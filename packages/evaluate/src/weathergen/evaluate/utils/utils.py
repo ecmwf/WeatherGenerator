@@ -23,9 +23,9 @@ from tqdm import tqdm
 from weathergen.evaluate.io.io_reader import Reader
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
+    heat_maps_metric_region,
     plot_metric_region,
     ratio_plot_metric_region,
-    heat_maps_metric_region,
     score_card_metric_region,
 )
 from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, ScoreCards

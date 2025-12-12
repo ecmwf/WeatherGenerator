@@ -114,6 +114,7 @@ def plot_metric_region(
                     print_summary=print_summary,
                 )
 
+
 def ratio_plot_metric_region(
     metric: str,
     region: str,
@@ -139,7 +140,7 @@ def ratio_plot_metric_region(
     print_summary: bool
         Option to print plot values to screen
 
-    """ 
+    """
     streams_set = collect_streams(runs)
 
     for stream in streams_set:
@@ -156,7 +157,7 @@ def ratio_plot_metric_region(
                 label = f"{run_id} - {label}"
             labels.append(label)
             run_ids.append(run_id)
-        
+
         if len(selected_data) > 0:
             _logger.info(f"Creating Ratio plot for {metric} - {stream}")
             name = "_".join([metric] + sorted(set(run_ids)) + [stream])
@@ -169,6 +170,7 @@ def ratio_plot_metric_region(
                 y_dim=metric,
                 print_summary=print_summary,
             )
+
 
 def heat_maps_metric_region(
     metric: str,
@@ -194,7 +196,7 @@ def heat_maps_metric_region(
     print_summary: bool
         Option to print plot values to screen
 
-    """ 
+    """
     streams_set = collect_streams(runs)
 
     for stream in streams_set:
@@ -211,16 +213,17 @@ def heat_maps_metric_region(
                 label = f"{run_id} - {label}"
             labels.append(label)
             run_ids.append(run_id)
-        
+
         if len(selected_data) > 0:
             _logger.info(f"Creating Heat maps for {metric} - {stream}")
             name = "_".join(sorted(set(run_ids)) + [stream])
             plotter.heat_map(
                 selected_data,
                 labels,
-                metric=metric, 
+                metric=metric,
                 tag=name,
             )
+
 
 def score_card_metric_region(
     metric: str,

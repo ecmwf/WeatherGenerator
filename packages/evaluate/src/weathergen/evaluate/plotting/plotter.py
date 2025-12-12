@@ -768,12 +768,9 @@ class LinePlots:
                 f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
                 "Skipping ensemble plotting."
             )
-    
+
     def _preprocess_data(
-        self,
-        data: xr.DataArray,
-        x_dim: str | list[str],
-        verbose: bool = True
+        self, data: xr.DataArray, x_dim: str | list[str], verbose: bool = True
     ) -> xr.DataArray:
         """
         Average all dimensions except x_dim (which may be a string or list)
@@ -855,9 +852,8 @@ class LinePlots:
                 _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
                 self._plot_ensemble(data, x_dim, label_list[i])
             else:
-
                 averaged = self._preprocess_data(data, x_dim)
-            
+
                 plt.plot(
                     averaged[x_dim],
                     averaged.values,
@@ -871,14 +867,15 @@ class LinePlots:
         self._plot_base(fig, name, x_dim, y_dim, print_summary)
 
     def _plot_base(
-        self, 
-        fig: plt.Figure, 
-        name: str, 
-        x_dim: str, 
-        y_dim: str, 
-        print_summary: bool = False, 
+        self,
+        fig: plt.Figure,
+        name: str,
+        x_dim: str,
+        y_dim: str,
+        print_summary: bool = False,
         line: float | None = None,
-        title: str | None = None) -> None:
+        title: str | None = None,
+    ) -> None:
         """
         Apply labels, title, legend, save and optionally print summary.
         Parameters
@@ -903,7 +900,7 @@ class LinePlots:
         """
         plt.xlabel("".join(c if c.isalnum() else " " for c in x_dim))
         plt.ylabel("".join(c if c.isalnum() else " " for c in y_dim))
-        plt.title(title if title is not None else " ".join(c if c.isalnum() else " " for c in name  ))
+        plt.title(title if title is not None else " ".join(c if c.isalnum() else " " for c in name))
         plt.legend(frameon=False)
 
         if self.add_grid:
@@ -912,13 +909,12 @@ class LinePlots:
         if self.log_scale:
             plt.yscale("log")
 
-
         if print_summary:
-            _logger.info(f"Summary values for {tag}")
+            _logger.info(f"Summary values for {name}")
             self.print_all_points_from_graph(fig)
-        
+
         if line:
-            plt.axhline(y=line, color='black', linestyle='--', linewidth=1)
+            plt.axhline(y=line, color="black", linestyle="--", linewidth=1)
 
         plt.tight_layout()
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
@@ -968,33 +964,32 @@ class LinePlots:
         if baseline_idx is not None:
             _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
             baseline = data_list[baseline_idx]
-            
+
         else:
             baseline_name = run_ids[0]
             baseline = data_list[0]
 
-        ref_raw = self._preprocess_data(baseline, x_dim, verbose = False)
+        ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
 
         channel_names = set(ref_raw.channel.values)
         # Merge channels from remaining datasets
         for data in data_list[1:]:
             channel_names.update(data.channel.values)  # add new channels
-        
+
         # Sort the merged list
         ref_channel_names = sorted(channel_names)
 
         ref = align_labels(ref_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
 
-        fig = plt.figure(figsize=(max(12, len(ref_channel_names)*0.25), 6))
+        fig = plt.figure(figsize=(max(12, len(ref_channel_names) * 0.25), 6))
 
-        for (data, run_id, lbl) in zip(data_list, run_ids, label_list):
-           
+        for data, run_id, lbl in zip(data_list, run_ids, label_list, strict=False):
             if run_id == baseline_name:
                 continue  # skip baseline
-           
-            num_raw = self._preprocess_data(data, x_dim, verbose = False)
+
+            num_raw = self._preprocess_data(data, x_dim, verbose=False)
             num = align_labels(num_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
-            
+
             ratio = num.sel(channel=ref_channel_names) / ref.sel(channel=ref_channel_names)
 
             plt.plot(
@@ -1010,8 +1005,7 @@ class LinePlots:
         plt.xticks(rotation=90, ha="right")
         plt.grid(True, linestyle="--", color="gray", alpha=0.5)
         title = f"Ratio plot {tag.split('_')[0]} - {tag.split('_')[-1]} (baseline: {baseline_name})"
-        self._plot_base(fig, name, x_dim, y_dim, print_summary, line = 1., title = title)
-        
+        self._plot_base(fig, name, x_dim, y_dim, print_summary, line=1.0, title=title)
 
     def heat_map(
         self,
@@ -1021,28 +1015,27 @@ class LinePlots:
         tag: str = "",
     ) -> None:
         """
-            Plot a heat map comparing multiple datasets.
-            Parameters
-            ----------
-            data:
-                DataArray or list of DataArrays to be plotted
-            labels:
-                Label or list of labels for each dataset            
-            metric:
-                Metric for which we are plotting
-            tag:
-                Tag to be added to the plot title and filename
-            Returns
-            -------
-                None
+        Plot a heat map comparing multiple datasets.
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        labels:
+            Label or list of labels for each dataset
+        metric:
+            Metric for which we are plotting
+        tag:
+            Tag to be added to the plot title and filename
+        Returns
+        -------
+            None
         """
 
         data_list, label_list = self._check_lengths(data, labels)
-        
+
         fsteps = sorted(data_list[0].forecast_step.values)
-        offsets = compute_offsets(len(data_list))
         n_runs = len(data_list)
-          
+
         x_ticks_names = set()
         for data in data_list:
             da = data.sel(forecast_step=fsteps[0])
@@ -1050,27 +1043,31 @@ class LinePlots:
 
         ref_ticks_names = sorted(x_ticks_names)
 
-        fig, axes = plt.subplots(1, n_runs, figsize=(8 * n_runs, max(12, len(ref_ticks_names)*0.25)), squeeze=False)
+        fig, axes = plt.subplots(
+            1, n_runs, figsize=(8 * n_runs, max(12, len(ref_ticks_names) * 0.25)), squeeze=False
+        )
 
         global_min = float("inf")
         global_max = float("-inf")
 
-        for (ax, data, label) in zip(axes[0], data_list, labels):
-            ref = self._preprocess_data(data.sel(channel = ref_ticks_names, forecast_step=fsteps[0]), "channel", verbose = False)
-            
-            num = self._preprocess_data(data, ["forecast_step", "channel"], verbose = False)
-            num = num.sel(channel = ref_ticks_names, forecast_step = fsteps)
-            
+        for ax, data, label in zip(axes[0], data_list, labels, strict=False):
+            ref = self._preprocess_data(
+                data.sel(channel=ref_ticks_names, forecast_step=fsteps[0]), "channel", verbose=False
+            )
+
+            num = self._preprocess_data(data, ["forecast_step", "channel"], verbose=False)
+            num = num.sel(channel=ref_ticks_names, forecast_step=fsteps)
+
             heatmap_data = num / ref
-            
+
             cmap = plt.get_cmap("magma_r") if lower_is_better(metric) else plt.get_cmap("magma")
             global_min = min(global_min, float(heatmap_data.min()))
             global_max = max(global_max, float(heatmap_data.max()))
-            
+
             last_hm = sns.heatmap(
                 heatmap_data.values.T,
                 ax=ax,
-                cmap= cmap,
+                cmap=cmap,
                 vmin=global_min,
                 vmax=global_max,
                 xticklabels=fsteps,
@@ -1083,15 +1080,11 @@ class LinePlots:
             ax.set_xlabel("Forecast Step (h)")
             ax.set_ylabel("Variable")
             plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-       
+
         cbar = fig.colorbar(
-            last_hm.collections[0],
-            ax=axes.ravel().tolist(),
-            shrink=0.6,
-            location='right',
-            pad=0.02
+            last_hm.collections[0], ax=axes.ravel().tolist(), shrink=0.6, location="right", pad=0.02
         )
-        cbar.set_label("Score")    
+        cbar.set_label("Score")
         parts = ["heat_map", metric, tag]
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
@@ -1654,8 +1647,9 @@ def lower_is_better(metric: str) -> bool:
 
 
 def compute_offsets(n, spacing=0.11):
-        idx = np.arange(n)
-        return (idx - (n - 1) / 2.0) * spacing
+    idx = np.arange(n)
+    return (idx - (n - 1) / 2.0) * spacing
+
 
 def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArray:
     """
