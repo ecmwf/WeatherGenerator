@@ -21,8 +21,8 @@ from tqdm import tqdm
 # Local application / package
 from weathergen.common.config import (
     get_shared_wg_path,
-    load_config,
-    load_model_config,
+    load_merge_configs,
+    load_run_config,
 )
 from weathergen.common.io import ZarrIO
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
@@ -101,12 +101,12 @@ class WeatherGenReader(Reader):
             _logger.info(
                 f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
             )
-            config = load_config(self.private_paths, self.run_id, self.mini_epoch)
+            config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
         else:
             _logger.info(
                 f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
             )
-            config = load_model_config(self.run_id, self.mini_epoch, self.model_base_dir)
+            config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
 
         if type(config) not in [dict, oc.DictConfig]:
             _logger.warning("Model config not found. inference config will be empty.")
