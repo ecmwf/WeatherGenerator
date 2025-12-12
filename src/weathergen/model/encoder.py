@@ -21,6 +21,7 @@ from weathergen.model.engines import (
 
 # from weathergen.model.model import ModelParams
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
+from weathergen.model.positional_encoding import positional_encoding_harmonic
 from weathergen.utils.utils import get_dtype
 
 
@@ -59,6 +60,9 @@ class EncoderModule(torch.nn.Module):
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
         # separate embedding networks for differnt observation types
         self.embed_engine = EmbeddingEngine(cf, self.sources_size, self.stream_names)
+
+        assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
+        self.num_register_tokens = cf.num_register_tokens
 
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
@@ -272,6 +276,12 @@ class EncoderModule(torch.nn.Module):
             tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
             + model_params.pe_global
         ).flatten(1, 2)
+
+        # create register tokens and prepend to latent spatial tokens
+        tokens_global_register = positional_encoding_harmonic(
+            self.q_cells.repeat(batch_size, self.num_register_tokens, 1)
+        )
+        tokens_global = torch.cat([tokens_global_register, tokens_global], dim=1)
 
         return tokens_global, posteriors
 
