@@ -1,0 +1,35 @@
+train : 
+  plot :
+    mzp2xvd1 : 
+      slurm_id: 0
+      description: "1000 samples [3,4,5,6,7,8]"
+      epoch: 5  
+      eval: yv0scz3w
+    
+    js45xaol : 
+      slurm_id: 0
+      description: "4096 samples [3,4,5,6,7,8]"
+      eval: jq63t9vj
+    
+    tt4561ai : 
+      slurm_id: 0
+      description: "1000 samples [3,4,5,6,7,8,9,10,11,12]"
+      epoch: 9  
+      eval: soxhzpf2
+
+    uf743jr2 : 
+      slurm_id: 0
+      description: "1000 samples [4,6,8]"
+      epoch: 2  
+      eval: elnk0mvo
+
+    gygh6uzm : 
+      slurm_id: 0
+      description: "4096 samples [4,6,8]"
+      eval: y7lruh4d
+    
+    uj94vuey : 
+      slurm_id: 0
+      description: "4096 samples [4...4,6...6,8...8]"
+      eval: q5krziaj
+
