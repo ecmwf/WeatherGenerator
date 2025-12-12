@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .loss_module_latent_diffusion import LossLatentDiffusion
 from .loss_module_physical import LossPhysical
 
-__all__ = [LossPhysical]
+__all__ = [LossLatentDiffusion, LossPhysical]

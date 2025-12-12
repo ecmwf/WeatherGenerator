@@ -13,6 +13,7 @@ import torch
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
+from weathergen.model.layers import LinearNormConditioning
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
@@ -197,6 +198,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        with_noise_conditioning=False,  # should only be True for diffusion model
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -242,10 +244,28 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         # compile for efficiency
         self.flex_attention = torch.compile(flex_attention, dynamic=False)
 
-    def forward(self, x, ada_ln_aux=None):
+        self.noise_conditioning = None
+        if with_noise_conditioning:
+            self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
+
+    def forward(self, *args):
+        # NOTE: Hotfix for TargetPredictionEngineClassic forward pass for attn. block, MLP...
+        x = args[0]
+        if len(args) == 2:
+            ada_ln_aux = args[1]
+        elif len(args) > 2:
+            ada_ln_aux = args[-1]
+            emb = args[1] if self.noise_conditioning else None
+        else:
+            ada_ln_aux = None
+            emb = None
+
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+
+        if self.noise_conditioning:
+            x, gate = self.noise_conditioning(x, emb)
 
         # project onto heads
         s = [x.shape[0], x.shape[1], self.num_heads, -1]
@@ -257,7 +277,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         out = self.proj_out(self.dropout(outs.flatten(-2, -1)))
         if self.with_residual:
-            out = x_in + out
+            out = x_in + out * gate if self.noise_conditioning else x_in + out
 
         return out
 
@@ -487,6 +507,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        with_noise_conditioning=False,  # should only be True for diffusion model
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -527,10 +548,32 @@ class MultiSelfAttentionHead(torch.nn.Module):
             self.att = self.attention
             self.softmax = torch.nn.Softmax(dim=-1)
 
-    def forward(self, x, ada_ln_aux=None):
+        self.noise_conditioning = None
+        if with_noise_conditioning:
+            # NOTE: noise_emb_dim currently hard-coded
+            self.noise_conditioning = LinearNormConditioning(
+                latent_space_dim=dim_embed, noise_emb_dim=512, dtype=self.dtype
+            )
+
+    def forward(self, *args):
+        # NOTE: Hotfix for TargetPredictionEngineClassic forward pass for attn. block, MLP...
+        x = args[0]
+        if len(args) == 2:
+            ada_ln_aux = args[1]
+        elif len(args) > 2:
+            ada_ln_aux = args[-1]
+            emb = args[1] if self.noise_conditioning else None
+        else:
+            ada_ln_aux = None
+            emb = None
+
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+
+        if self.noise_conditioning:
+            assert emb is not None, "Need noise embedding if using noise conditioning"
+            x, gate = self.noise_conditioning(x, emb)
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
@@ -547,7 +590,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         out = self.proj_out(outs.flatten(-2, -1))
         if self.with_residual:
-            out = out + x_in
+            out = out + x_in * gate if self.noise_conditioning else out + x_in
 
         return out
 

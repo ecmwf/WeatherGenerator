@@ -20,7 +20,7 @@ class StreamData:
     for one stream.
     """
 
-    def __init__(self, idx: int, forecast_steps: int, healpix_cells: int) -> None:
+    def __init__(self, idx: int, input_steps: int, forecast_steps: int, healpix_cells: int) -> None:
         """
         StreamData object
 
@@ -38,6 +38,7 @@ class StreamData:
 
         self.mask_value = 0.0
 
+        self.input_steps = input_steps
         self.forecast_steps = forecast_steps
         self.healpix_cells = healpix_cells
 
@@ -57,18 +58,18 @@ class StreamData:
         self.target_tokens_lens = [
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
         ]
+        self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(forecast_steps + 1)]
 
         # source tokens per cell
-        self.source_tokens_cells = []
+        self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
-        self.source_tokens_lens = []
-        self.source_centroids = []
+        self.source_tokens_lens = [[] for _ in range(self.input_steps)]
         # unprocessed source (for logging)
-        self.source_raw = []
+        self.source_raw = [None for _ in range(self.input_steps)]
         # auxiliary data for scatter operation that changes from stream-centric to cell-centric
         # processing after embedding
-        self.source_idxs_embed = torch.tensor([])
-        self.source_idxs_embed_pe = torch.tensor([])
+        self.source_idxs_embed = [torch.tensor([]) for _ in range(self.input_steps)]
+        self.source_idxs_embed_pe = [torch.tensor([]) for _ in range(self.input_steps)]
 
     def to_device(self, device: str) -> None:
         """
@@ -84,63 +85,26 @@ class StreamData:
         None
         """
 
-        self.source_tokens_cells = self.source_tokens_cells.to(device, non_blocking=True)
-        self.source_centroids = self.source_centroids.to(device, non_blocking=True)
-        self.source_tokens_lens = self.source_tokens_lens.to(device, non_blocking=True)
+        dv = device
+        self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
+        self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
 
-        self.target_coords = [t.to(device, non_blocking=True) for t in self.target_coords]
-        self.target_tokens = [t.to(device, non_blocking=True) for t in self.target_tokens]
-        self.target_tokens_lens = [t.to(device, non_blocking=True) for t in self.target_tokens_lens]
+        # move to device if source data is present
+        if not np.array([s is None for s in self.source_tokens_cells]).all():
+            self.source_tokens_cells = [
+                s.to(dv, non_blocking=True) for s in self.source_tokens_cells
+            ]
+            self.source_tokens_lens = [s.to(dv, non_blocking=True) for s in self.source_tokens_lens]
 
-        self.source_idxs_embed = self.source_idxs_embed.to(device, non_blocking=True)
-        self.source_idxs_embed_pe = self.source_idxs_embed_pe.to(device, non_blocking=True)
+            self.source_idxs_embed = [s.to(dv, non_blocking=True) for s in self.source_idxs_embed]
+            self.source_idxs_embed_pe = [
+                s.to(dv, non_blocking=True) for s in self.source_idxs_embed_pe
+            ]
 
         return self
 
-    def add_empty_source(self, source: IOReaderData) -> None:
-        """
-        Add an empty source for an input.
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        None
-        """
-
-        source = spoof(source)
-        self.source_raw += [source]
-        self.source_tokens_lens += [torch.ones([self.healpix_cells], dtype=torch.int32)]
-        self.source_tokens_cells += [torch.tensor([])]
-        self.source_centroids += [torch.tensor([])]
-
-    def add_empty_target(self, fstep: int) -> None:
-        """
-        Add an empty target for an input.
-
-        Parameters
-        ----------
-        fstep : int
-            forecast step
-
-        Returns
-        -------
-        None
-        """
-
-        self.target_tokens[fstep] += [torch.tensor([], dtype=torch.int32)]
-        self.target_tokens_lens[fstep] += [torch.zeros([self.healpix_cells], dtype=torch.int32)]
-        self.target_coords[fstep] += [torch.zeros((0, 105)) for _ in range(self.healpix_cells)]
-        self.target_coords_lens[fstep] += [torch.zeros([self.healpix_cells], dtype=torch.int32)]
-        self.target_coords_raw[fstep] += [torch.tensor([]) for _ in range(self.healpix_cells)]
-        self.target_times_raw[fstep] += [
-            np.array([], dtype="datetime64[ns]") for _ in range(self.healpix_cells)
-        ]
-
     def add_source(
-        self, ss_raw: IOReaderData, ss_lens: torch.tensor, ss_cells: list, ss_centroids: list
+        self, step: int, ss_raw: IOReaderData, ss_lens: torch.Tensor, ss_cells: list
     ) -> None:
         """
         Add data for source for one input.
@@ -148,32 +112,33 @@ class StreamData:
         Parameters
         ----------
         ss_raw : IOReaderData( dataclass containing coords, geoinfos, data, and datetimes )
-        ss_lens : torch.tensor( number of healpix cells )
+        ss_lens : torch.Tensor( number of healpix cells )
         ss_cells : list( number of healpix cells )
-            [ torch.tensor( tokens per cell, token size, number of channels) ]
-        ss_centroids : list(number of healpix cells )
-            [ torch.tensor( for source , 5) ]
+            [ torch.Tensor( tokens per cell, token size, number of channels) ]
 
         Returns
         -------
         None
         """
 
-        self.source_raw = ss_raw
-        self.source_tokens_lens = ss_lens
-        self.source_tokens_cells = torch.cat(ss_cells)
-        self.source_centroids = torch.cat(ss_centroids)
+        assert step < self.input_steps
 
-        idx = torch.isnan(self.source_tokens_cells)
-        self.source_tokens_cells[idx] = self.mask_value
+        self.source_raw[step] = ss_raw
+        self.source_tokens_lens[step] = ss_lens
+        self.source_tokens_cells[step] = torch.stack(ss_cells)
+
+        idx = torch.isnan(self.source_tokens_cells[step])
+        self.source_tokens_cells[step][idx] = self.mask_value
 
     def add_target(
         self,
         fstep: int,
         targets: list,
-        target_coords: torch.tensor,
-        target_coords_raw: torch.tensor,
-        times_raw: torch.tensor,
+        target_coords: torch.Tensor,
+        target_coords_per_cell: torch.Tensor,
+        target_coords_raw: torch.Tensor,
+        times_raw: torch.Tensor,
+        idxs_inv: torch.Tensor,
     ) -> None:
         """
         Add data for target for one input.
@@ -193,26 +158,94 @@ class StreamData:
         target_times : list( number of healpix cells)
             [ torch.tensor( points per cell) ]
               absolute target times
+        idxs_inv:
+            Indices to reorder targets back to order in input
 
         Returns
         -------
         None
         """
 
-        self.target_tokens[fstep] = torch.cat(targets)
-        self.target_coords[fstep] = torch.cat(target_coords)
-        self.target_times_raw[fstep] = np.concatenate(times_raw)
-        self.target_coords_raw[fstep] = torch.cat(target_coords_raw)
+        self.target_tokens[fstep] = targets
+        self.target_coords[fstep] = target_coords
+        self.target_coords_lens[fstep] = target_coords_per_cell
+        self.target_times_raw[fstep] = times_raw
+        self.target_coords_raw[fstep] = target_coords_raw
+        self.idxs_inv[fstep] = idxs_inv
 
-        tc = target_coords
-        self.target_coords_lens[fstep] = torch.tensor(
-            [len(f) for f in tc] if len(tc) > 1 else self.target_coords_lens[fstep],
-            dtype=torch.int,
-        )
-        self.target_tokens_lens[fstep] = torch.tensor(
-            [len(f) for f in targets] if len(targets) > 1 else self.target_tokens_lens[fstep],
-            dtype=torch.int,
-        )
+    def add_target_values(
+        self,
+        fstep: int,
+        targets: list,
+        target_coords_raw: torch.Tensor,
+        times_raw: torch.Tensor,
+        idxs_inv: torch.Tensor,
+    ) -> None:
+        """
+        Add data for target for one input.
+
+        Parameters
+        ----------
+        fstep : int
+            forecast step
+        targets : torch.tensor( number of healpix cells )
+            [ torch.tensor( num tokens, channels) ]
+              Target data for loss computation
+        targets_lens : torch.tensor( number of healpix cells)
+            length of targets per cell
+        target_coords : list( number of healpix cells)
+            [ torch.tensor( points per cell, 105) ]
+              target coordinates
+        target_times : list( number of healpix cells)
+            [ torch.tensor( points per cell) ]
+              absolute target times
+        idxs_inv:
+            Indices to reorder targets back to order in input
+
+        Returns
+        -------
+        None
+        """
+
+        self.target_tokens[fstep] = targets
+        self.target_times_raw[fstep] = times_raw
+        self.target_coords_raw[fstep] = target_coords_raw
+        self.idxs_inv[fstep] = idxs_inv
+
+    def add_target_coords(
+        self,
+        fstep: int,
+        target_coords: torch.Tensor,
+        target_coords_per_cell: torch.Tensor,
+    ) -> None:
+        """
+        Add data for target for one input.
+
+        Parameters
+        ----------
+        fstep : int
+            forecast step
+        targets : torch.tensor( number of healpix cells )
+            [ torch.tensor( num tokens, channels) ]
+              Target data for loss computation
+        targets_lens : torch.tensor( number of healpix cells)
+            length of targets per cell
+        target_coords : list( number of healpix cells)
+            [ torch.tensor( points per cell, 105) ]
+              target coordinates
+        target_times : list( number of healpix cells)
+            [ torch.tensor( points per cell) ]
+              absolute target times
+        idxs_inv:
+            Indices to reorder targets back to order in input
+
+        Returns
+        -------
+        None
+        """
+
+        self.target_coords[fstep] = target_coords
+        self.target_coords_lens[fstep] = target_coords_per_cell
 
     def target_empty(self) -> bool:
         """
@@ -229,7 +262,9 @@ class StreamData:
         """
 
         # cat over forecast steps
-        return torch.cat(self.target_tokens_lens).sum() == 0
+        target_coords_empty = torch.cat(self.target_coords_lens).sum() == 0
+        target_tokens_empty = torch.cat(self.target_tokens).sum() == 0
+        return target_coords_empty and target_tokens_empty
 
     def source_empty(self) -> bool:
         """
@@ -245,7 +280,9 @@ class StreamData:
             True if target is empty for stream, else False
         """
 
-        return self.source_tokens_lens.sum() == 0
+        return (
+            torch.tensor([s.sum() if len(s) > 0 else 0 for s in self.source_tokens_lens]).sum() == 0
+        )
 
     def empty(self):
         """
@@ -268,6 +305,12 @@ class StreamData:
         Either source or target is spoof
         """
         return self.source_is_spoof or self.target_is_spoof
+
+    def get_forecast_steps(self) -> int:
+        """
+        Get number of forecast steps
+        """
+        return self.forecast_steps
 
 
 def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:

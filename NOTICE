@@ -1,0 +1,40 @@
+=======================================================================
+NVLABS/EDM (Elucidating the Design of Diffusion Models)
+
+This software incorporates code from the 'edm' repository.
+
+Original Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+The source code is available at:
+https://github.com/NVlabs/edm
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+http://www.apache.org/licenses/LICENSE-2.0
+
+=======================================================================
+google-deepmind/graphcast (several associated papers)
+
+This software incorporates code from the 'google-deepmind/graphcast' repository, with adaptations.
+
+Original Copyright 2024 DeepMind Technologies Limited.
+
+The source code is available at:
+https://github.com/google-deepmind/graphcast
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+http://www.apache.org/licenses/LICENSE-2.0
+
+=======================================================================
+facebookresearch/DiT (Scalable Diffusion Models with Transformers (DiT))
+
+This software incorporates code from the 'facebookresearch/DiT' repository, with adaptations.
+
+The source code is available at:
+https://github.com/facebookresearch/DiT
+
+The code and model weights are licensed under CC-BY-NC. 
+See https://raw.githubusercontent.com/facebookresearch/DiT/refs/heads/main/LICENSE.txt for details.
