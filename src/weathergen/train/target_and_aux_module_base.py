@@ -27,7 +27,7 @@ class TargetAndAuxModuleBase:
     def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
         pass
 
-    def compute(self, *args, **kwargs) -> TargetAuxOutput:
+    def compute(self, sample, *args, **kwargs) -> TargetAuxOutput:
         pass
 
     def to_device(self, device):
@@ -47,8 +47,8 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
-        return TargetAuxOutput(physical=batch[0], latent=None, aux_outputs=None)
+    def compute(self, sample, *args, **kwargs) -> TargetAuxOutput:
+        return TargetAuxOutput(physical=sample.streams_data, latent=None, aux_outputs=None)
 
     def to_device(self, device):
         return

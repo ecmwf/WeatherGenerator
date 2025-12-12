@@ -1,11 +1,6 @@
-# obs_types
-# 0 : polar orbiting satellites
-# 1 : geostationay satellites
-# 2 : conventional observations
-
 SurfaceCombined :
   type : obs
-  stream_id : 2
+  stream_id: 2
   filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
   loss_weight : 1.0
   masking_rate : 0.6
@@ -17,11 +12,11 @@ SurfaceCombined :
     net : transformer
     num_tokens : 1
     num_heads : 2
-    dim_embed : 256
+    dim_embed : 32
     num_blocks : 2
   embed_target_coords : 
     net : linear
-    dim_embed : 256
+    dim_embed : 32
   target_readout :
     type : 'obs_value'  # token or obs_value
     num_layers : 2
