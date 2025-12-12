@@ -77,10 +77,6 @@ class ModelParams(torch.nn.Module):
             torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
         )
 
-        self.pe_register = torch.nn.Parameter(
-            torch.zeros(cf.num_register_tokens, cf.ae_global_dim_embed), requires_grad=False
-        )
-
         pe = torch.zeros(
             self.num_healpix_cells,
             cf.ae_local_num_queries,
@@ -154,8 +150,6 @@ class ModelParams(torch.nn.Module):
         )
         self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
-
-        self.pe_register.data = positional_encoding_harmonic(self.pe_register)
 
         dim_embed = cf.ae_global_dim_embed
         self.pe_global.data.fill_(0.0)
@@ -295,6 +289,8 @@ class Model(torch.nn.Module):
     def create(self) -> "Model":
         """Create each individual module of the model"""
         cf = self.cf
+
+        assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
 
         # determine stream names once so downstream components use consistent keys
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
@@ -627,6 +623,15 @@ class Model(torch.nn.Module):
 
         tokens = self.assimilate_global(model_params, tokens)
 
+        # latents for output
+        latent_state = LatentState(
+            register_tokens=tokens[:, : self.num_register_tokens].clone(),
+            latent_tokens=tokens[:, self.num_register_tokens :].clone(),
+        )
+        latents = {"posteriors": posteriors, "latent_state": latent_state}
+
+        # forecasting
+
         # roll-out in latent space
         preds_all = []
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
@@ -659,19 +664,6 @@ class Model(torch.nn.Module):
                 target_coords_idxs,
             )
         ]
-
-        latents = {}
-        z_pre_norm = tokens
-        z = self.norm(z_pre_norm)
-
-        latent_state = LatentState(
-            register_tokens=z[:, : self.num_register_tokens],
-            patch_tokens=z[:, self.num_register_tokens :],
-            z_pre_norm=z_pre_norm,
-        )
-
-        latents["posteriors"] = posteriors
-        latents["latent_state_pre_heads"] = latent_state
 
         return ModelOutput(physical=preds_all, latent=latents)
 
@@ -709,8 +701,6 @@ class Model(torch.nn.Module):
         )
 
         s = self.q_cells.shape
-        # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
-        #        + ':: {np.prod(np.array(tokens.shape))/np.prod(np.array(s))}')
         # TODO: test if positional encoding is needed here
         if self.cf.ae_local_queries_per_cell:
             tokens_global = (self.q_cells + model_params.pe_global).repeat(batch_size, 1, 1)
@@ -820,12 +810,10 @@ class Model(torch.nn.Module):
             + model_params.pe_global
         ).flatten(1, 2)
 
-        # add additional global register tokens
-        tokens_global_register = (
-            self.q_cells.repeat(batch_size, self.num_register_tokens, 1) + model_params.pe_register
+        # create register tokens and prepend to latent spatial tokens
+        tokens_global_register = positional_encoding_harmonic(
+            self.q_cells.repeat(batch_size, self.num_register_tokens, 1)
         )
-
-        # concatenate all global tokens
         tokens_global = torch.cat([tokens_global_register, tokens_global], dim=1)
 
         return tokens_global, posteriors

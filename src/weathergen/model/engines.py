@@ -810,9 +810,8 @@ class TargetPredictionEngine(nn.Module):
 @dataclasses.dataclass
 class LatentState:
     """
-    A dataclass to encapsulate the output of latent heads.
+    A dataclass to encapsulate the latent state
     """
 
     register_tokens: torch.Tensor
-    patch_tokens: torch.Tensor
-    z_pre_norm: torch.Tensor
+    latent_tokens: torch.Tensor
