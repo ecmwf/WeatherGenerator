@@ -170,10 +170,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                fsm = self.forecast_steps[0]
-                # if len(ds) > 0:
-                #     self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
-
                 # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
