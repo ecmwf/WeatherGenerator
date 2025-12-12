@@ -102,6 +102,7 @@ def positional_encoding_harmonic_coord(x, lats, lons):
 # licensed under the Apache License, Version 2.0.
 # Source: https://github.com/qiuzh20/gated_attention/blob/main/modeling_qwen3.py
 
+
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
 

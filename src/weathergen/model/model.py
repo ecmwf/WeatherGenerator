@@ -680,7 +680,7 @@ class Model(torch.nn.Module):
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
             # Apply 2D RoPE coords only on the first forecast step
-            tokens = self.forecast(model_params, tokens, fstep, apply_rope = fstep == forecast_offset)
+            tokens = self.forecast(model_params, tokens, fstep, apply_rope=fstep == forecast_offset)
 
         # prediction for final step
         preds_all += [

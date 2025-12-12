@@ -544,7 +544,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
 
         if coords is not None:
-            qs, ks = apply_rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=2)
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=2)
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
