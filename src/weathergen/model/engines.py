@@ -6,7 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-import dataclasses
 
 import torch
 import torch.nn as nn
@@ -822,7 +821,6 @@ class TargetPredictionEngine(nn.Module):
         return output
 
 
-@dataclasses.dataclass
 class LatentState:
     """
     A dataclass to encapsulate the latent state
@@ -830,3 +828,7 @@ class LatentState:
 
     register_tokens: torch.Tensor
     latent_tokens: torch.Tensor
+
+    def __init__(self, num_register_tokens: int, tokens: torch.Tensor):
+        self.register_tokens = tokens[:, :num_register_tokens].clone()
+        self.latent_tokens = tokens[:, num_register_tokens:].clone()
