@@ -94,3 +94,83 @@ def positional_encoding_harmonic_coord(x, lats, lons):
     x = x + pe
 
     return x
+
+
+####################################################################################################
+# The functions rotate_half() and apply_rotary_pos_emb() below are derived from LLaMA and Qwen3
+# models, originally developed by Meta Platforms, Inc., The Qwen team, Alibaba Group and the
+# HuggingFace Inc. team, licensed under the Apache License, Version 2.0.
+# Source: https://github.com/qiuzh20/gated_attention/blob/main/modeling_qwen3.py
+
+
+def rotate_half(x):
+    """Rotates half the hidden dims of the input."""
+
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+    """Applies Rotary Position Embedding to the query and key tensors.
+
+    Args:
+        q: Query tensor.
+        k: Key tensor.
+        cos: Cosine embedding tensor.
+        sin: Sine embedding tensor.
+        position_ids: Deprecated and unused; present for API compatibility.
+        unsqueeze_dim: Dimension along which to unsqueeze cos/sin for broadcasting.
+    """
+
+    cos = cos.unsqueeze(unsqueeze_dim).to(dtype=q.dtype)
+    sin = sin.unsqueeze(unsqueeze_dim).to(dtype=q.dtype)
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+
+    return q_embed, k_embed
+
+
+####################################################################################################
+def rotary_embedding_2d(coords, dim, base=10000.0):
+    """Create 2D RoPE embeddings from latitude/longitude coordinates.
+
+    Args:
+        coords: Tensor of shape (..., 2) with coordinates in radians (lat, lon).
+        dim: Head dimension to encode; must be divisible by 4.
+        base: RoPE base frequency.
+
+    Returns:
+        Tuple of (cos, sin) tensors with shape (..., dim).
+    """
+
+    if coords.shape[-1] != 2:
+        raise ValueError(f"coords last dimension must be 2 (lat, lon); got {coords.shape[-1]}")
+    if dim % 4 != 0:
+        raise ValueError(f"2D rotary embeddings require dim to be divisible by 4; got {dim}")
+
+    # Split the rotary frequencies evenly between latitude and longitude to stay local to each cell.
+    half_dim = dim // 2
+    inv_freq = 1.0 / (
+        base ** (torch.arange(0, half_dim, 2, device=coords.device, dtype=coords.dtype) / half_dim)
+    )
+
+    lat, lon = coords.unbind(dim=-1)
+    freq_lat = lat.unsqueeze(-1) * inv_freq
+    freq_lon = lon.unsqueeze(-1) * inv_freq
+
+    freqs = torch.cat((freq_lat, freq_lon), dim=-1)
+    emb = torch.cat((freqs, freqs), dim=-1)
+
+    cos = torch.cos(emb)
+    sin = torch.sin(emb)
+
+    return cos, sin
+
+
+####################################################################################################
+def rotary_pos_emb_2d(q, k, coords, base=10000.0, unsqueeze_dim=1):
+    """Convenience wrapper that builds 2D RoPE embeddings and applies them to q/k."""
+
+    cos, sin = rotary_embedding_2d(coords, q.shape[-1], base=base)
+    return apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=unsqueeze_dim)

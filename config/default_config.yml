@@ -63,6 +63,11 @@ impute_latent_noise_std: 0.0  # 1e-4
 
 healpix_level: 5
 
+# Use 2D RoPE instead of traditional global positional encoding
+# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
+# When False: uses traditional pe_global positional encoding
+rope_2D: False
+
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
