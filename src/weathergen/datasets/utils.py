@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import warnings
 
 import astropy_healpix as hp
 import numpy as np
@@ -267,356 +266,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-####################################################################################################
-# def add_local_vert_coords_ctrs3( ctrs, verts, tcs, a, zi, geoinfo_offset) :
-
-#   ref = torch.tensor( [1., 0., 0.])
-
-#   local_locs = [
-#       torch.matmul(R, s.transpose( -1, -2)).transpose( -2, -1)
-#       for i,(R,s) in enumerate(zip(healpix_centers_rots,locs)) if len(s)>0
-#   ]
-#   aa = locs_to_cell_coords_ctrs( ctrs, verts.transpose(0,1))
-#   aa = ref - torch.cat( [aaa.unsqueeze(0).repeat( [*tt.shape[:-1],1,1])
-#                                                               if len(tt)>0 else torch.tensor([])
-#                                                               for tt,aaa in zip(tcs,aa)]
-#                                                               if tt>, 0 )
-#   aa = aa.flatten(1,2)
-#   a[...,(geoinfo_offset+zi):(geoinfo_offset+zi+aa.shape[-1])] = aa
-#   return a
-
-
-####################################################################################################
-def get_target_coords_local(hlc, target_coords, geoinfo_offset):
-    """Generate local coordinates for target coords w.r.t healpix cell vertices and
-    and for healpix cell vertices themselves
-    """
-
-    # target_coords_lens = [len(t) for t in target_coords]
-    tcs = [
-        (
-            s2tor3(
-                torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
-                torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
-            )
-            if len(t) > 0
-            else torch.tensor([])
-        )
-        for t in target_coords
-    ]
-    target_coords = torch.cat(target_coords)
-    if target_coords.shape[0] == 0:
-        return torch.tensor([])
-
-    verts00 = healpix_verts(hlc, 0.0, 0.0)
-    verts10 = healpix_verts(hlc, 1.0, 0.0)
-    verts11 = healpix_verts(hlc, 1.0, 1.0)
-    verts01 = healpix_verts(hlc, 0.0, 1.0)
-    vertsmm = healpix_verts(hlc, 0.5, 0.5)
-
-    a = torch.zeros(
-        [*target_coords.shape[:-1], (target_coords.shape[-1] - 2) + 5 * (3 * 5) + 3 * 8]
-    )
-    a[..., :geoinfo_offset] = target_coords[..., :geoinfo_offset]
-    ref = torch.tensor([1.0, 0.0, 0.0])
-
-    zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 0.0, 0.0)
-    )
-    a = add_local_vert_coords(hlc, a, verts10, tcs, 3, 0.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts11, tcs, 6, 0.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts01, tcs, 9, 0.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, vertsmm, tcs, 12, 0.0, 0.0, geoinfo_offset)
-
-    zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 1.0, 0.0)
-    )
-    a = add_local_vert_coords(hlc, a, verts00, tcs, 18, 1.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts11, tcs, 21, 1.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts01, tcs, 24, 1.0, 0.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, vertsmm, tcs, 27, 1.0, 0.0, geoinfo_offset)
-
-    zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 1.0, 1.0)
-    )
-    a = add_local_vert_coords(hlc, a, verts00, tcs, 33, 1.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts10, tcs, 36, 1.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts01, tcs, 39, 1.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, vertsmm, tcs, 42, 1.0, 1.0, geoinfo_offset)
-
-    zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 0.0, 1.0)
-    )
-    a = add_local_vert_coords(hlc, a, verts00, tcs, 48, 0.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts11, tcs, 51, 0.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts10, tcs, 54, 0.0, 1.0, geoinfo_offset)
-    # a = add_local_vert_coords( hlc, a, verts10, tcs, 51, 0.0, 1.0, geoinfo_offset)
-    # a = add_local_vert_coords( hlc, a, verts01, tcs, 54, 0.0, 1.0, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, vertsmm, tcs, 57, 0.0, 1.0, geoinfo_offset)
-
-    zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords(hlc, tcs, 0.5, 0.5)
-    )
-    a = add_local_vert_coords(hlc, a, verts00, tcs, 63, 0.5, 0.5, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts10, tcs, 66, 0.5, 0.5, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts11, tcs, 69, 0.5, 0.5, geoinfo_offset)
-    a = add_local_vert_coords(hlc, a, verts01, tcs, 72, 0.5, 0.5, geoinfo_offset)
-
-    # add centroids to neighboring cells wrt to cell center
-    num_healpix_cells = 12 * 4**hlc
-    with warnings.catch_warnings(action="ignore"):
-        temp = hp.neighbours(np.arange(num_healpix_cells), 2**hlc, order="nested").transpose()
-    # fix missing nbors with references to self
-    for i, row in enumerate(temp):
-        temp[i][row == -1] = i
-    # coords of centers of all centers
-    lons, lats = hp.healpix_to_lonlat(
-        np.arange(0, num_healpix_cells), 2**hlc, dx=0.5, dy=0.5, order="nested"
-    )
-    ctrs = s2tor3(torch.from_numpy(np.pi / 2.0 - lats.value), torch.from_numpy(lons.value))
-    ctrs = ctrs[temp.flatten()].reshape((num_healpix_cells, 8, 3)).transpose(1, 0)
-    # local coords with respect to all neighboring centers
-    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in ctrs], -1)
-    zi = 75
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
-
-    # remaining geoinfos (zenith angle etc)
-    zi = 99
-    a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
-
-    return a
-
-
-####################################################################################################
-# TODO: remove this function, it is dead code that will fail immediately
-def get_target_coords_local_fast(hlc, target_coords, geoinfo_offset):
-    """Generate local coordinates for target coords w.r.t healpix cell vertices and
-    and for healpix cell vertices themselves
-    """
-
-    # target_coords_lens = [len(t) for t in target_coords]
-    tcs = [
-        (
-            s2tor3(
-                torch.deg2rad(90.0 - t[..., geoinfo_offset].to(torch.float64)),
-                torch.deg2rad(180.0 + t[..., geoinfo_offset + 1].to(torch.float64)),
-            )
-            if len(t) > 0
-            else torch.tensor([])
-        )
-        for t in target_coords
-    ]
-    target_coords = torch.cat(target_coords)
-    if target_coords.shape[0] == 0:
-        return torch.tensor([])
-
-    verts00, verts00_rots = healpix_verts_rots(hlc, 0.0, 0.0)
-    verts10, verts10_rots = healpix_verts_rots(hlc, 1.0, 0.0)
-    verts11, verts11_rots = healpix_verts_rots(hlc, 1.0, 1.0)
-    verts01, verts01_rots = healpix_verts_rots(hlc, 0.0, 1.0)
-    vertsmm, vertsmm_rots = healpix_verts_rots(hlc, 0.5, 0.5)
-
-    a = torch.zeros(
-        [*target_coords.shape[:-1], (target_coords.shape[-1] - 2) + 5 * (3 * 5) + 3 * 8]
-    )
-    # a = torch.zeros( [*target_coords.shape[:-1],
-    #  (target_coords.shape[-1]-2) + 5*(3*5) + 3*8])
-    # a = torch.zeros( [*target_coords.shape[:-1], 148])
-    #    #(target_coords.shape[-1]-2) + 5*(3*5) + 3*8])
-    a[..., :geoinfo_offset] = target_coords[..., :geoinfo_offset]
-    ref = torch.tensor([1.0, 0.0, 0.0])
-
-    zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts00_rots, tcs)
-    )
-    verts = torch.stack([verts10, verts11, verts01, vertsmm])
-    a = add_local_vert_coords_ctrs2(verts00_rots, verts, tcs, a, 3, geoinfo_offset)
-
-    zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts10_rots, tcs)
-    )
-    verts = torch.stack([verts00, verts11, verts01, vertsmm])
-    a = add_local_vert_coords_ctrs2(verts10_rots, verts, tcs, a, 18, geoinfo_offset)
-
-    zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts11_rots, tcs)
-    )
-    verts = torch.stack([verts00, verts10, verts01, vertsmm])
-    a = add_local_vert_coords_ctrs2(verts11_rots, verts, tcs, a, 33, geoinfo_offset)
-
-    zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(verts01_rots, tcs)
-    )
-    verts = torch.stack([verts00, verts11, verts10, vertsmm])
-    a = add_local_vert_coords_ctrs2(verts01_rots, verts, tcs, a, 48, geoinfo_offset)
-
-    zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - torch.cat(
-        locs_to_cell_coords_ctrs(vertsmm_rots, tcs)
-    )
-    verts = torch.stack([verts00, verts10, verts11, verts01])
-    a = add_local_vert_coords_ctrs2(vertsmm_rots, verts, tcs, a, 63, geoinfo_offset)
-
-    # add local coords wrt to center of neighboring cells
-    # (since the neighbors are used in the prediction)
-    num_healpix_cells = 12 * 4**hlc
-    with warnings.catch_warnings(action="ignore"):
-        temp = hp.neighbours(np.arange(num_healpix_cells), 2**hlc, order="nested").transpose()
-    # fix missing nbors with references to self
-    for i, row in enumerate(temp):
-        temp[i][row == -1] = i
-    nctrs = vertsmm[temp.flatten()].reshape((num_healpix_cells, 8, 3)).transpose(1, 0)
-    # local coords with respect to all neighboring centers
-    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
-    zi = 75
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
-    # a = add_local_vert_coords_ctrs2( vertsmm_rots, nctrs, tcs, a, 99, geoinfo_offset)
-
-    # remaining geoinfos (zenith angle etc)
-    # zi=99+3*8;
-    zi = 99
-    # assert target_coords.shape[-1] + zi < a.shape[-1]
-    a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
-
-    return a
-
-
-####################################################################################################
-def tcs_optimized(target_coords: list[torch.Tensor]) -> tuple[list[torch.Tensor], torch.Tensor]:
-    """
-    Args:
-    target_coords: List of 2D coordinate tensors, each with shape [N, 2]
-
-    Returns:
-        tcs: List of transformed coordinates
-        concatenated_coords: All original coords concatenated
-    """
-
-    # Concatenate all tensors
-    stacked_coords = torch.cat(target_coords, dim=0)  # [total_points, 2]
-
-    # Single vectorized coordinate transformation
-    theta_all = torch.deg2rad(90.0 - stacked_coords[..., 0])
-    phi_all = torch.deg2rad(180.0 + stacked_coords[..., 1])
-
-    # Transform all coordinates
-    transformed_all = s2tor3(theta_all, phi_all)  # [total_points, 3]
-
-    # Split back to original structure
-    sizes = [t.shape[0] for t in target_coords]  # Get original tensor sizes
-    tcs = list(torch.split(transformed_all, sizes, dim=0))  # Split back to list
-    return tcs, stacked_coords
-
-
-####################################################################################################
-def get_target_coords_local_ffast(
-    hlc, target_coords, target_geoinfos, target_times, verts_rots, verts_local, nctrs
-):
-    """Generate local coordinates for target coords w.r.t healpix cell vertices and
-    and for healpix cell vertices themselves
-    """
-
-    # target_coords_lens = [len(t) for t in target_coords]
-    tcs, target_coords = tcs_optimized(target_coords)
-
-    if target_coords.shape[0] == 0:
-        return torch.tensor([])
-    target_geoinfos = torch.cat(target_geoinfos)
-    target_times = torch.cat(target_times)
-
-    verts00_rots, verts10_rots, verts11_rots, verts01_rots, vertsmm_rots = verts_rots
-
-    a = torch.zeros(
-        [
-            *target_coords.shape[:-1],
-            1 + target_geoinfos.shape[1] + target_times.shape[1] + 5 * (3 * 5) + 3 * 8,
-        ]
-    )
-    # TODO: properly set stream_id, implicitly zero at the moment
-    geoinfo_offset = 1
-    a[..., geoinfo_offset : geoinfo_offset + target_times.shape[1]] = target_times
-    geoinfo_offset += target_times.shape[1]
-    a[..., geoinfo_offset : geoinfo_offset + target_geoinfos.shape[1]] = target_geoinfos
-    geoinfo_offset += target_geoinfos.shape[1]
-
-    ref = torch.tensor([1.0, 0.0, 0.0])
-
-    tcs_lens = torch.tensor([tt.shape[0] for tt in tcs], dtype=torch.int32)
-    tcs_lens_mask = tcs_lens > 0
-    tcs_lens = tcs_lens[tcs_lens_mask]
-
-    vls = torch.cat(
-        [
-            vl.repeat([tt, 1, 1])
-            for tt, vl in zip(tcs_lens, verts_local[tcs_lens_mask], strict=False)
-        ],
-        0,
-    )
-    vls = vls.transpose(0, 1)
-
-    zi = 0
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts00_rots, tcs
-    )
-
-    zi = 3
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
-
-    zi = 15
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts10_rots, tcs
-    )
-
-    zi = 18
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
-
-    zi = 30
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts11_rots, tcs
-    )
-
-    zi = 33
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
-
-    zi = 45
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        verts01_rots, tcs
-    )
-
-    zi = 48
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
-
-    zi = 60
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
-        vertsmm_rots, tcs
-    )
-
-    zi = 63
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
-
-    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
-    zi = 75
-    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
-    # a = add_local_vert_coords_ctrs2( vertsmm_rots, nctrs, tcs, a, 99, geoinfo_offset)
-
-    # remaining geoinfos (zenith angle etc)
-    # zi=99+3*8;
-    zi = 99
-    a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
-
-    return a
-
-
-def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
+def compute_offsets_scatter_embed(batch: StreamData, num_steps_input: int) -> StreamData:
     """
     Compute auxiliary information for scatter operation that changes from stream-centric to
     cell-centric computations
@@ -633,51 +283,60 @@ def compute_offsets_scatter_embed(batch: StreamData) -> StreamData:
     """
 
     # collect source_tokens_lens for all stream datas
-    source_tokens_lens = torch.stack(
-        [
-            torch.stack(
-                [
-                    s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                    for s in stl_b
-                ]
-            )
-            for stl_b in batch
-        ]
-    )
+    source_tokens_lens = [
+        torch.stack(
+            [
+                torch.stack(
+                    [
+                        s.source_tokens_lens[i]
+                        if (len(s.source_tokens_lens) > 0) and (len(s.source_tokens_lens[i]) > 0)
+                        else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
+                for stl_b in batch
+            ]
+        )
+        for i in range(num_steps_input)
+    ]
 
     # precompute index sets for scatter operation after embed
-    offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
-    offsets = torch.cat([torch.zeros(1, dtype=torch.int32), offsets_base[:-1]])
-    offsets_pe = torch.zeros_like(offsets)
+    offsets_base = [s.sum(1).sum(0).cumsum(0) for s in source_tokens_lens]
+    offsets = [torch.cat([torch.zeros(1, dtype=torch.int32), o[:-1]]) for o in offsets_base]
+    offsets_pe = [torch.zeros_like(o) for o in offsets]
 
-    for ib, sb in enumerate(batch):
-        for itype, s in enumerate(sb):
-            if not s.source_empty():
-                s.source_idxs_embed = torch.cat(
-                    [
-                        torch.arange(offset, offset + token_len, dtype=torch.int64)
-                        for offset, token_len in zip(
-                            offsets, source_tokens_lens[ib, itype], strict=False
-                        )
-                    ]
-                )
-                s.source_idxs_embed_pe = torch.cat(
-                    [
-                        torch.arange(offset, offset + token_len, dtype=torch.int32)
-                        for offset, token_len in zip(
-                            offsets_pe, source_tokens_lens[ib][itype], strict=False
-                        )
-                    ]
-                )
+    if torch.cat(offsets_base).shape[0] == 0:
+        return batch
 
-            # advance offsets
-            offsets += source_tokens_lens[ib][itype]
-            offsets_pe += source_tokens_lens[ib][itype]
+    for i_s in range(num_steps_input):
+        for ib, sb in enumerate(batch):  # batch items
+            for itype, s in enumerate(sb):  # streams, i.e. here we have StreamData object
+                if not s.source_empty():
+                    s.source_idxs_embed[i_s] = torch.cat(
+                        [
+                            torch.arange(offset, offset + token_len, dtype=torch.int64)
+                            for offset, token_len in zip(
+                                offsets[i_s], source_tokens_lens[i_s][ib, itype], strict=False
+                            )
+                        ]
+                    )
+                    s.source_idxs_embed_pe[i_s] = torch.cat(
+                        [
+                            torch.arange(offset, offset + token_len, dtype=torch.int32)
+                            for offset, token_len in zip(
+                                offsets_pe[i_s], source_tokens_lens[i_s][ib][itype], strict=False
+                            )
+                        ]
+                    )
+
+                # advance offsets
+                offsets[i_s] += source_tokens_lens[i_s][ib][itype]
+                offsets_pe[i_s] += source_tokens_lens[i_s][ib][itype]
 
     return batch
 
 
-def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
+def compute_idxs_predict(forecast_dt: int, batch: StreamData, streams: list[dict]) -> list:
     """
     Compute auxiliary information for prediction
 
@@ -697,39 +356,39 @@ def compute_idxs_predict(forecast_dt: int, batch: StreamData) -> list:
     target_coords_lens = [[s.target_coords_lens for s in sb] for sb in batch]
 
     # target coords idxs
-    tcs_lens_merged = []
+    tcs_lens_merged = {}
     pad = torch.zeros(1, dtype=torch.int32)
     for ii in range(len(batch[0])):
         # generate len lists for varlen attention (per batch list for local, per-cell attention and
         # global
-        tcs_lens_merged += [
-            [
-                torch.cat(
-                    [
-                        pad,
-                        torch.cat(
-                            [
-                                target_coords_lens[i_b][ii][fstep]
-                                for i_b in range(len(target_coords_lens))
-                            ]
-                        ),
-                    ]
-                ).to(torch.int32)
-                for fstep in range(forecast_dt + 1)
-            ]
+        tcs_lens_merged[streams[ii]["name"]] = [
+            torch.cat(
+                [
+                    pad,
+                    torch.cat(
+                        [
+                            target_coords_lens[i_b][ii][fstep]
+                            for i_b in range(len(target_coords_lens))
+                        ]
+                    ),
+                ]
+            ).to(torch.int32)
+            for fstep in range(forecast_dt + 1)
         ]
 
     return tcs_lens_merged
 
 
-def compute_source_cell_lens(batch: StreamData) -> torch.tensor:
+def compute_source_cell_lens(
+    batch: list[list[StreamData]], num_steps_input: int
+) -> list[torch.tensor]:
     """
     Compute auxiliary information for varlen attention for local assimilation
 
     Parameters
     ----------
     batch :
-        StreamData information for current batch
+        StreamData information for current batch for each batch item and each stream
 
     Returns
     -------
@@ -738,18 +397,24 @@ def compute_source_cell_lens(batch: StreamData) -> torch.tensor:
     """
 
     # precompute for processing in the model (with varlen flash attention)
-    source_cell_lens_raw = torch.stack(
-        [
-            torch.stack(
-                [
-                    s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                    for s in stl_b
-                ]
-            )
-            for stl_b in batch
-        ]
-    )
-    source_cell_lens = torch.sum(source_cell_lens_raw, 1).flatten().to(torch.int32)
-    source_cell_lens = torch.cat([torch.zeros(1, dtype=torch.int32), source_cell_lens])
+    source_cell_lens_raw = [
+        torch.stack(
+            [
+                torch.stack(
+                    [
+                        s.source_tokens_lens[i]
+                        if (len(s.source_tokens_lens) > 0) and (len(s.source_tokens_lens[i]) > 0)
+                        else torch.tensor([])
+                        for s in stl_b
+                    ]
+                )
+                for stl_b in batch
+            ]
+        )
+        for i in range(num_steps_input)
+    ]
+
+    source_cell_lens = [torch.sum(c, 1).flatten().to(torch.int32) for c in source_cell_lens_raw]
+    source_cell_lens = [torch.cat([torch.zeros(1, dtype=torch.int32), c]) for c in source_cell_lens]
 
     return source_cell_lens

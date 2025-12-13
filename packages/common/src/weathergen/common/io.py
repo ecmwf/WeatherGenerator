@@ -101,6 +101,7 @@ class IOReaderData:
     geoinfos: NDArray[DType]
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
+    is_spoof: bool = False
 
     def is_empty(self):
         """
@@ -142,6 +143,7 @@ class IOReaderData:
         geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
         data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
         datetimes = np.array([], dtype=other.datetimes.dtype)
+        is_spoof = True
 
         for other in others:
             n_datapoints = len(other.data)
@@ -153,8 +155,9 @@ class IOReaderData:
             geoinfos = np.concatenate([geoinfos, other.geoinfos])
             data = np.concatenate([data, other.data])
             datetimes = np.concatenate([datetimes, other.datetimes])
+            is_spoof = is_spoof and other.is_spoof
 
-        return cls(coords, geoinfos, data, datetimes)
+        return cls(coords, geoinfos, data, datetimes, is_spoof)
 
 
 @dataclasses.dataclass
@@ -652,7 +655,7 @@ class OutputBatchData:
         source: IOReaderData = self.sources[sample][stream_idx]
 
         assert source.data.shape[1] == len(channels), (
-            "Number of source channel names does not align with source data"
+            f"Number of source channel names {len(channels)} does not align with source data."
         )
 
         source_dataset = OutputDataset(
