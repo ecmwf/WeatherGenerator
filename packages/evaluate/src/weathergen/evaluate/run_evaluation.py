@@ -334,7 +334,7 @@ def evaluate_from_config(
                     )
 
     # summary plots
-    if scores_dict and cfg.evaluation.get("summary_plots", True):
+    if scores_dict:
         _logger.info("Started creating summary plots...")
         plot_summary(cfg, scores_dict, summary_dir)
 
