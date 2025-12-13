@@ -543,10 +543,7 @@ class Model(torch.nn.Module):
         tokens = torch.stack(tokens, 0).sum(0)
 
         # latents for output
-        latent_state = LatentState(
-            register_tokens=tokens[:, : self.num_register_tokens].clone(),
-            latent_tokens=tokens[:, self.num_register_tokens :].clone(),
-        )
+        latent_state = LatentState(self.num_register_tokens, tokens)
         output.add_latent_prediction(0, {"posteriors": posteriors, "latent_state": latent_state})
 
         # forecasting
