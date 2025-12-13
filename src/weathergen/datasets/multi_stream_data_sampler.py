@@ -204,7 +204,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
 
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
         perms_len = int(index_range.end - index_range.start) - (forecast_len + self.forecast_offset)
         n_duplicates = self.len - perms_len
         if n_duplicates > 0:
