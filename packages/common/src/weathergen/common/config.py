@@ -16,6 +16,8 @@ import string
 import subprocess
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import yaml
 import yaml.constructor
 import yaml.scanner
@@ -27,10 +29,109 @@ _REPO_ROOT = Path(
 ).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
+_DATETIME_TYPE_NAME = "datetime"  # Names for custom resolvers used in Omegaconf
+_TIMEDELTA_TYPE_NAME = "timedelta"
+
+
 _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
+
+
+def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
+    """
+    Parse a value into a numpy timedelta64[ms].
+    Integers and floats are interpreted as hours.
+    Strings are parsed using pandas.to_timedelta.
+    """
+    if isinstance(val, int | float | np.number):
+        return np.timedelta64(pd.to_timedelta(val, unit="s")).astype("timedelta64[ms]")
+    return np.timedelta64(pd.to_timedelta(val)).astype("timedelta64[ms]")
+
+
+def timedelta_to_str(val: np.timedelta64 | pd.Timedelta) -> str:
+    """
+    Put timedelta into string in format HH:MM:SS
+    """
+    dt = pd.to_timedelta(val)
+    total_seconds = int(dt.total_seconds())
+
+    # Calculate HH:MM:SS
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    # Format string (e.g., "06:00:00" or "24:00:00")
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
+def str_to_datetime64(s: str | int | np.datetime64) -> np.datetime64:
+    """
+    Convert a string to a numpy datetime64 object.
+    """
+    if isinstance(s, np.datetime64):
+        return s
+
+    # Convert to string to handle YAML integers (e.g. 20001010000000)
+    s = str(s)
+    return pd.to_datetime(s).to_datetime64()
+
+
+OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
+OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
+
+
+def _add_interpolation(conf: Config) -> Config:
+    conf = conf.copy()
+    delta_keys = ["time_window_step", "time_window_len", "forecast_delta"]
+    time_keys = ["start_date", "end_date", "start_date_val", "end_date_val"]
+
+    for key in delta_keys:
+        if key in conf:
+            raw_key = f"_{key}"
+            # Create an alias using interpolation syntax "${_keyname}"
+            # This stores a string instead of the resolved timedelta object.
+            conf[raw_key] = f"${{{key}}}"
+            conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{conf[key]}}}"
+
+    for key in time_keys:
+        if key in conf:
+            raw_key = f"_{key}"
+            conf[raw_key] = f"${{{key}}}"
+            conf[key] = f"${{{_DATETIME_TYPE_NAME}:{conf[key]}}}"
+
+    return conf
+
+
+def _strip_interpolation(conf: Config) -> Config:
+    stripped = OmegaConf.create()
+    for key in list(conf.keys()):
+        if key.startswith("_"):
+            # Skip hidden/backup keys
+            continue
+        elif OmegaConf.is_interpolation(conf, key):
+            raw_key = f"_{key}"
+            if raw_key in conf:
+                # Retrieve the value from the backup key (resolves interpolation)
+                val = conf[raw_key]
+            else:
+                # Fallback to the original key
+                val = conf[key]
+        else:
+            # Standard key retrieval
+            val = conf[key]
+
+        # Convert unsupported types (timedelta/datetime) to strings
+        if isinstance(val, np.timedelta64 | pd.Timedelta):
+            val = timedelta_to_str(val)
+        elif isinstance(val, np.datetime64 | pd.Timestamp):
+            dt = pd.to_datetime(val)
+            # Format: Standard ISO without microseconds
+            val = dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+        stripped[key] = val
+
+    return stripped
 
 
 def get_run_id():
@@ -41,7 +142,8 @@ def get_run_id():
 
 def format_cf(config: Config) -> str:
     stream = io.StringIO()
-    for key, value in config.items():
+    clean_cf = _strip_interpolation(config)
+    for key, value in clean_cf.items():
         match key:
             case "streams":
                 for rt in value:
@@ -63,7 +165,7 @@ def save(config: Config, mini_epoch: int | None):
 
     fname = _get_model_config_file_write_name(path_models, config.run_id, mini_epoch)
 
-    json_str = json.dumps(OmegaConf.to_container(config))
+    json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with fname.open("w") as f:
         f.write(json_str)
 
@@ -104,6 +206,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
+    config = _add_interpolation(config)
 
     return _apply_fixes(config)
 
@@ -236,6 +339,7 @@ def load_merge_configs(
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
+    c = _add_interpolation(c)
 
     # Ensure the config has mini-epoch notation
     if hasattr(c, "samples_per_epoch"):

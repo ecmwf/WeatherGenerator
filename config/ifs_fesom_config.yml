@@ -17,4 +17,7 @@ samples_per_validation: 16
 shuffle: True
 loader_num_workers: 4
 
+time_window_step: 06:00:00
+time_window_len: 06:00:00
+
 lr_max: 2e-5

@@ -7,16 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
 from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
 
+from weathergen.common.config import timedelta_to_str
 from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 
 _logger = logging.getLogger(__name__)
@@ -65,57 +64,6 @@ class DTRange:
         assert self.start > _DT_ZERO, "start time must be after 1850-01-01T00:00"
 
 
-def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
-    """
-    Convert a string to a numpy datetime64 object.
-    """
-    if isinstance(s, datetime64):
-        return s
-    s_str = str(s)
-
-    supported_formats = [
-        "%Y%m%d%H%M%S",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-    ]
-
-    for fmt in supported_formats:
-        try:
-            dt_obj = datetime.datetime.strptime(s_str, fmt)
-            return np.datetime64(dt_obj)
-        except ValueError:
-            pass
-
-    raise ValueError(f"Unable to parse the date string '{s}'. Original string might be invalid.")
-
-
-def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
-    """
-    Convert a string or datetime.timedelta object to a pd.Timedelta object.
-    The string format is expected to be "HH:MM:SS".
-    Hours are not limited to two digits. Minutes and seconds must be in the range 0-59.
-    """
-
-    if not isinstance(s, str) and not isinstance(s, datetime.timedelta):
-        raise TypeError("Input must be a string or a datetime.timedelta object")
-    if isinstance(s, datetime.timedelta):
-        # If input is a timedelta object, convert it directly to pd.Timedelta
-        return pd.Timedelta(s)
-    if isinstance(s, str):
-        # ensure that the string is in "HH:MM:SS" format
-        parts = s.split(":")
-        if not len(parts) == 3:
-            raise ValueError("String must be in 'HH:MM:SS' format")
-        if not all(part.isdigit() for part in parts):
-            raise ValueError("String must be in 'HH:MM:SS' format")
-        # ensure that minutes and seconds do not exceed 59
-        if int(parts[1]) > 59 or int(parts[2]) > 59:
-            raise ValueError("Minutes and seconds must be in the range 0-59")
-    return pd.to_timedelta(s)
-
-
 class TimeWindowHandler:
     """
     Handler for time windows and translation of indices to times
@@ -123,10 +71,10 @@ class TimeWindowHandler:
 
     def __init__(
         self,
-        t_start: str | int | NPDT64,
-        t_end: str | int | NPDT64,
-        t_window_len_hours: int,
-        t_window_step_hours: int,
+        t_start: NPDT64,
+        t_end: NPDT64,
+        t_window_len_hours: NPTDel64,
+        t_window_step_hours: NPTDel64,
     ):
         """
         Parameters
@@ -141,13 +89,21 @@ class TimeWindowHandler:
             delta hours between start times of windows
 
         """
-        self.t_start: NPDT64 = str_to_datetime64(t_start)
-        self.t_end: NPDT64 = str_to_datetime64(t_end)
-        self.t_window_len: NPTDel64 = np.timedelta64(t_window_len_hours, "h")
-        self.t_window_step: NPTDel64 = np.timedelta64(t_window_step_hours, "h")
+        self.t_start: NPDT64 = t_start
+        self.t_end: NPDT64 = t_end
+        self.t_window_len: NPTDel64 = t_window_len_hours
+        self.t_window_step: NPTDel64 = t_window_step_hours
 
         assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
         assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
+
+    def __str__(self) -> str:
+        # Helper to ensure readable timedelta formatting
+        l_str = timedelta_to_str(self.t_window_len)
+        s_str = timedelta_to_str(self.t_window_step)
+        return (
+            f"TimeWindowHandler: start={self.t_start}, end={self.t_end}, len={l_str}, step={s_str}"
+        )
 
     def get_index_range(self) -> TimeIndexRange:
         """
@@ -488,9 +444,11 @@ class DataReaderBase(metaclass=ABCMeta):
         self,
     ) -> list[float] | None:
         target_channel_weights = [
-            self.stream_info["channel_weights"].get(ch, 1.0)
-            if self.stream_info.get("channel_weights", None)
-            else 1.0
+            (
+                self.stream_info["channel_weights"].get(ch, 1.0)
+                if self.stream_info.get("channel_weights", None)
+                else 1.0
+            )
             for ch in self.target_channels
         ]
 

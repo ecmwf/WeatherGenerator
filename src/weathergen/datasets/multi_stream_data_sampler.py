@@ -13,13 +13,13 @@ import pathlib
 import numpy as np
 import torch
 
+from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
     TIndex,
-    str_to_datetime64,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
@@ -82,38 +82,39 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def __init__(
         self,
-        cf,
-        start_date_,
-        end_date_,
-        batch_size,
-        samples_per_mini_epoch,
+        cf: Config,
+        start_date: np.datetime64,
+        end_date: np.datetime64,
+        batch_size: int,
+        samples_per_mini_epoch: int,
         stage: Stage,
         shuffle=True,
     ):
         super(MultiStreamDataSampler, self).__init__()
 
-        start_date = str_to_datetime64(start_date_)
-        end_date = str_to_datetime64(end_date_)
-
-        assert end_date > start_date, (end_date, start_date)
-
         self.mask_value = 0.0
         self._stage = stage
 
-        self.len_hrs: int = cf.len_hrs
-        self.step_hrs: int = cf.step_hrs
-        self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
+        self.len_timedelta: np.timedelta64 = cf.time_window_len
+        self.step_timedelta: np.timedelta64 = cf.time_window_step
+        self.time_window_handler = TimeWindowHandler(
+            start_date, end_date, self.len_timedelta, self.step_timedelta
+        )
         if is_root():
-            logger.info(
-                f"Time window handler: start={start_date}, end={end_date},"
-                f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
-            )
+            logger.info(self.time_window_handler)
 
         self.forecast_offset = cf.forecast_offset
-        self.forecast_delta_hrs = (
-            cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
-        )
-        assert self.forecast_delta_hrs == self.len_hrs, "Only supported option at the moment"
+
+        # Handle forecast_delta_hrs which might be int (hours) or string (timedelta)
+        f_delta_dt = cf.forecast_delta
+
+        if f_delta_dt > np.timedelta64(0, "ms"):
+            self.forecast_delta_dt = f_delta_dt
+        else:
+            self.forecast_delta_dt = self.len_timedelta
+
+        assert self.forecast_delta_dt == self.len_timedelta, "Only supported option at the moment"
+
         self.forecast_steps = np.array(
             [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
         )
@@ -181,7 +182,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
-                    self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
+                    self.len = min(
+                        self.len, len(ds) - (self.len_timedelta * (fsm + 1)) // self.step_timedelta
+                    )
 
                 # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
@@ -201,7 +204,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
 
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
         perms_len = int(index_range.end - index_range.start) - (forecast_len + self.forecast_offset)
         n_duplicates = self.len - perms_len
         if n_duplicates > 0:
@@ -268,12 +271,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     ###################################################
     def get_sources_size(self):
         return [
-            0
-            if ds[0].get_source_num_channels() == 0
-            else ds[0].get_source_num_channels()
-            + ds[0].get_geoinfo_size()
-            + ds[0].get_coords_size()
-            + self.tokenizer.get_size_time_embedding()
+            (
+                0
+                if ds[0].get_source_num_channels() == 0
+                else ds[0].get_source_num_channels()
+                + ds[0].get_geoinfo_size()
+                + ds[0].get_coords_size()
+                + self.tokenizer.get_size_time_embedding()
+            )
             for ds in self.streams_datasets
         ]
 
@@ -312,7 +317,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         idx_end = index_range.end
         # native length of datasets, independent of mini_epoch length that has potentially been
         # specified
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
         idx_end -= forecast_len + self.forecast_offset
         assert idx_end > 0, "dataset size too small for forecast range"
         self.perms = np.arange(index_range.start, idx_end)
@@ -420,7 +425,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     for fstep in range(
                         self.forecast_offset, self.forecast_offset + forecast_dt + 1
                     ):
-                        step_forecast_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
+                        step_forecast_dt = idx + (self.len_timedelta * fstep) // self.step_timedelta
                         time_win_target = self.time_window_handler.window(step_forecast_dt)
 
                         # collect all targets for current stream

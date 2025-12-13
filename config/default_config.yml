@@ -51,7 +51,7 @@ pred_mlp_adaln: True
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
 forecast_offset : 0
-forecast_delta_hrs: 0
+forecast_delta: 00:00:00
 forecast_steps: 0
 forecast_policy: null
 forecast_att_dense_rate: 1.0
@@ -144,12 +144,12 @@ norm_type: "LayerNorm"
 nn_module: "te"
 log_grad_norms: False
 
-start_date: 197901010000
-end_date: 202012310000
-start_date_val: 202101010000
-end_date_val: 202201010000
-len_hrs: 6
-step_hrs: 6
+start_date: 1979-01-01T00:00
+end_date: 2020-12-31T00:00
+start_date_val: 2021-01-01T00:00
+end_date_val: 2022-01-01T00:00
+time_window_step: 06:00:00
+time_window_len: 06:00:00
 input_window_steps: 1
 
 val_initial: False
