@@ -7,11 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-ICON :
-  type : icon
-  filenames : ['icon-art-NWP_OH_CHEMISTRY-chem_DOM01_ML_daily_repeat_reduced_levels.zarr']
-  source : ['u_00', 'v_00', 'w_80', 'temp_00']
-  target : ['u_00', 'v_00', 'w_80', 'temp_00']
+ICONART :
+  type : iconart
+  filenames : ['icon_art_3d_DOM01_subset.zarr']
+  source : [
+    'U_', 'V_', 'T_', 'QV_', 'P_', 'CH4_',
+    ]  # Matches all U, V etc. at all height levels
+  target : [
+    'U_', 'V_', 'T_', 'QV_', 'P_', 'CH4_',
+    ]
+  attributes:
+    lon: 'clon'
+    lat: 'clat'
+    grid: 'ncells'
   loss_weight : 1.
   diagnostic : False
   masking_rate : 0.6
