@@ -94,7 +94,6 @@ class EmbeddingEngine(torch.nn.Module):
 
         return int(offsets_base[-1])
 
-    # TODO: remove device from arg list
     def forward(self, batch, pe_embed):
         num_steps_input = batch.get_num_source_steps()
 
@@ -115,14 +114,13 @@ class EmbeddingEngine(torch.nn.Module):
                     # indices for positional encoding
                     pe_idxs += [sample.streams_data[stream_name].source_idxs_embed_pe[istep]]
                     # scatter idxs for switching from stream to cell-based ordering
-                    # need to be offset for different
+                    # need to be offset for different samples
                     idx = sample.streams_data[stream_name].source_idxs_embed[istep]
                     scatter_idxs += [
                         idx + (scatter_idxs[-1][-1] + 1 if len(scatter_idxs) > 0 else 0)
                     ]
 
             sdata = torch.cat(sdata)
-
             # skip empty stream
             if len(sdata) == 0:
                 continue

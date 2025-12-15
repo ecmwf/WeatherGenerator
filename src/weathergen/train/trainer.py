@@ -229,7 +229,9 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculator.to_device(self.device)
 
         # if with_fsdp then parameter count is unreliable
-        if is_root() and not cf.with_fsdp and not cf.with_ddp:
+        if is_root():
+            if cf.with_fsdp:
+                logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
             self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/

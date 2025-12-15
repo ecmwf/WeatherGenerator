@@ -492,7 +492,7 @@ class Model(torch.nn.Module):
             strict=False,
         )
         [
-            print("    {:,} / {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2))
+            print("   {} : {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2))
             for si, np0, np1, np2 in zps
         ]
         print("-----------------")
@@ -595,31 +595,16 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
-            tte = self.target_token_engines[stream_name]
-            tc_embed = self.embed_target_coords[stream_name]
-
-            ## embed token coords, concatenating along batch dimension
-            # (which is taking care of through the varlen attention)
-            # arguably we should to the mixed precision policy when creating the model in FSDP
-            # TODO: find a better way for this loop
-            tc_tokens = torch.cat(
+            # extract target coords for current stream and fstep and convert to one tensor
+            t_coords = torch.cat(
                 [
-                    checkpoint(
-                        tc_embed,
-                        batch.source_samples[i_b].streams_data[stream_name].target_coords[fstep],
-                        use_reentrant=False,
-                    )
-                    if len(
-                        batch.source_samples[i_b]
-                        .streams_data[stream_name]
-                        .target_coords[fstep]
-                        .shape
-                    )
-                    > 1
-                    else batch.source_samples[i_b].streams_data[stream_name].target_coords[fstep]
+                    batch.source_samples[i_b].streams_data[stream_name].target_coords[fstep]
                     for i_b in range(batch_size)
                 ]
             )
+            # embed token coords
+            tc_embed = self.embed_target_coords[stream_name]
+            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
@@ -643,20 +628,13 @@ class Model(torch.nn.Module):
                         for sample in batch.source_samples
                     ]
                 )
-                # coord information for learnable layer norm
-                tcs_aux = torch.cat(
-                    [
-                        batch.source_samples[i_b].streams_data[stream_name].target_coords[fstep]
-                        for i_b in range(batch_size)
-                    ]
-                )
 
-                tc_tokens = tte(
+                tc_tokens = self.target_token_engines[stream_name](
                     latent=tokens_nbors,
                     output=tc_tokens,
                     latent_lens=tokens_nbors_lens,
                     output_lens=tcs_lens,
-                    coordinates=tcs_aux,
+                    coordinates=t_coords,
                 )
 
                 # final prediction head to map back to physical space

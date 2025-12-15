@@ -51,16 +51,17 @@ def init_model_and_shard(
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
-    freeze_modules = cf.freeze_modules
-
     # freeze request model part
     for name, module in model.named_modules():
         name = module.name if hasattr(module, "name") else name
         # avoid the whole model element which has name ''
         if name == "":
             continue
-        if re.fullmatch(freeze_modules, name) is not None:
+        if re.fullmatch(cf.freeze_modules, name) is not None:
             freeze_weights(module)
+    # TODO: this should be handled in the encoder to be close where q_cells is defined
+    if "q_cells" in cf.freeze_modules:
+        model.encoder.q_cells.requires_grad = False
 
     if cf.with_ddp and not cf.with_fsdp:
         # create DDP model if running without FSDP
@@ -119,9 +120,6 @@ def init_model_and_shard(
                 else None
             ),
         }
-        for module in model.pred_adapter_kv.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **full_precision_fsdp_kwargs)
 
         for module in model.target_token_engines.modules():
             if isinstance(module, modules_to_shard):
