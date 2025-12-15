@@ -49,7 +49,9 @@ class StreamData:
         self.sample_idx = idx
         self.target_coords = [torch.tensor([]) for _ in range(forecast_steps + 1)]
         self.target_coords_raw = [[] for _ in range(forecast_steps + 1)]
-        self.target_times_raw = [[] for _ in range(forecast_steps + 1)]
+        self.target_times_raw = [
+            np.array([], dtype="datetime64[ns]") for _ in range(forecast_steps + 1)
+        ]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)

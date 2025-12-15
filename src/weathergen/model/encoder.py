@@ -11,6 +11,7 @@ import torch
 from astropy_healpix import healpy
 
 from weathergen.common.config import Config
+from weathergen.datasets.batch import ModelBatch
 from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
@@ -22,7 +23,6 @@ from weathergen.model.engines import (
 # from weathergen.model.model import ModelParams
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.positional_encoding import positional_encoding_harmonic
-from weathergen.utils.utils import get_dtype
 
 
 class EncoderModule(torch.nn.Module):
@@ -43,7 +43,6 @@ class EncoderModule(torch.nn.Module):
         self.num_healpix_cells = 12 * 4**self.healpix_level
 
         self.cf = cf
-        self.dtype = get_dtype(self.cf.attention_dtype)
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
@@ -111,44 +110,21 @@ class EncoderModule(torch.nn.Module):
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
-    def forward(self, model_params, sample):
+    def forward(self, model_params, batch):
         """
         Encoder forward
         """
 
-        num_steps_input = len(sample.source_cell_lens)
+        stream_cell_tokens = self.embed_engine(batch, model_params.pe_embed)
 
-        tokens, posteriors = [], []
-        for input_step in range(num_steps_input):
-            # embed from physical space
-            toks = self.embed_cells(input_step, model_params, sample)
+        global_tokens, posteriors = self.assimilate_local(model_params, stream_cell_tokens, batch)
 
-            # local assimilation engine and adapter
-            toks, posts = self.assimilate_local(input_step, model_params, toks, sample)
+        global_tokens = self.assimilate_global(global_tokens)
 
-            toks = self.assimilate_global(toks)
-
-            tokens += [toks]
-            posteriors += [posts]
-
-        return tokens, posteriors
-
-    def embed_cells(self, input_step, model_params, sample) -> torch.Tensor:
-        """Embeds input data for each stream separately and rearranges it to cell-wise order
-        Args:
-            model_params : Query and embedding parameters
-            streams_data : Used to initialize first tokens for pre-processing
-        Returns:uv
-            Tokens for local assimilation
-        """
-
-        dev = next(self.parameters()).device
-        tokens_all = self.embed_engine(input_step, sample, model_params.pe_embed, self.dtype, dev)
-
-        return tokens_all
+        return global_tokens, posteriors
 
     def assimilate_local(
-        self, input_step: int, model_params, tokens: torch.Tensor, sample: torch.Tensor
+        self, model_params, tokens: torch.Tensor, batch: ModelBatch
     ) -> torch.Tensor:
         """Processes embedded tokens locally and prepares them for the global assimilation
         Args:
@@ -160,50 +136,39 @@ class EncoderModule(torch.nn.Module):
             Tokens for global assimilation
         """
 
-        cell_lens = sample.source_cell_lens[input_step]
-        batch_size = (
-            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
+        num_steps_input = batch.get_num_source_steps()
+
+        # combined cell lens for all tokens in batch across all input steps
+        # TODO: avoid 0-prepending of source_cell_lens
+        cell_lens = torch.cat(
+            [
+                sample.source_cell_lens[input_step][1:]
+                for sample in batch.source_samples
+                for input_step in range(num_steps_input)
+            ]
         )
+
+        rs = num_steps_input * batch.len_sources()
 
         s = self.q_cells.shape
-        # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
-        #        + ':: {np.prod(np.array(tokens.shape))/np.prod(np.array(s))}')
-        # TODO: test if positional encoding is needed here
+        # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:
-            tokens_global = (self.q_cells + model_params.pe_global).repeat(batch_size, 1, 1)
+            tokens_global = (self.q_cells + model_params.pe_global).repeat(rs, 1, 1)
         else:
-            tokens_global = (
-                self.q_cells.repeat(self.num_healpix_cells, 1, 1) + model_params.pe_global
-            )
+            tokens_global = self.q_cells.repeat(
+                self.num_healpix_cells * rs, 1, 1
+            ) + model_params.pe_global.repeat((rs, 1, 1))
+        # lens for varlen attention
         q_cells_lens = torch.cat(
             [model_params.q_cells_lens[0].unsqueeze(0)]
-            + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
+            + [model_params.q_cells_lens[1:] for _ in range(batch.len_sources())]
         )
 
-        # local assimilation model
-        # for block in self.ae_local_blocks:
-        #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
+        # the computation below conceptually apply the local assimilation engine and then the
+        # local-to-global adapter
+        # to work around to bug in flash attention, the computations is performed in chunks
 
-        # if self.cf.latent_noise_kl_weight > 0.0:
-        #     tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
-        #         tokens, sampling=self.training
-        #     )
-        # else:
-        #     tokens, posteriors = tokens, 0.0
-
-        # for block in self.ae_adapter:
-        #     tokens_global = checkpoint(
-        #         block,
-        #         tokens_global,
-        #         tokens,
-        #         q_cells_lens,
-        #         cell_lens,
-        #         use_reentrant=False,
-        #     )
-
-        # work around to bug in flash attention for hl>=5
-
-        cell_lens = cell_lens[1:]
+        # subdivision factor for required splitting
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_unmasked_all = []
         posteriors = []
@@ -273,15 +238,17 @@ class EncoderModule(torch.nn.Module):
 
         # recover batch dimension and build global token list
         tokens_global = (
-            tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
+            tokens_global.reshape([rs, self.num_healpix_cells, s[-2], s[-1]])
             + model_params.pe_global
         ).flatten(1, 2)
 
         # create register tokens and prepend to latent spatial tokens
         tokens_global_register = positional_encoding_harmonic(
-            self.q_cells.repeat(batch_size, self.num_register_tokens, 1)
+            self.q_cells.repeat(rs, self.num_register_tokens, 1)
         )
         tokens_global = torch.cat([tokens_global_register, tokens_global], dim=1)
+
+        # TODO: clean up above code and move to multiple functions
 
         return tokens_global, posteriors
 

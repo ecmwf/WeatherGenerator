@@ -549,7 +549,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         mode = self.training_cfg.get("training_mode")
         source_cfgs = self.training_cfg.get("model_input")
-        target_cfgs = self.training_cfg.get("target_input", source_cfgs)
 
         # get/coordinate masks
         # TODO: should also return number of views
@@ -576,6 +575,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # in source and target channels; overlap in one window when self.forecast_offset=0
             # max number of input steps
             i_max = np.array([sc.get("num_steps_input", 1) for sc in source_cfgs]).max().item()
+            # TODO: remove
             self.num_steps_input = i_max
             (input_data, output_data) = self._get_data_windows(idx, forecast_dt, i_max, stream_ds)
 
@@ -592,7 +592,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     idx,
                     forecast_dt,
                     stream_info,
-                    source_cfgs[sidx].get("num_steps_input", 1),
+                    source_masks.metadata[sidx].params.get("num_steps_input", 1),
                     input_data,
                     output_data,
                     input_tokens,
@@ -615,7 +615,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     idx,
                     forecast_dt,
                     stream_info,
-                    target_cfgs[sidx].get("num_steps_input", 1),
+                    target_masks.metadata[sidx].params.get("num_steps_input", 1),
                     input_data,
                     output_data,
                     input_tokens,

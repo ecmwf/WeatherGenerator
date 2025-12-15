@@ -6,7 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-import dataclasses
 
 import torch
 import torch.nn as nn
@@ -43,6 +42,7 @@ class EmbeddingEngine(torch.nn.Module):
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
+        self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
         self.stream_names = list(stream_names)
@@ -80,44 +80,62 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    # TODO: remove device from arg list
-    def forward(self, input_step, sample, pe_embed, dtype, device):
-        offsets_base = torch.cumsum(sample.source_cell_lens[input_step][1:], 0)
+    def get_num_tokens(self, num_steps_input, batch):
+        offsets_base = torch.cumsum(
+            torch.cat(
+                [
+                    sample.source_cell_lens[input_step][1:]
+                    for sample in batch.source_samples
+                    for input_step in range(num_steps_input)
+                ]
+            ),
+            0,
+        )
 
+        return int(offsets_base[-1])
+
+    # TODO: remove device from arg list
+    def forward(self, batch, pe_embed):
+        num_steps_input = batch.get_num_source_steps()
+
+        num_tokens = self.get_num_tokens(num_steps_input, batch)
         tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device
+            (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
         # iterate over all streams
-        for stream_name, s_data in sample.streams_data.items():
-            # embedding network
-            embed = self.embeds[stream_name]
+        # for stream_name, s_data in sample.streams_data.items():
+        for stream_name in self.stream_names:
+            # collect all source tokens from all input_steps and all samples in the batch
+            sdata, scatter_idxs, pe_idxs = [], [], []
+            for istep in range(num_steps_input):
+                for sample in batch.source_samples:
+                    # token data
+                    sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
+                    # indices for positional encoding
+                    pe_idxs += [sample.streams_data[stream_name].source_idxs_embed_pe[istep]]
+                    # scatter idxs for switching from stream to cell-based ordering
+                    # need to be offset for different
+                    idx = sample.streams_data[stream_name].source_idxs_embed[istep]
+                    scatter_idxs += [
+                        idx + (scatter_idxs[-1][-1] + 1 if len(scatter_idxs) > 0 else 0)
+                    ]
+
+            sdata = torch.cat(sdata)
 
             # skip empty stream
-            if s_data.source_empty():
+            if len(sdata) == 0:
                 continue
 
-            idxs = s_data.source_idxs_embed[input_step].to(device)
-            idxs_pe = s_data.source_idxs_embed_pe[input_step].to(device)
+            scatter_idxs = torch.cat(scatter_idxs)
+            scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+            pe_idxs = torch.cat(pe_idxs)
 
-            # create full scatter index
-            # (there's no broadcasting which is likely highly inefficient)
-            idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-            x_embed = embed(s_data.source_tokens_cells[input_step]).flatten(0, 1)
-            # there's undocumented limitation in flash_attn that will make embed fail if
-            # #tokens is too large; code below is a work around
-            # x_embed = torch.cat(
-            #     [
-            #         embed(s_c, c_c).flatten(0, 1)
-            #         for s_c, c_c in zip(
-            #             torch.split(s.source_tokens_cells, 49152),
-            #             torch.split(s.source_centroids, 49152),
-            #         )
-            #     ]
-            # )
+            # embedding from physical space to per patch latent representation
+            x_embed = self.embeds[stream_name](sdata).flatten(0, 1)
 
-            # scatter write to reorder from per stream to per cell ordering
-            tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
+            # switch from stream to cell-based ordering
+            tokens_all.scatter_(0, scatter_idxs, x_embed + pe_embed[pe_idxs])
 
         return tokens_all
 
@@ -822,7 +840,6 @@ class TargetPredictionEngine(nn.Module):
         return output
 
 
-@dataclasses.dataclass
 class LatentState:
     """
     A dataclass to encapsulate the latent state
@@ -830,3 +847,7 @@ class LatentState:
 
     register_tokens: torch.Tensor
     latent_tokens: torch.Tensor
+
+    def __init__(self, num_register_tokens: int, tokens: torch.Tensor):
+        self.register_tokens = tokens[:, :num_register_tokens].clone()
+        self.latent_tokens = tokens[:, num_register_tokens:].clone()

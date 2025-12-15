@@ -387,7 +387,8 @@ class Masker:
         source_masks = MaskData()
         source_target_mapping = []
         # different strategies
-        for i_source, source_cfg in enumerate(source_cfgs):
+        i_source = 0
+        for source_cfg in source_cfgs:
             # samples per strategy
             for _ in range(source_cfg.get("num_samples", 1)):
                 source_mask, mask_params = self._get_mask(
@@ -400,6 +401,7 @@ class Masker:
                 source_masks.add_mask(source_mask, mask_params, source_cfg)
                 # TODO: proper correspondence between source and target
                 source_target_mapping += [i_source % len(target_masks)]
+                i_source += 1
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 

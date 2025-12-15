@@ -365,39 +365,15 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                outputs = []
-                for sample in batch.source_samples:
-                    outputs.append(
-                        self.model(
-                            self.model_params,
-                            sample,
-                            cf.forecast_offset,
-                            sample.get_forecast_steps(),
-                        )
-                    )
+                # evaluate model
+                preds = self.model(self.model_params, batch)
 
-                targets_and_auxs = []
-                for sample in batch.target_samples:
-                    targets_and_auxs.append(
-                        self.target_and_aux_calculator.compute(
-                            sample,
-                            self.model_params,
-                            self.model,
-                            cf.forecast_offset,
-                            sample.get_forecast_steps(),
-                        )
-                    )
-                # targets, aux = zip(*targets_and_auxs)
-            loss = self.loss_calculator.compute_loss(
-                preds=outputs[0],
-                targets=targets_and_auxs[0],
-                # TOOD: view_metadata has to be part of targets and/or preds
-                # view_metadata=(batch[-1].source2target_matching_idxs,
-                #                 [sample.meta_info for sample in batch[-1].source_samples],
-                #                 batch[-1].target2source_matching_idxs,
-                #                 [sample.meta_info for sample in batch[-1].target_samples]
-                #                ),
-            )
+                # evaluate targets and aux
+                targets_and_auxs = self.target_and_aux_calculator.compute(
+                    batch, self.model_params, self.model
+                )
+
+            loss = self.loss_calculator.compute_loss(preds=preds, targets=targets_and_auxs)
 
             # TODO re-enable this, need to think on how to make it compatible with
             # TODO: CL, this should become a regular loss term
@@ -485,22 +461,13 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
-                        sample = batch.source_samples[0]
-                        output = model_forward(
-                            self.model_params,
-                            sample,
-                            cf.forecast_offset,
-                            sample.get_forecast_steps(),
-                        )
-                        sample = batch.target_samples[0]
+                        output = model_forward(self.model_params, batch)
                         target_aux_output = self.target_and_aux_calculator.compute(
-                            sample,
+                            batch,
                             self.model_params,
                             self.model,
-                            cf.forecast_offset,
-                            sample.get_forecast_steps(),
                         )
-                    loss = self.loss_calculator_val.compute_loss(
+                    _ = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=target_aux_output,
                     )
@@ -519,16 +486,6 @@ class Trainer(TrainerBase):
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
-
-    def batch_to_device(self, batch):
-        device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{self.cf.local_rank}")
-        # forecast_steps is dropped here from the batch
-        return (
-            [[d.to_device(self.device) for d in db] for db in batch[0]],
-            [b.to(self.device) for b in batch[1]],
-            [[b.to(self.device) for b in bf] for bf in batch[2]],
-        )
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (

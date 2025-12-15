@@ -135,6 +135,9 @@ class ModelBatch:
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
+    # device of the tensors in the batch
+    device: str | torch.device
+
     def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
         """ """
 
@@ -144,12 +147,16 @@ class ModelBatch:
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
-    def to_device(self, device):
+    def to_device(self, device):  # -> ModelBatch
         for sample in self.source_samples:
             sample.to_device(device)
 
         for sample in self.target_samples:
             sample.to_device(device)
+
+        self.device = device
+
+        return self
 
     def add_source_stream(
         self,
@@ -243,3 +250,32 @@ class ModelBatch:
         Get index of target sample for a given source sample index
         """
         return int(self.source2target_matching_idxs[source_idx])
+
+    def get_forecast_steps(self) -> int:
+        """
+        Get forecast steps
+        """
+        # use sample 0 since the number of forecast steps is constant across batch
+        return self.source_samples[0].get_forecast_steps()
+
+    def get_device(self) -> str | torch.device:
+        """
+        Get device of tensors in the batch
+        """
+        return self.device
+
+    def get_num_source_steps(self) -> int:
+        """
+        Get number of input/source steps
+        """
+        # TODO: define explicitly
+        # TODO: ensure that num_input_steps is constant across batch with different strategies
+        return len(self.source_samples[0].source_cell_lens)
+
+    def get_num_target_steps(self) -> int:
+        """
+        Get number of input/source steps
+        """
+        # TODO: define explicitly
+        # TODO: ensure that num_input_steps is constant across batch with different strategies
+        return len(self.target_samples[0].target_coords_idx["ERA5"])
