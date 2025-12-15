@@ -115,26 +115,20 @@ class EmbeddingEngine(torch.nn.Module):
                     idxs_pe = s.source_idxs_embed_pe.to(device)
 
                     # create full scatter index
-                    idxs = idxs.unsqueeze(
-                        1
-                    ).expand(
-                        -1, self.cf.ae_local_dim_embed
-                    )  # expand works as the tensor is only read (!do not apply in-place write 
-                       # operations on it!)
-                    try:
-                        x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
-                    except RuntimeError:
-                        # there's undocumented limitation in flash_attn that will make embed fail if
-                        # #tokens is too large; code below is a work around
-                        x_embed = torch.cat(
-                            [
-                                embed(s_c, c_c).flatten(0, 1)
-                                for s_c, c_c in zip(
-                                    torch.split(s.source_tokens_cells, 49152),
-                                    torch.split(s.source_centroids, 49152), strict=False,
-                                )
-                            ]
-                        )
+                    # (there's no broadcasting which is likely highly inefficient)
+                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
+                    # there's undocumented limitation in flash_attn that will make embed fail if
+                    # #tokens is too large; code below is a work around
+                    # x_embed = torch.cat(
+                    #     [
+                    #         embed(s_c, c_c).flatten(0, 1)
+                    #         for s_c, c_c in zip(
+                    #             torch.split(s.source_tokens_cells, 49152),
+                    #             torch.split(s.source_centroids, 49152),
+                    #         )
+                    #     ]
+                    # )
 
                     # scatter write to reorder from per stream to per cell ordering
                     tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
