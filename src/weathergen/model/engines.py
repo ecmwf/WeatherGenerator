@@ -126,7 +126,7 @@ class EmbeddingEngine(torch.nn.Module):
                 continue
 
             scatter_idxs = torch.cat(scatter_idxs)
-            scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+            scatter_idxs = scatter_idxs.unsqueeze(1).expand((1, self.cf.ae_local_dim_embed))
             pe_idxs = torch.cat(pe_idxs)
 
             # embedding from physical space to per patch latent representation
