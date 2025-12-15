@@ -368,116 +368,119 @@ class Model(torch.nn.Module):
         self.pred_adapter_kv = torch.nn.ModuleDict()
         self.pred_heads = torch.nn.ModuleDict()
 
-        for i_obs, si in enumerate(cf.streams):
-            stream_name = self.stream_names[i_obs]
 
-            # extract and setup relevant parameters
-            etc = si["embed_target_coords"]
-            tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
-            dim_embed = si["embed_target_coords"]["dim_embed"]
-            dim_out = max(
-                dim_embed,
-                si["token_size"] * self.targets_num_channels[i_obs],
-            )
-            tr = si["target_readout"]
-            num_layers = tr["num_layers"]
-            tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
-            tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
-            softcap = tr["softcap"] if "softcap" in tr else 0.0
+        loss_calculators = set(cf.training_config.losses.keys())
+        if "LossPhysical" in loss_calculators:
+            for i_obs, si in enumerate(cf.streams):
+                stream_name = self.stream_names[i_obs]
 
-            if tro_type == "obs_value":
-                # fixed dimension for obs_value type
-                dims_embed = [si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)]
-            else:
-                if cf.pred_dyadic_dims:
-                    coord_dim = self.geoinfo_sizes[i_obs] * si["token_size"]
-                    dims_embed = torch.tensor(
-                        [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
-                    )
-                    dims_embed[dims_embed < coord_dim] = dims_embed[
-                        torch.where(dims_embed >= coord_dim)[0][0]
-                    ]
-                    dims_embed = dims_embed.tolist()
+                # extract and setup relevant parameters
+                etc = si["embed_target_coords"]
+                tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
+                dim_embed = si["embed_target_coords"]["dim_embed"]
+                dim_out = max(
+                    dim_embed,
+                    si["token_size"] * self.targets_num_channels[i_obs],
+                )
+                tr = si["target_readout"]
+                num_layers = tr["num_layers"]
+                tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
+                tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
+                softcap = tr["softcap"] if "softcap" in tr else 0.0
+
+                if tro_type == "obs_value":
+                    # fixed dimension for obs_value type
+                    dims_embed = [si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)]
                 else:
-                    dims_embed = torch.linspace(
-                        dim_embed, dim_out, num_layers + 1, dtype=torch.int32
-                    ).tolist()
+                    if cf.pred_dyadic_dims:
+                        coord_dim = self.geoinfo_sizes[i_obs] * si["token_size"]
+                        dims_embed = torch.tensor(
+                            [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
+                        )
+                        dims_embed[dims_embed < coord_dim] = dims_embed[
+                            torch.where(dims_embed >= coord_dim)[0][0]
+                        ]
+                        dims_embed = dims_embed.tolist()
+                    else:
+                        dims_embed = torch.linspace(
+                            dim_embed, dim_out, num_layers + 1, dtype=torch.int32
+                        ).tolist()
 
-            if is_root():
-                logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
+                if is_root():
+                    logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
 
-            dim_coord_in = self.targets_coords_size[i_obs]
+                dim_coord_in = self.targets_coords_size[i_obs]
 
-            # embedding network for coordinates
-            if etc["net"] == "linear":
-                self.embed_target_coords[stream_name] = NamedLinear(
-                    f"embed_target_coords_{stream_name}",
-                    in_features=dim_coord_in,
-                    out_features=dims_embed[0],
-                    bias=False,
+                # embedding network for coordinates
+                if etc["net"] == "linear":
+                    self.embed_target_coords[stream_name] = NamedLinear(
+                        f"embed_target_coords_{stream_name}",
+                        in_features=dim_coord_in,
+                        out_features=dims_embed[0],
+                        bias=False,
+                    )
+                elif etc["net"] == "mlp":
+                    self.embed_target_coords[stream_name] = MLP(
+                        dim_coord_in,
+                        dims_embed[0],
+                        hidden_factor=8,
+                        with_residual=False,
+                        dropout_rate=dropout_rate,
+                        norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"embed_target_coords_{stream_name}",
+                    )
+                else:
+                    assert False
+
+                # obs-specific adapter for tokens
+                if cf.pred_adapter_kv:
+                    self.pred_adapter_kv[stream_name] = MLP(
+                        cf.ae_global_dim_embed,
+                        cf.ae_global_dim_embed,
+                        hidden_factor=2,
+                        with_residual=True,
+                        dropout_rate=dropout_rate,
+                        norm_type=cf.norm_type,
+                        norm_eps=self.cf.mlp_norm_eps,
+                        stream_name=f"pred_adapter_kv_{stream_name}",
+                    )
+                else:
+                    self.pred_adapter_kv[stream_name] = torch.nn.Identity()
+
+                # target prediction engines
+                tte_version = (
+                    TargetPredictionEngine
+                    if cf.decoder_type != "PerceiverIOCoordConditioning"
+                    else TargetPredictionEngineClassic
                 )
-            elif etc["net"] == "mlp":
-                self.embed_target_coords[stream_name] = MLP(
+                tte = tte_version(
+                    cf,
+                    dims_embed,
                     dim_coord_in,
-                    dims_embed[0],
-                    hidden_factor=8,
-                    with_residual=False,
-                    dropout_rate=dropout_rate,
-                    norm_eps=self.cf.mlp_norm_eps,
-                    stream_name=f"embed_target_coords_{stream_name}",
+                    tr_dim_head_proj,
+                    tr_mlp_hidden_factor,
+                    softcap,
+                    tro_type,
+                    stream_name=stream_name,
                 )
-            else:
-                assert False
 
-            # obs-specific adapter for tokens
-            if cf.pred_adapter_kv:
-                self.pred_adapter_kv[stream_name] = MLP(
-                    cf.ae_global_dim_embed,
-                    cf.ae_global_dim_embed,
-                    hidden_factor=2,
-                    with_residual=True,
-                    dropout_rate=dropout_rate,
+                self.target_token_engines[stream_name] = tte
+
+                # ensemble prediction heads to provide probabilistic prediction
+                final_activation = si["pred_head"].get("final_activation", "Identity")
+                if is_root():
+                    logger.debug(
+                        f"{final_activation} activation of prediction head of {si['name']} stream"
+                    )
+                self.pred_heads[stream_name] = EnsPredictionHead(
+                    dims_embed[-1],
+                    self.targets_num_channels[i_obs],
+                    si["pred_head"]["num_layers"],
+                    si["pred_head"]["ens_size"],
                     norm_type=cf.norm_type,
-                    norm_eps=self.cf.mlp_norm_eps,
-                    stream_name=f"pred_adapter_kv_{stream_name}",
+                    final_activation=final_activation,
+                    stream_name=stream_name,
                 )
-            else:
-                self.pred_adapter_kv[stream_name] = torch.nn.Identity()
-
-            # target prediction engines
-            tte_version = (
-                TargetPredictionEngine
-                if cf.decoder_type != "PerceiverIOCoordConditioning"
-                else TargetPredictionEngineClassic
-            )
-            tte = tte_version(
-                cf,
-                dims_embed,
-                dim_coord_in,
-                tr_dim_head_proj,
-                tr_mlp_hidden_factor,
-                softcap,
-                tro_type,
-                stream_name=stream_name,
-            )
-
-            self.target_token_engines[stream_name] = tte
-
-            # ensemble prediction heads to provide probabilistic prediction
-            final_activation = si["pred_head"].get("final_activation", "Identity")
-            if is_root():
-                logger.debug(
-                    f"{final_activation} activation of prediction head of {si['name']} stream"
-                )
-            self.pred_heads[stream_name] = EnsPredictionHead(
-                dims_embed[-1],
-                self.targets_num_channels[i_obs],
-                si["pred_head"]["num_layers"],
-                si["pred_head"]["ens_size"],
-                norm_type=cf.norm_type,
-                final_activation=final_activation,
-                stream_name=stream_name,
-            )
 
         # Latent heads for losses
         target_losses = cf["training_config"]["losses"].get("LossLatentSSLStudentTeacher", {})
@@ -920,7 +923,9 @@ class Model(torch.nn.Module):
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
-
+        # Empty dicts evaluate to False in python
+        if not self.pred_heads:
+            return []
         # add list which represents batch samples
         streams_data = [sample.streams_data]
         target_coords_idxs = sample.target_coords_idx
