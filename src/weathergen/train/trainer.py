@@ -600,8 +600,8 @@ class Trainer(TrainerBase):
                 )
 
         loss_calculator.loss_hist = []
-        loss_calculator.loss_unweighted_hist = []
-        loss_calculator.stdev_unweighted_hist = []
+        loss_calculator.losses_unweighted_hist = []
+        loss_calculator.stddev_unweighted_hist = []
 
     def _get_tensor_item(self, tensor):
         """
