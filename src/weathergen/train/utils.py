@@ -67,7 +67,8 @@ def flatten_dict(d, parent_key="", sep="."):
                         # Recursively flatten the dictionary inside the list
                         items.extend(flatten_dict(item, index_key, sep=sep).items())
                     elif isinstance(item, list):
-                        # Treat list within a list as a scalar list *at that level* # and append it (to avoid overly complex list indexing)
+                        # Treat list within a list as a scalar list *at that level*
+                        # and append it (to avoid overly complex list indexing)
                         items.append((index_key, item))
                     else:
                         # Append the scalar item
