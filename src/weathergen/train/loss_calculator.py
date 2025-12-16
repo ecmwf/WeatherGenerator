@@ -57,7 +57,7 @@ class LossCalculator:
         self.stddev_unweighted_hist = []
 
         calculator_configs = (
-            cf.training_config.losses if stage == TRAIN else cf.validation_mode_config.losses
+            cf.training_config.losses if stage == TRAIN else cf.validation_config.losses
         )
 
         self.loss_calculators = [

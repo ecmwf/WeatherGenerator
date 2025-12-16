@@ -116,7 +116,7 @@ ema_halflife_in_thousands: 1e-3
 # # "healpix": requires healpix mask level to be specified with `hl_mask`
 # "channel": requires "mode" to be specified, "per_cell" or "global",
 
-
+validation_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}}
 # Student-teacher configuration (only used when training_mode == "student_teacher")
 # TODO: adapt so that the masking or forecast config entry also sits here
 training_config:
@@ -146,14 +146,15 @@ training_config:
   training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
   target_and_aux_calc: "EMATeacher"
   losses :  
-    LossLatentSSLStudentTeacher: { 
-      "weight": 1.0,
-      # "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
-      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      # "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
-      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      # }
-      "JEPA": {'weight': 0.5, "loss_extra_args": {}, "out_dim": 2048} }
+    LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]}
+    # LossLatentSSLStudentTeacher: { 
+    #   "weight": 1.0,
+    #   # "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
+    #   #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+    #   # "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
+    #   #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+    #   # }
+    #   "JEPA": {'weight': 0.5, "loss_extra_args": {}, "out_dim": 2048} }
   model_input:
     - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
       num_samples: 1  # if student-teacher, the number of local (student) views to generate
@@ -190,7 +191,7 @@ training_config:
 
   target_input:
     - masking_strategy: "cropping"  # Strategy for teacher (global) view: "random", "healpix"
-      rate: 0.1  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
       num_samples: 2 # number of teacher views to generate
       hl_mask : 0 # healpix level to use for healpix masking strategy
       # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
@@ -232,7 +233,7 @@ input_window_steps: 1
 
 val_initial: False #True
 
-loader_num_workers: 12
+loader_num_workers: 0
 log_validation: 0
 streams_output: ["ERA5"]
 

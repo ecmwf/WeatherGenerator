@@ -541,6 +541,7 @@ class Masker:
         # get config for mask
 
         cfg = masking_strategy_config
+        import pdb; pdb.set_trace()
         keep_rate = cfg.get("rate", None)
         assert keep_rate is not None, 'No sampling rate "rate" specified.'
 
