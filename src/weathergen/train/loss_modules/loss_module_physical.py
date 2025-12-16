@@ -194,6 +194,11 @@ class LossPhysical(LossModuleBase):
         # TODO: iterate over batch dimension
         for stream_info in self.cf.streams:
             stream_name = stream_info["name"]
+            target_channels = (
+                stream_info.val_target_channels
+                if self.stage == "val"
+                else stream_info.train_target_channels
+            )
 
             losses_all[stream_name] = defaultdict(dict)
 
@@ -253,9 +258,7 @@ class LossPhysical(LossModuleBase):
                         weights_locations,
                     )
 
-                    for ch_n, v in zip(
-                        stream_info.train_target_channels, loss_lfct_chs, strict=True
-                    ):
+                    for ch_n, v in zip(target_channels, loss_lfct_chs, strict=True):
                         losses_all[stream_name][str(fstep)][loss_fct_name][ch_n] = (
                             spoof_weight * v if v != 0.0 else torch.nan
                         )
