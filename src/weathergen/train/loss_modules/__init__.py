@@ -10,6 +10,7 @@
 from .loss_module_base import LossModuleBase, LossValues
 from .loss_module_physical import LossPhysical
 
+
 class LossLatentSSLStudentTeacher(LossModuleBase):
     def __init__(
         self,
@@ -19,6 +20,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         device: str,
     ):
         LossModuleBase.__init__(self)
+
     # a placeholder to test configs
     def compute_loss(
         self,
@@ -26,5 +28,6 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         targets: dict,
     ) -> LossValues:
         return LossValues(loss=0, losses_all={}, stddev_all={})
+
 
 __all__ = [LossPhysical, LossLatentSSLStudentTeacher]

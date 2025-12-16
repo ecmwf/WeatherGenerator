@@ -375,7 +375,16 @@ class Trainer(TrainerBase):
                     batch, self.model_params, self.model
                 )
 
-            loss = self.loss_calculator.compute_loss(preds=preds, targets=targets_and_auxs)
+            loss = self.loss_calculator.compute_loss(
+                preds=preds,
+                targets=targets_and_auxs,
+                metadata=(
+                    batch.source2target_matching_idxs,
+                    [sample.meta_info["ERA5"] for sample in batch.source_samples],
+                    batch.target2source_matching_idxs,
+                    [sample.meta_info["ERA5"] for sample in batch.target_samples],
+                ),
+            )
 
             # TODO re-enable this, need to think on how to make it compatible with
             # TODO: CL, this should become a regular loss term
@@ -472,6 +481,12 @@ class Trainer(TrainerBase):
                     _ = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=target_aux_output,
+                        metadata=(
+                            batch.source2target_matching_idxs,
+                            [sample.meta_info["ERA5"] for sample in batch.source_samples],
+                            batch.target2source_matching_idxs,
+                            [sample.meta_info["ERA5"] for sample in batch.target_samples],
+                        ),
                     )
 
                     # log output

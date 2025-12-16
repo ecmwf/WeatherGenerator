@@ -147,11 +147,7 @@ class LossPhysical(LossModuleBase):
 
         return loss_lfct, losses_chs
 
-    def compute_loss(
-        self,
-        preds: dict,
-        targets: dict,
-    ) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
         stream data.

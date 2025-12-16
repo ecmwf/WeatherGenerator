@@ -677,7 +677,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     idx,
                     forecast_dt,
                     stream_info,
-                    target_masks.metadata[sidx].params.get("num_steps_input", 1),
+                    target_masks.metadata[tidx].params.get("num_steps_input", 1),
                     input_data,
                     output_data,
                     input_tokens,
