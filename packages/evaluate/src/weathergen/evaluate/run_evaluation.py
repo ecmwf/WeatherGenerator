@@ -225,7 +225,7 @@ def _process_stream(
             stream_computed_scores = calc_scores_per_stream(reader, stream, missing_regions, missing_metrics, plot_score_maps)
     
             scores_dict = merge(stream_loaded_scores, stream_computed_scores)
-           
+
         return run_id, stream, scores_dict
 
     # except Exception as e:
@@ -317,7 +317,6 @@ def evaluate_from_config(
         for metric, regions_dict in stream_scores.items():
             for region, streams_dict in regions_dict.items():
                 for stream, runs_dict in streams_dict.items():
-                    breakpoint()
                     scores_dict[metric][region][stream].update(runs_dict)
 
     # MLFlow logging

@@ -580,7 +580,6 @@ class Plotter:
                     _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
                     image_paths = []
                     for _, fstep in enumerate(fsteps):
-                        # breakpoint()
                         # TODO: refactor to avoid code duplication with scatter_plot
                         parts = [
                             "map",
