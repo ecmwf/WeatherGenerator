@@ -387,7 +387,7 @@ class ForecastingEngine(torch.nn.Module):
 
     def forward(self, tokens, fstep):
         aux_info = None
-        for b_idx, block in enumerate(self.fe_blocks):
+        for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             else:

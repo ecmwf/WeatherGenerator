@@ -60,7 +60,8 @@ if __name__ == "__main__":
 
         #
         # Option 1: All layers in one plot
-        plot_results(w_dict=fe_w_dict, epoch=epoch, layers=15, run_id=run_id, plot_dir=plot_dir)
+        plot_results(w_dict=fe_w_dict, epoch=epoch, layers=15, run_id=run_id,
+                     plot_dir=plot_dir)
 
         #
         # Option 2: One plot per layer
