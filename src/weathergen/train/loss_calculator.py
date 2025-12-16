@@ -56,38 +56,31 @@ class LossCalculator:
         self.losses_unweighted_hist = []
         self.stddev_unweighted_hist = []
 
-        training_config = cf.get("training_config")
-        loss_configs = [(t.num_samples, t.loss) for t in training_config.model_input]
-
-        calculator_configs = []
-        for num_samples, lc in loss_configs:
-            for _ in range(num_samples):
-                calculator_configs += (
-                    lc.training if stage == TRAIN else lc.get("validation", lc.training)
-                )
-
-        calculator_configs = [
-            (getattr(LossModules, Cls), config)
-            for t in calculator_configs
-            for (Cls, config) in t.items()
-        ]
+        calculator_configs = (
+            cf.training_config.losses if stage == TRAIN else cf.validation_mode_config.losses
+        )
 
         self.loss_calculators = [
-            (config.weight, Cls(cf=cf, loss_fcts=config.loss_fcts, stage=stage, device=self.device))
-            for (Cls, config) in calculator_configs
+            (
+                config.pop("weight"),
+                getattr(LossModules, class_name)(cf=cf, stage=stage, device=self.device, **config),
+            )
+            for class_name, config in calculator_configs.items()
         ]
 
     def compute_loss(
         self,
         preds: ModelOutput,
         targets: TargetAuxOutput,
+        metadata: dict,
     ):
         losses_all = defaultdict(dict)
         stddev_all = defaultdict(dict)
         loss = torch.tensor(0.0, requires_grad=True)
-
         for weight, calculator in self.loss_calculators:
-            loss_values = calculator.compute_loss(preds=preds, targets=targets)
+            loss_values = calculator.compute_loss(
+                preds=preds, targets=targets, metadata=metadata
+            )
             loss = loss + weight * loss_values.loss
             losses_all[calculator.name] = loss_values.losses_all
             losses_all[calculator.name]["loss_avg"] = loss_values.loss

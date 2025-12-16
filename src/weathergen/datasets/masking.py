@@ -22,7 +22,7 @@ class MaskData:
 
     def add_mask(self, mask, params, cfg):
         self.masks += [mask]
-        self.metadata += [SampleMetaData(params={**cfg, **params})]
+        self.metadata += [SampleMetaData(params={**cfg, **params}, mask=mask)]
 
 
 # Convert to torch.bool
@@ -369,6 +369,42 @@ class Masker:
         if len(target_cfgs) == 0:
             target_cfgs = source_cfgs
 
+        target_masks = MaskData()
+        source_masks = MaskData()
+        source_target_mapping = []
+        i_target = 0
+        # iterate over all target samples
+        # different strategies
+        for _, target_cfg in enumerate(target_cfgs):
+            # different samples/view per strategy
+            for _ in range(target_cfg.get("num_samples", 1)):
+                target_mask, mask_params = self._get_mask(
+                    num_cells=num_cells,
+                    strategy=target_cfg.get("strategy"),
+                    target_mask=None,
+                    masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
+                )
+                target_masks.add_mask(target_mask, mask_params, target_cfg)
+
+                # iterate over all source samples
+                # different strategies
+                for _i_source, source_cfg in enumerate(source_cfgs):
+                    # samples per strategy
+                    for _ in range(source_cfg.get("num_samples", 1)):
+                        source_mask, mask_params = self._get_mask(
+                            num_cells=num_cells,
+                            strategy=source_cfg.get("strategy"),
+                            masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
+                            target_mask=target_mask,
+                            relationship=source_cfg.get("relationship", "independent"),
+                        )
+                        source_masks.add_mask(source_mask, mask_params, source_cfg)
+                        source_target_mapping += [i_target]
+                i_target += 1
+
+        source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
+
+        return (target_masks, source_masks, source_target_mapping)
         # iterate over all target samples
         target_masks = MaskData()
         # different strategies
@@ -445,20 +481,33 @@ class Masker:
                 )
 
         # handle cases where mask is directly derived from target_mask
-        if target_mask is not None:
-            if relationship == "complement":
-                mask = ~target_mask
-                return mask, {}
+        if relationship == "complement":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = ~target_mask
+            return mask, {}
 
         # get mask
         mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
 
         # handle cases where mask needs to be combined with target_mask
-        if target_mask is not None:
-            if relationship == "subset":
-                mask = mask & target_mask
-            elif relationship == "disjoint":
-                mask = mask & (~target_mask)
+        # without the assert we can fail silently
+        if relationship == "subset":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = mask & target_mask
+        elif relationship == "disjoint":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = mask & (~target_mask)
+        elif relationship == "identity":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = target_mask
 
         return (mask, params)
 

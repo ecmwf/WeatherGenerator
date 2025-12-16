@@ -7,6 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .loss_module_base import LossModuleBase, LossValues
 from .loss_module_physical import LossPhysical
 
-__all__ = [LossPhysical]
+class LossLatentSSLStudentTeacher(LossModuleBase):
+    # a placeholder to test configs
+    def compute_loss(
+        self,
+        preds: dict,
+        targets: dict,
+    ) -> LossValues:
+        return LossValues(loss=0, losses_all={}, stddev_all={})
+
+__all__ = [LossPhysical, LossLatentSSLStudentTeacher]

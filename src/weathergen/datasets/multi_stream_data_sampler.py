@@ -566,73 +566,78 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
 
         # for all streams
-        for stream_info, (stream_name, stream_ds) in zip(
-            self.streams, self.streams_datasets.items(), strict=True
-        ):
-            (target_masks, source_masks, student_to_teacher) = masks_streams[stream_name]
+        for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
+            name = stream_info["name"]
 
-            # input_data and output_data is conceptually consecutive but differs
-            # in source and target channels; overlap in one window when self.forecast_offset=0
+            # TODO: data class for this or something similar
+            (
+                target_masks,
+                source_masks,
+                student_to_teacher,
+                target_metadata_list,
+                source_metadata_list,
+            ) = masks_streams[name]
+
             # max number of input steps
             i_max = np.array([sc.get("num_steps_input", 1) for sc in source_cfgs]).max().item()
             # TODO: remove
             self.num_steps_input = i_max
-            (input_data, output_data) = self._get_data_windows(idx, forecast_dt, i_max, stream_ds)
+            # input_data and output_data is conceptually consecutive but differs
+            # in source and target channels; overlap in one window when self.forecast_offset=0
+            (input_data, output_data) = self._get_data_windows(idx, forecast_dt, stream_ds)
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
             input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
-            # collect source data for current stream
-            # loop over student views
-            for sidx, source_mask in enumerate(source_masks.masks):
+            for sidx, source_mask in enumerate(source_masks):
+                # Map each student (source) to its teacher (target)
+                tidx = student_to_teacher[sidx].item()
                 sdata = self._build_stream_data(
-                    source_select,
+                    "target_coords target_values",
                     idx,
                     forecast_dt,
                     stream_info,
-                    source_masks.metadata[sidx].params.get("num_steps_input", 1),
                     input_data,
                     output_data,
                     input_tokens,
                     output_tokens,
-                    target_masks.masks[student_to_teacher[sidx]],
-                    source_mask,
+                    target_mask=target_masks[tidx],
+                    source_mask=source_mask,
                 )
 
+                batch.add_source_stream(sidx, tidx, name, sdata, source_metadata_list[sidx])
+
+            # stream_data_target can contain network input
+            stream_data_target = {}
+
+            # for t_idx, mask in enumerate(source_masks):
+            for tidx, target_mask in enumerate(target_masks):
+                # Note: for EMATeacher we the the streamdata obj
+                # to have the target mask applied to the inputs!
+                # Hence the target mask is also the source mask here!!
+                sdata = self._build_stream_data(
+                    "target_values",
+                    idx,
+                    forecast_dt,
+                    stream_info,
+                    input_data,
+                    output_data,
+                    input_tokens,
+                    output_tokens,
+                    target_mask=target_mask,
+                    source_mask=target_mask,
+                )
+                stream_data_target[name] = sdata
+                target_metadata = target_metadata_list[tidx]
                 # also want to add the mask to the metadata
-                source_metadata = source_masks.metadata[sidx]
-                source_metadata.mask = source_mask
-
-                # map each source to its target
-                t_idx = student_to_teacher[sidx]
-                batch.add_source_stream(sidx, t_idx, stream_name, sdata, source_metadata)
-
-            for sidx, target_mask in enumerate(target_masks.masks):
-                sdata = self._build_stream_data(
-                    target_select,
-                    idx,
-                    forecast_dt,
-                    stream_info,
-                    target_masks.metadata[sidx].params.get("num_steps_input", 1),
-                    input_data,
-                    output_data,
-                    input_tokens,
-                    output_tokens,
-                    target_mask,
-                    target_mask,
-                )
-
-                # get target config info
-                target_metadata = target_masks.metadata[sidx]
                 target_metadata.mask = target_mask
-
-                # find indices of all sources for current target
+                # Map target to all source students
                 student_indices = [
-                    s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == sidx
+                    s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == tidx
                 ]
-                batch.add_target_stream(sidx, student_indices, stream_name, sdata, target_metadata)
+                batch.add_target_stream(tidx, student_indices, name, sdata, target_metadata)
 
         return batch
 
@@ -652,6 +657,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         source_cfgs = self.training_cfg.get("model_input")
         target_cfgs = self.training_cfg.get("target_input", source_cfgs)
         target_cfgs = target_cfgs if target_cfgs is not None else source_cfgs
+        # num_target_samples = (
+        #     max(mapping) + 1
+        # )  
+        # num_source_samples = len(
+        #     mapping
+        # )  
         num_source_samples = np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
         num_target_samples = np.array([tc.get("num_samples", 1) for tc in target_cfgs]).sum().item()
 
