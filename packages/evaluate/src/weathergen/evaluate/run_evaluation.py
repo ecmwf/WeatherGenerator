@@ -35,6 +35,7 @@ from weathergen.evaluate.utils.utils import (
     plot_data,
     plot_summary,
     triple_nested_dict,
+    merge, 
 )
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
@@ -166,31 +167,30 @@ def _process_stream(
     metrics: list[str],
     plot_score_maps: bool,
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
-    """
-    Worker function for a single stream of a single run.
-    Returns a dictionary with the scores instead of modifying shared dict.
-    Parameters
-    ----------
+        """
+        Worker function for a single stream of a single run.
+        Returns a dictionary with the scores instead of modifying shared dict.
+        Parameters
+        ----------
 
-    run_id:
-        Run identification string.
-    run:
-        Configuration dictionary for the given run.
-    stream:
-        String to be processed
-    private_paths:
-        List of private paths to be used to retrieve directories
-    global_plotting_opts:
-        Dictionary containing all common plotting options
-    regions:
-        List of regions to be processed.
-    metrics:
-        List of metrics to be processed.
-    plot_score_maps:
-        Bool to define if the score maps need to be plotted or not.
-
-    """
-    try:
+        run_id:
+            Run identification string.
+        run:
+            Configuration dictionary for the given run.
+        stream:
+            String to be processed
+        private_paths:
+            List of private paths to be used to retrieve directories
+        global_plotting_opts:
+            Dictionary containing all common plotting options
+        regions:
+            List of regions to be processed.
+        metrics:
+            List of metrics to be processed.
+        plot_score_maps:
+            Bool to define if the score maps need to be plotted or not.
+        """
+    # try:
         type_ = run.get("type", "zarr")
         reader = (
             WeatherGenReader(run, run_id, private_paths)
@@ -210,13 +210,27 @@ def _process_stream(
         if not stream_dict.get("evaluation"):
             return run_id, stream, {}
 
-        stream_scores = calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps)
+        stream_loaded_scores, missing_scores = reader.load_scores(
+            stream,
+            regions,
+            metrics,
+        )
+        scores_dict = stream_loaded_scores
 
-        return run_id, stream, stream_scores
+        if missing_scores or plot_score_maps:
 
-    except Exception as e:
-        _logger.error(f"Error processing {run_id} - {stream}: {e}")
-        return run_id, stream, {}
+            missing_regions = list(missing_scores.keys()) if missing_scores else metrics
+            missing_metrics = list(missing_scores.values()) if missing_scores else regions
+
+            stream_computed_scores = calc_scores_per_stream(reader, stream, missing_regions, missing_metrics, plot_score_maps)
+    
+            scores_dict = merge(stream_loaded_scores, stream_computed_scores)
+           
+        return run_id, stream, scores_dict
+
+    # except Exception as e:
+    #     _logger.error(f"Error processing {run_id} - {stream}: {e}")
+    #     return run_id, stream, {}
 
 
 # Weird typing error from python: mp.Queue is seen as a method with a "|" operator => this fai
@@ -261,11 +275,14 @@ def evaluate_from_config(
     # Build tasks per stream
     for run_id, run in runs.items():
         type_ = run.get("type", "zarr")
-        reader = (
-            WeatherGenReader(run, run_id, private_paths)
-            if type_ == "zarr"
-            else CsvReader(run, run_id, private_paths)
-        )
+       
+        if type_ == "zarr":
+            reader = WeatherGenReader(run, run_id, private_paths)
+        elif type_ == "csv":
+            reader =  CsvReader(run, run_id, private_paths)
+        else:
+            raise ValueError(f"Unknown run type: {type_}")
+
         for stream in reader.streams:
             tasks.append(
                 {
@@ -300,6 +317,7 @@ def evaluate_from_config(
         for metric, regions_dict in stream_scores.items():
             for region, streams_dict in regions_dict.items():
                 for stream, runs_dict in streams_dict.items():
+                    breakpoint()
                     scores_dict[metric][region][stream].update(runs_dict)
 
     # MLFlow logging

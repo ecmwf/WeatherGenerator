@@ -1033,12 +1033,12 @@ class LinePlots:
 
         data_list, label_list = self._check_lengths(data, labels)
 
-        fsteps = sorted(data_list[0].forecast_step.values)
         n_runs = len(data_list)
 
         x_ticks_names = set()
+
         for data in data_list:
-            da = data.sel(forecast_step=fsteps[0])
+            da = data.isel(forecast_step=0)
             x_ticks_names.update(map(str, da.channel.values))
 
         ref_ticks_names = sorted(x_ticks_names)
@@ -1051,12 +1051,16 @@ class LinePlots:
         global_max = float("-inf")
 
         for ax, data, label in zip(axes[0], data_list, labels, strict=False):
-            ref = self._preprocess_data(
-                data.sel(channel=ref_ticks_names, forecast_step=fsteps[0]), "channel", verbose=False
+            
+            fsteps = sorted(data.forecast_step.values)
+            
+            ref = data.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps[0])
+            ref = self._preprocess_data(ref, "channel", verbose=False
             )
 
+
             num = self._preprocess_data(data, ["forecast_step", "channel"], verbose=False)
-            num = num.sel(channel=ref_ticks_names, forecast_step=fsteps)
+            num = num.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps)
 
             heatmap_data = num / ref
 

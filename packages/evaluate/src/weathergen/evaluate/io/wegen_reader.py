@@ -42,7 +42,7 @@ class WeatherGenReader(Reader):
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
         self.mini_epoch = getattr(eval_cfg, "mini_epoch", getattr(eval_cfg, "epoch", -1))
         self.rank = eval_cfg.rank
-
+       
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
 
@@ -59,6 +59,8 @@ class WeatherGenReader(Reader):
         self.metrics_base_dir = Path(
             self.eval_cfg.get("metrics_base_dir", self.results_base_dir)
         )  # base directory where score files will be stored
+        
+        self.step_hrs = self.inference_cfg.get("step_hrs", 1)
 
         self.results_dir, self.runplot_dir = (
             Path(self.results_base_dir) / self.run_id,
@@ -431,7 +433,7 @@ class WeatherGenReader(Reader):
         _logger.debug("Latitude and longitude coordinates are regularly spaced.")
         return True
 
-    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+    def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray | None:
         """
         Load the pre-computed scores for a given run, stream and metric and epoch.
 
@@ -441,27 +443,65 @@ class WeatherGenReader(Reader):
             Reader object containing all info for a specific run_id
         stream :
             Stream name.
-        region :
-            Region name.
-        metric :
-            Metric name.
+        regions :
+            Region names.
+        metrics :
+            Metric names.
 
         Returns
         -------
-            The metric DataArray or None if the file does not exist.
+        xr.DataArray 
+            The metric DataArray.
+        missing_metrics:
+            dictionary of missing regions and metrics that need to be recomputed.
         """
-        score_path = (
-            Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
-        )
-        _logger.debug(f"Looking for: {score_path}")
 
-        if score_path.exists():
-            with open(score_path) as f:
-                data_dict = json.load(f)
-                return xr.DataArray.from_dict(data_dict)
-        else:
-            return None
+        local_scores = {}
+        missing_metrics = {}
+        for region in regions:
+            for metric in metrics:
+
+                score_path = (
+                    Path(self.metrics_dir)
+                    / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
+                )
+                _logger.debug(f"Looking for: {score_path}")
+
+                if score_path.exists():
+                    with open(score_path) as f:
+                        data_dict = json.load(f)
+                        score_dict =  xr.DataArray.from_dict(data_dict)
+
+                    available_data = reader.check_availability(
+                            stream, score_dict, mode="evaluation"
+                        )
+
+                    if available_data.score_availability:
+                        score_dict = score_dict.sel(
+                            sample=available_data.samples,
+                            channel=available_data.channels,
+                            forecast_step=available_data.fsteps,
+                        )
+                        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[reader.run_id
+            ] = score_dict
+                        continue
+                
+                #all other cases: recompute scores 
+                missing_metrics[region] = metric
+                continue
+                
+                
+        return local_scores, missing_metrics
+
+
+        # Build local dictionary for this region
+        for metric in metrics:
+            local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
+                reader.run_id
+            ] = metric_stream.sel({"metric": metric})
+                
+        return score_dict
+
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """

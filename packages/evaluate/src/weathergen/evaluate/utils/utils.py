@@ -98,7 +98,7 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
     ensemble = available_data.ensemble
     is_regular = reader.is_regular(stream)
     group_by_coord = None if is_regular else "sample"
-
+    step_hrs = reader.step_hrs if hasattr(reader, "step_hrs") else 1
     output_data = reader.get_data(
         stream,
         fsteps=fsteps,
@@ -156,6 +156,7 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
             # Add it only if it is not None
             valid_scores = []
+       
             for metric in metrics:
                 score = get_score(
                     score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
@@ -197,6 +198,8 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
+        metric_stream["forecast_step"] = metric_stream["forecast_step"]*step_hrs 
+        print(f"Forecast steps after scaling: {metric_stream['forecast_step'].values}")
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
@@ -496,7 +499,6 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         Dictionary containing scores for each metric and stream.
     """
     _logger.info("Plotting summary of evaluation results...")
-
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
     print_summary = cfg.evaluation.get("print_summary", False)
@@ -671,3 +673,26 @@ def nested_dict():
 def triple_nested_dict():
     """Three-level nested dict factory: dict[key1][key2][key3] = value"""
     return defaultdict(nested_dict)
+
+
+def merge(dst: dict, src: dict) -> dict:
+    """
+    Recursively merge src into dst.
+    Values in src overwrite values in dst.
+    Parameters
+    ----------
+    dst : dict
+        Destination dictionary.
+    src : dict
+        Source dictionary.
+    Returns
+    -------
+    dict
+        Merged dictionary.
+    """
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            deep_merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
