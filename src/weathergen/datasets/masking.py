@@ -405,43 +405,6 @@ class Masker:
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
         return (target_masks, source_masks, source_target_mapping)
-        # iterate over all target samples
-        target_masks = MaskData()
-        # different strategies
-        for target_cfg in target_cfgs:
-            # different samples/view per strategy
-            for _ in range(target_cfg.get("num_samples", 1)):
-                target_mask, mask_params = self._get_mask(
-                    num_cells=num_cells,
-                    strategy=target_cfg.get("masking_strategy"),
-                    target_mask=None,
-                    masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
-                )
-                target_masks.add_mask(target_mask, mask_params, target_cfg)
-
-        # iterate over all source samples
-        source_masks = MaskData()
-        source_target_mapping = []
-        # different strategies
-        i_source = 0
-        for source_cfg in source_cfgs:
-            # samples per strategy
-            for _ in range(source_cfg.get("num_samples", 1)):
-                source_mask, mask_params = self._get_mask(
-                    num_cells=num_cells,
-                    strategy=source_cfg.get("masking_strategy"),
-                    masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
-                    target_mask=target_masks.masks[i_source % len(target_masks)],
-                    relationship=source_cfg.get("relationship", "independent"),
-                )
-                source_masks.add_mask(source_mask, mask_params, source_cfg)
-                # TODO: proper correspondence between source and target
-                source_target_mapping += [i_source % len(target_masks)]
-                i_source += 1
-
-        source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
-
-        return (target_masks, source_masks, source_target_mapping)
 
     def _get_mask(
         self,
