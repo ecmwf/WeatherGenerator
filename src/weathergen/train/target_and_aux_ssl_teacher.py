@@ -46,9 +46,10 @@ class EMATeacher(TargetAndAuxModuleBase):
         DINO, iBOT, JEPA will have different heads, which then probably should be computed
         in the postprocess_targets modules, which are nn.Modules
         """
-        outputs = self.ema_model.forward_eval(
-            model_params, batch, forecast_offset, forecast_steps
-        ).latent
+        with torch.no_grad():
+            outputs = self.ema_model.forward_eval(
+                model_params, batch, forecast_offset, forecast_steps
+            ).latent
         targets = {}
         for loss_name, target_module in self.postprocess_targets.items():
             with torch.no_grad():

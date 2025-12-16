@@ -10,6 +10,13 @@
 
 import torch
 
+from weathergen.utils.distributed import is_root
+from torch.distributed.tensor import DTensor
+
+def check_if_params_sharded(model):
+    print(dir(model))
+    for name, param in model.ae_global_engine.named_parameters():
+        return isinstance(param, DTensor)
 
 class EMAModel:
     """
@@ -54,16 +61,23 @@ class EMAModel:
         if self.rampup_ratio is not None:
             halflife_steps = min(halflife_steps, cur_step / 1e3 * self.rampup_ratio)
         beta = 0.5 ** (batch_size / max(halflife_steps * 1e3, 1e-6))
+        num_good_params = 0
         for p_net, p_ema in zip(
             self.original_model.parameters(), self.ema_model.parameters(), strict=False
         ):
+            # if isinstance(p_ema, DTensor) ^ isinstance(p_net, DTensor):
+            #     print(f"{p_net.shape}")
+            #     print(f"{isinstance(p_net, DTensor)}")
+            #     print(num_good_params)
+            # else:
+            #     num_good_params += 1
             p_ema.lerp_(p_net, 1 - beta)
 
     @torch.no_grad()
     def forward_eval(self, *args, **kwargs):
         self.ema_model.eval()
         out = self.ema_model(*args, **kwargs)
-        self.ema_model.train()
+        # self.ema_model.train()
         return out
 
     def state_dict(self):

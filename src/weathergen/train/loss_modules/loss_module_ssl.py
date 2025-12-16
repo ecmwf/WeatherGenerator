@@ -81,7 +81,7 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
     mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
     loss = F.l1_loss(student_patches_masked[mask], teacher_patches_masked[mask])
     loss = loss * masks_weight[mask]
-    return loss.sum() / student_masks.shape[0]
+    return loss.sum() # / student_masks.shape[0]
 
 
 def ibot_loss(
