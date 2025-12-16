@@ -491,7 +491,7 @@ def get_path_model(config: Config) -> Path:
 
 def get_path_output(config: Config, mini_epoch: int) -> Path:
     base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zarr"
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zip"
 
     return base_path / fname
 

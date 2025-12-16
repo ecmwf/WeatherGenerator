@@ -21,7 +21,7 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
-from zarr.storage import LocalStore
+from zarr.storage import ZipStore
 from tqdm import tqdm
 
 # experimental value, should be inferred more intelligently
@@ -342,10 +342,10 @@ class ZarrIO:
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
-        self._store: LocalStore | None = None
+        self._store: ZipStore | None = None
 
     def __enter__(self) -> typing.Self:
-        self._store = LocalStore(self._store_path)
+        self._store = ZipStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
 
         return self
