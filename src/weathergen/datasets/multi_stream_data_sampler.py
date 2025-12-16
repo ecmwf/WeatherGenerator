@@ -574,8 +574,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 target_masks,
                 source_masks,
                 student_to_teacher,
-                target_metadata_list,
-                source_metadata_list,
             ) = masks_streams[name]
 
             # max number of input steps
@@ -584,14 +582,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.num_steps_input = i_max
             # input_data and output_data is conceptually consecutive but differs
             # in source and target channels; overlap in one window when self.forecast_offset=0
-            (input_data, output_data) = self._get_data_windows(idx, forecast_dt, stream_ds)
+            (input_data, output_data) = self._get_data_windows(idx, forecast_dt, i_max, stream_ds)
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
             input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
-            for sidx, source_mask in enumerate(source_masks):
+            for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each student (source) to its teacher (target)
                 tidx = student_to_teacher[sidx].item()
                 sdata = self._build_stream_data(
@@ -603,17 +601,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     output_data,
                     input_tokens,
                     output_tokens,
-                    target_mask=target_masks[tidx],
+                    target_mask=target_masks.masks[tidx],
                     source_mask=source_mask,
                 )
 
-                batch.add_source_stream(sidx, tidx, name, sdata, source_metadata_list[sidx])
+                batch.add_source_stream(sidx, tidx, name, sdata, source_masks.metadata[sidx])
 
             # stream_data_target can contain network input
             stream_data_target = {}
 
             # for t_idx, mask in enumerate(source_masks):
-            for tidx, target_mask in enumerate(target_masks):
+            for tidx, target_mask in enumerate(target_masks.masks):
                 # Note: for EMATeacher we the the streamdata obj
                 # to have the target mask applied to the inputs!
                 # Hence the target mask is also the source mask here!!
@@ -630,7 +628,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     source_mask=target_mask,
                 )
                 stream_data_target[name] = sdata
-                target_metadata = target_metadata_list[tidx]
+                target_metadata = target_masks.metadata[tidx]
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
                 # Map target to all source students
