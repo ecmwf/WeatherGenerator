@@ -380,7 +380,7 @@ class Masker:
             for _ in range(target_cfg.get("num_samples", 1)):
                 target_mask, mask_params = self._get_mask(
                     num_cells=num_cells,
-                    strategy=target_cfg.get("strategy"),
+                    strategy=target_cfg.get("masking_strategy"),
                     target_mask=None,
                     masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
                 )
@@ -393,7 +393,7 @@ class Masker:
                     for _ in range(source_cfg.get("num_samples", 1)):
                         source_mask, mask_params = self._get_mask(
                             num_cells=num_cells,
-                            strategy=source_cfg.get("strategy"),
+                            strategy=source_cfg.get("masking_strategy"),
                             masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
                             target_mask=target_mask,
                             relationship=source_cfg.get("relationship", "independent"),
