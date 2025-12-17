@@ -22,7 +22,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -113,12 +113,12 @@ validation_mode_config:
   losses:
     LossLatentSSLStudentTeacher: { 
       "weight": 1.0,
-      # "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
-      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      # "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
-      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      # }
-      "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
+      "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
+          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
+          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      }
+      # "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
 # Student-teacher configuration (only used when training_mode == "student_teacher")
 # TODO: adapt so that the masking or forecast config entry also sits here
 training_config:
@@ -128,52 +128,40 @@ training_config:
   losses :  
     LossLatentSSLStudentTeacher: { 
       "weight": 1.0,
-      # "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
-      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      # "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
-      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-      # }
-      "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
+      "iBOT": {'weight': 0.1, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
+          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      "DINO": {'weight': 0.1, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
+          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      }
+      # "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
   model_input:
-    - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
-      num_samples: 1  # if student-teacher, the number of local (student) views to generate
-      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
-      # masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
-      #                       "probabilities": [0.34, 0.33, 0.33],
-      #                       "hl_mask": 3, "mode": "per_cell",
-      #                       "same_strategy_per_batch": false
-      #                       }
-      # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
-      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      loss : jepa
     # - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
     #   num_samples: 1  # if student-teacher, the number of local (student) views to generate
     #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
-    #   # masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
-    #   #                       "probabilities": [0.34, 0.33, 0.33],
-    #   #                       "hl_mask": 3, "mode": "per_cell",
-    #   #                       "same_strategy_per_batch": false
-    #   #                       }
     #   # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
     #   relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-    #   loss : ibot
-    # - masking_strategy: "cropping"
-    #   num_samples: 2 # if student-teacher, the number of local (student) views to generate
-    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
-    #   relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-    #   loss : dino
-    # - masking_strategy: "cropping"
-    #   num_samples: 1 # if student-teacher, the number of local (student) views to generate
-    #   masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
-    #   relationship: "identity"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-    #   loss : dino
+    #   loss : jepa
+    - masking_strategy: "masking" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+      num_samples: 1  # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      loss : ibot
+    - masking_strategy: "cropping"
+      num_samples: 2 # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      loss : dino
+    - masking_strategy: "cropping"
+      num_samples: 1 # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+      relationship: "identity"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      loss : dino
 
   target_input:
     - masking_strategy: "cropping"  # Strategy for teacher (global) view: "random", "healpix"
       rate: 0.1  # Fraction of data to keep in global view (alternative: use "keep_m" for absolute count)
       num_samples: 2 # number of teacher views to generate
       hl_mask : 0 # healpix level to use for healpix masking strategy
-      # keep_m: 100  # Alternative to rate: keep exactly this many parent cells
       rate_sampling: true  # randomly sample the rate per batch
 
 num_mini_epochs: 32
