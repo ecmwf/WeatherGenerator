@@ -4,8 +4,8 @@ model_path: "./models"
 loss_fcts: [["mse", 1.0]]
 loss_fcts_val: [["mse", 1.0]]
 num_mini_epochs: 1
-samples_per_mini_epoch: 100
-samples_per_validation: 5
+samples_per_mini_epoch: 128
+samples_per_validation: 32
 lr_steps_warmup: 4
 lr_steps_cooldown: 2
 loader_num_workers: 8
@@ -20,7 +20,7 @@ fe_num_blocks: 2
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []
+fe_layer_norm_after_blocks: [] 
 impute_latent_noise_std: 0.0
 
 healpix_level: 4
