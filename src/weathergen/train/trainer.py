@@ -30,6 +30,7 @@ from weathergen.model.model_interface import (
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
+from weathergen.train.utils import extract_batch_metadata
 from weathergen.utils.distributed import ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_batch_size, get_dtype
@@ -378,12 +379,7 @@ class Trainer(TrainerBase):
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
                 targets=targets_and_auxs,
-                metadata=(
-                    batch.source2target_matching_idxs,
-                    [sample.meta_info["ERA5"] for sample in batch.source_samples],
-                    batch.target2source_matching_idxs,
-                    [sample.meta_info["ERA5"] for sample in batch.target_samples],
-                ),
+                metadata=extract_batch_metadata(batch),
             )
 
             # TODO re-enable this, need to think on how to make it compatible with
@@ -481,12 +477,7 @@ class Trainer(TrainerBase):
                     _ = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=target_aux_output,
-                        metadata=(
-                            batch.source2target_matching_idxs,
-                            [sample.meta_info["ERA5"] for sample in batch.source_samples],
-                            batch.target2source_matching_idxs,
-                            [sample.meta_info["ERA5"] for sample in batch.target_samples],
-                        ),
+                        metadata=extract_batch_metadata(batch),
                     )
 
                     # log output

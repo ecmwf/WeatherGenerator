@@ -111,3 +111,12 @@ def unflatten_dict(d, separator="."):
         current_level[parts[-1]] = value
 
     return unflattened
+
+
+def extract_batch_metadata(batch):
+    return (
+        batch.source2target_matching_idxs,
+        [sample.meta_info["ERA5"] for sample in batch.source_samples],
+        batch.target2source_matching_idxs,
+        [sample.meta_info["ERA5"] for sample in batch.target_samples],
+    )

@@ -630,7 +630,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for stream_info, (stream_name, stream_ds) in zip(
             self.streams, self.streams_datasets.items(), strict=True
         ):
-            (target_masks, source_masks, student_to_teacher) = masks_streams[stream_name]
+            (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
 
             # max number of input steps
             i_max = np.array([sc.get("num_steps_input", 1) for sc in source_cfgs]).max().item()
@@ -646,8 +646,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
             for sidx, source_mask in enumerate(source_masks.masks):
-                # Map each student (source) to its teacher (target)
-                tidx = student_to_teacher[sidx].item()
+                # Map each source to its target
+                tidx = source_to_target[sidx].item()
                 sdata = self._build_stream_data(
                     source_select,
                     idx,
@@ -663,9 +663,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 )
 
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
-
-            # stream_data_target can contain network input
-            stream_data_target = {}
 
             # for t_idx, mask in enumerate(source_masks):
             for tidx, target_mask in enumerate(target_masks.masks):
@@ -685,13 +682,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     output_mask=target_mask,
                     input_mask=target_mask,
                 )
-                stream_data_target[stream_name] = sdata
                 target_metadata = target_masks.metadata[tidx]
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
                 # Map target to all source students
                 student_indices = [
-                    s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == tidx
+                    s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx
                 ]
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
 
