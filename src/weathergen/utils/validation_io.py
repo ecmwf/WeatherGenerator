@@ -14,7 +14,7 @@ import torch
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange
-from weathergen.datasets.data_reader_base import TimeWindowHandler, str_to_datetime64
+from weathergen.datasets.data_reader_base import TimeWindowHandler
 
 _logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
         for stream_info in cf.streams:
             # predictions
             pred = model_output.get_physical_prediction(fstep, stream_info["name"]).to(fp32)
-            target = target_aux_output.physical[stream_info["name"]].target_tokens[fstep].to(fp32)
+            target = target_aux_output.physical[stream_info["name"]][fstep]["target"].to(fp32)
 
             if not (target.shape[0] > 0 and pred.shape[0] > 0):
                 continue
@@ -49,8 +49,8 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
             targets_all[-1] += [[dn_data(stream_info["name"], target).detach().cpu().numpy()]]
 
             sname = stream_info["name"]
-            targets_coords_all[-1] += [target_aux_output.physical[sname].target_coords_raw[fstep]]
-            targets_times_all[-1] += [target_aux_output.physical[sname].target_times_raw[fstep]]
+            targets_coords_all[-1] += [target_aux_output.physical[sname][fstep]["target_coords"]]
+            targets_times_all[-1] += [target_aux_output.physical[sname][fstep]["target_times"]]
 
     #         # TODO: re-enable
     #           if len(idxs_inv) > 0:
@@ -101,10 +101,15 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
 
     # write output
 
-    start_date = str_to_datetime64(cf.start_date_val)
-    end_date = str_to_datetime64(cf.end_date_val)
+    start_date = cf.start_date_val
+    end_date = cf.end_date_val
 
-    twh = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
+    twh = TimeWindowHandler(
+        start_date,
+        end_date,
+        cf.time_window_len,
+        cf.time_window_step,
+    )
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 

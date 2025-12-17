@@ -20,6 +20,7 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
+import torch
 
 import weathergen.common.config as config
 from weathergen.train.utils import flatten_dict
@@ -428,6 +429,7 @@ def prepare_losses_for_logging(
 
     for d in losses_unweighted_hist:
         for key, value in flatten_dict(d).items():
+            value = torch.tensor(value, device="cuda") if type(value) is float else value
             losses_all[key].append(ddp_average(value).item())
 
     for d in stddev_unweighted_hist:

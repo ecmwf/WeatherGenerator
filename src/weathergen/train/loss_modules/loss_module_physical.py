@@ -216,7 +216,9 @@ class LossPhysical(LossModuleBase):
                 # get current prediction and target
                 # TODO: consistent ordering of preds and targets
                 pred = preds.physical[fstep].get(stream_name, torch.tensor([]))
-                (target, target_times) = targets.physical[stream_name][fstep]
+
+                target = targets.physical[stream_name][fstep]["target"]
+                target_times = targets.physical[stream_name][fstep]["target_times"]
 
                 # skip if either target or prediction has no data points
                 if not (target.shape[0] > 0 and pred.shape[0] > 0):

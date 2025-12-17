@@ -139,14 +139,7 @@ class EncoderModule(torch.nn.Module):
         num_steps_input = batch.get_num_source_steps()
 
         # combined cell lens for all tokens in batch across all input steps
-        # TODO: avoid 0-prepending of source_cell_lens
-        cell_lens = torch.cat(
-            [
-                sample.source_cell_lens[input_step][1:]
-                for sample in batch.source_samples
-                for input_step in range(num_steps_input)
-            ]
-        )
+        cell_lens = torch.sum(batch.source_tokens_lens, 2).flatten()
 
         rs = num_steps_input * batch.len_sources()
 

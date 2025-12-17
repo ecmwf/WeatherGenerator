@@ -1,5 +1,5 @@
-streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_nppatms_synop/"
+# streams_directory: "./config/streams/era5_1deg/"
+streams_directory: "./config/streams/era5_nppatms_synop/"
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"
@@ -31,6 +31,7 @@ ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: False
 
 ae_aggregation_num_blocks: 2
 ae_aggregation_num_heads: 32
@@ -48,17 +49,19 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
-forecast_delta_hrs: 0
-forecast_steps: 2
-forecast_policy: "fixed"
+forecast_offset : 0
+forecast_delta: 00:00:00
+forecast_steps: 0
+forecast_policy: null
+forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
 forecast_with_step_conditioning: True # False
 fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-impute_latent_noise_std: 0.0  # 1e-4
+fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_impute_latent_noise_std: 0.0  # 1e-4
 
 healpix_level: 5
 
@@ -131,7 +134,7 @@ training_config:
       num_samples: 1  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
       relationship: "complement"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      num_steps_input: 2
+      num_steps_input: 1
       # loss : ibot
 
   ## Example config that should run for Student Teacher Latent SSL
@@ -188,7 +191,7 @@ lr_start: 1e-6
 lr_max: 5e-5
 lr_final_decay: 1e-6
 lr_final: 0.0
-lr_steps_warmup: 512 
+lr_steps_warmup: 512
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "constant"
@@ -200,13 +203,12 @@ norm_type: "LayerNorm"
 nn_module: "te"
 log_grad_norms: False
 
-# start_date: 197901010000
-start_date: 201401010000
-end_date: 202012310000
-start_date_val: 202101010000
-end_date_val: 202201010000
-len_hrs: 6
-step_hrs: 6
+start_date: 2014-01-01T00:00
+end_date: 2022-12-31T00:00
+start_date_val: 2023-01-01T00:00
+end_date_val: 2023-12-31T00:00
+time_window_step: 06:00:00
+time_window_len: 06:00:00
 input_window_steps: 1
 
 val_initial: False #True

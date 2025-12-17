@@ -115,10 +115,7 @@ class ModelParams(torch.nn.Module):
         )
         # self.hp_nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
 
-        if cf.target_cell_local_prediction:
-            tokens_lens_value = nqs * s[2]
-        else:
-            tokens_lens_value = nqs * s[1] * s[2]
+        tokens_lens_value = nqs * s[2]
         self.tokens_lens = torch.nn.Parameter(
             tokens_lens_value * torch.ones(bs * s[1] + 1, dtype=torch.int32), requires_grad=False
         )
@@ -202,18 +199,6 @@ class ModelParams(torch.nn.Module):
         # nbors *and* self
         self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
         self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
-
-        # varlen index set for tokens
-        assert cf.batch_size_per_gpu == cf.batch_size_validation_per_gpu
-        bs = cf.batch_size_per_gpu
-        nqs = 9
-        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
-        if cf.target_cell_local_prediction:
-            tokens_lens_value = nqs * s[2]
-        else:
-            tokens_lens_value = nqs * s[1] * s[2]
-        self.tokens_lens.data.fill_(tokens_lens_value)
-        self.tokens_lens.data[0] = 0
 
         # precompute for varlen attention
         self.q_cells_lens.data.fill_(1)
@@ -531,7 +516,7 @@ class Model(torch.nn.Module):
 
             if self.training:
                 # Impute noise to the latent state
-                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+                noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
@@ -591,7 +576,11 @@ class Model(torch.nn.Module):
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
         tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
-        tokens_nbors_lens = model_params.tokens_lens.unsqueeze(0).repeat((batch_size, 1)).flatten()
+        # TODO: precompute in model_params?
+        tokens_nbors_lens = torch.full(
+            (s[0] * s[1] + 1,), fill_value=9, dtype=torch.int32, device=tokens_nbors.device
+        )
+        tokens_nbors_lens[0] = 0
 
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
@@ -622,12 +611,13 @@ class Model(torch.nn.Module):
 
             else:
                 # lens for varlen attention
-                tcs_lens = torch.cat(
+                tcls = torch.cat(
                     [
-                        sample.target_coords_idx[stream_name][fstep]
+                        sample.streams_data[stream_name].target_coords_lens[fstep]
                         for sample in batch.source_samples
                     ]
                 )
+                tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
                 tc_tokens = self.target_token_engines[stream_name](
                     latent=tokens_nbors,

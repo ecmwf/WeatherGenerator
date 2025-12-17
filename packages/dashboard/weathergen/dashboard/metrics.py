@@ -5,7 +5,6 @@ Downloads metrics from MLFlow.
 import logging
 
 import mlflow
-import mlflow.client
 import polars as pl
 import streamlit as st
 from mlflow.client import MlflowClient
@@ -17,7 +16,7 @@ _logger = logging.getLogger(__name__)
 phase = "train"
 exp_lifecycle = "test"
 project = "WeatherGenerator"
-experiment_id = "384213844828345"
+#experiment_id = "384213844828345"
 all_stages = ["train", "val", "eval"]
 
 # Polars utilities
@@ -41,6 +40,14 @@ def setup_mflow() -> MlflowClient:
     return setup_mlflow_utils(private_config=None)
 
 
+@st.cache_data(ttl=ST_TTL_SEC)
+def get_experiment_id() -> str:
+    client = setup_mflow()
+    exp = client.get_experiment_by_name(MlFlowUpload.experiment_name)
+    assert exp is not None
+    return exp.experiment_id
+
+
 @st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
 def latest_runs():
     """
@@ -49,7 +56,7 @@ def latest_runs():
     _logger.info("Downloading latest runs from MLFlow")
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
-            experiment_ids=[experiment_id],
+            experiment_ids=[get_experiment_id()],
             # filter_string="status='FINISHED' AND tags.completion_status = 'success'",
         )
     )
@@ -69,7 +76,7 @@ def all_runs():
     _logger.info("Downloading all runs from MLFlow")
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
-            experiment_ids=[experiment_id],
+            experiment_ids=[get_experiment_id()],
             # filter_string="status='FINISHED' AND tags.completion_status = 'success'",
         )
     )

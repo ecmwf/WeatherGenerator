@@ -80,30 +80,15 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def get_num_tokens(self, num_steps_input, batch):
-        offsets_base = torch.cumsum(
-            torch.cat(
-                [
-                    sample.source_cell_lens[input_step][1:]
-                    for sample in batch.source_samples
-                    for input_step in range(num_steps_input)
-                ]
-            ),
-            0,
-        )
-
-        return int(offsets_base[-1])
-
     def forward(self, batch, pe_embed):
         num_steps_input = batch.get_num_source_steps()
 
-        num_tokens = self.get_num_tokens(num_steps_input, batch)
+        num_tokens = torch.sum(batch.source_tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
         # iterate over all streams
-        # for stream_name, s_data in sample.streams_data.items():
         for stream_name in self.stream_names:
             # collect all source tokens from all input_steps and all samples in the batch
             sdata, scatter_idxs, pe_idxs = [], [], []
@@ -114,11 +99,7 @@ class EmbeddingEngine(torch.nn.Module):
                     # indices for positional encoding
                     pe_idxs += [sample.streams_data[stream_name].source_idxs_embed_pe[istep]]
                     # scatter idxs for switching from stream to cell-based ordering
-                    # need to be offset for different samples
-                    idx = sample.streams_data[stream_name].source_idxs_embed[istep]
-                    scatter_idxs += [
-                        idx + (scatter_idxs[-1][-1] + 1 if len(scatter_idxs) > 0 else 0)
-                    ]
+                    scatter_idxs += [sample.streams_data[stream_name].source_idxs_embed[istep]]
 
             sdata = torch.cat(sdata)
             # skip empty stream
@@ -385,6 +366,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
+        if self.cf.get("ae_global_trailing_layer_norm", False):
+            self.ae_global_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
 
         self.ae_global_blocks.append(
             torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
@@ -399,7 +384,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
-    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
+    def __init__(self, cf: Config, num_healpix_cells: int, dim_aux: int = None) -> None:
         """
         Initialize the ForecastingEngine with the configuration.
 
@@ -424,7 +409,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=(1 if cf.forecast_with_step_conditioning else 0),
+                            dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
@@ -440,7 +425,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=(1 if cf.forecast_with_step_conditioning else 0),
+                            dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
@@ -453,10 +438,15 @@ class ForecastingEngine(torch.nn.Module):
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
-                        dim_aux=1,
+                        dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
+                # Optionally, add LayerNorm after i-th layer
+                if i in self.cf.get("fe_layer_norm_after_blocks", []):
+                    self.fe_blocks.append(
+                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+                    )
 
             self.fe_blocks.append(
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
@@ -472,20 +462,13 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
-        # predict residual to last time step if requested
-        forecast_residual = self.cf.get("forecast_residual", False)
-        if forecast_residual:
-            tokens_in = tokens
-
-        # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
-        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
-        for block in self.fe_blocks:
-            if type(block) is torch.nn.LayerNorm:
+        aux_info = None
+        for _b_idx, block in enumerate(self.fe_blocks):
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             else:
                 tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
-
-        return tokens if not forecast_residual else (tokens_in + tokens)
+        return tokens
 
 
 class EnsPredictionHead(torch.nn.Module):

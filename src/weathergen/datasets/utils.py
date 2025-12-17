@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from astropy_healpix.healpy import ang2pix
 
-from weathergen.datasets.stream_data import StreamData
+from weathergen.datasets.batch import Sample
 
 
 ####################################################################################################
@@ -266,8 +266,36 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-def compute_offsets_scatter_embed(batch: StreamData, num_steps_input: int) -> StreamData:
+def get_tokens_lens(streams: dict, batch_data: list[Sample], input_steps: int) -> torch.Tensor:
     """
+    TODO
+    """
+    # collect source_tokens_lens for all stream datas
+    source_tokens_lens = torch.stack(
+        [
+            torch.stack(
+                [
+                    torch.stack(
+                        [
+                            sample.streams_data[stream_info["name"]].source_tokens_lens[i]
+                            for stream_info in streams
+                        ]
+                    )
+                    for sample in batch_data
+                ]
+            )
+            for i in range(input_steps)
+        ]
+    )
+
+    return source_tokens_lens
+
+
+def compute_offsets_scatter_embed(
+    streams, batch_data: list[Sample], source_tokens_lens, input_steps: int
+) -> None:
+    """
+    TODO: update
     Compute auxiliary information for scatter operation that changes from stream-centric to
     cell-centric computations
 
@@ -282,23 +310,8 @@ def compute_offsets_scatter_embed(batch: StreamData, num_steps_input: int) -> St
         stream data with offsets added as members
     """
 
-    # collect source_tokens_lens for all stream datas
-    source_tokens_lens = [
-        torch.stack(
-            [
-                torch.stack(
-                    [
-                        s.source_tokens_lens[i]
-                        if (len(s.source_tokens_lens) > 0) and (len(s.source_tokens_lens[i]) > 0)
-                        else torch.tensor([])
-                        for s in stl_b
-                    ]
-                )
-                for stl_b in batch
-            ]
-        )
-        for i in range(num_steps_input)
-    ]
+    if source_tokens_lens.sum() == 0:
+        return
 
     # precompute index sets for scatter operation after embed
     offsets_base = [s.sum(1).sum(0).cumsum(0) for s in source_tokens_lens]
@@ -306,13 +319,14 @@ def compute_offsets_scatter_embed(batch: StreamData, num_steps_input: int) -> St
     offsets_pe = [torch.zeros_like(o) for o in offsets]
 
     if torch.cat(offsets_base).shape[0] == 0:
-        return batch
+        return
 
-    for i_s in range(num_steps_input):
-        for ib, sb in enumerate(batch):  # batch items
-            for itype, s in enumerate(sb):  # streams, i.e. here we have StreamData object
-                if not s.source_empty():
-                    s.source_idxs_embed[i_s] = torch.cat(
+    for itype, stream_info in enumerate(streams):
+        for i_s in range(input_steps):
+            for ib, sb in enumerate(batch_data):  # batch items
+                stream_data = sb.streams_data[stream_info["name"]]
+                if not stream_data.source_empty():
+                    stream_data.source_idxs_embed[i_s] = torch.cat(
                         [
                             torch.arange(offset, offset + token_len, dtype=torch.int64)
                             for offset, token_len in zip(
@@ -320,11 +334,13 @@ def compute_offsets_scatter_embed(batch: StreamData, num_steps_input: int) -> St
                             )
                         ]
                     )
-                    s.source_idxs_embed_pe[i_s] = torch.cat(
+                    stream_data.source_idxs_embed_pe[i_s] = torch.cat(
                         [
                             torch.arange(offset, offset + token_len, dtype=torch.int32)
                             for offset, token_len in zip(
-                                offsets_pe[i_s], source_tokens_lens[i_s][ib][itype], strict=False
+                                offsets_pe[i_s],
+                                source_tokens_lens[i_s][ib][itype],
+                                strict=False,
                             )
                         ]
                     )
@@ -332,89 +348,3 @@ def compute_offsets_scatter_embed(batch: StreamData, num_steps_input: int) -> St
                 # advance offsets
                 offsets[i_s] += source_tokens_lens[i_s][ib][itype]
                 offsets_pe[i_s] += source_tokens_lens[i_s][ib][itype]
-
-    return batch
-
-
-def compute_idxs_predict(forecast_dt: int, batch: StreamData, streams: list[dict]) -> list:
-    """
-    Compute auxiliary information for prediction
-
-    Parameters
-    ----------
-    forecast_dt : str
-        number of forecast steps
-    batch :
-        StreamData information for current batch
-
-    Returns
-    -------
-    tuple[list,list]
-        - lens for each item for varlen flash attention
-    """
-
-    target_coords_lens = [[s.target_coords_lens for s in sb] for sb in batch]
-
-    # target coords idxs
-    tcs_lens_merged = {}
-    pad = torch.zeros(1, dtype=torch.int32)
-    for ii in range(len(batch[0])):
-        # generate len lists for varlen attention (per batch list for local, per-cell attention and
-        # global
-        tcs_lens_merged[streams[ii]["name"]] = [
-            torch.cat(
-                [
-                    pad,
-                    torch.cat(
-                        [
-                            target_coords_lens[i_b][ii][fstep]
-                            for i_b in range(len(target_coords_lens))
-                        ]
-                    ),
-                ]
-            ).to(torch.int32)
-            for fstep in range(forecast_dt + 1)
-        ]
-
-    return tcs_lens_merged
-
-
-def compute_source_cell_lens(
-    batch: list[list[StreamData]], num_steps_input: int
-) -> list[torch.tensor]:
-    """
-    Compute auxiliary information for varlen attention for local assimilation
-
-    Parameters
-    ----------
-    batch :
-        StreamData information for current batch for each batch item and each stream
-
-    Returns
-    -------
-    torch.tensor
-        Offsets for varlen attention
-    """
-
-    # precompute for processing in the model (with varlen flash attention)
-    source_cell_lens_raw = [
-        torch.stack(
-            [
-                torch.stack(
-                    [
-                        s.source_tokens_lens[i]
-                        if (len(s.source_tokens_lens) > 0) and (len(s.source_tokens_lens[i]) > 0)
-                        else torch.tensor([])
-                        for s in stl_b
-                    ]
-                )
-                for stl_b in batch
-            ]
-        )
-        for i in range(num_steps_input)
-    ]
-
-    source_cell_lens = [torch.sum(c, 1).flatten().to(torch.int32) for c in source_cell_lens_raw]
-    source_cell_lens = [torch.cat([torch.zeros(1, dtype=torch.int32), c]) for c in source_cell_lens]
-
-    return source_cell_lens
