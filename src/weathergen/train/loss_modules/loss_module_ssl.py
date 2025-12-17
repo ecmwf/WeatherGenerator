@@ -127,7 +127,7 @@ def get_loss_function_ssl(name):
         )
 
 
-def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
+def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):     
     if name == "JEPA":
         """
         Important this assumes that there is 1 masked version for each global view
@@ -138,12 +138,12 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
                 [
                     p.latent[name]
                     for p, info in zip(preds, metadata, strict=False)
-                    if info.params["loss"] == "jepa"
+                    if info[0].global_params["loss"] == "jepa"
                 ],
                 dim=0,
             ),
             "student_masks": torch.stack(
-                [info.mask.to("cuda") for info in metadata if info.params["loss"] == "jepa"],
+                [info[0].mask.to("cuda") for info in metadata if info[0].global_params["loss"] == "jepa"],
                 dim=0,
             ).unsqueeze(1),
         }
@@ -217,7 +217,7 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
                 dim=0,
             ),
             "teacher_masks": torch.stack(
-                [info.mask.to("cuda") for info in metadata],
+                [info[0].mask.to("cuda") for info in metadata],
                 dim=0,
             ).unsqueeze(1),
         }

@@ -274,8 +274,8 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculator.to_device(self.device)
 
         # if with_fsdp then parameter count is unreliable
-        if is_root() and not cf.with_fsdp and not cf.with_ddp:
-            self.model.print_num_parameters()
+        #if is_root() and not cf.with_fsdp and not cf.with_ddp:
+        #    self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper https://arxiv.org/pdf/2111.06377
@@ -583,15 +583,21 @@ class Trainer(TrainerBase):
                             batch.get_forecast_dt(),
                         )
                     )
+       
             loss, loss_values = self.loss_calculator.compute_loss(
                 preds=outputs,
                 targets=target_auxs,
                 metadata=(
-                    batch.source2target_matching_idxs,
-                    [sample.meta_info["ERA5"] for sample in batch.source_samples],
-                    batch.target2source_matching_idxs,
-                    [sample.meta_info["ERA5"] for sample in batch.target_samples],
-                ),
+                batch.source2target_matching_idxs,
+                [
+                    list(sample.meta_info.values())
+                    for sample in batch.source_samples
+                ],
+                batch.target2source_matching_idxs,
+                [
+                    list(sample.meta_info.values())
+                    for sample in batch.target_samples
+                ],)
             )
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training

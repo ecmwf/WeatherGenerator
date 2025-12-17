@@ -389,7 +389,7 @@ class Masker:
                         )
                         source_masks += [source_mask]
                         source_metadata += [
-                            SampleMetaData(params={**source_cfg, **mask_params}, mask=source_mask)
+                            SampleMetaData(params={**source_cfg, **mask_params}, mask=source_mask, global_params={"loss": source_cfg.get("loss", {})})
                         ]
                         source_target_mapping += [i_target]
                 i_target += 1
