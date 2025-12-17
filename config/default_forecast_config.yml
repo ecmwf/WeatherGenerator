@@ -139,7 +139,7 @@ nn_module: "te"
 log_grad_norms: False
 
 start_date: 197901010000
-end_date: 202012310000
+end_date: 202212310000
 start_date_val: 202310010000
 end_date_val: 202312310000
 len_hrs: 6
