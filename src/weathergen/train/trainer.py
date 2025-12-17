@@ -784,9 +784,6 @@ class Trainer(TrainerBase):
             path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
         )
 
-        # Ensure backward compatibility with old model checkpoints
-        params = self.model.rename_old_state_dict(params)
-
         model_state_dict = self.model.state_dict()
         params = {
             k: v
@@ -796,7 +793,6 @@ class Trainer(TrainerBase):
 
         is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
         if is_model_sharded:
-            params = self.model.rename_old_state_dict(params=params)  # For backward compatibility
             meta_sharded_sd = self.model.state_dict()
             maybe_sharded_sd = {}
             for param_name, full_tensor in params.items():
