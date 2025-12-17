@@ -339,14 +339,22 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path):
+    def __init__(self, store_path: pathlib.Path, create: bool = True):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
         self._store: ZipStore | None = None
+        self.create = create
 
     def __enter__(self) -> typing.Self:
-        self._store = ZipStore(self._store_path)
-        self.data_root = zarr.group(store=self._store)
+        print("mode = ", self.create)
+        if self.create == True:
+            self._store = ZipStore(self._store_path, mode = "a")
+            self.data_root = zarr.group(store=self._store)
+        else:
+            print('opening store as read-only')
+            self._store = ZipStore(self._store_path,read_only  = True)
+            self.data_root = zarr.open_group(store=self._store, mode = "r")
+        print(self.data_root)
 
         return self
 
@@ -384,11 +392,13 @@ class ZarrIO:
         }
 
     def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group:
+        print("data root")
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
             group = self.data_root.create_group(item.path)
         else:
             try:
+                print("item_path:", item.path)
                 group = self.data_root.get(item.path)
                 assert group is not None, f"Zarr group: {item.path} does not exist."
             except KeyError as e:
@@ -462,7 +472,9 @@ class ZarrIO:
     def streams(self) -> list[str]:
         """Query available streams in this zarr store."""
         # assume stream/samples are orthogonal => use first sample
+        print('printing:',self.data_root.groups())
         _, example_sample = next(self.data_root.groups())
+        print(example_sample)
         return list(example_sample.group_keys())
 
     @functools.cached_property

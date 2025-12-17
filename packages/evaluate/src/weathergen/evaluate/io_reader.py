@@ -112,6 +112,7 @@ class Reader:
         dict
             the config dictionary associated to that stream
         """
+        print(self.eval_cfg)
         return self.eval_cfg.streams.get(stream, {})
 
     def get_samples(self) -> set[int]:
@@ -465,57 +466,63 @@ class CsvReader(Reader):
 
 class WeatherGenReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
-        """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
+        try:
+            """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
+            print('setting up wgenreader')
+            super().__init__(eval_cfg, run_id, private_paths)
 
-        super().__init__(eval_cfg, run_id, private_paths)
+            # TODO: remove backwards compatibility to "epoch" in Feb. 2026
+            self.mini_epoch = getattr(eval_cfg, "mini_epoch", getattr(eval_cfg, "epoch", -1))
+            self.rank = eval_cfg.rank
+            print(self.eval_cfg)
+            # Load model configuration and set (run-id specific) directories
+            self.inference_cfg = self.get_inference_config()
 
-        # TODO: remove backwards compatibility to "epoch" in Feb. 2026
-        self.mini_epoch = getattr(eval_cfg, "mini_epoch", getattr(eval_cfg, "epoch", -1))
-        self.rank = eval_cfg.rank
+            if not self.results_base_dir:
+                self.results_base_dir = Path(get_shared_wg_path("results"))
+                _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
+            else:
+                _logger.info(f"Results directory parsed: {self.results_base_dir}")
 
-        # Load model configuration and set (run-id specific) directories
-        self.inference_cfg = self.get_inference_config()
+            self.runplot_base_dir = Path(
+                self.eval_cfg.get("runplot_base_dir", self.results_base_dir)
+            )  # base directory where map plots and histograms will be stored
 
-        if not self.results_base_dir:
-            self.results_base_dir = Path(get_shared_wg_path("results"))
-            _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
-        else:
-            _logger.info(f"Results directory parsed: {self.results_base_dir}")
-
-        self.runplot_base_dir = Path(
-            self.eval_cfg.get("runplot_base_dir", self.results_base_dir)
-        )  # base directory where map plots and histograms will be stored
-
-        self.metrics_base_dir = Path(
-            self.eval_cfg.get("metrics_base_dir", self.results_base_dir)
-        )  # base directory where score files will be stored
-
-        self.results_dir, self.runplot_dir = (
-            Path(self.results_base_dir) / self.run_id,
-            Path(self.runplot_base_dir) / self.run_id,
-        )
-        # for backward compatibility allow metric_dir to be specified in the run config
-        self.metrics_dir = Path(
-            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
-        )
-
-        fname_zarr_new = self.results_dir.joinpath(
-            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
-        )
-        fname_zarr_old = self.results_dir.joinpath(
-            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
-        )
-
-        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
-            self.fname_zarr = fname_zarr_new
-        else:
-            self.fname_zarr = fname_zarr_old
-
-        if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(
-                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
+            self.metrics_base_dir = Path(
+                self.eval_cfg.get("metrics_base_dir", self.results_base_dir)
+            )  # base directory where score files will be stored
+            print(self.metrics_base_dir)
+            self.results_dir, self.runplot_dir = (
+                Path(self.results_base_dir) / self.run_id,
+                Path(self.runplot_base_dir) / self.run_id,
             )
+            # for backward compatibility allow metric_dir to be specified in the run config
+            self.metrics_dir = Path(
+                self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
+            )
+
+            fname_zarr_new = self.results_dir.joinpath(
+                f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zip"
+            )
+            fname_zarr_old = self.results_dir.joinpath(
+                f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zip"
+            )
+
+            if fname_zarr_new.exists():
+                self.fname_zarr = fname_zarr_new
+            else:
+                self.fname_zarr = fname_zarr_old
+
+            print(self.fname_zarr)
+
+            if not self.fname_zarr.exists():
+                _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
+                raise FileNotFoundError(
+                    f"Zarr file {self.fname_zarr} does not exist or is not a directory."
+                )
+            print('setup complete')
+        except Exception as e:
+            print(e)
 
     def get_inference_config(self):
         """
@@ -584,7 +591,7 @@ class WeatherGenReader(Reader):
               if `return_counts` is True.
         """
 
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr, create = False) as zio:
             stream_cfg = self.get_stream(stream)
             all_channels = self.get_channels(stream)
             _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
@@ -772,19 +779,23 @@ class WeatherGenReader(Reader):
             the config dictionary associated to that stream
         """
         stream_dict = {}
-        with ZarrIO(self.fname_zarr) as zio:
+        print('opening zarrio:', self.fname_zarr)
+        with ZarrIO(self.fname_zarr, create = False) as zio:
+            print('opened zarr')
+            print(print(zio.streams))
             if stream in zio.streams:
+                
                 stream_dict = self.eval_cfg.streams.get(stream, {})
         return stream_dict
 
     def get_samples(self) -> set[int]:
         """Get the set of sample indices from the Zarr file."""
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr, create = False) as zio:
             return set(int(s) for s in zio.samples)
 
     def get_forecast_steps(self) -> set[int]:
         """Get the set of forecast steps from the Zarr file."""
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr,create = False) as zio:
             return set(int(f) for f in zio.forecast_steps)
 
     def get_channels(self, stream: str) -> list[str]:
@@ -821,7 +832,7 @@ class WeatherGenReader(Reader):
         _logger.debug(f"Getting ensembles for stream {stream}...")
 
         # TODO: improve this to get ensemble from io class
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr,create = False) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
 
@@ -840,7 +851,7 @@ class WeatherGenReader(Reader):
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr,create = False) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
 
             sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]

@@ -130,8 +130,8 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
-    zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
-    zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.zarr"
+    zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zip"
+    zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.zip"
 
     if zarr_path_new.exists() or zarr_path_new.is_dir():
         zarr_path = zarr_path_new
