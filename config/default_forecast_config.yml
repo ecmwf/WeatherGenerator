@@ -10,7 +10,7 @@ embed_dropout_rate: 0.1
 target_cell_local_prediction: True
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 2
+ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -24,7 +24,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -43,18 +43,18 @@ pred_mlp_adaln: True
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 0
+forecast_offset : 1
 forecast_delta_hrs: 0
-forecast_steps: 0
-forecast_policy: null
+forecast_steps: 4
+forecast_policy: "fixed"
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
-fe_num_blocks: 0
+fe_num_blocks: 8
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0.0  # 1e-4
+fe_layer_norm_after_blocks: [3]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_impute_latent_noise_std: 1e-4  # 1e-4
 
 healpix_level: 5
 
@@ -96,7 +96,7 @@ ema_halflife_in_thousands: 1e-3
 
 # training mode: "forecast" or "masking" (masked token modeling)
 # for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
+training_mode: "forecast"
 # masking rate when training mode is "masking"; ignored in foreacast mode
 masking_rate: 0.6
 # sample the masking rate (with normal distribution centered at masking_rate)
@@ -104,7 +104,7 @@ masking_rate: 0.6
 masking_rate_sampling: True
 # sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
 sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
+# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "combination"
 masking_strategy: "random"
 # masking_strategy_config is a dictionary of additional parameters for the masking strategy
 # required for "healpix" and "channel" masking strategies
@@ -123,10 +123,10 @@ shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
-lr_max: 5e-5
-lr_final_decay: 1e-6
+lr_max: 0.0001
+lr_final_decay: 2e-6
 lr_final: 0.0
-lr_steps_warmup: 512
+lr_steps_warmup: 256
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "constant"
@@ -139,7 +139,7 @@ nn_module: "te"
 log_grad_norms: False
 
 start_date: 197901010000
-end_date: 202212310000
+end_date: 202012310000
 start_date_val: 202310010000
 end_date_val: 202312310000
 len_hrs: 6
