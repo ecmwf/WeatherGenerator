@@ -26,6 +26,8 @@ class SampleMetaData:
 
     mask: torch.Tensor | None = None
 
+    global_params: dict | None = None
+
 
 class Sample:
     # keys: stream name, values: SampleMetaData

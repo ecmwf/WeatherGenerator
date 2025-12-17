@@ -22,7 +22,17 @@ class MaskData:
 
     def add_mask(self, mask, params, cfg):
         self.masks += [mask]
-        self.metadata += [SampleMetaData(params={**cfg, **params}, mask=mask)]
+        self.metadata += [
+            SampleMetaData(
+                params={**cfg, **params},
+                mask=mask,
+                global_params={
+                    "loss": cfg.get("loss", {}),
+                    "masking_strategy": cfg.get("strategy", {}),
+                    "relationship": cfg.get("relationship", {}),
+                },
+            )
+        ]
 
 
 # Convert to torch.bool
