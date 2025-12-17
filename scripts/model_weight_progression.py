@@ -60,8 +60,7 @@ if __name__ == "__main__":
 
         #
         # Option 1: All layers in one plot
-        plot_results(w_dict=fe_w_dict, epoch=epoch, layers=15, run_id=run_id,
-                     plot_dir=plot_dir)
+        plot_results(w_dict=fe_w_dict, epoch=epoch, layers=15, run_id=run_id, plot_dir=plot_dir)
 
         #
         # Option 2: One plot per layer
@@ -71,7 +70,8 @@ if __name__ == "__main__":
 
         #     if layer != l:
         #         if layer != -1:
-        #             plot_results(w_dict=w_per_layer, epoch=epoch, layers=15, run_id=run_id, plot_dir=plot_dir)
+        #             plot_results(w_dict=w_per_layer, epoch=epoch, layers=15,
+        #                          run_id=run_id, plot_dir=plot_dir)
         #         # Reset layer dict for new layer
         #         layer = l
         #         w_per_layer = dict()
