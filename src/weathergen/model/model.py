@@ -549,45 +549,6 @@ class Model(torch.nn.Module):
         print("-----------------")
 
     #########################################
-    def rename_old_state_dict(self, params: dict) -> dict:
-        """Checks if model from checkpoint is from the old model version and if so renames
-        the parameters accordingly to the new model version.
-
-        Args:
-            params : Dictionary with (old) model parameters from checkpoint
-        Returns:
-            new_params : Dictionary with (renamed) model parameters
-        """
-        params_cleanup = {
-            "embeds": "embed_engine.embeds",  # EmbeddingEngine
-            "ae_local_blocks": "ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
-            "ae_adapter": "ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
-            "ae_global_blocks": "ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
-            "fe_blocks": "forecast_engine.fe_blocks",  # ForecastingEngine
-        }
-
-        new_params = {}
-
-        for k, v in params.items():
-            new_k = k
-            prefix = ""
-
-            # Strip "module." (prefix for DataParallel or DistributedDataParallel)
-            if new_k.startswith("module."):
-                prefix = "module."
-                new_k = new_k[len(prefix) :]
-
-            first_w, rest = new_k.split(".", 1) if "." in new_k else (new_k, "")
-            # Only check first word (root level modules) to avoid false matches.
-            if first_w in params_cleanup:
-                new_k = params_cleanup[first_w] + "." + rest
-
-            new_k = prefix + new_k
-            new_params[new_k] = v
-
-        return new_params
-
-    #########################################
     def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
         """Performs the forward pass of the model to generate forecasts
 
@@ -632,7 +593,7 @@ class Model(torch.nn.Module):
 
             if self.training:
                 # Impute noise to the latent state
-                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+                noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
