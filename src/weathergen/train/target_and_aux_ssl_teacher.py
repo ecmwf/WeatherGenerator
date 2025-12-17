@@ -36,6 +36,7 @@ class EMATeacher(TargetAndAuxModuleBase):
         return
 
     def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
+        self.ema_model.ema_model.reshard()
         self.ema_model.update(istep, self.batch_size)
 
     def compute(
@@ -50,11 +51,10 @@ class EMATeacher(TargetAndAuxModuleBase):
             outputs = self.ema_model.forward_eval(
                 model_params, batch, forecast_offset, forecast_steps
             ).latent
-        targets = {}
-        for loss_name, target_module in self.postprocess_targets.items():
-            with torch.no_grad():
-                targets[loss_name] = target_module(outputs[loss_name])
-        return TargetAuxOutput(physical={}, latent=targets, aux_outputs={})
+            targets = {}
+            for loss_name, target_module in self.postprocess_targets.items():
+                    targets[loss_name] = target_module(outputs[loss_name])
+            return TargetAuxOutput(physical={}, latent=targets, aux_outputs={})
 
     def to_device(self, device):
         for _, module in self.postprocess_targets.items():

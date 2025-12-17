@@ -628,11 +628,12 @@ class Trainer(TrainerBase):
             self.grad_scaler.update()
             # self.optimizer.step()
 
-            self.target_and_aux_calculator.update_state_post_opt_step(bidx, batch, self.model)
-
             # update learning rate
             self.lr_scheduler.step()
 
+            self.target_and_aux_calculator.update_state_post_opt_step(
+                self.cf.istep * get_batch_size(self.cf, self.world_size_original), batch, self.model
+            )
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(
