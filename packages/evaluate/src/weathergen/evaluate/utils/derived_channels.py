@@ -153,3 +153,34 @@ class DeriveChannels:
                     "in the available channels..."
                 )
         return data_tars, data_preds, self.channels
+
+    def scale_channels(
+        self,
+        data_tars: xr.DataArray,
+        data_preds: xr.DataArray,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """
+        Function to scale channels based on the stream configuration
+
+        Parameters:
+        -----------
+        - data_tars: Target dataset
+        - data_preds: Prediction dataset
+
+        Returns:
+        --------
+        - data_tars: Scaled target dataset
+        - data_preds: Scaled prediction dataset
+
+        """
+
+        if "scale_channels" not in self.stream_cfg:
+            return data_tars, data_preds
+
+        for tag, factor in self.stream_cfg["scale_channels"].items():
+            for data in [data_tars, data_preds]:
+                if tag in data.channel.values:
+                    data.loc[dict(channel=tag)] *= factor
+                    _logger.debug(f"Channel {tag} scaled by factor {factor}.")
+
+        return data_tars, data_preds

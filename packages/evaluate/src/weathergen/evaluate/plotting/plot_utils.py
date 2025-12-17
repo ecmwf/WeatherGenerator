@@ -149,7 +149,7 @@ def ratio_plot_metric_region(
         run_ids = []
         for run_id, run_data in runs.items():
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data is None:
+            if data.isnull().all():
                 continue
             selected_data.append(data)
             label = run_data.get("label", run_id)
@@ -205,7 +205,7 @@ def heat_maps_metric_region(
         run_ids = []
         for run_id in runs:
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data is None:
+            if data.isnull().all():
                 continue
             selected_data.append(data)
             label = runs[run_id].get("label", run_id)

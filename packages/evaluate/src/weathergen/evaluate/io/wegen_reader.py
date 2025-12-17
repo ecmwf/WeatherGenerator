@@ -42,7 +42,7 @@ class WeatherGenReader(Reader):
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
         self.mini_epoch = getattr(eval_cfg, "mini_epoch", getattr(eval_cfg, "epoch", -1))
         self.rank = eval_cfg.rank
-       
+
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
 
@@ -59,7 +59,7 @@ class WeatherGenReader(Reader):
         self.metrics_base_dir = Path(
             self.eval_cfg.get("metrics_base_dir", self.results_base_dir)
         )  # base directory where score files will be stored
-        
+
         self.step_hrs = self.inference_cfg.get("step_hrs", 1)
 
         self.results_dir, self.runplot_dir = (
@@ -207,7 +207,7 @@ class WeatherGenReader(Reader):
                         continue
 
                     target, pred = out.target.as_xarray(), out.prediction.as_xarray()
-
+                    
                     npoints = len(target.ipoint)
                     pps.append(npoints)
 
@@ -252,6 +252,10 @@ class WeatherGenReader(Reader):
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
 
+                #apply z scaling if needed
+                da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
+                da_preds_fs = self.scale_z_channels(da_preds_fs , stream)
+
                 if len(samples) == 1:
                     _logger.debug("Repeating sample coordinate for single-sample case.")
                     for da in (da_tars_fs, da_preds_fs):
@@ -289,6 +293,34 @@ class WeatherGenReader(Reader):
             )
 
     ######## reader utils ########
+
+    def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
+        """
+        Check scale all channels.
+
+        Parameters
+        ----------
+        data :
+            Input dataset  
+        stream :
+            Stream name.
+        Returns
+        -------
+            Returns a Dataset where channels have been scaled if needed
+        """
+       
+        channels_z = [ch for ch in data.channel.values if str(ch).startswith("z_")]
+        data_scaled = data.copy()
+        factor = 9.80665
+       
+        if channels_z and stream == "ERA5":
+            idx = [i for i, ch in enumerate(data.channel.values) if str(ch).startswith("z_")]
+            data_scaled.loc[dict(channel=channels_z)] = data_scaled.sel(channel=channels_z) / factor
+        else:
+            data_scaled = data
+       
+        return data_scaled
+
 
     def get_climatology_filename(self, stream: str) -> str | None:
         """
@@ -450,7 +482,7 @@ class WeatherGenReader(Reader):
 
         Returns
         -------
-        xr.DataArray 
+        xr.DataArray
             The metric DataArray.
         missing_metrics:
             dictionary of missing regions and metrics that need to be recomputed.
@@ -460,7 +492,6 @@ class WeatherGenReader(Reader):
         missing_metrics = {}
         for region in regions:
             for metric in metrics:
-
                 score_path = (
                     Path(self.metrics_dir)
                     / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
@@ -470,11 +501,9 @@ class WeatherGenReader(Reader):
                 if score_path.exists():
                     with open(score_path) as f:
                         data_dict = json.load(f)
-                        score_dict =  xr.DataArray.from_dict(data_dict)
+                        score_dict = xr.DataArray.from_dict(data_dict)
 
-                    available_data = reader.check_availability(
-                            stream, score_dict, mode="evaluation"
-                        )
+                    available_data = self.check_availability(stream, score_dict, mode="evaluation")
 
                     if available_data.score_availability:
                         score_dict = score_dict.sel(
@@ -482,26 +511,16 @@ class WeatherGenReader(Reader):
                             channel=available_data.channels,
                             forecast_step=available_data.fsteps,
                         )
-                        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[reader.run_id
-            ] = score_dict
+                        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
+                            stream, {}
+                        )[self.run_id] = score_dict
                         continue
-                
-                #all other cases: recompute scores 
-                missing_metrics[region] = metric
+
+                # all other cases: recompute scores
+                missing_metrics.setdefault(region, []).append(metric)
                 continue
-                
-                
+
         return local_scores, missing_metrics
-
-
-        # Build local dictionary for this region
-        for metric in metrics:
-            local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
-                reader.run_id
-            ] = metric_stream.sel({"metric": metric})
-                
-        return score_dict
-
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """

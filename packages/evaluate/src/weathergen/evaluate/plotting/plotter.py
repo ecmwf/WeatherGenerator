@@ -2,6 +2,7 @@ import datetime
 import glob
 import logging
 import os
+import re
 from pathlib import Path
 
 import cartopy
@@ -877,6 +878,7 @@ class LinePlots:
         y_dim: str,
         print_summary: bool = False,
         line: float | None = None,
+        vlines : bool = False,
         title: str | None = None,
     ) -> None:
         """
@@ -895,6 +897,8 @@ class LinePlots:
             If True, print a summary of the values from the graph.
         line:
             If provided, draw a horizontal line at the given y-value.
+        vlines:
+            If True, draw vertical lines to separate each group of variables. 
         title:
             Title for the plot.
         Returns
@@ -918,6 +922,25 @@ class LinePlots:
 
         if line:
             plt.axhline(y=line, color="black", linestyle="--", linewidth=1)
+
+        # if vlines:
+        #     vlines = []
+        #     last_prefix = None
+
+        #     channels = [
+        #         t.get_text()
+        #         for t in fig.gca().get_xticklabels()
+        #         if t.get_text()
+        #     ]
+
+        #     for idx, ch in enumerate(channels):
+        #         m = re.match(r"([a-zA-Z]+)_\d+", ch)
+        #         prefix = m.group(1) if m else ch
+        #         if last_prefix is not None and prefix != last_prefix:
+        #             vlines.append(idx - 0.5)
+        #         last_prefix = prefix
+        #     for vl in vlines:
+        #         plt.axvline(x=vl, color="#001f3f", linestyle="-", linewidth=0.5, zorder=1)
 
         plt.tight_layout()
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
@@ -973,14 +996,14 @@ class LinePlots:
             baseline = data_list[0]
 
         ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
-
+        
         channel_names = set(ref_raw.channel.values)
         # Merge channels from remaining datasets
         for data in data_list[1:]:
             channel_names.update(data.channel.values)  # add new channels
 
         # Sort the merged list
-        ref_channel_names = sorted(channel_names)
+        ref_channel_names = sorted(channel_names, key=channel_sort_key)
 
         ref = align_labels(ref_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
 
@@ -1006,9 +1029,9 @@ class LinePlots:
         parts = ["ratio_plot", tag]
         name = "_".join(filter(None, parts))
         plt.xticks(rotation=90, ha="right")
-        plt.grid(True, linestyle="--", color="gray", alpha=0.5)
+        plt.grid(True, linestyle="--", color="gray", alpha=0.2)
         title = f"Ratio plot {tag.split('_')[0]} - {tag.split('_')[-1]} (baseline: {baseline_name})"
-        self._plot_base(fig, name, x_dim, y_dim, print_summary, line=1.0, title=title)
+        self._plot_base(fig, name, x_dim, y_dim, print_summary, line=1.0, vlines=True, title=title)
 
     def heat_map(
         self,
@@ -1044,7 +1067,7 @@ class LinePlots:
             da = data.isel(forecast_step=0)
             x_ticks_names.update(map(str, da.channel.values))
 
-        ref_ticks_names = sorted(x_ticks_names)
+        ref_ticks_names = sorted(x_ticks_names, key=channel_sort_key)
 
         fig, axes = plt.subplots(
             1, n_runs, figsize=(8 * n_runs, max(12, len(ref_ticks_names) * 0.25)), squeeze=False
@@ -1054,13 +1077,17 @@ class LinePlots:
         global_max = float("-inf")
 
         for ax, data, label in zip(axes[0], data_list, labels, strict=False):
-            
             fsteps = sorted(data.forecast_step.values)
-            
-            ref = data.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps[0])
-            ref = self._preprocess_data(ref, "channel", verbose=False
-            )
 
+            ref = data.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps[0])
+            ref = self._preprocess_data(ref, "channel", verbose=False)
+            
+            if ref.isnull().all():
+                _logger.warning(
+                    f"Heatmap:: Reference data for metric {metric} and label {label} contains "
+                    "only NaNs. Skipping heatmap."
+                )
+                continue
 
             num = self._preprocess_data(data, ["forecast_step", "channel"], verbose=False)
             num = num.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps)
@@ -1668,3 +1695,24 @@ def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArra
 
     # Reindex, inserting NaN for missing labels
     return da.reindex({x_dim: labels})
+
+
+def channel_sort_key(name: str) -> tuple[int, str, int]:
+    """
+    Sorting key for channel names like 't_850', 'z_500', etc.
+    Splits the name into a prefix and a number suffix for sorting.
+    Parameters
+    ----------
+    name : str
+        Channel name to be sorted.
+    Returns
+    -------
+    tuple[int, str, int]
+        Sorting key: (0, prefix, number) if pattern matches, else (1,
+    """
+    m = re.match(r"(.+?)_(\d+)$", name)
+    if m:
+        prefix, number = m.groups()
+        return (0, prefix, int(number))
+    else:
+        return (1, name, float("inf"))

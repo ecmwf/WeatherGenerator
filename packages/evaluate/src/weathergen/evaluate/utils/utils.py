@@ -54,7 +54,7 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
     return preds_next, tars_next
 
 
-def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=False):
+def calc_scores_per_stream(reader: Reader, stream: str, regions: list[str], metrics_dict: dict, plot_score_maps: bool =False):
     """
     Calculate scores for a given run and stream using the specified metrics.
 
@@ -68,8 +68,8 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
         Dictionary for scores with structure scores_dict[metric][region][stream][run_id]
     regions :
         List of regions to calculate scores on.
-    metrics :
-        List of metric names to calculate.
+    metrics_dict :
+        Dictionary mapping regions to lists of metric names to calculate.
     plot_score_maps :
         When it is True and the stream is on a regular grid the scores are
         recomputed as a function of the "ipoint" and plotted on a 2D scatter map.
@@ -81,8 +81,6 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
     Dictionary containing scores for each metric and stream.
     """
     local_scores = {}  # top-level dict: metric -> region -> stream -> run_id
-
-    _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
     if plot_score_maps:
         _logger.info(f"RUN {reader.run_id} - {stream}: Plotting scores is enabled.")
 
@@ -114,7 +112,10 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
     for region in regions:
         bbox = RegionBoundingBox.from_region_name(region)
-
+        metrics = metrics_dict[region]
+       
+        _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for region {region} and metrics {metrics}...")
+       
         metric_stream = xr.DataArray(
             np.full(
                 (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
@@ -156,7 +157,7 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
             # Add it only if it is not None
             valid_scores = []
-       
+
             for metric in metrics:
                 score = get_score(
                     score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
@@ -198,8 +199,8 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
-        metric_stream["forecast_step"] = metric_stream["forecast_step"]*step_hrs 
-        print(f"Forecast steps after scaling: {metric_stream['forecast_step'].values}")
+        metric_stream["forecast_step"] = metric_stream["forecast_step"] * step_hrs
+
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
