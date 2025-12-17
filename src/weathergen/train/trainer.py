@@ -734,20 +734,21 @@ class Trainer(TrainerBase):
                         sample = batch.target_samples[0]
                         target_aux_output = self.target_and_aux_calculator.compute(
                             bidx,
-                            (
-                                sample.streams_data,
-                                sample.source_cell_lens,
-                                sample.target_coords_idx,
-                            ),
+                            sample,
                             self.model_params,
                             self.model,
                             cf.forecast_offset,
                             forecast_steps,
                         )
                     loss, loss_values = self.loss_calculator_val.compute_loss(
-                        preds=output,
-                        targets=target_aux_output,
-                        metadata=None,
+                        preds=[output],
+                        targets=[target_aux_output],
+                        metadata=(
+                            [batch.source2target_matching_idxs[0]],
+                            [[sample.meta_info["ERA5"] for sample in batch.source_samples][0]],
+                            [batch.target2source_matching_idxs[0]],
+                            [[sample.meta_info["ERA5"] for sample in batch.target_samples][0]],
+                        ),
                     )
 
                     # log output

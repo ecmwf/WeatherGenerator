@@ -109,7 +109,16 @@ masking_rate_sampling: True
 
 
 
-validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}}
+validation_mode_config:
+  losses:
+    LossLatentSSLStudentTeacher: { 
+      "weight": 1.0,
+      # "iBOT": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
+      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      # "DINO": {'weight': 0.5, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
+      #     "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      # }
+      "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
 # Student-teacher configuration (only used when training_mode == "student_teacher")
 # TODO: adapt so that the masking or forecast config entry also sits here
 training_config:
