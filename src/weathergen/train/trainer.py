@@ -10,15 +10,11 @@
 # nor does it submit to any jurisdiction.
 import logging
 import time
-from typing import Any
 
 import numpy as np
-import omegaconf
 import torch
 import tqdm
-from numpy.typing import NDArray
 from omegaconf import OmegaConf
-from torch import Tensor
 
 # FSDP2
 from torch.distributed.tensor import DTensor
@@ -26,7 +22,6 @@ from torch.distributed.tensor import DTensor
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
-from weathergen.datasets.stream_data import StreamData
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
     get_target_aux_calculator,
@@ -35,8 +30,9 @@ from weathergen.model.model_interface import (
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.utils.distributed import all_gather_vlen, ddp_average, is_root
-from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger
+from weathergen.train.utils import extract_batch_metadata
+from weathergen.utils.distributed import ddp_average, is_root
+from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_batch_size, get_dtype
 from weathergen.utils.validation_io import write_output
 
@@ -59,18 +55,19 @@ class Trainer(TrainerBase):
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
-        self.loss_model_hist = []
-        self.loss_unweighted_hist: dict = {}
         self.lr_scheduler: LearningRateScheduler | None = None
         self.model = None
         self.model_params = None
         self.optimizer: torch.optim.Optimizer | None = None
         self.perf_gpu = None
         self.perf_mem = None
-        self.stdev_unweighted_hist: dict = {}
         self.t_start: float = 0
         self.target_and_aux_calculator = None
         self.validate_with_ema: bool = False
+
+        self.loss_model_hist = {}
+        self.loss_unweighted_hist = {}
+        self.stdev_unweighted_hist = {}
 
     def init(self, cf: Config, devices):
         # pylint: disable=attribute-defined-outside-init
@@ -237,7 +234,9 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculator.to_device(self.device)
 
         # if with_fsdp then parameter count is unreliable
-        if is_root() and not cf.with_fsdp and not cf.with_ddp:
+        if is_root():
+            if cf.with_fsdp:
+                logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
             self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
@@ -352,175 +351,51 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(cf.num_mini_epochs)
 
-    ###########################################
-    def _prepare_logging(
-        self,
-        preds: list[list[Tensor]],
-        forecast_offset: int,
-        forecast_steps: int,
-        streams_data: list[list[Any]],
-    ):
-        """Collects and denormalizes prediction and target data for logging.
-
-        This function processes target and prediction tensors, extracts relevant
-        coordinates and timestamps, denormalizes the data, and organizes it
-        into a structured format suitable for logging or further analysis. It
-        handles potential empty tensors and NaN values.
-
-        Args:
-            preds: A list of lists, where the outer list
-                corresponds to forecast steps, and the inner list contains prediction
-                tensors for each observation stream. Each prediction tensor is
-                expected to be in the normalized latent or observation space,
-                depending on the model's output.
-            targets: A list of lists, where the outer list
-                corresponds to forecast steps, and the inner list contains target
-                tensors for each observation stream. Each target tensor is expected
-                to be in the normalized observation space.
-            forecast_offset: The starting offset for the forecast steps
-                relative to the original data.
-            forecast_steps: The number of forecast steps to consider.
-            streams_data: A list of lists, where each inner list
-                contains data objects (e.g., `BatchItem` instances) for each stream
-                at a specific time step. These objects are expected to have
-                `target_coords_raw` and `target_times_raw` attributes.
-
-        Returns:
-            tuple: A tuple containing:
-                - preds_all: Denormalized
-                predictions, organized by forecast step and observation stream.
-                - targets_all: Denormalized
-                targets, organized by forecast step and observation stream.
-                - targets_coords_raw: Raw target coordinates,
-                extracted and concatenated for each forecast step and stream.
-                - targets_times_raw: Raw target timestamps,
-                extracted and concatenated for each forecast step and stream.
-                - targets_lens: A list of lists, where each
-                inner list contains the original lengths (shape[0]) of the target
-                tensors before any filtering.
-        """
-
-        # handle case when forecast_steps is a list
-        if type(forecast_steps) is omegaconf.listconfig.ListConfig:
-            forecast_range = np.array(forecast_steps)
-        else:
-            forecast_range = np.arange(forecast_offset, forecast_offset + forecast_steps + 1)
-
-        #'''
-        # TODO: Remove this function and port functionality to write_validation(), which then
-        # extracts preds_all, targets_all,... itself directly from stream_data.
-        # TODO: Undo list resorting
-        # The following list operations realize a reshaping of the original tensors in streams_data
-        # from shape [batch_sample][stream][fstep] into shape [fstep][stream][batch_sample]. When
-        # removing the reshaping, make sure to index the tensors starting at forecast_offset, e.g.,
-        # target_times_raw = streams_data[i_batch][i_strm].target_times_raw[forecast_offset+fstep],
-        # when iterating over batch, stream, and fsteps.
-        targets_rt = [
-            [
-                torch.cat([t[i].target_tokens[fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in forecast_range
-        ]
-        # TODO: Undo list resorting
-        targets_coords_raw = [
-            [
-                torch.cat([t[i].target_coords_raw[fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in forecast_range
-        ]
-        # TODO: Undo list resorting
-        targets_times_raw = [
-            [
-                np.concatenate([t[i].target_times_raw[fstep] for t in streams_data])
-                for i in range(len(self.cf.streams))
-            ]
-            for fstep in forecast_range
-        ]
-
-        # assert len(targets_rt) == len(preds) and len(preds) == len(self.cf.streams)
-        fsteps = len(targets_rt)
-        preds_all: list[list[list[NDArray]]] = [
-            [[] for _ in self.cf.streams] for _ in range(fsteps)
-        ]
-        targets_all: list[list[list[NDArray]]] = [
-            [[] for _ in self.cf.streams] for _ in range(fsteps)
-        ]
-        targets_lens: list[list[list[int]]] = [[[] for _ in self.cf.streams] for _ in range(fsteps)]
-
-        # TODO: iterate over batches here in future, and change loop order to batch, stream, fstep
-        for fstep in range(len(targets_rt)):
-            if len(preds.physical[fstep]) == 0:
-                continue
-
-            for i_strm, target in enumerate(targets_rt[fstep]):
-                pred = preds.physical[fstep][i_strm]
-
-                if not (target.shape[0] > 0 and pred.shape[0] > 0):
-                    continue
-
-                # extract data/coords and remove token dimension if it exists
-                pred = pred.reshape([pred.shape[0], *target.shape])
-                assert pred.shape[1] > 0
-
-                mask_nan = ~torch.isnan(target)
-                if pred[:, mask_nan].shape[1] == 0:
-                    continue
-
-                targets_lens[fstep][i_strm] += [target.shape[0]]
-                dn_data = self.dataset_val.denormalize_target_channels
-
-                f32 = torch.float32
-                preds_all[fstep][i_strm] += [
-                    np.asarray(dn_data(i_strm, pred.to(f32)).detach().cpu())
-                ]
-                targets_all[fstep][i_strm] += [
-                    np.asarray(dn_data(i_strm, target.to(f32)).detach().cpu())
-                ]
-
-        return (
-            preds_all,
-            targets_all,
-            targets_coords_raw,
-            targets_times_raw,
-            targets_lens,
-        )
-
     def train(self, mini_epoch):
         cf = self.cf
         self.model.train()
-        # torch.autograd.set_detect_anomaly(True)
 
         dataset_iter = iter(self.data_loader)
 
         self.optimizer.zero_grad()
 
+        # Unweighted loss, real weighted loss, std for losses that need it
+        self.loss_model_hist, self.loss_unweighted_hist, self.stdev_unweighted_hist = [], [], []
+
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            forecast_steps = batch[-1]
-            batch = self.batch_to_device(batch)
+            batch.to_device(self.device)
 
-            # evaluate model
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                output = self.model(self.model_params, batch, cf.forecast_offset, forecast_steps)
-                target_aux_output = self.target_and_aux_calculator.compute(
-                    bidx, batch, self.model_params, self.model, cf.forecast_offset, forecast_steps
-                )
-            loss, loss_values = self.loss_calculator.compute_loss(
-                preds=output,
-                targets=target_aux_output,
-            )
-            if cf.latent_noise_kl_weight > 0.0:
-                kl = torch.cat([posterior.kl() for posterior in output.latent])
-                loss += cf.latent_noise_kl_weight * kl.mean()
+                # evaluate model
+                preds = self.model(self.model_params, batch)
 
-            self.target_and_aux_calculator.update_state_pre_backward(bidx, batch, self.model)
+                # evaluate targets and aux
+                targets_and_auxs = self.target_and_aux_calculator.compute(
+                    batch, self.model_params, self.model
+                )
+
+            loss = self.loss_calculator.compute_loss(
+                preds=preds,
+                targets=targets_and_auxs,
+                metadata=extract_batch_metadata(batch),
+            )
+
+            # TODO re-enable this, need to think on how to make it compatible with
+            # TODO: CL, this should become a regular loss term
+            # student-teacher training
+            # if cf.latent_noise_kl_weight > 0.0:
+            #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
+            #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+
+            self.target_and_aux_calculator.update_state_pre_backward(
+                self.cf.istep, batch, self.model
+            )
 
             # backward pass
             self.optimizer.zero_grad()
@@ -543,7 +418,6 @@ class Trainer(TrainerBase):
             # optimizer step
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
-            # self.optimizer.step()
 
             self.target_and_aux_calculator.update_state_post_opt_step(bidx, batch, self.model)
 
@@ -557,26 +431,6 @@ class Trainer(TrainerBase):
                     get_batch_size(self.cf, self.world_size_original),
                 )
 
-            # Collecting loss statistics for later inspection
-            if bidx == 0:
-                self.loss_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.losses_all.keys()
-                }
-                self.stdev_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.stddev_all.keys()
-                }
-                self.loss_model_hist = []
-            for _, loss_terms in loss_values.loss_terms.items():
-                for loss_name, losses_all in loss_terms.losses_all.items():
-                    self.loss_unweighted_hist[loss_name].append(losses_all)
-                for loss_name, stddev_all in loss_terms.stddev_all.items():
-                    self.stdev_unweighted_hist[loss_name].append(stddev_all)
-            self.loss_model_hist += [loss.item()]
-
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
@@ -584,32 +438,10 @@ class Trainer(TrainerBase):
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
-                self.loss_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.losses_all.keys()
-                }
-                self.stdev_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.stddev_all.keys()
-                }
-                self.loss_model_hist = []
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
-                self.loss_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.losses_all.keys()
-                }
-                self.stdev_unweighted_hist = {
-                    loss_name: []
-                    for _, calc_terms in loss_values.loss_terms.items()
-                    for loss_name in calc_terms.stddev_all.keys()
-                }
-                self.loss_model_hist = []
 
             self.cf.istep += 1
 
@@ -627,8 +459,7 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    forecast_steps = batch[-1]
-                    batch = self.batch_to_device(batch)
+                    batch.to_device(self.device)
 
                     # evaluate model
                     with torch.autocast(
@@ -641,73 +472,24 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
-                        output = model_forward(
-                            self.model_params, batch, cf.forecast_offset, forecast_steps
-                        )
+                        output = model_forward(self.model_params, batch)
                         target_aux_output = self.target_and_aux_calculator.compute(
-                            bidx,
                             batch,
                             self.model_params,
                             self.model,
-                            cf.forecast_offset,
-                            forecast_steps,
                         )
-                    loss, loss_values = self.loss_calculator_val.compute_loss(
+                    _ = self.loss_calculator_val.compute_loss(
                         preds=output,
                         targets=target_aux_output,
+                        metadata=extract_batch_metadata(batch),
                     )
 
                     # log output
                     if bidx < cf.log_validation:
-                        # TODO: Move _prepare_logging into write_validation by passing streams_data
-                        streams_data: list[list[StreamData]] = batch[0]
-                        (
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                        ) = self._prepare_logging(
-                            preds=output,
-                            forecast_offset=cf.forecast_offset,
-                            forecast_steps=cf.forecast_steps,
-                            streams_data=streams_data,
-                        )
-                        sources = [[item.source_raw for item in stream] for stream in streams_data]
-                        # sample idx should be the same across streams => select first
-                        sample_idxs = [item.sample_idx for item in streams_data[0]]
+                        dn_data = self.dataset_val.denormalize_target_channels
                         write_output(
-                            self.cf,
-                            mini_epoch,
-                            bidx,
-                            sources,
-                            preds_all,
-                            targets_all,
-                            targets_coords_all,
-                            targets_times_all,
-                            targets_lens,
-                            sample_idxs,
+                            self.cf, mini_epoch, bidx, dn_data, batch, output, target_aux_output
                         )
-
-                    # Collecting loss statistics for later inspection
-                    if bidx == 0:
-                        self.loss_unweighted_hist = {
-                            loss_name: []
-                            for _, calc_terms in loss_values.loss_terms.items()
-                            for loss_name in calc_terms.losses_all.keys()
-                        }
-                        self.stdev_unweighted_hist = {
-                            loss_name: []
-                            for _, calc_terms in loss_values.loss_terms.items()
-                            for loss_name in calc_terms.stddev_all.keys()
-                        }
-                        self.loss_model_hist = []
-                    for _, loss_terms in loss_values.loss_terms.items():
-                        for loss_name, losses_all in loss_terms.losses_all.items():
-                            self.loss_unweighted_hist[loss_name].append(losses_all)
-                        for loss_name, stddev_all in loss_terms.stddev_all.items():
-                            self.stdev_unweighted_hist[loss_name].append(stddev_all)
-                    self.loss_model_hist += [loss.item()]
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
@@ -716,16 +498,6 @@ class Trainer(TrainerBase):
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
-
-    def batch_to_device(self, batch):
-        device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{self.cf.local_rank}")
-        # forecast_steps is dropped here from the batch
-        return (
-            [[d.to_device(self.device) for d in db] for db in batch[0]],
-            batch[1].to(self.device),
-            [[b.to(self.device) for b in bf] for bf in batch[2]],
-        )
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
@@ -801,37 +573,6 @@ class Trainer(TrainerBase):
             # save config
             config.save(self.cf, mini_epoch)
 
-    def _prepare_losses_for_logging(
-        self,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-        """
-        Aggregates across ranks loss and standard deviation data for logging.
-
-        Returns:
-            real_loss (torch.Tensor): The scalar loss used for backpropagation.
-            losses_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel loss tensor.
-            stddev_all (dict[str, torch.Tensor]): Dictionary mapping each stream name to its
-                per-channel standard deviation tensor.
-        """
-
-        losses_all: dict[str, Tensor] = {}
-        stddev_all: dict[str, Tensor] = {}
-
-        # Make list of losses into a tensor. This is individual tensor per rank
-        real_loss = torch.tensor(self.loss_model_hist, device=self.device)
-        # Gather all tensors from all ranks into a list and stack them into one tensor again
-        real_loss = torch.cat(all_gather_vlen(real_loss))
-
-        for loss_name, loss_values in self.loss_unweighted_hist.items():
-            loss_values = torch.stack(loss_values).to(torch.float64)
-            losses_all[loss_name] = torch.cat(all_gather_vlen(loss_values))
-        for stddev_name, stddev_values in self.stdev_unweighted_hist.items():
-            stddev_values = torch.stack(stddev_values).to(torch.float64)
-            stddev_all[stddev_name] = torch.cat(all_gather_vlen(stddev_values))
-
-        return real_loss, losses_all, stddev_all
-
     def _log(self, stage: Stage):
         """
         Logs training or validation metrics.
@@ -844,24 +585,35 @@ class Trainer(TrainerBase):
             - This method only executes logging on the main process (rank 0).
             - After logging, historical loss and standard deviation records are cleared.
         """
-        avg_loss, losses_all, stddev_all = self._prepare_losses_for_logging()
+        loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
+        avg_loss, losses_all, stddev_all = prepare_losses_for_logging(
+            loss_calculator.loss_hist,
+            loss_calculator.losses_unweighted_hist,
+            loss_calculator.stddev_unweighted_hist,
+        )
+
         samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.world_size
 
         if is_root():
             # plain logger
             if stage == VAL:
-                self.train_logger.add_val(samples, losses_all, stddev_all)
+                self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.istep >= 0:
-                self.train_logger.add_train(
+                self.train_logger.add_logs(
+                    stage,
                     samples,
-                    self.lr_scheduler.get_lr(),
-                    avg_loss,
                     losses_all,
                     stddev_all,
-                    self.perf_gpu,
-                    self.perf_mem,
+                    avg_loss=avg_loss,
+                    lr=self.lr_scheduler.get_lr(),
+                    perf_gpu=self.perf_gpu,
+                    perf_mem=self.perf_mem,
                 )
+
+        loss_calculator.loss_hist = []
+        loss_calculator.losses_unweighted_hist = []
+        loss_calculator.stddev_unweighted_hist = []
 
     def _get_tensor_item(self, tensor):
         """
@@ -887,19 +639,19 @@ class Trainer(TrainerBase):
         print_freq = self.train_log_freq.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
-            avg_loss, losses_all, _ = self._prepare_losses_for_logging()
+            loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
+            avg_loss, losses_all, _ = prepare_losses_for_logging(
+                loss_calculator.loss_hist,
+                loss_calculator.losses_unweighted_hist,
+                loss_calculator.stddev_unweighted_hist,
+            )
 
             if is_root():
                 if stage == VAL:
                     logger.info(
                         f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
-                        {avg_loss.nanmean().item()}"""
+                        {np.nanmean(avg_loss)}"""
                     )
-                    for loss_name, loss_values in losses_all.items():
-                        logger.info(
-                            f"{loss_name}" + f" : {loss_values.nanmean():0.4E} \t",
-                        )
-                    logger.info("\n")
 
                 elif stage == TRAIN:
                     # samples per sec
@@ -907,7 +659,7 @@ class Trainer(TrainerBase):
                     len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
                     pstr = (
                         f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
-                        + f"{self.cf.istep:06d} : loss = {avg_loss.nanmean().item():.4E} "
+                        + f"{self.cf.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
                     if self.log_grad_norms:
@@ -915,10 +667,12 @@ class Trainer(TrainerBase):
                     pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
                     logger.info(pstr)
                     logger.info("\t")
-                    for loss_name, loss_values in losses_all.items():
+
+                for key, value in losses_all.items():
+                    if key.endswith("avg"):
                         logger.info(
-                            f"{loss_name}" + f" : {loss_values.nanmean():0.4E} \t",
+                            f"{key} : {np.nanmean(value):0.4E} \t",
                         )
-                    logger.info("\n")
+                logger.info("\n")
 
             self.t_start = time.time()
