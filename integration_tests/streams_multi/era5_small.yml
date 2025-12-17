@@ -1,0 +1,30 @@
+ERA5:
+  type: anemoi
+  filenames: ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  loss_weight: 1.0
+  source_exclude: ['w_', 'skt', 'sp', 'tcw', 'cp', 'tp']
+  target_exclude: ['w_', 'skt', 'sp', 'tcw', 'cp', 'tp']
+  source: ["t_850", "z_850"]
+  target: ["t_850"]
+  diagnostic: False
+  masking_rate: 0.6
+  masking_rate_none: 0.05
+  token_size: 32
+  tokenize_spacetime: True
+  max_num_targets: -1
+  embed:
+    net: transformer
+    num_tokens: 1
+    num_heads: 2
+    dim_embed: 16
+    num_blocks: 2
+  embed_target_coords:
+    net: linear
+    dim_embed: 16
+  target_readout:
+    type: 'obs_value'
+    num_layers: 2
+    num_heads: 2
+  pred_head:
+    ens_size: 1
+    num_layers: 1

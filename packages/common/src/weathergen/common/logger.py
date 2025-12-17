@@ -22,7 +22,7 @@ LOGGING_CONFIG = """
     "disable_existing_loggers": false,
     "formatters": {
         "custom": {
-            "class": "weathergen.utils.logger.ColoredRelPathFormatter",
+            "class": "weathergen.common.logger.ColoredRelPathFormatter",
             "format": \
                 "%(asctime)s %(process)d %(filename)s:%(lineno)d : %(levelname)-8s : %(message)s"
         }
@@ -44,7 +44,7 @@ LOGGING_CONFIG = """
             "class": "logging.FileHandler",
             "level": "DEBUG",
             "formatter": "custom",
-            "filename": "log.text",
+            "filename": "log.txt",
             "mode": "w"
         },
         "errorfile": {
@@ -96,7 +96,7 @@ class ColoredRelPathFormatter(logging.Formatter):
 
 
 @cache
-def init_loggers(run_id, logging_config=None):
+def init_loggers(run_id=None, logging_config=None):
     """
     Initialize the logger for the package and set output streams/files.
 
@@ -121,11 +121,18 @@ def init_loggers(run_id, logging_config=None):
     # timestamp = now.strftime("%Y-%m-%d-%H%M")
 
     # output_dir = f"./output/{timestamp}-{run_id}"
-    output_dir = f"./output/{run_id}"
+    output_dir = ""
+    if run_id is not None:
+        output_dir = f"./output/{run_id}"
 
     # load the structure for logging config
     if logging_config is None:
         logging_config = json.loads(LOGGING_CONFIG)
+
+        if run_id is None:
+            del logging_config["handlers"]["logfile"]
+            del logging_config["handlers"]["errorfile"]
+            del logging_config["root"]["handlers"][2:]
 
     for _, handler in logging_config["handlers"].items():
         for k, v in handler.items():
@@ -146,4 +153,7 @@ def init_loggers(run_id, logging_config=None):
     # make sure the parent directory exists
     logging.config.dictConfig(logging_config)
 
-    logging.info(f"Logging set up. Logs are in {output_dir}")
+    if output_dir:
+        logging.info(f"Logging set up. Logs are in {output_dir}")
+    else:
+        logging.info("Logging set up. No log files created.")

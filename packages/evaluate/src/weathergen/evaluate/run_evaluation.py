@@ -9,26 +9,32 @@
 # weathergen-evaluate = { path = "../../../../../packages/evaluate" }
 # ///
 
+# Standard library
 import argparse
 import logging
+import multiprocessing as mp
 import sys
 from collections import defaultdict
+from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
+# Third-party
 import mlflow
 from mlflow.client import MlflowClient
-from omegaconf import OmegaConf
-from xarray import DataArray
+from omegaconf import DictConfig, OmegaConf
 
+# Local application / package
 from weathergen.common.config import _REPO_ROOT
+from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
-from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
-from weathergen.evaluate.plot_utils import collect_channels
-from weathergen.evaluate.utils import (
+from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.wegen_reader import WeatherGenReader
+from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
-    metric_list_to_json,
     plot_data,
     plot_summary,
+    triple_nested_dict,
 )
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
@@ -37,21 +43,76 @@ from weathergen.metrics.mlflow_utils import (
     setup_mlflow,
 )
 
-_logger = logging.getLogger(__name__)
-
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
+_logger = logging.getLogger(__name__)
 _platform_env = get_platform_env()
 
 
+def setup_main_logger(log_file: str | None, log_queue: mp.Queue) -> QueueListener:
+    """Set up main process logger with QueueListener
+
+    Parameters
+    ----------
+        log_file: str
+            Name of
+    """
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
+    )
+
+    handlers: list[logging.Handler] = [console_handler]
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
+        )
+        handlers.append(file_handler)
+
+    listener = QueueListener(log_queue, *handlers)
+    listener.start()
+    return listener
+
+
+def setup_worker_logger(log_queue: mp.Queue) -> logging.Logger:
+    """"""
+    qh = QueueHandler(log_queue)
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    logger.addHandler(qh)
+    return logger
+
+
+#################################################################
+
+
 def evaluate() -> None:
+    """entry point for evaluation script."""
     # By default, arguments from the command line are read.
-    evaluate_from_args(sys.argv[1:])
+    log_queue: mp.Queue = mp.Queue()
+    listener = setup_main_logger("evaluation.log", log_queue)
+    try:
+        evaluate_from_args(sys.argv[1:], log_queue)
+    finally:
+        listener.stop()
+        log_queue.close()
+        log_queue.join_thread()
 
 
-def evaluate_from_args(argl: list[str]) -> None:
+def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
+    """
+    Wrapper of evaluate_from_config.
+
+    Parameters
+    ----------
+    argl:
+       List of arguments passed from terminal
+    """
     # configure logging
-    logging.basicConfig(level=logging.INFO)
+    init_loggers()
     parser = argparse.ArgumentParser(description="Fast evaluation of WeatherGenerator runs.")
     parser.add_argument(
         "--config",
@@ -80,123 +141,175 @@ def evaluate_from_args(argl: list[str]) -> None:
         assert hpc_conf is not None
         private_home = Path(hpc_conf)
         private_cf = OmegaConf.load(private_home)
+        assert isinstance(private_cf, DictConfig)
         mlflow_client = setup_mlflow(private_cf)
         _logger.info(f"MLFlow client set up: {mlflow_client}")
 
-    evaluate_from_config(OmegaConf.load(config), mlflow_client)
+    cf = OmegaConf.load(config)
+    assert isinstance(cf, DictConfig)
+    evaluate_from_config(cf, mlflow_client, log_queue)
 
 
-def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
-    # load configuration
+def _process_stream_wrapper(
+    args: dict[str, object],
+) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
+    return _process_stream(**args)
 
+
+def _process_stream(
+    run_id: str,
+    run: dict,
+    stream: str,
+    private_paths: dict[str, str],
+    global_plotting_opts: dict[str, object],
+    regions: list[str],
+    metrics: list[str],
+    plot_score_maps: bool,
+) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
+    """
+    Worker function for a single stream of a single run.
+    Returns a dictionary with the scores instead of modifying shared dict.
+    Parameters
+    ----------
+
+    run_id:
+        Run identification string.
+    run:
+        Configuration dictionary for the given run.
+    stream:
+        String to be processed
+    private_paths:
+        List of private paths to be used to retrieve directories
+    global_plotting_opts:
+        Dictionary containing all common plotting options
+    regions:
+        List of regions to be processed.
+    metrics:
+        List of metrics to be processed.
+    plot_score_maps:
+        Bool to define if the score maps need to be plotted or not.
+
+    """
+    try:
+        type_ = run.get("type", "zarr")
+        reader = (
+            WeatherGenReader(run, run_id, private_paths)
+            if type_ == "zarr"
+            else CsvReader(run, run_id, private_paths)
+        )
+
+        stream_dict = reader.get_stream(stream)
+        if not stream_dict:
+            return run_id, stream, {}
+
+        # Parallel plotting
+        if stream_dict.get("plotting"):
+            plot_data(reader, stream, global_plotting_opts)
+
+        # Scoring per stream
+        if not stream_dict.get("evaluation"):
+            return run_id, stream, {}
+
+        stream_scores = calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps)
+
+        return run_id, stream, stream_scores
+
+    except Exception as e:
+        _logger.error(f"Error processing {run_id} - {stream}: {e}")
+        return run_id, stream, {}
+
+
+# Weird typing error from python: mp.Queue is seen as a method with a "|" operator => this fai
+def evaluate_from_config(
+    cfg: dict, mlflow_client: MlflowClient | None, log_queue: "mp.Queue | None"
+) -> None:
+    """
+    Main function that controls evaluation plotting and scoring.
+    Parameters
+    ----------
+    cfg:
+        Configuration input stored as dictionary.
+    """
     runs = cfg.run_ids
-
     _logger.info(f"Detected {len(runs)} runs")
-
-    # Directory to store the summary plots
-    private_paths = cfg.get("private_paths", None)
-    summary_dir = Path(
-        cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR)
-    )  # base directory where summary plots will be stored
-
+    private_paths = cfg.get("private_paths")
+    summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
-
     global_plotting_opts = cfg.get("global_plotting_options", {})
-
-    # to get a structure like: scores_dict[metric][region][stream][run_id] = plot
-    scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-
-    for run_id, run in runs.items():
-        _logger.info(f"RUN {run_id}: Getting data...")
-
-        type = run.get("type", "zarr")
-        if type == "zarr":
-            reader = WeatherGenReader(run, run_id, private_paths)
-        elif type == "csv":
-            reader = CsvReader(run, run_id, private_paths)
+    use_parallel = cfg.evaluation.get("num_processes", 0)
+    if use_parallel == "auto":
+        num_processes = mp.cpu_count()
+    elif isinstance(use_parallel, int):
+        if use_parallel > 0:
+            num_processes = min(use_parallel, mp.cpu_count())
         else:
-            raise ValueError(f"Unknown run type {type} for run {run_id}. Supported: zarr, csv.")
+            # Using the main process only
+            num_processes = 0
+    else:
+        raise ValueError("parallel option must be 'auto' or an non-negative integer")
 
-        for stream in reader.streams:
-            _logger.info(f"RUN {run_id}: Processing stream {stream}...")
+    if num_processes > 1:
+        _logger.info("Using %d processes for evaluation", num_processes)
+    else:
+        _logger.info("Using main process for evaluation")
 
-            stream_dict = reader.get_stream(stream)
-            if not stream_dict:
-                _logger.info(
-                    f"Stream {stream} does not exist in source data or config file is empty. "
-                    "Skipping."
-                )
-                continue
+    scores_dict = defaultdict(triple_nested_dict)  # metric -> region -> stream -> run
+    tasks = []
 
-            if stream_dict.get("plotting"):
-                _logger.info(f"RUN {run_id}: Plotting stream {stream}...")
-                _ = plot_data(reader, stream, global_plotting_opts)
-
-            if stream_dict.get("evaluation"):
-                _logger.info(f"Retrieve or compute scores for {run_id} - {stream}...")
-
-                for region in regions:
-                    metrics_to_compute = []
-
-                    for metric in metrics:
-                        metric_data = reader.load_scores(
-                            stream,
-                            region,
-                            metric,
-                        )
-
-                        if metric_data is None or plot_score_maps:
-                            metrics_to_compute.append(metric)
-                            continue
-
-                        available_data = reader.check_availability(
-                            stream, metric_data, mode="evaluation"
-                        )
-
-                        if not available_data.score_availability:
-                            metrics_to_compute.append(metric)
-                        else:
-                            # simply select the chosen eval channels, samples, fsteps here...
-                            scores_dict[metric][region][stream][run_id] = metric_data.sel(
-                                sample=available_data.samples,
-                                channel=available_data.channels,
-                                forecast_step=available_data.fsteps,
-                            )
-
-                    if metrics_to_compute:
-                        all_metrics, points_per_sample = calc_scores_per_stream(
-                            reader, stream, region, metrics_to_compute, plot_score_maps
-                        )
-
-                        metric_list_to_json(
-                            reader,
-                            [all_metrics],
-                            [points_per_sample],
-                            [stream],
-                            region,
-                        )
-
-                    for metric in metrics_to_compute:
-                        scores_dict[metric][region][stream][run_id] = all_metrics.sel(
-                            {"metric": metric}
-                        )
-
-    if mlflow_client:
-        # Reorder scores_dict to push to MLFlow per run_id:
-        # Create a new defaultdict with the target structure: [run_id][metric][region][stream]
-        reordered_dict: dict[str, dict[str, dict[str, dict[str, DataArray]]]] = defaultdict(
-            lambda: defaultdict(lambda: defaultdict(dict))
+    # Build tasks per stream
+    for run_id, run in runs.items():
+        type_ = run.get("type", "zarr")
+        reader = (
+            WeatherGenReader(run, run_id, private_paths)
+            if type_ == "zarr"
+            else CsvReader(run, run_id, private_paths)
         )
+        for stream in reader.streams:
+            tasks.append(
+                {
+                    "run_id": run_id,
+                    "run": run,
+                    "stream": stream,
+                    "private_paths": private_paths,
+                    "global_plotting_opts": global_plotting_opts,
+                    "regions": regions,
+                    "metrics": metrics,
+                    "plot_score_maps": plot_score_maps,
+                }
+            )
 
-        # Iterate through the original dictionary to get all keys and the final value
+    scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    if num_processes == 0:
+        if log_queue is not None:
+            setup_worker_logger(log_queue)
+        results = [_process_stream(**task) for task in tasks]
+    else:
+        with mp.Pool(
+            processes=num_processes,
+            initializer=setup_worker_logger,
+            initargs=(log_queue,),
+        ) as pool:
+            results = pool.map(
+                _process_stream_wrapper,
+                tasks,
+            )
+
+    for _, stream, stream_scores in results:
+        for metric, regions_dict in stream_scores.items():
+            for region, streams_dict in regions_dict.items():
+                for stream, runs_dict in streams_dict.items():
+                    scores_dict[metric][region][stream].update(runs_dict)
+
+    # MLFlow logging
+    if mlflow_client:
+        reordered_dict = defaultdict(triple_nested_dict)
         for metric, regions_dict in scores_dict.items():
             for region, streams_dict in regions_dict.items():
                 for stream, runs_dict in streams_dict.items():
-                    for run_id, final_dict in runs_dict.items():
-                        # Assign the final_dict to the new structure using the reordered keys
-                        reordered_dict[run_id][metric][region][stream] = final_dict
+                    for run_id, data in runs_dict.items():
+                        reordered_dict[run_id][metric][region][stream] = data
 
         channels_set = collect_channels(scores_dict, metric, region, runs)
 
@@ -211,18 +324,18 @@ def evaluate_from_config(cfg, mlflow_client: MlflowClient | None) -> None:
                     run_name=f"{phase}_{from_run_id}_{run_id}",
                     parent_run_id=parent_run.info.run_id,
                     nested=True,
-                ) as run:
+                ) as mlflow_run:
                     mlflow.set_tags(MlFlowUpload.run_tags(run_id, phase, from_run_id))
                     log_scores(
                         reordered_dict[run_id],
                         mlflow_client,
-                        run.info.run_id,
+                        mlflow_run.info.run_id,
                         channels_set,
                     )
 
-    # plot summary
+    # summary plots
     if scores_dict and cfg.evaluation.get("summary_plots", True):
-        _logger.info("Started creating summary plots..")
+        _logger.info("Started creating summary plots...")
         plot_summary(cfg, scores_dict, summary_dir)
 
 
