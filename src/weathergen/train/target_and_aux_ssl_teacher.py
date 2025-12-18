@@ -42,19 +42,12 @@ class EMATeacher(TargetAndAuxModuleBase):
     def compute(
         self, bidx, batch, model_params, model, forecast_offset, forecast_steps
     ) -> tuple[Any, Any]:
-        """
-        Likely will gain in complexity as we actually implement things as different losses
-        DINO, iBOT, JEPA will have different heads, which then probably should be computed
-        in the postprocess_targets modules, which are nn.Modules
-        """
         with torch.no_grad():
-            outputs = self.ema_model.forward_eval(
-                model_params, batch, forecast_offset, forecast_steps
-            ).latent
+            outputs = self.ema_model.forward_eval(model_params, batch).get_latent_prediction(0)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
-                    targets[loss_name] = target_module(outputs[loss_name])
-            return TargetAuxOutput(physical={}, latent=targets, aux_outputs={})
+                targets[loss_name] = target_module(outputs[loss_name])
+            return TargetAuxOutput(0, physical={}, latent=targets, aux_outputs={})
 
     def to_device(self, device):
         for _, module in self.postprocess_targets.items():

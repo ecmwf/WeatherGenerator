@@ -9,27 +9,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import dataclasses
 import logging
+from collections import defaultdict
 
 import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules as LossModules
-from weathergen.train.loss_modules.loss_module_base import LossValues
+from weathergen.model.model import ModelOutput
+from weathergen.train.target_and_aux_module_base import TargetAuxOutput
 from weathergen.utils.train_logger import TRAIN, Stage
 
 _logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass
-class LossTerms:
-    """
-    A dataclass which combines the LossValues of all loss modules
-    """
-
-    # Dictionary containing the LossValues of each loss module.
-    loss_terms: dict[str, LossValues]
 
 
 class LossCalculator:
@@ -61,9 +52,12 @@ class LossCalculator:
         self.cf = cf
         self.stage = stage
         self.device = device
+        self.loss_hist = []
+        self.losses_unweighted_hist = []
+        self.stddev_unweighted_hist = []
 
         calculator_configs = (
-            cf.training_config.losses if stage == TRAIN else cf.validation_mode_config.losses
+            cf.training_config.losses if stage == TRAIN else cf.validation_config.losses
         )
 
         self.loss_calculators = [
@@ -76,16 +70,23 @@ class LossCalculator:
 
     def compute_loss(
         self,
-        preds: dict,  # isn't this a ModelOutput?
-        targets: dict,  # isn't this a TargetAuxOutput?
+        preds: ModelOutput,
+        targets: TargetAuxOutput,
         metadata: dict,
     ):
-        loss_terms = {}
+        losses_all = defaultdict(dict)
+        stddev_all = defaultdict(dict)
         loss = torch.tensor(0.0, requires_grad=True)
         for weight, calculator in self.loss_calculators:
-            loss_terms[calculator.name] = calculator.compute_loss(
-                preds=preds, targets=targets, metadata=metadata
-            )
-            loss = loss + weight * loss_terms[calculator.name].loss
+            loss_values = calculator.compute_loss(preds=preds, targets=targets, metadata=metadata)
+            loss = loss + weight * loss_values.loss
+            losses_all[calculator.name] = loss_values.losses_all
+            losses_all[calculator.name]["loss_avg"] = loss_values.loss
+            stddev_all[calculator.name] = loss_values.stddev_all
 
-        return loss, LossTerms(loss_terms=loss_terms)
+        # Keep histories for logging
+        self.loss_hist += [loss.detach()]
+        self.losses_unweighted_hist += [losses_all]
+        self.stddev_unweighted_hist += [stddev_all]
+
+        return loss

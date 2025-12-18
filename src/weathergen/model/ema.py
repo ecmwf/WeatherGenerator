@@ -62,7 +62,6 @@ class EMAModel:
     def forward_eval(self, *args, **kwargs):
         self.ema_model.eval()
         out = self.ema_model(*args, **kwargs)
-        # self.ema_model.train()
         return out
 
     def state_dict(self):

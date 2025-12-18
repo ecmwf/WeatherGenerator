@@ -13,14 +13,14 @@ import pathlib
 import numpy as np
 import torch
 
+from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
-from weathergen.datasets.batch import ModelBatch, Sample
+from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
     TIndex,
-    str_to_datetime64,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
@@ -28,15 +28,15 @@ from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
-    compute_idxs_predict,
     compute_offsets_scatter_embed,
-    compute_source_cell_lens,
+    get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
+type StreamName = str
 
 logger = logging.getLogger(__name__)
 
@@ -70,40 +70,39 @@ def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderD
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def __init__(
         self,
-        cf,
-        start_date_,
-        end_date_,
-        batch_size,
-        samples_per_mini_epoch,
+        cf: Config,
+        start_date: np.datetime64,
+        end_date: np.datetime64,
+        batch_size: int,
+        samples_per_mini_epoch: int,
         stage: Stage,
         shuffle=True,
     ):
         super(MultiStreamDataSampler, self).__init__()
 
-        start_date = str_to_datetime64(start_date_)
-        end_date = str_to_datetime64(end_date_)
-
-        assert end_date > start_date, (end_date, start_date)
-
         self.mask_value = 0.0
         self._stage = stage
 
-        self.num_input_steps = cf.get("num_input_steps", 1)
-
-        self.len_hrs: int = cf.len_hrs
-        self.step_hrs: int = cf.step_hrs
-        self.time_window_handler = TimeWindowHandler(start_date, end_date, cf.len_hrs, cf.step_hrs)
+        self.len_timedelta: np.timedelta64 = cf.time_window_len
+        self.step_timedelta: np.timedelta64 = cf.time_window_step
+        self.time_window_handler = TimeWindowHandler(
+            start_date, end_date, self.len_timedelta, self.step_timedelta
+        )
         if is_root():
-            logger.info(
-                f"Time window handler: start={start_date}, end={end_date},"
-                f"len_hrs={cf.len_hrs}, step_hrs={cf.step_hrs}"
-            )
+            logger.info(self.time_window_handler)
 
         self.forecast_offset = cf.forecast_offset
-        self.forecast_delta_hrs = (
-            cf.forecast_delta_hrs if cf.forecast_delta_hrs > 0 else self.len_hrs
-        )
-        assert self.forecast_delta_hrs == self.len_hrs, "Only supported option at the moment"
+
+        # Handle forecast_delta_hrs which might be int (hours) or string (timedelta)
+        f_delta_dt = cf.forecast_delta
+
+        if f_delta_dt > np.timedelta64(0, "ms"):
+            self.forecast_delta_dt = f_delta_dt
+        else:
+            self.forecast_delta_dt = self.len_timedelta
+
+        assert self.forecast_delta_dt == self.len_timedelta, "Only supported option at the moment"
+
         self.forecast_steps = np.array(
             [cf.forecast_steps] if isinstance(cf.forecast_steps, int) else cf.forecast_steps
         )
@@ -114,9 +113,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.len = 100000000
 
-        self.streams_datasets: list[list[AnyDataReader]] = []
+        self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
         for _, stream_info in enumerate(cf.streams):
-            self.streams_datasets.append([])
+            # list of sources for current stream
+            self.streams_datasets[stream_info["name"]] = []
 
             for fname in stream_info["filenames"]:
                 kwargs = {
@@ -171,9 +171,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 fsm = self.forecast_steps[0]
                 if len(ds) > 0:
-                    self.len = min(self.len, len(ds) - (self.len_hrs * (fsm + 1)) // self.step_hrs)
+                    self.len = min(
+                        self.len, len(ds) - (self.len_timedelta * (fsm + 1)) // self.step_timedelta
+                    )
 
-                # MODIFIES config !!!
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
                 stream_info["target_channel_weights"] = (
@@ -182,7 +183,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     else [1.0 for _ in ds.target_channels]
                 )
 
-                self.streams_datasets[-1] += [ds]
+                self.streams_datasets[stream_info["name"]] += [ds]
 
         index_range = self.time_window_handler.get_index_range()
         self.len = int(index_range.end - index_range.start)
@@ -190,6 +191,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // batch_size) * batch_size
         self.len = min(self.len, len_chunk)
+
+        forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
+        perms_len = int(index_range.end - index_range.start) - (forecast_len + self.forecast_offset)
+        n_duplicates = self.len - perms_len
+        if n_duplicates > 0:
+            # TODO fix this more permanently (#1085)
+            msg = (
+                "WARNING: Missmatch between length of permutation indexes and"
+                "length of MultiStreamDataSampler,"
+                f"{n_duplicates} duplicate samples will be sampled."
+                "To avoid this increase the the length of the"
+                f"global sampling window by {n_duplicates * cf.step_hrs} hours."
+            )
+            logger.warning(msg)
         logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
 
         self.rank = cf.rank
@@ -199,7 +214,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.shuffle = shuffle
         # TODO: remove options that are no longer supported
         self.input_window_steps = cf.input_window_steps
-        self.sampling_rate_target = cf.sampling_rate_target
+        # TODO, TODO, TODO: this needs to be stream specific and should not be an attribute
+        # current implementation needs to be cleaned up when batch_size > 1 is enabled
+        self.num_steps_input = -1
 
         self.batch_size = batch_size
 
@@ -239,20 +256,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             + ds[0].get_geoinfo_size()
             + ds[0].get_coords_size()
             + self.tokenizer.get_size_time_embedding()
-            for ds in self.streams_datasets
+            for _, ds in self.streams_datasets.items()
         ]
 
     def get_sources_num_channels(self):
-        return [ds[0].get_source_num_channels() for ds in self.streams_datasets]
+        return [ds[0].get_source_num_channels() for _, ds in self.streams_datasets.items()]
 
     def get_targets_num_channels(self):
-        return [ds[0].get_target_num_channels() for ds in self.streams_datasets]
+        return [ds[0].get_target_num_channels() for _, ds in self.streams_datasets.items()]
 
     def get_targets_coords_size(self):
         # TODO: avoid hard coding magic values
         # +6 at the end for stram_id and time encoding
         return [
-            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6 for ds in self.streams_datasets
+            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            for _, ds in self.streams_datasets.items()
         ]
 
     def reset(self):
@@ -273,7 +291,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         idx_end = index_range.end
         # native length of datasets, independent of mini_epoch length that has potentially been
         # specified
-        forecast_len = (self.len_hrs * (fsm + 1)) // self.step_hrs
+        forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
         idx_end -= forecast_len + self.forecast_offset
         assert idx_end > 0, "dataset size too small for forecast range"
         self.perms = np.arange(index_range.start, idx_end)
@@ -296,13 +314,74 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.tokenizer.reset_rng(self.rng)
 
-    def denormalize_source_channels(self, stream_id, data) -> torch.Tensor:
+    def denormalize_source_channels(self, stream_name, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
-        return self.streams_datasets[stream_id][0].denormalize_source_channels(data)
+        return self.streams_datasets[stream_name][0].denormalize_source_channels(data)
 
-    def denormalize_target_channels(self, stream_id, data) -> torch.Tensor:
+    def denormalize_target_channels(self, stream_name, data) -> torch.Tensor:
         # TODO: with multiple ds per stream we need to distinguish these here
-        return self.streams_datasets[stream_id][0].denormalize_target_channels(data)
+        return self.streams_datasets[stream_name][0].denormalize_target_channels(data)
+
+    def _build_stream_data(
+        self,
+        modes: str,
+        base_idx: TIndex,
+        forecast_dt: int,
+        stream_info: dict,
+        num_steps_input: int,
+        input_data: list,
+        output_data: list,
+        input_tokens: list,
+        output_tokens: list,
+        output_mask,
+        input_mask,
+    ) -> StreamData:
+        """
+        Return one batch of data
+        Build a StreamData object for a single view (teacher or student).
+
+        Args:
+            modes :
+            stream_data :
+            base_idx: Time index for this sample
+            forecast_dt: Number of forecast steps
+            stream_info: Stream configuration dict
+            stream_ds: List of dataset readers for this stream
+
+            output_mask : mask for output/prediction/target
+            input_mask : mask for network input (can be source or target)
+
+
+        Returns:
+            StreamData with source and targets masked according to view_meta
+        """
+
+        dt = self.forecast_offset + forecast_dt
+        stream_data = StreamData(base_idx, num_steps_input, dt, self.num_healpix_cells)
+
+        stream_data = self._build_stream_data_input(
+            modes,
+            stream_data,
+            base_idx,
+            stream_info,
+            num_steps_input,
+            input_data,
+            input_tokens,
+            input_mask,
+        )
+
+        stream_data = self._build_stream_data_output(
+            modes,
+            stream_data,
+            base_idx,
+            stream_info,
+            forecast_dt,
+            output_data,
+            output_tokens,
+            output_mask,
+        )
+
+        return stream_data
 
     def _build_stream_data_input(
         self,
@@ -310,6 +389,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         stream_data: StreamData,
         base_idx: TIndex,
         stream_info: dict,
+        num_steps_input: int,
         input_data: list,
         input_tokens: list,
         mask: torch.Tensor | None = None,
@@ -329,30 +409,31 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             StreamData with source and targets masked according to view_meta
         """
 
-        # iterate overall input steps
-        for step, idx in enumerate(range(base_idx, base_idx - self.num_input_steps, -1)):
-            # TODO: check that we are not out of bounds when we go back in time
+        if "network_input" in mode:
+            # iterate overall input steps
+            for step, idx in enumerate(range(base_idx, base_idx - num_steps_input, -1)):
+                # TODO: check that we are not out of bounds when we go back in time
 
-            time_win_source = self.time_window_handler.window(idx)
+                time_win_source = self.time_window_handler.window(idx)
 
-            # collect all targets for current stream
-            # do we want this to be ascending or descending in time?
-            rdata = input_data[-(step + 1)]
-            token_data = input_tokens[-(step + 1)]
+                # collect all targets for current stream
+                # do we want this to be ascending or descending in time?
+                rdata = input_data[-(step + 1)]
+                token_data = input_tokens[-(step + 1)]
 
-            stream_data.source_is_spoof = rdata.is_spoof
+                stream_data.source_is_spoof = rdata.is_spoof
 
-            # preprocess data for model input
-            (source_cells, source_cells_lens, mask_state) = self.tokenizer.get_source(
-                stream_info,
-                rdata,
-                token_data,
-                (time_win_source.start, time_win_source.end),
-                mask,
-            )
+                # preprocess data for model input
+                (source_cells, source_cells_lens, mask_state) = self.tokenizer.get_source(
+                    stream_info,
+                    rdata,
+                    token_data,
+                    (time_win_source.start, time_win_source.end),
+                    mask,
+                )
 
-            # collect data for stream
-            stream_data.add_source(step, rdata, source_cells_lens, source_cells)
+                # collect data for stream
+                stream_data.add_source(step, rdata, source_cells_lens, source_cells)
 
         return stream_data
 
@@ -375,7 +456,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # collect for all forecast steps
         dt = self.forecast_offset + forecast_dt
         for step, fstep in enumerate(range(self.forecast_offset, dt + 1)):
-            step_forecast_dt = idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
+            step_forecast_dt = idx + (self.forecast_delta_dt * fstep) // self.step_timedelta
             time_win_target = self.time_window_handler.window(step_forecast_dt)
 
             # collect all targets for current stream
@@ -387,7 +468,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if "target_coords" in mode:
                 (tc, tc_l) = self.tokenizer.get_target_coords(
                     stream_info,
-                    self.sampling_rate_target,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
@@ -398,7 +478,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
                     stream_info,
-                    self.sampling_rate_target,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
@@ -410,60 +489,66 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     def _build_stream_data(
         self,
-        mode: str,
+        modes: str,
         base_idx: TIndex,
         forecast_dt: int,
         stream_info: dict,
+        num_steps_input: int,
         input_data: list,
         output_data: list,
         input_tokens: list,
         output_tokens: list,
-        target_mask,
-        source_mask,
+        output_mask,
+        input_mask,
     ) -> StreamData:
         """
         Return one batch of data
         Build a StreamData object for a single view (teacher or student).
 
         Args:
-            mode :
+            modes :
             stream_data :
             base_idx: Time index for this sample
             forecast_dt: Number of forecast steps
             stream_info: Stream configuration dict
             stream_ds: List of dataset readers for this stream
 
+            output_mask : mask for output/prediction/target
+            input_mask : mask for network input (can be source or target)
+
+
         Returns:
             StreamData with source and targets masked according to view_meta
         """
 
         dt = self.forecast_offset + forecast_dt
-        stream_data = StreamData(base_idx, dt, self.num_healpix_cells)
+        stream_data = StreamData(base_idx, num_steps_input, dt, self.num_healpix_cells)
 
         stream_data = self._build_stream_data_input(
-            mode,
+            modes,
             stream_data,
             base_idx,
             stream_info,
+            num_steps_input,
             input_data,
             input_tokens,
-            source_mask,
+            input_mask,
         )
 
         stream_data = self._build_stream_data_output(
-            mode,
+            modes,
             stream_data,
             base_idx,
             stream_info,
             forecast_dt,
             output_data,
             output_tokens,
-            target_mask,
+            output_mask,
         )
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, forecast_dt, stream_ds):
+    def _get_data_windows(self, base_idx, forecast_dt, num_steps_input_max, stream_ds):
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
@@ -472,7 +557,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # source data: iterate overall input steps
         input_data = []
-        for idx in range(base_idx - self.num_input_steps, base_idx + 1):
+        for idx in range(base_idx - num_steps_input_max, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source")
@@ -494,7 +579,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # target data: collect for all forecast steps
         output_data = []
         for fstep in range(self.forecast_offset, self.forecast_offset + forecast_dt + 1):
-            step_forecast_dt = base_idx + (self.forecast_delta_hrs * fstep) // self.step_hrs
+            step_forecast_dt = base_idx + (self.forecast_delta_dt * fstep) // self.step_timedelta
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target")
 
@@ -514,7 +599,43 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return (input_data, output_data)
 
-    def _get_sample(self, idx: int, forecast_dt: int):
+    def _get_source_target_masks(self, training_mode):
+        """
+        Generate source and target masks for all streams
+        """
+
+        masks = {}
+        for stream_info in self.streams:
+            # Build source and target sample masks
+            masks[stream_info["name"]] = self.tokenizer.masker.build_samples_for_stream(
+                training_mode, self.num_healpix_cells, self.training_cfg
+            )
+
+        # Determine number of samples directly from config (teacher and student views)
+        source_cfgs = self.training_cfg.get("model_input")
+        target_cfgs = self.training_cfg.get("target_input", source_cfgs)
+        num_target_samples = np.array([tc.get("num_samples", 1) for tc in target_cfgs]).sum().item()
+        num_source_samples = (
+            np.array([num_target_samples * sc.get("num_samples", 1) for sc in source_cfgs])
+            .sum()
+            .item()
+        )
+
+        return masks, num_source_samples, num_target_samples
+
+    def _preprocess_model_batch(self, batch: ModelBatch, input_steps: int, forecast_dt: int):
+        """
+        Perform necessary pre-processing of model batch
+        """
+        batch.source_tokens_lens = get_tokens_lens(self.streams, batch.source_samples, input_steps)
+
+        compute_offsets_scatter_embed(
+            self.streams, batch.source_samples, batch.source_tokens_lens, input_steps
+        )
+
+        return batch
+
+    def _get_batch(self, idx: int, forecast_dt: int):
         """
 
         modes :
@@ -526,159 +647,91 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
 
         mode = self.training_cfg.get("training_mode")
+        source_cfgs = self.training_cfg.get("model_input")
 
         # get/coordinate masks
         # TODO: should also return number of views
         masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
 
-        if mode == "masking" or mode == "student-teacher":
-            batch = ModelBatch(self.streams, num_source_samples, num_target_samples, forecast_dt)
-
-            # for all streams
-            for stream_info, stream_ds in zip(self.streams, self.streams_datasets, strict=True):
-                name = stream_info["name"]
-
-                # TODO: data class for this or something similar
-                (
-                    target_masks,
-                    source_masks,
-                    student_to_teacher,
-                    target_metadata_list,
-                    source_metadata_list,
-                ) = masks_streams[name]
-
-                # input_data and output_data is conceptually consecutive but differs
-                # in source and target channels; overlap in one window when self.forecast_offset=0
-                (input_data, output_data) = self._get_data_windows(idx, forecast_dt, stream_ds)
-
-                # tokenize windows
-                # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-                input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
-                output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
-
-                for sidx, source_mask in enumerate(source_masks):
-                    # Map each student (source) to its teacher (target)
-                    tidx = student_to_teacher[sidx].item()
-                    sdata = self._build_stream_data(
-                        "target_coords target_values",
-                        idx,
-                        forecast_dt,
-                        stream_info,
-                        input_data,
-                        output_data,
-                        input_tokens,
-                        output_tokens,
-                        target_mask=target_masks[tidx],
-                        source_mask=source_mask,
-                    )
-
-                    batch.add_source_stream(sidx, tidx, name, sdata, source_metadata_list[sidx])
-
-                # stream_data_target can contain network input
-                stream_data_target = {}
-
-                # for t_idx, mask in enumerate(source_masks):
-                for tidx, target_mask in enumerate(target_masks):
-                    # Note: for EMATeacher we the the streamdata obj
-                    # to have the target mask applied to the inputs!
-                    # Hence the target mask is also the source mask here!!
-                    sdata = self._build_stream_data(
-                        "target_values",
-                        idx,
-                        forecast_dt,
-                        stream_info,
-                        input_data,
-                        output_data,
-                        input_tokens,
-                        output_tokens,
-                        target_mask=target_mask,
-                        source_mask=target_mask,
-                    )
-                    stream_data_target[name] = sdata
-                    target_metadata = target_metadata_list[tidx]
-                    # also want to add the mask to the metadata
-                    target_metadata.mask = target_mask
-                    # Map target to all source students
-                    student_indices = [
-                        s_idx for s_idx, tid in enumerate(student_to_teacher) if tid == tidx
-                    ]
-                    batch.add_target_stream(tidx, student_indices, name, sdata, target_metadata)
-
+        if mode == "masking":
+            source_select = ["network_input", "target_coords"]
+            target_select = ["target_values"]
+        elif mode == "student_teacher" or mode == "latent_loss":
+            source_select = ["network_input"]
+            target_select = ["network_input"]
         else:
-            assert False, "Mode not implemented"
+            raise NotImplementedError(f"Unsupported training mode {mode}.")
+
+        batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
+
+        # for all streams
+        for stream_info, (stream_name, stream_ds) in zip(
+            self.streams, self.streams_datasets.items(), strict=True
+        ):
+            (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
+
+            # max number of input steps
+            i_max = np.array([sc.get("num_steps_input", 1) for sc in source_cfgs]).max().item()
+            # TODO: remove
+            self.num_steps_input = i_max
+            # input_data and output_data is conceptually consecutive but differs
+            # in source and target channels; overlap in one window when self.forecast_offset=0
+            (input_data, output_data) = self._get_data_windows(idx, forecast_dt, i_max, stream_ds)
+
+            # tokenize windows
+            # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
+            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
+            output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+
+            for sidx, source_mask in enumerate(source_masks.masks):
+                # Map each source to its target
+                tidx = source_to_target[sidx].item()
+                sdata = self._build_stream_data(
+                    source_select,
+                    idx,
+                    forecast_dt,
+                    stream_info,
+                    source_masks.metadata[sidx].params.get("num_steps_input", 1),
+                    input_data,
+                    output_data,
+                    input_tokens,
+                    output_tokens,
+                    output_mask=target_masks.masks[tidx],
+                    input_mask=source_mask,
+                )
+
+                batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
+
+            # for t_idx, mask in enumerate(source_masks):
+            for tidx, target_mask in enumerate(target_masks.masks):
+                # Note: for EMATeacher we the the streamdata obj
+                # to have the target mask applied to the inputs!
+                # Hence the target mask is also the source mask here!!
+                sdata = self._build_stream_data(
+                    target_select,
+                    idx,
+                    forecast_dt,
+                    stream_info,
+                    target_masks.metadata[tidx].params.get("num_steps_input", 1),
+                    input_data,
+                    output_data,
+                    input_tokens,
+                    output_tokens,
+                    output_mask=target_mask,
+                    input_mask=target_mask,
+                )
+                target_metadata = target_masks.metadata[tidx]
+                # also want to add the mask to the metadata
+                target_metadata.mask = target_mask
+                # Map target to all source students
+                student_indices = [
+                    s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx
+                ]
+                batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
+
+        batch = self._preprocess_model_batch(batch, self.num_steps_input, forecast_dt)
 
         return batch
-
-    def _get_source_target_masks(self, training_mode):
-        """
-        Generate source and target masks for all streams
-        """
-
-        masks = {}
-        for stream_info in self.streams:
-            # Build source and target sample masks
-            target_data, source_data, mapping = self.tokenizer.masker.build_samples_for_stream(
-                training_mode, self.num_healpix_cells, self.training_cfg
-            )
-
-            # TODO: avoid the unpacking here
-            masks[stream_info["name"]] = (
-                target_data[0],
-                source_data[0],
-                mapping,
-                target_data[1],
-                source_data[1],
-            )
-
-        # Determine number of views direct from config (teacher & student views)
-        source_cfgs = self.training_cfg.get("model_input")
-        target_cfgs = self.training_cfg.get("target_input", source_cfgs)
-        target_cfgs = target_cfgs if target_cfgs is not None else source_cfgs
-        num_target_samples = (
-            max(mapping) + 1
-        )  # np.array([sc.get("num_samples", 1) for sc in source_cfgs]).sum().item()
-        num_source_samples = len(
-            mapping
-        )  # np.array([sc.get("num_samples", 1) for sc in target_cfgs]).sum().item()
-
-        return masks, num_source_samples, num_target_samples
-
-    def _preprocess_model_data(self, batch, forecast_dt):
-        """ """
-
-        # aggregated lens of tokens per cell across input batch samples
-        source_cell_lens = compute_source_cell_lens(batch, self.num_input_steps)
-
-        # compute offsets for scatter computation after embedding
-        batch = compute_offsets_scatter_embed(batch, self.num_input_steps)
-
-        # compute offsets and auxiliary data needed for prediction computation
-        # (info is not per stream so separate data structure)
-
-        # TODO: only use when targets are predicted with decoders
-        target_coords_idx = compute_idxs_predict(
-            self.forecast_offset + forecast_dt, batch, self.streams
-        )
-
-        return batch, source_cell_lens, target_coords_idx
-
-    def _preprocess_model_batch_sample(self, sample: Sample, forecast_dt: int):
-        """ """
-        streams = [sd for sd in sample.streams_data.values() if sd is not None]
-        if not streams:
-            sample.set_preprocessed([], [])
-            return
-        _, scl, tci = self._preprocess_model_data([streams], forecast_dt)
-        sample.set_preprocessed(scl, tci)
-
-    def _preprocess_model_batch(self, model_batch: ModelBatch, forecast_dt: int):
-        """
-        Perform necessary pre-processing of model batch
-        """
-        for sample in model_batch.source_samples:
-            self._preprocess_model_batch_sample(sample, forecast_dt)
-        for sample in model_batch.target_samples:
-            self._preprocess_model_batch_sample(sample, forecast_dt)
 
     def __iter__(self) -> ModelBatch:
         """
@@ -707,23 +760,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
 
-                # Sample masking strategy once per batch item
-                # TODO: still needed?
-                self.tokenizer.masker.set_batch_strategy()
+                batch = self._get_batch(idx, forecast_dt)
 
-                batch = self._get_sample(idx, forecast_dt)
-
-                # Reset masking strategy for next batch item
-                # TODO: still needed?
-                self.tokenizer.masker.reset_batch_strategy()
-
-                # # skip completely empty batch item or when all targets are empty -> no grad
+                # skip completely empty batch item or when all targets are empty -> no grad
                 if not batch.is_empty():
                     break
                 else:
                     logger.warning("Skipping empty batch.")
-
-            self._preprocess_model_batch(batch, forecast_dt)
 
             yield batch
 

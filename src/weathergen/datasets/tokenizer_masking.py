@@ -147,7 +147,7 @@ class TokenizerMasking(Tokenizer):
 
         # capture per-view mask state to later produce consistent targets
         mask_state = {
-            "strategy": self.masker.current_strategy,
+            "strategy": None,  # self.masker.current_strategy,
             "mask_tokens": mask_tokens,
             "mask_channels": mask_channels,
         }
@@ -203,7 +203,6 @@ class TokenizerMasking(Tokenizer):
     def get_target_coords(
         self,
         stream_info: dict,
-        sampling_rate_target: float,
         rdata: IOReaderData,
         token_data,
         time_win: tuple,
@@ -263,7 +262,6 @@ class TokenizerMasking(Tokenizer):
     def get_target_values(
         self,
         stream_info: dict,
-        sampling_rate_target: float,
         rdata: IOReaderData,
         token_data,
         time_win: tuple,
