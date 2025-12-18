@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --verbose --script
+#!/usr/bin/env -S uv run --script
 # /// script
 # dependencies = [
 #   "weathergen-metrics",
@@ -153,7 +153,7 @@ def _fetch_runs(client: MlflowClient, max_runs: int, exp_id: str, before_ts_ms: 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description=""" Cleans up old MLFlow runs:
+        description=""" Cleans up old MLFlow runs to remove the metrics history.
 
 - takes all the child runs in mlflow before a cutoff dates (ex: train_xxxx before 2025-1-1)
 
