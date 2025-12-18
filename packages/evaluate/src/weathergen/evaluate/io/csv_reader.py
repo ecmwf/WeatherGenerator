@@ -126,13 +126,13 @@ class CsvReader(Reader):
         """
         metric_name = _metric_quaver_convention(metric)
         region_name = _region_quaver_convention(region)
-        
+
         data = self.data.loc[
-                (self.data["score"] == metric_name)
-                & (self.data["domain_name"] == region_name)
-                & (self.data["step"].isin(forecast_steps))
-                & (self.data["channel"].isin(channels))
-            ]
+            (self.data["score"] == metric_name)
+            & (self.data["domain_name"] == region_name)
+            & (self.data["step"].isin(forecast_steps))
+            & (self.data["channel"].isin(channels))
+        ]
 
         data = data.copy()
         data["sample"] = data["date"].astype("category").cat.codes
@@ -169,7 +169,6 @@ class CsvReader(Reader):
 
         for metric in metrics:
             for region in regions:
-               
                 # fill it only for matching metric
                 data = self.get_values(
                     region=region, metric=metric, forecast_steps=fsteps, channels=channels

@@ -207,7 +207,7 @@ class WeatherGenReader(Reader):
                         continue
 
                     target, pred = out.target.as_xarray(), out.prediction.as_xarray()
-                    
+
                     npoints = len(target.ipoint)
                     pps.append(npoints)
 
@@ -252,9 +252,9 @@ class WeatherGenReader(Reader):
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
 
-                #apply z scaling if needed
+                # apply z scaling if needed
                 da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
-                da_preds_fs = self.scale_z_channels(da_preds_fs , stream)
+                da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
 
                 if len(samples) == 1:
                     _logger.debug("Repeating sample coordinate for single-sample case.")
@@ -301,26 +301,24 @@ class WeatherGenReader(Reader):
         Parameters
         ----------
         data :
-            Input dataset  
+            Input dataset
         stream :
             Stream name.
         Returns
         -------
             Returns a Dataset where channels have been scaled if needed
         """
-       
+
         channels_z = [ch for ch in data.channel.values if str(ch).startswith("z_")]
         data_scaled = data.copy()
         factor = 9.80665
-       
+
         if channels_z and stream == "ERA5":
-            idx = [i for i, ch in enumerate(data.channel.values) if str(ch).startswith("z_")]
             data_scaled.loc[dict(channel=channels_z)] = data_scaled.sel(channel=channels_z) / factor
         else:
             data_scaled = data
-       
-        return data_scaled
 
+        return data_scaled
 
     def get_climatology_filename(self, stream: str) -> str | None:
         """

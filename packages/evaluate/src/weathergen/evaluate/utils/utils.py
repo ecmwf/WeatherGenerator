@@ -54,7 +54,13 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
     return preds_next, tars_next
 
 
-def calc_scores_per_stream(reader: Reader, stream: str, regions: list[str], metrics_dict: dict, plot_score_maps: bool =False):
+def calc_scores_per_stream(
+    reader: Reader,
+    stream: str,
+    regions: list[str],
+    metrics_dict: dict,
+    plot_score_maps: bool = False,
+):
     """
     Calculate scores for a given run and stream using the specified metrics.
 
@@ -113,9 +119,12 @@ def calc_scores_per_stream(reader: Reader, stream: str, regions: list[str], metr
     for region in regions:
         bbox = RegionBoundingBox.from_region_name(region)
         metrics = metrics_dict[region]
-       
-        _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for region {region} and metrics {metrics}...")
-       
+
+        _logger.info(
+            f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
+            f" and metrics {metrics}..."
+        )
+
         metric_stream = xr.DataArray(
             np.full(
                 (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
@@ -693,7 +702,7 @@ def merge(dst: dict, src: dict) -> dict:
     """
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
-            deep_merge(dst[k], v)
+            merge(dst[k], v)
         else:
             dst[k] = v
     return dst

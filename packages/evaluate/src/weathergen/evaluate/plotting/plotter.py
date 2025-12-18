@@ -878,7 +878,7 @@ class LinePlots:
         y_dim: str,
         print_summary: bool = False,
         line: float | None = None,
-        vlines : bool = False,
+        vlines: bool = False,
         title: str | None = None,
     ) -> None:
         """
@@ -898,7 +898,7 @@ class LinePlots:
         line:
             If provided, draw a horizontal line at the given y-value.
         vlines:
-            If True, draw vertical lines to separate each group of variables. 
+            If True, draw vertical lines to separate each group of variables.
         title:
             Title for the plot.
         Returns
@@ -921,26 +921,22 @@ class LinePlots:
             self.print_all_points_from_graph(fig)
 
         if line:
-            plt.axhline(y=line, color="black", linestyle="--", linewidth=1)
+            plt.axhline(y=line, color="black", linestyle="--", linewidth=1, zorder=1)
 
-        # if vlines:
-        #     vlines = []
-        #     last_prefix = None
+        if vlines:
+            vlines = []
+            last_prefix = None
 
-        #     channels = [
-        #         t.get_text()
-        #         for t in fig.gca().get_xticklabels()
-        #         if t.get_text()
-        #     ]
+            channels = [t.get_text() for t in fig.gca().get_xticklabels() if t.get_text()]
 
-        #     for idx, ch in enumerate(channels):
-        #         m = re.match(r"([a-zA-Z]+)_\d+", ch)
-        #         prefix = m.group(1) if m else ch
-        #         if last_prefix is not None and prefix != last_prefix:
-        #             vlines.append(idx - 0.5)
-        #         last_prefix = prefix
-        #     for vl in vlines:
-        #         plt.axvline(x=vl, color="#001f3f", linestyle="-", linewidth=0.5, zorder=1)
+            for idx, ch in enumerate(channels):
+                m = re.match(r"([a-zA-Z]+)_\d+", ch)
+                prefix = m.group(1) if m else ch
+                if last_prefix is not None and prefix != last_prefix:
+                    vlines.append(idx - 0.5)
+                last_prefix = prefix
+            for vl in vlines:
+                plt.axvline(x=vl, color="#001f3f", linestyle="-", linewidth=0.5, zorder=1)
 
         plt.tight_layout()
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
@@ -996,7 +992,7 @@ class LinePlots:
             baseline = data_list[0]
 
         ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
-        
+
         channel_names = set(ref_raw.channel.values)
         # Merge channels from remaining datasets
         for data in data_list[1:]:
@@ -1081,7 +1077,7 @@ class LinePlots:
 
             ref = data.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps[0])
             ref = self._preprocess_data(ref, "channel", verbose=False)
-            
+
             if ref.isnull().all():
                 _logger.warning(
                     f"Heatmap:: Reference data for metric {metric} and label {label} contains "
