@@ -12,8 +12,11 @@
 import logging
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
+
+from collections import deque
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
@@ -46,6 +49,8 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             for name, local_conf in losses.items()
             # if name in self.valid_loss_names
         }
+        
+        self.latent_buffer = deque(maxlen=cf.training_config.loss_module.ssl_memory_buffer_size)
 
     def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
         # gradient loss
@@ -68,6 +73,10 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
             loss = loss + (weight * loss_value)
             # losses_all[name] = loss_value.item()
+
+        # TODO update to preds and targets
+        #self.latent_buffer.append({"preds": preds.detach(), "targets": targets.detach()})
+        #past = list(self.latent_buffer)
 
         return LossValues(loss=loss, losses_all={}, stddev_all={})
 
@@ -259,3 +268,67 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
         )
+
+
+# LeJEPA loss
+
+class SIGReg(torch.nn.Module):
+    def __init__(self, knots=17):
+        super().__init__()
+        t = torch.linspace(0, 3, knots, dtype=torch.float32)
+        dt = 3 / (knots - 1)
+        weights = torch.full((knots,), 2 * dt, dtype=torch.float32)
+        weights[[0, -1]] = dt
+        window = torch.exp(-t.square() / 2.0)
+        self.register_buffer("t", t)
+        self.register_buffer("phi", window)
+        self.register_buffer("weights", weights * window)
+
+    def forward(self, proj):
+        A = torch.randn(proj.size(-1), 256, device="cuda")
+        A = A.div_(A.norm(p=2, dim=0))
+        x_t = (proj @ A).unsqueeze(-1) * self.t
+        err = (x_t.cos().mean(-3) - self.phi).square() + x_t.sin().mean(-3).square()
+        statistic = (err @ self.weights) * proj.size(-2)
+        return statistic.mean()
+    
+
+class ProjectionHead(torch.nn.Module):
+    def __init__(self, input_dim, proj_dim=256):
+        super().__init__()
+        # make sure input dim is correct
+        self.proj = MLP(512, [12288, 2048, proj_dim], norm_layer=nn.BatchNorm1d)
+
+    def forward(self, emb):
+        # get embeddings from the encoder
+        # TODO: reshape here
+        return self.proj(emb).reshape(N, V, -1).transpose(0, 1)   
+
+
+def lejepa_loss(emb, proj):
+
+    inv_loss = (proj.mean(0) - proj).square().mean()
+    sigreg = SIGReg().to("cuda")
+    sigreg_loss = sigreg(proj)
+    lejepa_loss = sigreg_loss * cfg.lamb + inv_loss * (1 - cfg.lamb)
+    y_rep, yhat = y.repeat_interleave(cfg.V), probe(emb.detach())
+    probe_loss = F.cross_entropy(yhat, y_rep)
+    loss = lejepa_loss + probe_loss
+    return loss
+
+
+class MLP(nn.Sequential):
+    def __init__(self, in_channels, hidden_channels, norm_layer=None, activation_layer=nn.ReLU):
+        layers = []
+        in_dim = in_channels
+        
+        for h_dim in hidden_channels[:-1]:
+            layers.append(nn.Linear(in_dim, h_dim))
+            if norm_layer is not None:
+                layers.append(norm_layer(h_dim))
+            layers.append(activation_layer(inplace=True))
+            in_dim = h_dim
+            
+        layers.append(nn.Linear(in_dim, hidden_channels[-1]))
+        
+        super().__init__(*layers)
