@@ -47,7 +47,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             # if name in self.valid_loss_names
         }
 
-    def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
+    def compute_loss(self, preds, targets, metadata) -> LossValues:
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
 
@@ -58,12 +58,14 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         source2target_matching_idxs, output_info, target2source_matching_idxs, target_info = (
             metadata
         )
+        preds = preds.latent[0] # [0]  because we always want the first fstep
+        targets = targets.latent # [0]  because we always want the first fstep
         for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = gather_preds_for_loss(
-                name, preds, output_info, target2source_matching_idxs
+                name, preds[name], output_info, target2source_matching_idxs
             )
             targets_for_loss = gather_targets_for_loss(
-                name, targets, target_info, target2source_matching_idxs
+                name, targets[name], target_info, target2source_matching_idxs
             )
             loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
             loss = loss + (weight * loss_value)
@@ -73,6 +75,9 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
 
 def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, teacher_masks):
+    # TODO remove as we deal with batch dimension
+    student_masks = student_masks.squeeze()
+    teacher_masks= teacher_masks.squeeze()
     masks_weight = (
         (1 / student_masks.sum(-1).clamp(min=1.0))
         .unsqueeze(-1)
@@ -136,7 +141,7 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
         return {
             "student_patches_masked": torch.stack(
                 [
-                    p.latent[name]
+                    p
                     for p, info in zip(preds, metadata, strict=False)
                     if info.params["loss"] == "jepa"
                 ],
@@ -157,7 +162,7 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
         return {
             "student_patches_masked": torch.stack(
                 [
-                    p.latent[name][:, 1:]
+                    p[:, 1:]
                     for p, info in zip(preds, metadata, strict=False)
                     if info.params["loss"] == "ibot"
                 ],
@@ -169,7 +174,7 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
             ).unsqueeze(1),
             "student_class_masked": torch.stack(
                 [
-                    p.latent[name][:, :1]
+                    p[:, :1]
                     for p, info in zip(preds, metadata, strict=False)
                     if info.params["loss"] == "ibot"
                 ],
@@ -180,7 +185,7 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
         local2global_dino_student = []
         for student_indices in target2source_matching_idxs:
             local_preds = [
-                preds[sidx].latent[name]
+                preds[sidx]
                 for sidx in student_indices
                 if metadata[sidx].params["loss"] == "dino"
             ]
@@ -192,7 +197,7 @@ def gather_preds_for_loss(name, preds, metadata, target2source_matching_idxs):
             "local2global_dino_student": local2global_dino_student,
             "global2global_dino_student": torch.stack(
                 [
-                    p.latent[name]
+                    p
                     for p, info in zip(preds, metadata, strict=False)
                     if info.params["loss"] == "dino" and info.params["relationship"] == "identity"
                 ],
@@ -213,7 +218,7 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
         """
         return {
             "teacher_patches_masked": torch.stack(
-                [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
+                [p for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
             ),
             "teacher_masks": torch.stack(
@@ -230,7 +235,7 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
         """
         return {
             "teacher_patches_masked": torch.stack(
-                [p.latent[name][:, 1:] for p, info in zip(targets, metadata, strict=False)],
+                [p[:, 1:] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
             ),
             "teacher_masks": torch.stack(
@@ -238,19 +243,19 @@ def gather_targets_for_loss(name, targets, metadata, target2source_matching_idxs
                 dim=0,
             ).unsqueeze(1),
             "teacher_class_masked": torch.stack(
-                [p.latent[name][:, :1] for p, info in zip(targets, metadata, strict=False)],
+                [p[:, :1] for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
             ),
         }
     elif name == "DINO":
         return {
             "local2global_dino_teacher": torch.stack(
-                [p.latent[name] for p, info in zip(targets, metadata, strict=False)],
+                [p for p, info in zip(targets, metadata, strict=False)],
                 dim=0,
             ),
             "global2global_dino_teacher": torch.stack(
                 list(
-                    reversed([p.latent[name] for p, info in zip(targets, metadata, strict=False)])
+                    reversed([p for p, info in zip(targets, metadata, strict=False)])
                 ),
                 dim=0,
             ),

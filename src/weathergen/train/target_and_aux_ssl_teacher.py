@@ -36,7 +36,8 @@ class EMATeacher(TargetAndAuxModuleBase):
         return
 
     def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
-        self.ema_model.ema_model.reshard()
+        if self.ema_model.is_model_sharded:
+            self.ema_model.ema_model.reshard()
         self.ema_model.update(istep, self.batch_size)
 
     def compute(
