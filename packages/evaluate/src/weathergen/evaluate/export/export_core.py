@@ -204,6 +204,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             Epoch number to identify the Zarr store.
         rank : int
             Rank number to identify the Zarr store.
+        regrid_degree : float
+            If specified, regrid the data to a regular lat/lon grid with the given degree
         output_dir : str
             Directory to save the NetCDF files.
         output_format : str

@@ -20,6 +20,7 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
+from zarr.storage import LocalStore
 
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
@@ -100,6 +101,7 @@ class IOReaderData:
     geoinfos: NDArray[DType]
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
+    is_spoof: bool = False
 
     def is_empty(self):
         """
@@ -141,6 +143,7 @@ class IOReaderData:
         geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
         data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
         datetimes = np.array([], dtype=other.datetimes.dtype)
+        is_spoof = True
 
         for other in others:
             n_datapoints = len(other.data)
@@ -152,8 +155,9 @@ class IOReaderData:
             geoinfos = np.concatenate([geoinfos, other.geoinfos])
             data = np.concatenate([data, other.data])
             datetimes = np.concatenate([datetimes, other.datetimes])
+            is_spoof = is_spoof and other.is_spoof
 
-        return cls(coords, geoinfos, data, datetimes)
+        return cls(coords, geoinfos, data, datetimes, is_spoof)
 
 
 @dataclasses.dataclass
@@ -185,7 +189,7 @@ class ItemKey:
         Infer forecast offset by the (non)presence of targets at fstep 0.
 
         Args:
-            datasets: Datasets found in a fstep 0 OutputItem.
+            datasets: Datasets found in a fstep 0 OutputItem (eg. ZarrIO.example_key).
         """
         # forecast offset=1 should produce no targets at fstep 0
         return 0 if "target" in datasets else 1
@@ -317,15 +321,17 @@ class ZarrIO:
     def __init__(self, store_path: pathlib.Path):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
+        self._store: LocalStore | None = None
 
     def __enter__(self) -> typing.Self:
-        self._store = zarr.storage.DirectoryStore(self._store_path)
+        self._store = LocalStore(self._store_path)
         self.data_root = zarr.group(store=self._store)
 
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
-        self._store.close()
+        if self._store is not None:
+            self._store.close()
 
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
@@ -355,15 +361,13 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
-    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Group:
+    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
-        group: zarr.Group | None
         if create:
             group = self.data_root.create_group(item.path)
         else:
             try:
-                group = self.data_root.get(item.path)
-                assert group is not None, f"Zarr group: {item.path} does not exist."
+                group = self.data_root[item.path]
             except KeyError as e:
                 msg = f"Zarr group: {item.path} has not been created."
                 raise FileNotFoundError(msg) from e
@@ -388,14 +392,14 @@ class ZarrIO:
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
         if array.size == 0:  # sometimes for geoinfo
-            chunks = None
+            chunks = "auto"
         else:
             chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + "into group: {group}."
         )
-        group.create_dataset(name, data=array, chunks=chunks)
+        group.create_array(name, data=array, chunks=chunks)
 
     @functools.cached_property
     def forecast_offset(self) -> int:
@@ -404,13 +408,17 @@ class ZarrIO:
 
     @functools.cached_property
     def example_key(self) -> ItemKey:
+        fstep = 0
         try:
             sample, example_sample = next(self.data_root.groups())
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
+
+        assert fstep in example_stream.groups(), (
+            "fstep 0 is missisg, but should always contain at least sources."
+        )
 
         return ItemKey(sample, fstep, stream)
 
@@ -433,7 +441,8 @@ class ZarrIO:
         _, example_sample = next(self.data_root.groups())
         _, example_stream = next(example_sample.groups())
 
-        all_steps = list(example_stream.group_keys())
+        all_steps = sorted(list(example_stream.group_keys()))
+
         if self.forecast_offset == 1:
             return all_steps[1:]  # exclude fstep with no targets/preds
         else:
@@ -615,7 +624,7 @@ class OutputBatchData:
         return slice(start, start + n_samples)
 
     def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
-        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
+        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints]
 
         # ensure _coords has size (?,2)
         if len(_coords) == 0:
@@ -646,7 +655,7 @@ class OutputBatchData:
         source: IOReaderData = self.sources[sample][stream_idx]
 
         assert source.data.shape[1] == len(channels), (
-            "Number of source channel names does not align with source data"
+            f"Number of source channel names {len(channels)} does not align with source data."
         )
 
         source_dataset = OutputDataset(

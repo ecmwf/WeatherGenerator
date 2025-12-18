@@ -7,26 +7,29 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# Standard library
 import json
 import logging
 from collections import defaultdict
 from pathlib import Path
 
+# Third-party
 import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.evaluate.clim_utils import get_climatology
-from weathergen.evaluate.io_reader import Reader
-from weathergen.evaluate.plot_utils import (
+# Local application / package
+from weathergen.evaluate.io.io_reader import Reader
+from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     plot_metric_region,
     score_card_metric_region,
 )
-from weathergen.evaluate.plotter import BarPlots, LinePlots, Plotter, ScoreCards
-from weathergen.evaluate.score import VerifiedData, get_score
-from weathergen.evaluate.score_utils import RegionBoundingBox
+from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, ScoreCards
+from weathergen.evaluate.scores.score import VerifiedData, get_score
+from weathergen.evaluate.utils.clim_utils import get_climatology
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -267,7 +270,7 @@ def _plot_score_maps_per_stream(
 
     for metric in plot_metrics.coords["metric"].values:
         for ens_val in tqdm(ens_values, f"Plotting metric - {metric}"):
-            tag = f"score_maps_{region}_{metric}_fstep_{fstep}" + (
+            tag = f"score_maps_{metric}_fstep_{fstep}" + (
                 f"_ens_{ens_val}" if ens_val is not None else ""
             )
             for channel in plot_metrics.coords["channel"].values:
@@ -279,7 +282,7 @@ def _plot_score_maps_per_stream(
                 title = f"{metric} - {channel}: fstep {fstep}" + (
                     f", ens {ens_val}" if ens_val is not None else ""
                 )
-                plotter.scatter_plot(data, map_dir, channel, tag=tag, title=title)
+                plotter.scatter_plot(data, map_dir, channel, region, tag=tag, title=title)
 
 
 def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
@@ -319,9 +322,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
         "fps": global_plotting_opts.get("fps", 2),
+        "regions": global_plotting_opts.get("regions", ["global"]),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
-
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")

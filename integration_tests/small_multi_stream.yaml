@@ -1,0 +1,34 @@
+streams_directory: "./integration_tests/streams_multi/"
+run_path: "./results"
+model_path: "./models"
+loss_fcts: [["mse", 1.0]]
+loss_fcts_val: [["mse", 1.0]]
+num_mini_epochs: 1
+samples_per_mini_epoch: 128
+samples_per_validation: 4
+lr_steps_warmup: 4
+lr_steps_cooldown: 2
+loader_num_workers: 8
+
+# forecast_offset: 0
+forecast_offset : 1
+forecast_steps: 2
+forecast_policy: "fixed"
+forecast_freeze_model: False
+forecast_att_dense_rate: 1.0
+fe_num_blocks: 2
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+fe_layer_norm_after_blocks: [] 
+impute_latent_noise_std: 0.0
+
+healpix_level: 4
+training_mode: "forecast"
+
+train_log:
+  log_interval: 1
+
+start_date: 201210010000
+# need to customize the starting date for NPPATMS
+# otherwise Integration Test can fails (nan values in the losses)
