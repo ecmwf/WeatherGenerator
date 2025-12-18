@@ -180,6 +180,8 @@ class EncoderModule(torch.nn.Module):
             cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
             q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
 
+            if tokens_c.shape[0] == 0:
+                continue
             # local assimilation model
             tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
 
