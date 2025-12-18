@@ -111,8 +111,8 @@ training_config:
 num_register_tokens: 16
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 512 #4096
-samples_per_validation: 32 #512
+samples_per_mini_epoch: 4096
+samples_per_validation: 512
 shuffle: True
 
 lr_scaling_policy: "sqrt"
