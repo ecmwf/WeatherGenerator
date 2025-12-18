@@ -95,18 +95,17 @@ validation_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1
 # TODO: adapt so that the masking or forecast config entry also sits here
 training_config:
   # # when this is "masking", we are basically only using the model_input subconfig
-  training_mode: "masking"  # "masking", "student_teacher", "forecast"
+  training_mode: "masking"  
 
   losses :
-      LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]}
+      LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]}
   # Example config for masking/diffusion
   model_input:
-    - masking_strategy: "random" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+    - masking_strategy: "forecast" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
       num_samples: 1  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
       relationship: "complement"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
       num_steps_input: 1
-      # loss : ibot
 
 num_register_tokens: 16
 
