@@ -16,8 +16,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plotting.plot_utils import (
     DefaultMarkerSize,
 )
@@ -1203,7 +1203,7 @@ class ScoreCards:
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
                 # Perform Wilcoxon test
-                if diff["forecast_step"].item() > 1.0:
+                if len(diff["forecast_step"].values) > 1:
                     stat, p = wilcoxon(diff, alternative=alt)
 
                     # Draw rectangle border for significance
