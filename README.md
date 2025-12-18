@@ -29,3 +29,9 @@ The [main branch](https://github.com/ecmwf/WeatherGenerator/tree/main) is the mo
 
 The [develop branch](https://github.com/ecmwf/WeatherGenerator/tree/develop) has the latest
 features. However, it is currently evolving at a fast pace. It should not be expected to have stable code or weight interfaces, or to be backward compatible.
+
+# Copyright and License
+
+This software is licensed under the terms of the Apache Licence Version 2.0 which can be obtained at [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0).
+
+In applying this licence, ECMWF does not waive the privileges and immunities granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
