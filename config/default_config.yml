@@ -159,6 +159,7 @@ log_validation: 0
 streams_output: ["ERA5"]
 
 istep: 0
+samples: 0
 run_history: []
 
 desc: ""

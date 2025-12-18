@@ -97,7 +97,7 @@ class TrainLogger:
     #######################################
     def add_train(
         self,
-        samples: int,
+        num_samples: int,
         lr: float,
         avg_loss: Tensor,
         losses_all: dict[str, Tensor],
@@ -108,14 +108,14 @@ class TrainLogger:
         """
         Log training data
         """
-        metrics: dict[str, float] = dict(num_samples=samples)
+        metrics: dict[str, float] = dict(num_samples=num_samples)
 
         log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
-        log_vals += [samples]
+        log_vals += [num_samples]
 
         metrics["loss_avg_mean"] = avg_loss.nanmean().item()
         metrics["learning_rate"] = lr
-        metrics["num_samples"] = int(samples)
+        metrics["num_samples"] = int(num_samples)
         log_vals += [avg_loss.nanmean().item()]
         log_vals += [lr]
 
@@ -145,16 +145,16 @@ class TrainLogger:
 
     #######################################
     def add_val(
-        self, samples: int, losses_all: dict[str, Tensor], stddev_all: dict[str, Tensor]
+        self, num_samples: int, losses_all: dict[str, Tensor], stddev_all: dict[str, Tensor]
     ) -> None:
         """
         Log validation data
         """
 
-        metrics: dict[str, float] = dict(num_samples=int(samples))
+        metrics: dict[str, float] = dict(num_samples=int(num_samples))
 
         log_vals: list[float] = [int(datetime.datetime.now().strftime("%Y%m%d%H%M%S"))]
-        log_vals += [samples]
+        log_vals += [num_samples]
 
         stream_names = [st["name"] for st in self.cf.streams]
 

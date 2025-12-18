@@ -612,6 +612,7 @@ class Trainer(TrainerBase):
                 self.loss_model_hist = []
 
             self.cf.istep += 1
+            self.cf.samples += self.cf.batch_size_per_gpu * self.world_size_original
 
         self.dataset.advance()
 
@@ -845,16 +846,15 @@ class Trainer(TrainerBase):
             - After logging, historical loss and standard deviation records are cleared.
         """
         avg_loss, losses_all, stddev_all = self._prepare_losses_for_logging()
-        samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.world_size
 
         if is_root():
             # plain logger
             if stage == VAL:
-                self.train_logger.add_val(samples, losses_all, stddev_all)
+                self.train_logger.add_val(self.cf.samples, losses_all, stddev_all)
 
             elif self.cf.istep >= 0:
                 self.train_logger.add_train(
-                    samples,
+                    self.cf.samples,
                     self.lr_scheduler.get_lr(),
                     avg_loss,
                     losses_all,

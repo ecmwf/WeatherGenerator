@@ -152,11 +152,11 @@ class TokenizerMasking(Tokenizer):
         # otherwise take global sampling_rate_target from config
         sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
 
-        samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
+        mask = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
             target_tokens_lens
         )
         target_tokens = [
-            (tokens[samples]) for tokens, samples in zip(target_tokens, samples, strict=False)
+            (tokens[mask]) for tokens, mask in zip(target_tokens, mask, strict=False)
         ]
         target_tokens_lens = [len(t) for t in target_tokens]
 
