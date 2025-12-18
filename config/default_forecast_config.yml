@@ -104,7 +104,7 @@ training_config:
     - masking_strategy: "forecast" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
       num_samples: 1  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
-      relationship: "complement"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      relationship: "independent"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
       num_steps_input: 1
 
 num_register_tokens: 16
