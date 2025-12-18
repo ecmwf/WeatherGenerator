@@ -107,7 +107,7 @@ training_config:
       relationship: "independent"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
       num_steps_input: 1
 
-num_register_tokens: 16
+num_register_tokens: 0
 
 num_mini_epochs: 64
 samples_per_mini_epoch: 4096

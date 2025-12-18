@@ -113,7 +113,7 @@ training_config:
       # loss : ibot
 
 
-num_register_tokens: 16
+num_register_tokens: 0
 
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096
