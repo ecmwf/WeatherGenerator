@@ -135,20 +135,21 @@ def _fetch_runs(client: MlflowClient, max_runs: int, exp_id: str, before_ts_ms: 
         [exp_id],
         filter_string=f"attributes.start_time <= '{before_ts_ms}'",
         order_by=["attributes.start_time DESC"],
-        max_results=max_runs,)
+        max_results=max_runs,
+    )
     _logger.info(f"Read {len(batch.to_list())} runs")
     res += batch.to_list()
     while batch is not None and batch.token is not None:
         batch = client.search_runs(
-        [exp_id],
-        filter_string=f"attributes.start_time <= '{before_ts_ms}'",
-        order_by=["attributes.start_time DESC"],
-        max_results=max_runs,page_token=batch.token)
+            [exp_id],
+            filter_string=f"attributes.start_time <= '{before_ts_ms}'",
+            order_by=["attributes.start_time DESC"],
+            max_results=max_runs,
+            page_token=batch.token,
+        )
         res += batch.to_list()
         _logger.info(f"Read {len(batch.to_list())} runs")
     return res
-        
-
 
 
 if __name__ == "__main__":
