@@ -16,7 +16,7 @@ _logger = logging.getLogger(__name__)
 phase = "train"
 exp_lifecycle = "test"
 project = "WeatherGenerator"
-# experiment_id = "384213844828345"
+#experiment_id = "384213844828345"
 all_stages = ["train", "val", "eval"]
 
 # Polars utilities
@@ -71,7 +71,7 @@ def latest_runs():
     return latest_run_by_exp
 
 
-# @st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
 def all_runs():
     _logger.info("Downloading all runs from MLFlow")
     runs_pdf = pl.DataFrame(
