@@ -133,7 +133,7 @@ log_grad_norms: False
 
 start_date: 1979-01-01T00:00
 end_date: 2022-12-31T00:00
-start_date_val: 2023-01-01T00:00
+start_date_val: 2023-10-01T00:00
 end_date_val: 2023-12-31T00:00
 time_window_step: 06:00:00
 time_window_len: 06:00:00
