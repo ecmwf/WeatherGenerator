@@ -101,6 +101,7 @@ class IOReaderData:
     geoinfos: NDArray[DType]
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
+    is_spoof: bool = False
 
     def is_empty(self):
         """
@@ -142,6 +143,7 @@ class IOReaderData:
         geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
         data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
         datetimes = np.array([], dtype=other.datetimes.dtype)
+        is_spoof = True
 
         for other in others:
             n_datapoints = len(other.data)
@@ -153,8 +155,9 @@ class IOReaderData:
             geoinfos = np.concatenate([geoinfos, other.geoinfos])
             data = np.concatenate([data, other.data])
             datetimes = np.concatenate([datetimes, other.datetimes])
+            is_spoof = is_spoof and other.is_spoof
 
-        return cls(coords, geoinfos, data, datetimes)
+        return cls(coords, geoinfos, data, datetimes, is_spoof)
 
 
 @dataclasses.dataclass
@@ -186,7 +189,7 @@ class ItemKey:
         Infer forecast offset by the (non)presence of targets at fstep 0.
 
         Args:
-            datasets: Datasets found in a fstep 0 OutputItem.
+            datasets: Datasets found in a fstep 0 OutputItem (eg. ZarrIO.example_key).
         """
         # forecast offset=1 should produce no targets at fstep 0
         return 0 if "target" in datasets else 1
@@ -364,8 +367,7 @@ class ZarrIO:
             group = self.data_root.create_group(item.path)
         else:
             try:
-                group = self.data_root.get(item.path)
-                assert group is not None, f"Zarr group: {item.path} does not exist."
+                group = self.data_root[item.path]
             except KeyError as e:
                 msg = f"Zarr group: {item.path} has not been created."
                 raise FileNotFoundError(msg) from e
@@ -406,13 +408,17 @@ class ZarrIO:
 
     @functools.cached_property
     def example_key(self) -> ItemKey:
+        fstep = 0
         try:
             sample, example_sample = next(self.data_root.groups())
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
+
+        assert fstep in example_stream.groups(), (
+            "fstep 0 is missisg, but should always contain at least sources."
+        )
 
         return ItemKey(sample, fstep, stream)
 
@@ -618,7 +624,7 @@ class OutputBatchData:
         return slice(start, start + n_samples)
 
     def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
-        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
+        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints]
 
         # ensure _coords has size (?,2)
         if len(_coords) == 0:
@@ -649,7 +655,7 @@ class OutputBatchData:
         source: IOReaderData = self.sources[sample][stream_idx]
 
         assert source.data.shape[1] == len(channels), (
-            "Number of source channel names does not align with source data"
+            f"Number of source channel names {len(channels)} does not align with source data."
         )
 
         source_dataset = OutputDataset(
