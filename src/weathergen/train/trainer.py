@@ -510,6 +510,7 @@ class Trainer(TrainerBase):
                         )
                         output = model_forward(self.model_params, batch)
                         target_aux_output = self.target_and_aux_calculator.compute(
+                            self.cf.istep,
                             batch,
                             self.model_params,
                             self.model,

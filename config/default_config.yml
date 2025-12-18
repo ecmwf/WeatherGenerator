@@ -122,7 +122,7 @@ training_config:
 # ### Student-teacher configuration (only used when training_mode == "student_teacher")
 # training_config:
 #   # when this is "masking", we are basically only using the model_input subconfig
-#   training_mode: "student-teacher"  # "masking", "student_teacher", "forecast"
+#   training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
 #   target_and_aux_calc: "EMATeacher"
 #   losses :  
 #     LossLatentSSLStudentTeacher: { 
@@ -141,7 +141,7 @@ training_config:
 #       masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 0 }
 #       num_samples: 1 # number of teacher views to generate
 #       rate_sampling: False  # randomly sample the rate per batch
-# 
+
 # ### Example validation and training config for student-teacher with iBOT and DINO
 # validation_config:
 #   losses:
@@ -152,8 +152,8 @@ training_config:
 #       "DINO": {'weight': 0.25, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
 #           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
 #       }
-
-
+# 
+# 
 # ### Student-teacher configuration (only used when training_mode == "student_teacher")
 # training_config:
 #   # when this is "masking", we are basically only using the model_input subconfig

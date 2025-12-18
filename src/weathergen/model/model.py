@@ -492,12 +492,17 @@ class Model(torch.nn.Module):
         num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         num_params_embed_tcs = [
-            get_num_parameters(self.embed_target_coords[name]) for name in self.stream_names
+            get_num_parameters(self.embed_target_coords[name]) if self.embed_target_coords else 0
+            for name in self.stream_names
         ]
         num_params_tte = [
-            get_num_parameters(self.target_token_engines[name]) for name in self.stream_names
+            get_num_parameters(self.target_token_engines[name]) if self.target_token_engines else 0
+            for name in self.stream_names
         ]
-        num_params_preds = [get_num_parameters(self.pred_heads[name]) for name in self.stream_names]
+        num_params_preds = [
+            get_num_parameters(self.pred_heads[name]) if self.pred_heads else 0
+            for name in self.stream_names
+        ]
 
         print("-----------------")
         print(f"Total number of trainable parameters: {num_params_total:,}")
@@ -554,8 +559,8 @@ class Model(torch.nn.Module):
         z = self.norm(z_pre_norm)
         latent_state = LatentState(
             register_tokens=z[:, : self.register_token_idx],
-            class_token=z[:, self.register_token_idx: self.class_token_idx],
-            patch_tokens=z[:, self.class_token_idx:],
+            class_token=z[:, self.register_token_idx : self.class_token_idx],
+            patch_tokens=z[:, self.class_token_idx :],
             z_pre_norm=z_pre_norm,
         )
         output.add_latent_prediction(0, "posteriors", posteriors)
@@ -624,10 +629,10 @@ class Model(torch.nn.Module):
         """
         # Empty dicts evaluate to False in python
         if not self.pred_heads:
-            return []
+            return output
 
         # remove register tokens
-        tokens = tokens[:, self.class_token_idx:]
+        tokens = tokens[:, self.class_token_idx :]
 
         # get 1-ring neighborhood for prediction
         batch_size = batch.len_sources()
