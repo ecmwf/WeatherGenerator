@@ -489,7 +489,12 @@ def get_path_model(config: Config) -> Path:
     return Path(config.model_path) / config.run_id
 
 
-def get_path_output(config: Config, mini_epoch: int, ext: str) -> Path:
+def get_path_output(config: Config, mini_epoch: int) -> Path:
+    type = config.zarr_store
+    if type == "zip":
+        ext = "zip"
+    elif type == "local":
+        ext = "zarr"
     base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 

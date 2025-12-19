@@ -81,14 +81,9 @@ def write_output(
         sample_start,
         cf.forecast_offset,
     )
-    if cf.zarr_store == "zip":
-        ext = "zip"
-    else:
-        # backwards compatibility
-        ext = "zarr"
 
     with io.ZarrIO(
-        config.get_path_output(cf, mini_epoch, ext), type=cf.zarr_store, create=True
+        config.get_path_output(cf, mini_epoch), create=True
     ) as writer:
         for subset in data.items():
             start_time = timeit.default_timer()

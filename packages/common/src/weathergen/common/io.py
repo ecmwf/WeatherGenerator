@@ -348,7 +348,6 @@ class ZarrIO:
         self.data_root: zarr.Group | None = None
         # determine type using extension
         ext = self._store_path.suffix[1:]
-        print(f"ZarrIO store type inferred as: {self.type}")
         if ext == "zip":
             self.type = "zip"
         elif ext == "zarr":
