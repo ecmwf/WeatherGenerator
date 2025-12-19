@@ -110,7 +110,7 @@ def evaluate_multi_stream_results(run_id):
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
                                 "sample": [0, 1],
-                                "forecast_step": [0],
+                                "forecast_step": [1],
                                 "plot_maps": True,
                                 "plot_histograms": True,
                                 "plot_animations": False,
@@ -122,7 +122,7 @@ def evaluate_multi_stream_results(run_id):
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
                                 "sample": [0, 1],
-                                "forecast_step": [0],
+                                "forecast_step": [1],
                                 "plot_maps": True,
                                 "plot_histograms": True,
                                 "plot_animations": False,
@@ -134,7 +134,7 @@ def evaluate_multi_stream_results(run_id):
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
                                 "sample": [0, 1],
-                                "forecast_step": [0],
+                                "forecast_step": [1],
                                 "plot_maps": True,
                                 "plot_histograms": True,
                                 "plot_animations": False,
