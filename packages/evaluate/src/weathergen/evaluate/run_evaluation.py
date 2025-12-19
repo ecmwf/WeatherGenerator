@@ -188,15 +188,12 @@ def _process_stream(
     """
     try:
         type_ = run.get("type", "zarr")
-        print(type_)
         reader = (
             WeatherGenReader(run, run_id, private_paths)
             if type_ == "zarr"
             else CsvReader(run, run_id, private_paths)
         )
-        print(stream)
         stream_dict = reader.get_stream(stream)
-        print(stream_dict)
         if not stream_dict:
             return run_id, stream, {}
 
@@ -259,7 +256,6 @@ def evaluate_from_config(
     # Build tasks per stream
     for run_id, run in runs.items():
         type_ = run.get("type", "zarr")
-        print(type_)
         reader = (
             WeatherGenReader(run, run_id, private_paths)
             if type_ == "zarr"

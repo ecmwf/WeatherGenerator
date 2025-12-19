@@ -130,21 +130,21 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
-    zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zip"
-    zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.zip"
+    for ext in ["zarr", "zip"]:
+        zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"    
+        zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
-    if zarr_path_new.exists() or zarr_path_new.is_dir():
-        zarr_path = zarr_path_new
-    elif zarr_path_old.exists() or zarr_path_old.is_dir():
-        zarr_path = zarr_path_old
-    else:
-        raise FileNotFoundError(
-            f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
-            f"exist or is not a directory."
-        )
-
-    return zarr_path
-
+        if zarr_path_new.exists() or zarr_path_new.is_dir():
+            zarr_path = zarr_path_new
+            return zarr_path
+        elif zarr_path_old.exists() or zarr_path_old.is_dir():
+            zarr_path = zarr_path_old
+            return zarr_path
+        else:
+            raise FileNotFoundError(
+                f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+                f"exist or is not a directory."
+            )
 
 def _apply_fixes(config: Config) -> Config:
     """
@@ -489,9 +489,9 @@ def get_path_model(config: Config) -> Path:
     return Path(config.model_path) / config.run_id
 
 
-def get_path_output(config: Config, mini_epoch: int) -> Path:
+def get_path_output(config: Config, mini_epoch: int, ext: str) -> Path:
     base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zip"
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 
     return base_path / fname
 

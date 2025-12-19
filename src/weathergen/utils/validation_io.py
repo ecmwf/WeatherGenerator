@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-import zarr
 import timeit
 
 import weathergen.common.config as config
@@ -82,10 +81,17 @@ def write_output(
         sample_start,
         cf.forecast_offset,
     )
+    if cf.zarr_store == "zip":
+        ext = "zip"
+    else:
+        # backwards compatibility
+        ext = "zarr"
 
-    with io.ZarrIO(config.get_path_output(cf, mini_epoch), type = cf.zarr_store, create = True) as writer:
+    with io.ZarrIO(
+        config.get_path_output(cf, mini_epoch, ext), type=cf.zarr_store, create=True
+    ) as writer:
         for subset in data.items():
             start_time = timeit.default_timer()
             writer.write_zarr(subset)
             elapsed = timeit.default_timer() - start_time
-            print(f"writing subset: {subset} took {elapsed:.2f}")
+            _logger.info(f"writing subset: {subset} took {elapsed:.2f}")

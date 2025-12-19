@@ -27,9 +27,14 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     -------
         xarray DataArray for the specified sample and forecast step.
     """
-    sample, fstep, run_id, stream, dtype, epoch, rank = args
-    fname_zarr = get_model_results(run_id, epoch, rank)
-    with ZarrIO(fname_zarr) as zio:
+    sample, fstep, run_id, stream, dtype, epoch, rank, type= args
+    if type == "zip":
+        ext = "zip"
+    else:
+        ext = "zarr"
+        # backwards compatibility
+    fname_zarr = get_model_results(run_id, epoch, rank, ext)
+    with ZarrIO(fname_zarr, type) as zio:
         out = zio.get_data(sample, stream, fstep)
         if dtype == "target":
             data = out.target
@@ -38,7 +43,7 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     return data
 
 
-def get_fsteps(fsteps, fname_zarr: str):
+def get_fsteps(fsteps, fname_zarr: str, type):
     """
     Retrieve available forecast steps from the Zarr store and filter
     based on requested forecast steps.
@@ -55,7 +60,7 @@ def get_fsteps(fsteps, fname_zarr: str):
         list[str]
             List of forecast steps to be used for data retrieval.
     """
-    with ZarrIO(fname_zarr) as zio:
+    with ZarrIO(fname_zarr, type) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
     return zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
 

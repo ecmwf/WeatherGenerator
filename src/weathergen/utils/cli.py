@@ -66,10 +66,10 @@ def get_inference_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--zarr-store",
-        default = "zip",
-        help= "Specify which type of Zarr storage to use. Default 'zip', which uses ZipStore.",
+        default="zip",
+        help="Specify which type of Zarr storage to use. Default 'zip', which uses ZipStore.",
         choices=["zip", "local"],
-        type= str
+        type=str,
     )
 
     return parser

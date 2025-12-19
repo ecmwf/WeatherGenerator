@@ -48,7 +48,7 @@ def inference_from_args(argl: list[str]):
         samples_per_validation=args.samples,
         log_validation=args.samples if args.save_samples else 0,
         streams_output=args.streams_output,
-        zarr_store = args.zarr_store
+        zarr_store=args.zarr_store,
     )
 
     cli_overwrite = config.from_cli_arglist(args.options)

@@ -12,8 +12,8 @@ import functools
 import itertools
 import logging
 import pathlib
-import typing
 import timeit
+import typing
 
 import dask.array as da
 import numpy as np
@@ -21,8 +21,8 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
-from zarr.storage import ZipStore, LocalStore
 from tqdm import tqdm
+from zarr.storage import LocalStore, ZipStore
 
 # experimental value, should be inferred more intelligently
 SHARDING_ENABLED = True
@@ -33,7 +33,7 @@ type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
 
-#CHUNK_N_SAMPLES has to equal to integer * SHARD_N_SAMPLES
+# CHUNK_N_SAMPLES has to equal to integer * SHARD_N_SAMPLES
 
 # zarr.config.set({
 #     "threading.num_workers": None,
@@ -266,17 +266,21 @@ class OutputDataset:
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples = SHARD_N_SAMPLES) -> xr.DataArray:
+    def as_xarray(
+        self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples=SHARD_N_SAMPLES
+    ) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
-        chunks = (chunk_nsamples, *self.data.shape[1:])
+        chunks = (chunk_nsamples, *(max(x // 4, 1) for x in self.data.shape[1:]))
         if SHARDING_ENABLED:
-            shards = (shard_nsamples, *(x*4 for x in self.data.shape[1:]))
-            print(f"sharding enabled with shards: {shards} and chunks: {chunks}")
+            shards = (shard_nsamples, *(5 * x for x in chunks[1:]))
+            _logger.info(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
             shards = None
-            print(f"sharding disabled, using chunks: {chunks}")
+            _logger.info(f"sharding disabled, using chunks: {chunks}")
         # maybe do dask conversion earlier? => usefull for parallel writing?
-        data = da.from_zarr(self.data, chunks=chunks, shards = shards)  # dont call compute to lazy load
+        data = da.from_zarr(
+            self.data, chunks=chunks, shards=shards
+        )  # dont call compute to lazy load
         # include pseudo ens dim so all data arrays have same dimensionality
         # TODO: does it make sense for target and source to have ens dim?
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
@@ -339,25 +343,32 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path, type, create = False):
+    def __init__(self, store_path: pathlib.Path, create=False):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
-        self.type = type
+        # determine type using extension
+        ext = self._store_path.suffix[1:]
+        print(f"ZarrIO store type inferred as: {self.type}")
+        if ext == "zip":
+            self.type = "zip"
+        elif ext == "zarr":
+            self.type = "local"
         self.create = create
 
     def __enter__(self) -> typing.Self:
-        print("mode = ", self.create)
         if self.type == "zip":
-            if self.create == True:
-                self._store = ZipStore(self._store_path, mode = "a")
+            if self.create:
+                _logger.info("Creating zipstore")
+                self._store = ZipStore(self._store_path, mode="a")
                 self.data_root = zarr.group(store=self._store)
-            elif self.create == False:
-                print('opening store as read-only')
-                self._store = ZipStore(self._store_path,read_only  = True)
-                self.data_root = zarr.open_group(store=self._store, mode = "r")
-            print(self.data_root)            
+            if not self.create:
+                _logger.info("Opening zipstore as read-only")
+                self._store = ZipStore(self._store_path, read_only=True)
+                self.data_root = zarr.open_group(store=self._store, mode="r")
         elif self.type == "local":
             self._store = LocalStore(self._store_path)
+            self.data_root = zarr.group(store=self._store)
+            _logger.info("Opened local zarr store")
         else:
             raise Exception("format not supported")
         return self
@@ -372,7 +383,6 @@ class ZarrIO:
         for dataset in tqdm(item.datasets):
             if dataset is not None:
                 self._write_dataset(group, dataset)
-        
 
     def get_data(self, sample: int, stream: str, forecast_step: int) -> OutputItem:
         """Get datasets for the output item matching the arguments."""
@@ -396,13 +406,11 @@ class ZarrIO:
         }
 
     def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group:
-        print("data root")
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
             group = self.data_root.create_group(item.path)
         else:
             try:
-                print("item_path:", item.path)
                 group = self.data_root.get(item.path)
                 assert group is not None, f"Zarr group: {item.path} does not exist."
             except KeyError as e:
@@ -428,27 +436,25 @@ class ZarrIO:
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
-        print(array.shape)
+
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = (CHUNK_N_SAMPLES, *(max(x//4,1) for x in array.shape[1:]))
-        print(
+            chunks = (CHUNK_N_SAMPLES, *(max(x // 4, 1) for x in array.shape[1:]))
+        _logger.info(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + f"into group: {group}."
         )
         start_time = timeit.default_timer()
         if SHARDING_ENABLED and chunks != "auto":
-            shards = (SHARD_N_SAMPLES, *(5*x for x in chunks[1:]))
-            group.create_array(name, data=array, chunks=chunks, shards =shards)
-            print(f"sharding enabled with shards: {shards} and chunks: {chunks}")
+            shards = (SHARD_N_SAMPLES, *(5 * x for x in chunks[1:]))
+            group.create_array(name, data=array, chunks=chunks, shards=shards)
+            _logger.info(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
             group.create_array(name, data=array, chunks=chunks)
-            print(f"sharding disabled, writing with chunks: {chunks}")
+            _logger.info(f"sharding disabled, writing with chunks: {chunks}")
         elapsed = timeit.default_timer() - start_time
-        print(f"writing array: {name} took {elapsed:.2f}")
-        #print(z.info_complete())
-
+        _logger.info(f"writing array: {name} took {elapsed:.2f}")
 
     @functools.cached_property
     def forecast_offset(self) -> int:
@@ -476,9 +482,7 @@ class ZarrIO:
     def streams(self) -> list[str]:
         """Query available streams in this zarr store."""
         # assume stream/samples are orthogonal => use first sample
-        print('printing:',self.data_root.groups())
         _, example_sample = next(self.data_root.groups())
-        print(example_sample)
         return list(example_sample.group_keys())
 
     @functools.cached_property
