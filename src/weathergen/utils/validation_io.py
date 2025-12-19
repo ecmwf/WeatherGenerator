@@ -83,7 +83,7 @@ def write_output(
         cf.forecast_offset,
     )
 
-    with io.ZarrIO(config.get_path_output(cf, mini_epoch), create = True) as writer:
+    with io.ZarrIO(config.get_path_output(cf, mini_epoch), type = cf.zarr_store, create = True) as writer:
         for subset in data.items():
             start_time = timeit.default_timer()
             writer.write_zarr(subset)

@@ -21,7 +21,7 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
-from zarr.storage import ZipStore
+from zarr.storage import ZipStore, LocalStore
 from tqdm import tqdm
 
 # experimental value, should be inferred more intelligently
@@ -339,23 +339,27 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path, create: bool = True):
+    def __init__(self, store_path: pathlib.Path, type, create = False):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
-        self._store: ZipStore | None = None
+        self.type = type
         self.create = create
 
     def __enter__(self) -> typing.Self:
         print("mode = ", self.create)
-        if self.create == True:
-            self._store = ZipStore(self._store_path, mode = "a")
-            self.data_root = zarr.group(store=self._store)
+        if self.type == "zip":
+            if self.create == True:
+                self._store = ZipStore(self._store_path, mode = "a")
+                self.data_root = zarr.group(store=self._store)
+            elif self.create == False:
+                print('opening store as read-only')
+                self._store = ZipStore(self._store_path,read_only  = True)
+                self.data_root = zarr.open_group(store=self._store, mode = "r")
+            print(self.data_root)            
+        elif self.type == "local":
+            self._store = LocalStore(self._store_path)
         else:
-            print('opening store as read-only')
-            self._store = ZipStore(self._store_path,read_only  = True)
-            self.data_root = zarr.open_group(store=self._store, mode = "r")
-        print(self.data_root)
-
+            raise Exception("format not supported")
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
