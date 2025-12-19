@@ -60,6 +60,8 @@ class WeatherGenReader(Reader):
             self.eval_cfg.get("metrics_base_dir", self.results_base_dir)
         )  # base directory where score files will be stored
 
+        self.step_hrs = self.inference_cfg.get("step_hrs", 1)
+
         self.results_dir, self.runplot_dir = (
             Path(self.results_base_dir) / self.run_id,
             Path(self.runplot_base_dir) / self.run_id,
@@ -250,6 +252,10 @@ class WeatherGenReader(Reader):
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
 
+                # apply z scaling if needed
+                da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
+                da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
+
                 if len(samples) == 1:
                     _logger.debug("Repeating sample coordinate for single-sample case.")
                     for da in (da_tars_fs, da_preds_fs):
@@ -287,6 +293,32 @@ class WeatherGenReader(Reader):
             )
 
     ######## reader utils ########
+
+    def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
+        """
+        Check scale all channels.
+
+        Parameters
+        ----------
+        data :
+            Input dataset
+        stream :
+            Stream name.
+        Returns
+        -------
+            Returns a Dataset where channels have been scaled if needed
+        """
+
+        channels_z = [ch for ch in data.channel.values if str(ch).startswith("z_")]
+        data_scaled = data.copy()
+        factor = 9.80665
+
+        if channels_z and stream == "ERA5":
+            data_scaled.loc[dict(channel=channels_z)] = data_scaled.sel(channel=channels_z) / factor
+        else:
+            data_scaled = data
+
+        return data_scaled
 
     def get_climatology_filename(self, stream: str) -> str | None:
         """
@@ -431,7 +463,7 @@ class WeatherGenReader(Reader):
         _logger.debug("Latitude and longitude coordinates are regularly spaced.")
         return True
 
-    def load_scores(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+    def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray | None:
         """
         Load the pre-computed scores for a given run, stream and metric and epoch.
 
@@ -441,27 +473,52 @@ class WeatherGenReader(Reader):
             Reader object containing all info for a specific run_id
         stream :
             Stream name.
-        region :
-            Region name.
-        metric :
-            Metric name.
+        regions :
+            Region names.
+        metrics :
+            Metric names.
 
         Returns
         -------
-            The metric DataArray or None if the file does not exist.
+        xr.DataArray
+            The metric DataArray.
+        missing_metrics:
+            dictionary of missing regions and metrics that need to be recomputed.
         """
-        score_path = (
-            Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
-        )
-        _logger.debug(f"Looking for: {score_path}")
 
-        if score_path.exists():
-            with open(score_path) as f:
-                data_dict = json.load(f)
-                return xr.DataArray.from_dict(data_dict)
-        else:
-            return None
+        local_scores = {}
+        missing_metrics = {}
+        for region in regions:
+            for metric in metrics:
+                score_path = (
+                    Path(self.metrics_dir)
+                    / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
+                )
+                _logger.debug(f"Looking for: {score_path}")
+
+                if score_path.exists():
+                    with open(score_path) as f:
+                        data_dict = json.load(f)
+                        score_dict = xr.DataArray.from_dict(data_dict)
+
+                    available_data = self.check_availability(stream, score_dict, mode="evaluation")
+
+                    if available_data.score_availability:
+                        score_dict = score_dict.sel(
+                            sample=available_data.samples,
+                            channel=available_data.channels,
+                            forecast_step=available_data.fsteps,
+                        )
+                        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
+                            stream, {}
+                        )[self.run_id] = score_dict
+                        continue
+
+                # all other cases: recompute scores
+                missing_metrics.setdefault(region, []).append(metric)
+                continue
+
+        return local_scores, missing_metrics
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
