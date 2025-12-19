@@ -163,26 +163,29 @@ training_config:
 #   losses :  
 #     LossLatentSSLStudentTeacher: { 
 #       "weight": 1.0,
-#       "iBOT": {'weight': 0.75, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
-#           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
-#       "DINO": {'weight': 0.25, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
-#           "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+#       "iBOT": {'weight': 0.75, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 4096, # 16384, 
+#           "teacher_temp": 0.1, "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+#       "DINO": {'weight': 0.25, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 4096, # 16384, 
+#           "teacher_temp": 0.1, "teacher_style": "softmax_center", "center_momentum": 0.9}, 
 #       }
 #   model_input:
 #     - masking_strategy: "random" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
 #       num_samples: 1  # if student-teacher, the number of local (student) views to generate
 #       masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
 #       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+#       rate_sampling: False  # randomly sample the rate per batch
 #       loss : ibot
 #     - masking_strategy: "healpix"
 #       num_samples: 2 # if student-teacher, the number of local (student) views to generate
 #       masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 1 }
 #       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+#       rate_sampling: False  # randomly sample the rate per batch
 #       loss : dino
 #     - masking_strategy: "healpix"
 #       num_samples: 1 # if student-teacher, the number of local (student) views to generate
 #       masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 1 }
 #       relationship: "identity"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+#       rate_sampling: False  # randomly sample the rate per batch
 #       loss : dino
 # 
 #   target_input:
