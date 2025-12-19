@@ -9,7 +9,7 @@ embed_dropout_rate: 0.1
 
 target_cell_local_prediction: True
 
-ae_local_dim_embed: 1024
+ae_local_dim_embed: 2048
 ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -45,18 +45,18 @@ pred_mlp_adaln: True
 # one is training an auto-encoder
 forecast_offset : 1
 forecast_delta_hrs: 0
-forecast_steps: 4
+forecast_steps: 2
 forecast_policy: "fixed"
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
-fe_num_blocks: 8
+fe_num_blocks: 16
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-impute_latent_noise_std: 0.0  # 1e-4
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+impute_latent_noise_std: 1e-4
 
-healpix_level: 4
+healpix_level: 5
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -116,7 +116,7 @@ masking_strategy_config: {"strategies": ["random", "healpix", "channel"],
                           "same_strategy_per_batch": false
                           }
 
-num_epochs: 64
+num_epochs: 128
 samples_per_epoch: 4096
 samples_per_validation: 512
 shuffle: True
@@ -164,3 +164,24 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+
+# Tags for experiment tracking
+# These tags will be logged in MLFlow along with completed runs for train, eval, val
+# The tags are free-form, with the following rules:
+# - tags should be primitive types (strings, numbers, booleans). NO lists or dictionaries
+# - tags should not duplicate existing config entries.
+# - try to reuse existing tags where possible. MLFlow does not like having too many unique tags
+# - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
+wgtags:
+  # The name of the organization of the person running the experiment.
+  # This may be autofilled in the future. Expected values are lowercase strings of 
+  # the organizations codenames in https://confluence.ecmwf.int/display/MAEL/Staff+Contact+List
+  # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
+  org: None
+  # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
+  # This is expected to be the primary tag for comparing experiments in MLFlow.
+  # Expected values are lowercase strings with no spaces, just underscores:
+  # Examples: "rollout_ablation_grid"  
+  exp: "rollout_params"
+  # *** Experiment-specific tags ***
+  grid_search: 1
