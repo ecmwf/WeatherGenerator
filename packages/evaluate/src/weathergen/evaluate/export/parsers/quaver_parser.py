@@ -19,8 +19,10 @@ uv run export --run-id ciga1p9c --stream ERA5
 --output-dir ./test_output1 
 --format quaver --type prediction target  
 --samples 2 --fsteps 2 
---quaver_template_folder "<path to quaver templates> --quaver_template_grid_type O96
+--quaver-template-folder "<path to quaver templates> --quaver-template-grid-type o96 
 --expver test 
+
+NOTE: check if it is o96 or O96 in the template.
 """
 
 
