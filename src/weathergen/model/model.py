@@ -652,26 +652,27 @@ class Model(torch.nn.Module):
             self.plot_token_distribution(tokens=tokens, fstep=0)
 
         # roll-out in latent space
+        forecast_loss_all_step = self.cf.get("forecast_loss_all_step", True)
         preds_all = []
         for fstep in range(forecast_offset, forecast_offset + forecast_steps):
-            # prediction
-            preds_all += [
-                self.predict(
-                    model_params,
-                    fstep,
-                    tokens,
-                    streams_data,
-                    target_coords_idxs,
-                )
-            ]
-
-            if self.training:
-                # Impute noise to the latent state
-                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
-                if noise_std > 0.0:
-                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
-
-            tokens = self.forecast(model_params, tokens, fstep)
+            # compute
+            # if forecast_loss_all_step or (fstep == (forecast_offset + forecast_steps + 1)):
+            if forecast_loss_all_step or not self.training:
+                preds_all += [
+                    self.predict(
+                        model_params,
+                        fstep,
+                        tokens,
+                        streams_data,
+                        target_coords_idxs,
+                    )
+                ]
+                tokens = self.forecast(model_params, tokens, fstep)
+            else:
+                # Push-forward trick
+                with torch.no_grad():
+                    tokens = self.forecast(model_params, tokens, fstep)
+                preds_all += [[]]
 
             if not self.training:
                 self.plot_token_distribution(tokens=tokens, fstep=fstep)
@@ -837,6 +838,12 @@ class Model(torch.nn.Module):
         Raises:
             ValueError: For unexpected arguments in checkpoint method
         """
+
+        if self.training:
+            # Impute noise to the latent state
+            noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+            if noise_std > 0.0:
+                tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
         tokens = self.forecast_engine(tokens, fstep)
 

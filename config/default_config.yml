@@ -45,10 +45,11 @@ pred_mlp_adaln: True
 # one is training an auto-encoder
 forecast_offset : 1
 forecast_delta_hrs: 0
-forecast_steps: 4
+forecast_steps: 2
 forecast_policy: "fixed"
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
+forecast_loss_all_step : True
 fe_num_blocks: 8
 fe_num_heads: 16
 fe_dropout_rate: 0.1
@@ -56,7 +57,7 @@ fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 impute_latent_noise_std: 0.0  # 1e-4
 
-healpix_level: 4
+healpix_level: 5
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -139,9 +140,9 @@ nn_module: "te"
 log_grad_norms: False
 
 start_date: 197901010000
-end_date: 202012310000
-start_date_val: 2023100100
-end_date_val: 2023123100
+end_date: 202212310000
+start_date_val: 202310010000
+end_date_val: 202312310000
 len_hrs: 6
 step_hrs: 6
 input_window_steps: 1
