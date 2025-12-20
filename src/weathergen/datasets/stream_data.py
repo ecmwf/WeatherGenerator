@@ -49,7 +49,9 @@ class StreamData:
         self.sample_idx = idx
         self.target_coords = [torch.tensor([]) for _ in range(forecast_steps + 1)]
         self.target_coords_raw = [[] for _ in range(forecast_steps + 1)]
-        self.target_times_raw = [[] for _ in range(forecast_steps + 1)]
+        self.target_times_raw = [
+            np.array([], dtype="datetime64[ns]") for _ in range(forecast_steps + 1)
+        ]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
@@ -63,7 +65,9 @@ class StreamData:
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
-        self.source_tokens_lens = [[] for _ in range(self.input_steps)]
+        self.source_tokens_lens = [
+            torch.tensor([], dtype=torch.int32) for _ in range(self.input_steps)
+        ]
         # unprocessed source (for logging)
         self.source_raw = [None for _ in range(self.input_steps)]
         # auxiliary data for scatter operation that changes from stream-centric to cell-centric
@@ -87,6 +91,7 @@ class StreamData:
 
         dv = device
         self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
+        self.target_coords_lens = [t.to(dv, non_blocking=True) for t in self.target_coords_lens]
         self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
 
         # move to device if source data is present

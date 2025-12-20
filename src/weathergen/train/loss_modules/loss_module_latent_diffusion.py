@@ -78,6 +78,7 @@ class LossLatentDiffusion(LossModuleBase):
         self,
         preds: dict,
         targets: dict,
+        **kwargs
     ) -> LossValues:
         losses_all: dict[str, Tensor] = {
             f"{self.name}.{loss_fct_name}": torch.zeros(
@@ -88,7 +89,8 @@ class LossLatentDiffusion(LossModuleBase):
         }
 
         pred_tokens_all = [pl["latent_state"].latent_tokens for pl in preds.latent if pl]
-        target_tokens_all = targets.latent
+        target_tokens_all = [targets.latent]  # TODO: remove extra list
+
         eta = torch.tensor([targets.aux_outputs["noise_level_rn"]], device=self.device)
         fsteps = len(target_tokens_all)
 

@@ -22,7 +22,17 @@ class MaskData:
 
     def add_mask(self, mask, params, cfg):
         self.masks += [mask]
-        self.metadata += [SampleMetaData(params={**cfg, **params})]
+        self.metadata += [
+            SampleMetaData(
+                params={**cfg, **params},
+                mask=mask,
+                global_params={
+                    "loss": cfg.get("loss", {}),
+                    "masking_strategy": cfg.get("strategy", {}),
+                    "relationship": cfg.get("relationship", {}),
+                },
+            )
+        ]
 
 
 # Convert to torch.bool
@@ -63,15 +73,6 @@ class Masker:
 
     def __init__(self, cf: Config):
         self.rng = None
-        # self.masking_rate = cf.masking_rate
-        # self.masking_strategy = cf.masking_strategy
-        # self.current_strategy = cf.masking_strategy  # Current strategy in use
-        # self.masking_rate_sampling = cf.masking_rate_sampling
-        # # masking_strategy_config is a dictionary that can hold any additional parameters
-        # self.masking_strategy_config = cf.get("masking_strategy_config", {})
-        # self.perm_sel = None
-        # self.mask_tokens = None
-        # self.mask_channels = None
 
         self.mask_value = 0.0
         self.dim_time_enc = 6
@@ -80,86 +81,11 @@ class Masker:
         self.healpix_level_data = cf.healpix_level
         self.healpix_num_cells = 12 * (4**cf.healpix_level)
 
-    # # Per-batch strategy tracking
-    # self.same_strategy_per_batch = self.masking_strategy_config.get(
-    #     "same_strategy_per_batch", False
-    # )
-    # self.batch_strategy_set = False
-
-    # # Check for required masking_strategy_config at construction time
-    # if self.current_strategy == "healpix":
-    #     hl_data = self.healpix_level_data
-    #     hl_mask = self.masking_strategy_config.get("hl_mask")
-    #     assert hl_data is not None and hl_mask is not None, (
-    #         "If HEALPix masking, hl_mask must be given in masking_strategy_config."
-    #     )
-    #     assert hl_mask < hl_data, "hl_mask must be less than hl_data for HEALPix masking."
-
-    # if self.current_strategy == "channel":
-    #     # Ensure that masking_strategy_config contains either 'global' or 'per_cell'
-    #     assert self.masking_strategy_config.get("mode") in [
-    #         "global",
-    #         "per_cell",
-    #     ], "masking_strategy_config must contain 'mode' key with value 'global' or 'per_cell'."
-
-    #     # check all streams that source and target channels are identical
-    #     for stream in cf.streams:
-    #         # check explicit includes
-    #         source_include = stream.get("source_include", [])
-    #         target_include = stream.get("target_include", [])
-    #         assert set(source_include) == set(target_include), (
-    #             "Source and target channels not identical. Required for masking_mode=channel"
-    #         )
-    #         # check excludes
-    #         source_exclude = stream.get("source_exclude", [])
-    #         target_exclude = stream.get("target_exclude", [])
-    #         assert set(source_exclude) == set(target_exclude), (
-    #             "Source and target channels not identical. Required for masking_mode=channel"
-    #         )
-
     def reset_rng(self, rng) -> None:
         """
         Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
-
-    # def set_batch_strategy(self):
-    #     """
-    #     Set strategy for this batch.
-    #     Only relevant with combination and same_strategy_per_batch.
-    #     """
-    #     if self.masking_strategy == "combination" and self.same_strategy_per_batch:
-    #         self.current_strategy = self.rng.choice(
-    #             self.masking_strategy_config["strategies"],
-    #             p=self.masking_strategy_config["probabilities"],
-    #         )
-    #         self.batch_strategy_set = True
-
-    # def reset_batch_strategy(self):
-    #     """
-    #     Reset for next batch.
-    #     """
-    #     if self.masking_strategy == "combination" and self.same_strategy_per_batch:
-    #         self.current_strategy = None
-    #         self.batch_strategy_set = False
-
-    def _select_strategy(self):
-        """
-        Select the strategy to use.
-        """
-        if self.masking_strategy == "combination":
-            if self.same_strategy_per_batch:
-                assert self.batch_strategy_set, "Must call set_batch_strategy() first"
-                return self.current_strategy
-            else:
-                # Sample new strategy for each stream
-                return self.rng.choice(
-                    self.masking_strategy_config["strategies"],
-                    p=self.masking_strategy_config["probabilities"],
-                )
-        else:
-            # Non-combination strategy, return as is
-            return self.masking_strategy
 
     def _get_sampling_rate(self):
         """
@@ -369,10 +295,13 @@ class Masker:
         if len(target_cfgs) == 0:
             target_cfgs = source_cfgs
 
-        # iterate over all target samples
         target_masks = MaskData()
+        source_masks = MaskData()
+        source_target_mapping = []
+        i_target = 0
+        # iterate over all target samples
         # different strategies
-        for target_cfg in target_cfgs:
+        for _, target_cfg in enumerate(target_cfgs):
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
                 target_mask, mask_params = self._get_mask(
@@ -383,23 +312,21 @@ class Masker:
                 )
                 target_masks.add_mask(target_mask, mask_params, target_cfg)
 
-        # iterate over all source samples
-        source_masks = MaskData()
-        source_target_mapping = []
-        # different strategies
-        for i_source, source_cfg in enumerate(source_cfgs):
-            # samples per strategy
-            for _ in range(source_cfg.get("num_samples", 1)):
-                source_mask, mask_params = self._get_mask(
-                    num_cells=num_cells,
-                    strategy=source_cfg.get("masking_strategy"),
-                    masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
-                    target_mask=target_masks.masks[i_source % len(target_masks)],
-                    relationship=source_cfg.get("relationship", "independent"),
-                )
-                source_masks.add_mask(source_mask, mask_params, source_cfg)
-                # TODO: proper correspondence between source and target
-                source_target_mapping += [i_source % len(target_masks)]
+                # iterate over all source samples
+                # different strategies
+                for _i_source, source_cfg in enumerate(source_cfgs):
+                    # samples per strategy
+                    for _ in range(source_cfg.get("num_samples", 1)):
+                        source_mask, mask_params = self._get_mask(
+                            num_cells=num_cells,
+                            strategy=source_cfg.get("masking_strategy"),
+                            masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
+                            target_mask=target_mask,
+                            relationship=source_cfg.get("relationship", "independent"),
+                        )
+                        source_masks.add_mask(source_mask, mask_params, source_cfg)
+                        source_target_mapping += [i_target]
+                i_target += 1
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
@@ -443,20 +370,33 @@ class Masker:
                 )
 
         # handle cases where mask is directly derived from target_mask
-        if target_mask is not None:
-            if relationship == "complement":
-                mask = ~target_mask
-                return mask, {}
+        if relationship == "complement":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = ~target_mask
+            return mask, {}
 
         # get mask
         mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
 
         # handle cases where mask needs to be combined with target_mask
-        if target_mask is not None:
-            if relationship == "subset":
-                mask = mask & target_mask
-            elif relationship == "disjoint":
-                mask = mask & (~target_mask)
+        # without the assert we can fail silently
+        if relationship == "subset":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = mask & target_mask
+        elif relationship == "disjoint":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = mask & (~target_mask)
+        elif relationship == "identity":
+            assert target_mask is not None, (
+                "relationship: {relationship} incompatible with target_mask None"
+            )
+            mask = target_mask
 
         return (mask, params)
 

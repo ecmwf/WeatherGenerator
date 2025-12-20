@@ -44,6 +44,7 @@ class EmbeddingEngine(torch.nn.Module):
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
+        self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
         self.stream_names = list(stream_names)
@@ -81,44 +82,41 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    # TODO: remove device from arg list
-    def forward(self, input_step, sample, pe_embed, dtype, device):
-        offsets_base = torch.cumsum(sample.source_cell_lens[input_step][1:], 0)
+    def forward(self, batch, pe_embed):
+        num_steps_input = batch.get_num_source_steps()
 
+        num_tokens = torch.sum(batch.source_tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device
+            (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
         # iterate over all streams
-        for stream_name, s_data in sample.streams_data.items():
-            # embedding network
-            embed = self.embeds[stream_name]
+        for stream_name in self.stream_names:
+            # collect all source tokens from all input_steps and all samples in the batch
+            sdata, scatter_idxs, pe_idxs = [], [], []
+            for istep in range(num_steps_input):
+                for sample in batch.source_samples:
+                    # token data
+                    sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
+                    # indices for positional encoding
+                    pe_idxs += [sample.streams_data[stream_name].source_idxs_embed_pe[istep]]
+                    # scatter idxs for switching from stream to cell-based ordering
+                    scatter_idxs += [sample.streams_data[stream_name].source_idxs_embed[istep]]
 
+            sdata = torch.cat(sdata)
             # skip empty stream
-            if s_data.source_empty():
+            if len(sdata) == 0:
                 continue
 
-            idxs = s_data.source_idxs_embed[input_step].to(device)
-            idxs_pe = s_data.source_idxs_embed_pe[input_step].to(device)
+            scatter_idxs = torch.cat(scatter_idxs)
+            scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+            pe_idxs = torch.cat(pe_idxs)
 
-            # create full scatter index
-            # (there's no broadcasting which is likely highly inefficient)
-            idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-            x_embed = embed(s_data.source_tokens_cells[input_step]).flatten(0, 1)
-            # there's undocumented limitation in flash_attn that will make embed fail if
-            # #tokens is too large; code below is a work around
-            # x_embed = torch.cat(
-            #     [
-            #         embed(s_c, c_c).flatten(0, 1)
-            #         for s_c, c_c in zip(
-            #             torch.split(s.source_tokens_cells, 49152),
-            #             torch.split(s.source_centroids, 49152),
-            #         )
-            #     ]
-            # )
+            # embedding from physical space to per patch latent representation
+            x_embed = self.embeds[stream_name](sdata).flatten(0, 1)
 
-            # scatter write to reorder from per stream to per cell ordering
-            tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
+            # switch from stream to cell-based ordering
+            tokens_all.scatter_(0, scatter_idxs, x_embed + pe_embed[pe_idxs])
 
         return tokens_all
 
@@ -370,6 +368,14 @@ class GlobalAssimilationEngine(torch.nn.Module):
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
+        if self.cf.get("ae_global_trailing_layer_norm", False):
+            self.ae_global_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
+
+        self.ae_global_blocks.append(
+            torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+        )
 
         self.ae_global_blocks.append(
             torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
@@ -384,7 +390,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
-    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
+    def __init__(self, cf: Config, num_healpix_cells: int, dim_aux: int = None) -> None:
         """
         Initialize the ForecastingEngine with the configuration.
 
@@ -409,7 +415,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=(1 if cf.forecast_with_step_conditioning else None),
+                            dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_noise_conditioning=self.cf.fe_diffusion_model,
@@ -426,7 +432,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=(1 if cf.forecast_with_step_conditioning else None),
+                            dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_noise_conditioning=self.cf.fe_diffusion_model,
@@ -440,11 +446,20 @@ class ForecastingEngine(torch.nn.Module):
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
-                        dim_aux=(1 if cf.forecast_with_step_conditioning else None),
+                        dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         with_noise_conditioning=self.cf.fe_diffusion_model,
                     )
                 )
+                # Optionally, add LayerNorm after i-th layer
+                if i in self.cf.get("fe_layer_norm_after_blocks", []):
+                    self.fe_blocks.append(
+                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+                    )
+
+            self.fe_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
@@ -475,10 +490,16 @@ class ForecastingEngine(torch.nn.Module):
                 "Noise embedding must be provided for diffusion forecast engine"
             )
             for block in self.fe_blocks:
-                tokens = checkpoint(block, tokens, noise_emb, aux_info, use_reentrant=False)
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = checkpoint(block, tokens, use_reentrant=False)
+                else:
+                    tokens = checkpoint(block, tokens, noise_emb, aux_info, use_reentrant=False)
         else:
             for block in self.fe_blocks:
-                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = checkpoint(block, tokens, use_reentrant=False)
+                else:
+                    tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
 
@@ -833,7 +854,6 @@ class TargetPredictionEngine(nn.Module):
         return output
 
 
-@dataclasses.dataclass
 class LatentState:
     """
     A dataclass to encapsulate the latent state
@@ -841,3 +861,7 @@ class LatentState:
 
     register_tokens: torch.Tensor
     latent_tokens: torch.Tensor
+
+    def __init__(self, num_register_tokens: int, tokens: torch.Tensor):
+        self.register_tokens = tokens[:, :num_register_tokens].clone()
+        self.latent_tokens = tokens[:, num_register_tokens:].clone()

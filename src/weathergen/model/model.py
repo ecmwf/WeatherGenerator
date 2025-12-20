@@ -23,6 +23,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import Sample, SampleMetaData
 from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.datasets.batch import ModelBatch
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     EnsPredictionHead,
@@ -116,10 +117,7 @@ class ModelParams(torch.nn.Module):
         )
         # self.hp_nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
 
-        if cf.target_cell_local_prediction:
-            tokens_lens_value = nqs * s[2]
-        else:
-            tokens_lens_value = nqs * s[1] * s[2]
+        tokens_lens_value = nqs * s[2]
         self.tokens_lens = torch.nn.Parameter(
             tokens_lens_value * torch.ones(bs * s[1] + 1, dtype=torch.int32), requires_grad=False
         )
@@ -204,18 +202,6 @@ class ModelParams(torch.nn.Module):
         self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
         self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
 
-        # varlen index set for tokens
-        assert cf.batch_size_per_gpu == cf.batch_size_validation_per_gpu
-        bs = cf.batch_size_per_gpu
-        nqs = 9
-        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
-        if cf.target_cell_local_prediction:
-            tokens_lens_value = nqs * s[2]
-        else:
-            tokens_lens_value = nqs * s[1] * s[2]
-        self.tokens_lens.data.fill_(tokens_lens_value)
-        self.tokens_lens.data[0] = 0
-
         # precompute for varlen attention
         self.q_cells_lens.data.fill_(1)
         self.q_cells_lens.data[0] = 0
@@ -290,7 +276,8 @@ class Model(torch.nn.Module):
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
-        self.pred_adapter_kv = None
+        self.forecast_offset = cf.forecast_offset
+
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
@@ -330,7 +317,6 @@ class Model(torch.nn.Module):
         dropout_rate = cf.embed_dropout_rate
         self.embed_target_coords = torch.nn.ModuleDict()
         self.target_token_engines = torch.nn.ModuleDict()
-        self.pred_adapter_kv = torch.nn.ModuleDict()
         self.pred_heads = torch.nn.ModuleDict()
 
         # determine stream names once so downstream components use consistent keys
@@ -396,21 +382,6 @@ class Model(torch.nn.Module):
                 )
             else:
                 assert False
-
-            # obs-specific adapter for tokens
-            if cf.pred_adapter_kv:
-                self.pred_adapter_kv[stream_name] = MLP(
-                    cf.ae_global_dim_embed,
-                    cf.ae_global_dim_embed,
-                    hidden_factor=2,
-                    with_residual=True,
-                    dropout_rate=dropout_rate,
-                    norm_type=cf.norm_type,
-                    norm_eps=self.cf.mlp_norm_eps,
-                    stream_name=f"pred_adapter_kv_{stream_name}",
-                )
-            else:
-                self.pred_adapter_kv[stream_name] = torch.nn.Identity()
 
             # target prediction engines
             tte_version = (
@@ -485,9 +456,6 @@ class Model(torch.nn.Module):
             else self.forecast_engine.fe_blocks
         )
 
-        num_params_pred_adapter = [
-            get_num_parameters(self.pred_adapter_kv[name]) for name in self.stream_names
-        ]
         num_params_embed_tcs = [
             get_num_parameters(self.embed_target_coords[name]) for name in self.stream_names
         ]
@@ -510,95 +478,67 @@ class Model(torch.nn.Module):
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
         print(f" Forecast engine: {num_params_fe:,}")
-        print(" kv-adapter, coordinate embedding, prediction networks and prediction heads:")
+        print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
             cf.streams,
-            num_params_pred_adapter,
             num_params_embed_tcs,
             num_params_tte,
             num_params_preds,
             strict=False,
         )
         [
-            print("    {} : {:,} / {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2, np3))
-            for si, np0, np1, np2, np3 in zps
+            print("   {} : {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2))
+            for si, np0, np1, np2 in zps
         ]
         print("-----------------")
 
     #########################################
-    def forward(self, model_params: ModelParams, sample, forecast_offset: int, forecast_steps: int):
+    def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
         Args:
             model_params : Query and embedding parameters
-            batch :
-                streams_data : Contains tokenized source data and target data for each dataset and
-                    each stream
-                source_cell_lens : Used to identify range of tokens to use from generated tokens in
-                    cell embedding
-                target_coords_idxs : Indices of target coordinates for each dataset.
-            forecast_offset : Starting index for iteration
-            forecast_steps : Number of forecast steps to calculate from forecast_offset
+            batch
         Returns:
             A list containing all prediction results
         """
 
-        output = ModelOutput(forecast_steps + 1)  # Why +1?
+        output = ModelOutput(batch.get_forecast_steps() + 1)
 
-        tokens, posteriors = self.encoder(model_params, sample)
+        tokens, posteriors = self.encoder(model_params, batch)
 
+        # recover batch dimension and separate input_steps
+        shape = (batch.len_sources(), batch.get_num_source_steps(), *tokens.shape[1:])
         # collapse along input step dimension
-        tokens = torch.stack(tokens, 0).sum(0)
+        tokens = tokens.reshape(shape).sum(axis=1)
 
-        # latents for output (forecast mode not working when adding latents for fstep 0 to output)
-        # latent_state = LatentState(
-        #     register_tokens=tokens[:, : self.num_register_tokens].clone(),
-        #     latent_tokens=tokens[:, self.num_register_tokens :].clone(),
-        # )
-        # output.add_latent_prediction(0, {"posteriors": posteriors, "latent_state": latent_state})
+        # latents for output
+        latent_state = LatentState(self.num_register_tokens, tokens)
+        output.add_latent_prediction(0, {"posteriors": posteriors, "latent_state": latent_state})
 
-        # Decode tokens into physical space
-        tokens_latent = tokens[:, self.num_register_tokens :]
-        pred = self.predict(model_params, 0, tokens_latent, sample, output)
-        # TODO: adjust to multiple streams
-        for stream_name in ["ERA5"]:
-            output.add_physical_prediction(fstep=0, stream_name=stream_name, pred=pred)
+        # forecasting
 
-        # forecasting: roll-out in latent space
-        for fstep in range(forecast_offset, forecast_steps):
+        # roll-out in latent space
+        for fstep in range(self.forecast_offset, batch.get_forecast_steps()):
+            # prediction
+            output = self.predict(model_params, fstep, tokens, batch, output)
 
             if self.training:
                 # Impute noise to the latent state
-                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
+                noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-            # Rollout step in latent space
-            tokens = self.forecast(model_params, tokens, fstep, meta_info=sample.meta_info)
-            latent_state = LatentState(
-                register_tokens=tokens[:, : self.num_register_tokens].clone(),
-                latent_tokens=tokens[:, self.num_register_tokens :].clone(),
-            )
-            output.add_latent_prediction(fstep, {"latent_state": latent_state})
+            tokens = self.forecast(model_params, tokens, fstep, batch.source_samples[0].meta_info)
 
-            # Decode tokens into physical space
-            tokens_latent = tokens[:, self.num_register_tokens :]
-            pred = self.predict(model_params, fstep, tokens_latent, sample, output)
-            # TODO: adjust to multiple streams
-            for stream_name in ["ERA5"]:
-                output.add_physical_prediction(fstep, stream_name, pred)
+        # prediction for final step
+        output = self.predict(model_params, batch.get_forecast_steps(), tokens, batch, output)
 
         return output
 
     #########################################
-    def forecast(
-        self,
-        model_params: ModelParams,
-        tokens: torch.Tensor,
-        fstep: int,
-        meta_info: dict[str, SampleMetaData] = None,
-    ) -> torch.Tensor:
+    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int, meta_info = None) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:
@@ -622,7 +562,7 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         fstep: int,
         tokens: torch.Tensor,
-        sample: Sample,
+        batch: ModelBatch,
         output: ModelOutput,
     ) -> list[torch.Tensor]:
         """Predict outputs at the specific target coordinates based on the input weather state and
@@ -639,41 +579,32 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
 
-        # add list which represents batch samples
-        streams_data = [sample.streams_data]
-        target_coords_idxs = sample.target_coords_idx
+        # remove register tokens
+        tokens = tokens[:, self.num_register_tokens :]
 
-        batch_size = (
-            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
-        )
-
+        # get 1-ring neighborhood for prediction
+        batch_size = batch.len_sources()
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-        tokens_stream = tokens.reshape(s).flatten(0, 1)
-        tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
+        idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
+        tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
+        # TODO: precompute in model_params?
+        tokens_nbors_lens = torch.full(
+            (s[0] * s[1] + 1,), fill_value=9, dtype=torch.int32, device=tokens_nbors.device
+        )
+        tokens_nbors_lens[0] = 0
 
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
-            tte = self.target_token_engines[stream_name]
-            tte_kv = self.pred_adapter_kv[stream_name]
-            tc_embed = self.embed_target_coords[stream_name]
-
-            assert batch_size == 1
-
-            ## embed token coords, concatenating along batch dimension
-            # (which is taking care of through the varlen attention)
-            # arguably we should to the mixed precision policy when creating the model in FSDP
-            tc_tokens = torch.cat(
+            # extract target coords for current stream and fstep and convert to one tensor
+            t_coords = torch.cat(
                 [
-                    checkpoint(
-                        tc_embed,
-                        streams_data[i_b][stream_name].target_coords[fstep],
-                        use_reentrant=False,
-                    )
-                    if len(streams_data[i_b][stream_name].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][stream_name].target_coords[fstep]
-                    for i_b in range(len(streams_data))  # i_b is the index over the batch dimension
+                    batch.source_samples[i_b].streams_data[stream_name].target_coords[fstep]
+                    for i_b in range(batch_size)
                 ]
             )
+            # embed token coords
+            tc_embed = self.embed_target_coords[stream_name]
+            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
@@ -690,26 +621,21 @@ class Model(torch.nn.Module):
                 pred = torch.tensor([], device=tc_tokens.device)
 
             else:
-                # TODO: how to support tte_kv efficiently,
-                #  generate 1-ring neighborhoods here or on a per stream basis
-                assert isinstance(tte_kv, torch.nn.Identity)
-
                 # lens for varlen attention
-                tcs_lens = target_coords_idxs[stream_name][fstep]
-                # coord information for learnable layer norm
-                tcs_aux = torch.cat(
+                tcls = torch.cat(
                     [
-                        streams_data[i_b][stream_name].target_coords[fstep]
-                        for i_b in range(len(streams_data))
+                        sample.streams_data[stream_name].target_coords_lens[fstep]
+                        for sample in batch.source_samples
                     ]
                 )
+                tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
-                tc_tokens = tte(
-                    latent=tokens_stream,
+                tc_tokens = self.target_token_engines[stream_name](
+                    latent=tokens_nbors,
                     output=tc_tokens,
-                    latent_lens=model_params.tokens_lens,
+                    latent_lens=tokens_nbors_lens,
                     output_lens=tcs_lens,
-                    coordinates=tcs_aux,
+                    coordinates=t_coords,
                 )
 
                 # final prediction head to map back to physical space

@@ -26,6 +26,8 @@ class SampleMetaData:
 
     mask: torch.Tensor | None = None
 
+    global_params: dict | None = None
+
 
 class Sample:
     # keys: stream name, values: SampleMetaData
@@ -35,13 +37,6 @@ class Sample:
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
 
-    # TODO:
-    # these two need to live in ModelBatch as they are flattened!
-    # this should be a dict also lives in ModelBatch
-    source_cell_lens: list[torch.Tensor] | None
-    # TODO why is this a list of lists in practice, but the type says list of tensors?
-    target_coords_idx: list[torch.Tensor] | None
-
     def __init__(self, streams: dict) -> None:
         # TODO: can we pass this right away?
         self.meta_info = {}
@@ -50,21 +45,7 @@ class Sample:
         for stream_info in streams:
             self.streams_data[stream_info["name"]] = None
 
-        self.source_cell_lens: list[torch.Tensor] | None = None
-        self.target_coords_idx: list[torch.Tensor] | None = None
-
     def to_device(self, device) -> None:
-        if self.source_cell_lens is not None:
-            # iterate over forecast steps
-            self.source_cell_lens = [t.to(device, non_blocking=True) for t in self.source_cell_lens]
-
-        if self.target_coords_idx is not None:
-            target_coords_idx_new = {}
-            for k, v in self.target_coords_idx.items():
-                # iterate over forecast steps
-                target_coords_idx_new[k] = [vv.to(device, non_blocking=True) for vv in v]
-            self.target_coords_idx = target_coords_idx_new
-
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
                 self.meta_info[key].mask.to(device, non_blocking=True)
@@ -97,13 +78,6 @@ class Sample:
         """
         self.meta_info[stream_name] = meta_info
 
-    def set_preprocessed(self, source_cell_lens, target_coords_idx):
-        """
-        Set preprocessed data for sample
-        """
-        self.source_cell_lens = source_cell_lens
-        self.target_coords_idx = target_coords_idx
-
     def get_stream_data(self, stream_name: str) -> StreamData:
         """
         Get data for stream @stream_name from sample
@@ -135,6 +109,12 @@ class ModelBatch:
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
+    # device of the tensors in the batch
+    device: str | torch.device
+
+    # number of tokens per cell per forecast step and stream
+    source_tokens_lens: torch.Tensor
+
     def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
         """ """
 
@@ -144,12 +124,18 @@ class ModelBatch:
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
-    def to_device(self, device):
+    def to_device(self, device):  # -> ModelBatch
         for sample in self.source_samples:
             sample.to_device(device)
 
         for sample in self.target_samples:
             sample.to_device(device)
+
+        self.source_tokens_lens = self.source_tokens_lens.to(device, non_blocking=True)
+
+        self.device = device
+
+        return self
 
     def add_source_stream(
         self,
@@ -243,3 +229,32 @@ class ModelBatch:
         Get index of target sample for a given source sample index
         """
         return int(self.source2target_matching_idxs[source_idx])
+
+    def get_forecast_steps(self) -> int:
+        """
+        Get forecast steps
+        """
+        # use sample 0 since the number of forecast steps is constant across batch
+        return self.source_samples[0].get_forecast_steps()
+
+    def get_device(self) -> str | torch.device:
+        """
+        Get device of tensors in the batch
+        """
+        return self.device
+
+    def get_num_source_steps(self) -> int:
+        """
+        Get number of input/source steps
+        """
+        # TODO: define explicitly
+        # TODO: ensure that num_input_steps is constant across batch with different strategies
+        return len(self.source_samples[0].streams_data["ERA5"].source_tokens_cells)
+
+    def get_num_target_steps(self) -> int:
+        """
+        Get number of input/source steps
+        """
+        # TODO: define explicitly
+        # TODO: ensure that num_input_steps is constant across batch with different strategies
+        return len(self.target_samples[0].streams_data["ERA5"].target_tokens)

@@ -21,6 +21,8 @@ evaluation:
   metrics  : ["rmse", "mae"]
   regions: ["global", "nhem"]
   summary_plots : true
+  ratio_plots : false
+  heat_maps : false
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
   plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 

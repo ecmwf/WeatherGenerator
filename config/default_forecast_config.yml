@@ -1,5 +1,4 @@
 streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_nppatms_synop/"
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"
@@ -22,7 +21,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -33,7 +32,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 2
+ae_aggregation_num_blocks: 0
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -51,38 +50,24 @@ pred_mlp_adaln: True
 # one is training an auto-encoder
 forecast_offset : 1
 forecast_delta: 00:00:00
-forecast_steps: 1
+forecast_steps: 4
 forecast_policy: "fixed"
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
-forecast_with_step_conditioning: False
 fe_num_blocks: 8
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_diffusion_model: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0.0  # 1e-4
-# Diffusion related parameters
-frequency_embedding_dim: 256
-embedding_dim: 512
-sigma_min: 0.002
-sigma_max: 50000
-sigma_data: 0.5
-rho: 7
-p_mean: -1.2
-p_std: 1.2
-# Encoder weights (set to null to not load a pretrained encoder)
-chkpt_encoder_weights: "./models/whkujigw/whkujigw_latest.chkpt"
+fe_layer_norm_after_blocks: [3]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_impute_latent_noise_std: 1e-4  # 1e-4
 
 healpix_level: 5
 
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: False
+with_fsdp: True
 attention_dtype: bf16
-mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
 
@@ -110,35 +95,31 @@ validation_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1
 # TODO: adapt so that the masking or forecast config entry also sits here
 training_config:
   # # when this is "masking", we are basically only using the model_input subconfig
-  training_mode: "masking"  # "masking", "student_teacher", "forecast"
+  training_mode: "masking"  
 
   losses :
-      # LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]}
-      LossLatentDiffusion: {weight: 1.0, loss_fcts: [['mse', 1.0]]}
+      LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]}
   # Example config for masking/diffusion
   model_input:
-    - masking_strategy: "forecast" # "random", "healpix", "forecast". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+    - masking_strategy: "forecast" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
       num_samples: 1  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
       relationship: "independent"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
       num_steps_input: 1
-      # loss : ibot
-target_and_aux_calc: "DiffusionLatentTargetEncoder"
 
 num_register_tokens: 0
 
-num_mini_epochs: 32
-samples_per_mini_epoch: 512 #4096
-samples_per_validation: 32 #512
-
+num_mini_epochs: 64
+samples_per_mini_epoch: 4096
+samples_per_validation: 512
 shuffle: True
 
 lr_scaling_policy: "sqrt"
 lr_start: 1e-6
-lr_max: 5e-5
-lr_final_decay: 1e-6
+lr_max: 0.0001
+lr_final_decay: 2e-6
 lr_final: 0.0
-lr_steps_warmup: 512
+lr_steps_warmup: 256
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "constant"
@@ -156,9 +137,10 @@ start_date_val: 2023-10-01T00:00
 end_date_val: 2023-12-31T00:00
 time_window_step: 06:00:00
 time_window_len: 06:00:00
+
 input_window_steps: 1
 
-val_initial: False #True
+val_initial: False
 
 loader_num_workers: 12
 log_validation: 0
@@ -176,6 +158,7 @@ train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
+
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val
