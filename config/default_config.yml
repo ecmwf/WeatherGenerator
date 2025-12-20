@@ -139,9 +139,9 @@ nn_module: "te"
 log_grad_norms: False
 
 start_date: 197901010000
-end_date: 202012310000
-start_date_val: 2023100100
-end_date_val: 2023123100
+end_date: 202212310000
+start_date_val: 202310010000
+end_date_val: 202312310000
 len_hrs: 6
 step_hrs: 6
 input_window_steps: 1
@@ -178,6 +178,7 @@ wgtags:
   # the organizations codenames in https://confluence.ecmwf.int/display/MAEL/Staff+Contact+List
   # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
   org: None
+  issue: 1495
   # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
   # This is expected to be the primary tag for comparing experiments in MLFlow.
   # Expected values are lowercase strings with no spaces, just underscores:
