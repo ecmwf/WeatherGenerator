@@ -248,7 +248,10 @@ class ModelBatch:
         Get number of input/source steps from smallest of all available streams
         """
         # TODO: define explicitly
-        lens = [len(stream.source_tokens_cells) for stream in self.target_samples[0].streams_data]
+        lens = [
+            len(stream.source_tokens_cells)
+            for _, stream in self.target_samples[0].streams_data.items()
+        ]
 
         return min(lens)
 
@@ -258,6 +261,8 @@ class ModelBatch:
         """
         # TODO: define explicitly
         # TODO: ensure that num_input_steps is constant across batch with different strategies
-        lens = [len(stream.target_tokens) for stream in self.target_samples[0].streams_data]
+        lens = [
+            len(stream.target_tokens) for _, stream in self.target_samples[0].streams_data.items()
+        ]
 
         return min(lens)
