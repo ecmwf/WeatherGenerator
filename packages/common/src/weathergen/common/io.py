@@ -14,6 +14,7 @@ import logging
 import pathlib
 import timeit
 import typing
+import warnings
 
 import dask.array as da
 import numpy as np
@@ -31,22 +32,6 @@ CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
-
-
-# CHUNK_N_SAMPLES has to equal to integer * SHARD_N_SAMPLES
-
-# zarr.config.set({
-#     "threading.num_workers": None,
-#     "array.write_empty_chunks": False,
-#     "codec_pipeline": {
-#         'batch_size': 1,
-#         "path": "zarrs.ZarrsCodecPipeline",
-#         "validate_checksums": True,
-#         "store_empty_chunks": False,
-#         "chunk_concurrent_minimum": 4,
-#         "chunk_concurrent_maximum": None,
-#     }
-# })
 
 _logger = logging.getLogger(__name__)
 
@@ -360,16 +345,34 @@ class ZarrIO:
                 _logger.info("Creating zipstore")
                 self._store = ZipStore(self._store_path, mode="a")
                 self.data_root = zarr.group(store=self._store)
-            if not self.create:
+            else:
                 _logger.info("Opening zipstore as read-only")
                 self._store = ZipStore(self._store_path, read_only=True)
                 self.data_root = zarr.open_group(store=self._store, mode="r")
+
         elif self.type == "local":
-            self._store = LocalStore(self._store_path)
-            self.data_root = zarr.group(store=self._store)
-            _logger.info("Opened local zarr store")
-        else:
-            raise Exception("format not supported")
+            # Capture warnings emitted during store creation/open
+            with warnings.catch_warnings(record=True) as caught:
+                self._store = LocalStore(self._store_path)
+                self.data_root = zarr.group(store=self._store)
+            # Raise DeprecationWarning only if a ZarrUserWarning was raised
+            if any(issubclass(w.category, zarr.errors.ZarrUserWarning) for w in caught):
+                # Optionally include the last ZarrUserWarning's message for context
+                last_msg = next(
+                    (
+                        str(w.message)
+                        for w in reversed(caught)
+                        if issubclass(w.category, zarr.errors.ZarrUserWarning)
+                    ),
+                    "",
+                )
+                # warnings.warn(f"Zarr2 conflict: {last_msg}",
+                #                 DeprecationWarning
+                # )
+                _logger.warning(
+                    f"Future Deprecation Zarr2 conflict: {last_msg} , Opened local zarr store"
+                )
+
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
@@ -410,6 +413,7 @@ class ZarrIO:
             group = self.data_root.create_group(item.path)
         else:
             try:
+                #####WARNING IS APPEARING HERE TOO#####
                 group = self.data_root.get(item.path)
                 assert group is not None, f"Zarr group: {item.path} does not exist."
             except KeyError as e:

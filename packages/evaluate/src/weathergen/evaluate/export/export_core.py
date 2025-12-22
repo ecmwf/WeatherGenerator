@@ -27,7 +27,7 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     -------
         xarray DataArray for the specified sample and forecast step.
     """
-    sample, fstep, run_id, stream, dtype, epoch, rank, type= args
+    sample, fstep, run_id, stream, dtype, epoch, rank, type = args
     if type == "zip":
         ext = "zip"
     else:

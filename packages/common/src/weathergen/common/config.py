@@ -131,7 +131,7 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
     for ext in ["zarr", "zip"]:
-        zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"    
+        zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
         zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
         if zarr_path_new.exists() or zarr_path_new.is_dir():
@@ -145,6 +145,7 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
                 f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
                 f"exist or is not a directory."
             )
+
 
 def _apply_fixes(config: Config) -> Config:
     """
