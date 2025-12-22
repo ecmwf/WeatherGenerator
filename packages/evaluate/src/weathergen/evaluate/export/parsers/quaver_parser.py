@@ -50,8 +50,11 @@ class QuaverParser(CfParser):
         super().__init__(config, **kwargs)
 
         self.template_cache = []
-        
-        self.template = str(Path(self.quaver_template_folder) / f"aifs_{{level_type}}_{self.quaver_template_grid_type}_data.grib")
+
+        self.template = str(
+            Path(self.quaver_template_folder)
+            / f"aifs_{{level_type}}_{self.quaver_template_grid_type}_data.grib"
+        )
 
         self.pl_template = ekd.from_source("file", self.template.format(level_type="pl"))
         self.sf_template = ekd.from_source("file", self.template.format(level_type="sfc"))
