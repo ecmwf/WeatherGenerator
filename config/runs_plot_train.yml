@@ -1,6 +1,200 @@
 train : 
   plot :
-    lnjzhore : 
+    # in9eslqf : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.05, v1"
+    #   eval: vgbndhco
+    # t5vqafju : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.05, v2"
+    #   eval: vgbndhco
+    # qz9n6815 : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.05, v3"
+    #   eval: vgbndhco
+    
+    # scapqu18 : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.1, v1"
+    #   eval: vgbndhco
+    # yqy2ezoa : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.1, v2"
+    #   eval: vgbndhco
+    # bp9lcgwn : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.1, v3"
+    #   eval: vgbndhco
+    
+    # vzeakjlb : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.2, v1"
+    #   eval: vgbndhco
+    # a8n4zrfs : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.2, v2"
+    #   eval: vgbndhco
+    # cxicf671 : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.2, v3"
+    #   eval: vgbndhco
+    
+    # z3infogw : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.4, v1"
+    #   eval: vgbndhco
+    # a9hp2qju : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.4, v2"
+    #   eval: vgbndhco
+    # achvju39 : 
+    #   slurm_id: 0
+    #   description: "lr 5e-4, w-dec 0.4, v3"
+    #   eval: vgbndhco
+    
+    cszpe803 : 
       slurm_id: 0
-      description: "Christian's naoj54ch with new code"
+      description: "lr 5e-4, w-dec 0.6, v1"
+      eval: vgbndhco
+    y0kauh4s : 
+      slurm_id: 0
+      description: "lr 5e-4, w-dec 0.6, v2"
+      eval: vgbndhco
+    eneq4ahr : 
+      slurm_id: 0
+      description: "lr 5e-4, w-dec 0.6, v3"
+      eval: vgbndhco
+    
+
+
+    # mia69x1h : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.05, v1"
+    #   eval: vgbndhco
+    # lgzkdwls : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.05, v2"
+    #   eval: vgbndhco
+    # jr39znm6 : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.05, v3"
+    #   eval: vgbndhco
+    
+    # gzxgp7cw : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.1, v1"
+    #   eval: vgbndhco
+    # el6zytfd : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.1, v2"
+    #   eval: vgbndhco
+    # c64w3cgy : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.1, v3"
+    #   eval: vgbndhco
+    
+    # m4x3a0jt : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.2, v1"
+    #   eval: vgbndhco
+    # manyrowd : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.2, v2"
+    #   eval: vgbndhco
+    # ijwbpy3k : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.2, v3"
+    #   eval: vgbndhco
+    
+    # i9qkv084 : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.4, v1"
+    #   eval: vgbndhco
+    # l78tqy2z : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.4, v2"
+    #   eval: vgbndhco
+    # xn4wa7b2 : 
+    #   slurm_id: 0
+    #   description: "lr 1e-4, w-dec 0.4, v3"
+    #   eval: vgbndhco
+    
+    s9sldzyb : 
+      slurm_id: 0
+      description: "lr 1e-4, w-dec 0.6, v1"
+      eval: vgbndhco
+    e29izt1j : 
+      slurm_id: 0
+      description: "lr 1e-4, w-dec 0.6, v2"
+      eval: vgbndhco
+    bmoc645w : 
+      slurm_id: 0
+      description: "lr 1e-4, w-dec 0.6, v3"
+      eval: vgbndhco
+
+
+
+    # q4l8jb2e : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.05, v1"
+    #   eval: vgbndhco
+    # eytr9nki : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.05, v2"
+    #   eval: vgbndhco
+    # bbcm27x1 : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.05, v3"
+    #   eval: vgbndhco
+    
+    # jjbfpuya : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.1, v1"
+    #   eval: vgbndhco
+    # wxehoqic : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.1, v2"
+    #   eval: vgbndhco
+    # sbylixor : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.1, v3"
+    #   eval: vgbndhco
+    
+    # scguorkl : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.2, v1"
+    #   eval: vgbndhco
+    # uh0iz8sa : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.2, v2"
+    #   eval: vgbndhco
+    # jizcxg9f : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.2, v3"
+    #   eval: vgbndhco
+    
+    # d2wgjec9 : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.4, v1"
+    #   eval: vgbndhco
+    # g10zvcn4 : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.4, v2"
+    #   eval: vgbndhco
+    # a2vlj964 : 
+    #   slurm_id: 0
+    #   description: "lr 5e-5, w-dec 0.4, v3"
+    #   eval: vgbndhco
+    
+    z8vx03bg : 
+      slurm_id: 0
+      description: "lr 5e-5, w-dec 0.6, v1"
+      eval: vgbndhco
+    e3k2v450 : 
+      slurm_id: 0
+      description: "lr 5e-5, w-dec 0.6, v2"
+      eval: vgbndhco
+    qmil5gwk : 
+      slurm_id: 0
+      description: "lr 5e-5, w-dec 0.6, v3"
       eval: vgbndhco
