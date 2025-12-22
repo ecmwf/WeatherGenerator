@@ -19,8 +19,10 @@ uv run export --run-id ciga1p9c --stream ERA5
 --output-dir ./test_output1 
 --format quaver --type prediction target  
 --samples 2 --fsteps 2 
---template "<path to quaver templates>/quaver_templates/aifs_{level_type}_o96_data.grib" 
+--quaver-template-folder "<path to quaver templates> --quaver-template-grid-type o96 
 --expver test 
+
+NOTE: check if it is o96 or O96 in the template.
 """
 
 
@@ -36,8 +38,10 @@ class QuaverParser(CfParser):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-        if not hasattr(self, "template"):
-            raise ValueError("Template file must be provided for Quaver format.")
+        if not hasattr(self, "quaver_template_folder"):
+            raise ValueError("Template folder must be provided for Quaver format.")
+        if not hasattr(self, "quaver_template_grid_type"):
+            raise ValueError("Template grid type must be provided for Quaver format.")
         if not hasattr(self, "channels"):
             raise ValueError("Channels must be provided for Quaver format.")
         if not hasattr(self, "expver"):
@@ -46,6 +50,8 @@ class QuaverParser(CfParser):
         super().__init__(config, **kwargs)
 
         self.template_cache = []
+        
+        self.template = str(Path(self.quaver_template_folder) / f"aifs_{{level_type}}_{self.quaver_template_grid_type}_data.grib")
 
         self.pl_template = ekd.from_source("file", self.template.format(level_type="pl"))
         self.sf_template = ekd.from_source("file", self.template.format(level_type="sfc"))

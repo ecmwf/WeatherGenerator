@@ -11,6 +11,7 @@
 
 import dataclasses
 from abc import abstractmethod
+from collections import defaultdict
 
 from torch import Tensor
 
@@ -34,8 +35,8 @@ class LossValues:
     loss: Tensor
     # Dictionaries containing loss values for each stream, channel, and loss function, as
     # well as standard deviations when operating with ensembles (e.g., when training with CRPS).
-    losses_all: dict[StreamName, Tensor]
-    stddev_all: dict[StreamName, Tensor]
+    losses_all: defaultdict
+    stddev_all: defaultdict
 
 
 class LossModuleBase:
