@@ -581,6 +581,13 @@ class Model(torch.nn.Module):
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
             tokens = self.forecast(model_params, tokens, fstep)
+            latent_state = LatentState(
+                register_tokens=tokens[:, : self.register_token_idx],
+                class_token=tokens[:, self.register_token_idx : self.class_token_idx],
+                patch_tokens=tokens[:, self.class_token_idx :],
+                z_pre_norm=None
+            )
+            output.add_latent_prediction(fstep, "latent_state", latent_state)
 
         # prediction for final step
         output = self.predict(model_params, batch.get_forecast_steps(), tokens, batch, output)
