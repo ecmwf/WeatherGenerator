@@ -88,6 +88,10 @@ def assert_nans_in_metrics_file(run_id):
     loss_values_train = np.array([entry.get('LossLatentSSLStudentTeacher.loss_avg') for entry in metrics if entry.get("stage") == 'train'])
     loss_values_val = np.array([entry.get('LossLatentSSLStudentTeacher.loss_avg') for entry in metrics if entry.get("stage") == 'val'])
     
+    #remove nans if applicable
+    loss_values_train = np.array([float(value) if value != 'nan' else np.nan for value in loss_values_train])
+    loss_values_val = np.array([float(value) if value != 'nan' else np.nan for value in loss_values_val])
+    
     assert not np.isnan(loss_values_train).any(), (
         "NaN values found in training loss metrics!"
     )
