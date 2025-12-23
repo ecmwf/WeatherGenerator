@@ -585,7 +585,7 @@ class Model(torch.nn.Module):
                 register_tokens=tokens[:, : self.register_token_idx],
                 class_token=tokens[:, self.register_token_idx : self.class_token_idx],
                 patch_tokens=tokens[:, self.class_token_idx :],
-                z_pre_norm=None
+                z_pre_norm=None,
             )
             output.add_latent_prediction(fstep, "latent_state", latent_state)
 
