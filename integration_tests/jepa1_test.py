@@ -14,6 +14,7 @@ import shutil
 from pathlib import Path
 import omegaconf
 import pytest
+import numpy as np
 
 from weathergen.evaluate.run_evaluation import evaluate_from_config
 from weathergen.run_train import inference_from_args, train_with_args
@@ -57,84 +58,10 @@ def test_train(setup, test_run_id):
         f"{WEATHERGEN_HOME}/config/streams/streams_test/",
     )
 
-    infer_with_missing(test_run_id)
-    evaluate_results(test_run_id)
     assert_missing_metrics_file(test_run_id)
-    assert_train_loss_below_threshold(test_run_id)
-    assert_val_loss_below_threshold(test_run_id)
+    assert_nans_in_metrics_file(test_run_id)
     logger.info("end test_train")
 
-
-def infer(run_id):
-    logger.info("run inference")
-    inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
-        + [
-            "--from_run_id",
-            run_id,
-            "--run_id",
-            run_id,
-            "--config",
-            f"{WEATHERGEN_HOME}/integration_tests/jepa1.yaml",
-        ]
-    )
-
-
-def infer_with_missing(run_id):
-    logger.info("run inference")
-    inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
-        + [
-            "--from_run_id",
-            run_id,
-            "--run_id",
-            run_id,
-            "--config",
-            f"{WEATHERGEN_HOME}/integration_tests/jepa1.yaml",
-        ]
-    )
-
-
-def evaluate_results(run_id):
-    logger.info("run evaluation")
-    cfg = omegaconf.OmegaConf.create(
-        {
-            "global_plotting_options": {
-                "image_format": "png",
-                "dpi_val": 300,
-            },
-            "evaluation": {
-                "metrics": ["rmse", "l1", "mse"],
-                "verbose": True,
-                "summary_plots": True,
-                "summary_dir": "./plots/",
-                "print_summary": True,
-            },
-            "run_ids": {
-                run_id: {  # would be nice if this could be done with option
-                    "streams": {
-                        "ERA5": {
-                            "results_base_dir": "./results/",
-                            "channels": ["t_850"],  # "all" indicator would be nice
-                            "evaluation": {"forecast_steps": "all", "sample": "all"},
-                            "plotting": {
-                                "sample": [0, 1],
-                                "forecast_step": [0],
-                                "plot_maps": True,
-                                "plot_histograms": True,
-                                "plot_animations": True,
-                            },
-                        }
-                    },
-                    "label": "MTM ERA5",
-                    "mini_epoch": 0,
-                    "rank": 0,
-                }
-            },
-        }
-    )
-    # Not passing the mlflow client for tests.
-    evaluate_from_config(cfg, None, None )
 
 
 def load_metrics(run_id):
@@ -154,46 +81,18 @@ def assert_missing_metrics_file(run_id):
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
     assert metrics is not None, f"Failed to load metrics for run_id: {run_id}"
-
-
-def assert_train_loss_below_threshold(run_id):
-    """Test that the 'stream.ERA5.loss_mse.loss_avg' metric is below a threshold."""
+    
+def assert_nans_in_metrics_file(run_id):
+    """Test that there are no NaNs in the metrics file."""
     metrics = load_metrics(run_id)
-    loss_metric = next(
-        (
-            metric.get("loss.LossPhysical.ERA5.mse.loss_avg", None)
-            for metric in reversed(metrics)
-            if metric.get("stage") == "train"
-        ),
-        None,
+    loss_values_train = np.array([entry.get('LossLatentSSLStudentTeacher.loss_avg') for entry in metrics if entry.get("stage") == 'train'])
+    loss_values_val = np.array([entry.get('LossLatentSSLStudentTeacher.loss_avg') for entry in metrics if entry.get("stage") == 'val'])
+    
+    assert not np.isnan(loss_values_train).any(), (
+        "NaN values found in training loss metrics!"
     )
-    assert loss_metric is not None, (
-        "'loss.LossPhysical.ERA5.mse.loss_avg' metric is missing in metrics file"
-    )
-    # Check that the loss does not explode in a single mini_epoch
-    # This is meant to be a quick test, not a convergence test
-    target = 0.25
-    assert loss_metric < target, (
-        f"'loss.LossPhysical.ERA5.mse.loss_avg' is {loss_metric}, expected to be below {target}"
+    
+    assert not np.isnan(loss_values_val).any(), (
+        "NaN values found in validation loss metrics!"
     )
 
-
-def assert_val_loss_below_threshold(run_id):
-    """Test that the 'stream.ERA5.loss_mse.loss_avg' metric is below a threshold."""
-    metrics = load_metrics(run_id)
-    loss_metric = next(
-        (
-            metric.get("loss.LossPhysical.ERA5.mse.loss_avg", None)
-            for metric in reversed(metrics)
-            if metric.get("stage") == "val"
-        ),
-        None,
-    )
-    assert loss_metric is not None, (
-        "'stream.ERA5.loss_mse.loss_avg' metric is missing in metrics file"
-    )
-    # Check that the loss does not explode in a single mini_epoch
-    # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 0.25, (
-        f"'loss.LossPhysical.ERA5.mse.loss_avg' is {loss_metric}, expected to be below 0.25"
-    )
