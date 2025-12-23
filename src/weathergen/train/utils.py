@@ -116,7 +116,7 @@ def unflatten_dict(d, separator="."):
 def extract_batch_metadata(batch):
     return (
         batch.source2target_matching_idxs,
-        [list(sample.meta_info.values()) for sample in batch.source_samples],
+        [list(sample.meta_info.values())[0] for sample in batch.source_samples],
         batch.target2source_matching_idxs,
-        [list(sample.meta_info.values()) for sample in batch.target_samples],
+        [list(sample.meta_info.values())[0] for sample in batch.target_samples],
     )

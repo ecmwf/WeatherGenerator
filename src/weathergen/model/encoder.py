@@ -62,6 +62,7 @@ class EncoderModule(torch.nn.Module):
 
         assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
+        self.num_class_tokens = cf.num_class_tokens
 
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
@@ -240,11 +241,11 @@ class EncoderModule(torch.nn.Module):
             + model_params.pe_global
         ).flatten(1, 2)
 
-        # create register tokens and prepend to latent spatial tokens
-        tokens_global_register = positional_encoding_harmonic(
-            self.q_cells.repeat(rs, self.num_register_tokens, 1)
+        # create register and latent tokens and prepend to latent spatial tokens
+        tokens_global_register_class = positional_encoding_harmonic(
+            self.q_cells.repeat(rs, self.num_register_tokens + self.num_class_tokens, 1)
         )
-        tokens_global = torch.cat([tokens_global_register, tokens_global], dim=1)
+        tokens_global = torch.cat([tokens_global_register_class, tokens_global], dim=1)
 
         # TODO: clean up above code and move to multiple functions
 

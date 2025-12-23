@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-import weathergen.train.loss_modules.loss_functions as losses
+import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import TRAIN, VAL, Stage
 
@@ -49,7 +49,7 @@ class LossPhysical(LossModuleBase):
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
-            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w, name]
+            [getattr(loss_fns, name if name != "mse" else "mse_channel_location_weighted"), w, name]
             for name, w in loss_fcts
         ]
 
@@ -82,14 +82,14 @@ class LossPhysical(LossModuleBase):
         timestep_weight_config = self.cf.get("timestep_weight")
         if timestep_weight_config is None:
             return [1.0 for _ in range(forecast_steps)]
-        weights_timestep_fct = getattr(losses, timestep_weight_config[0])
+        weights_timestep_fct = getattr(loss_fns, timestep_weight_config[0])
         return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
 
     def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
             return None
-        weights_locations_fct = getattr(losses, location_weight_type)
+        weights_locations_fct = getattr(loss_fns, location_weight_type)
         weights_locations = weights_locations_fct(stream_data, forecast_offset, fstep)
         weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
