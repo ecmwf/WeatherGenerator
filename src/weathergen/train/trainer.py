@@ -339,15 +339,20 @@ class Trainer(TrainerBase):
         if is_root() and not cf.with_fsdp and not cf.with_ddp:
             self.model.print_num_parameters()
 
+        # Retrieve Adam betas from config or compute them dynamically if not specified
+        beta1, beta2 = cf.get("adam_beta1", None), cf.get("adam_beta2", None)
+
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper https://arxiv.org/pdf/2111.06377
         kappa = (
             cf.batch_size_per_gpu * cf.world_size
         )  # I doubt this holds for us from some anecdotal runs
+        # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta1 = max(
             0.5, 1.0 - kappa * (1.0 - 0.975)
-        )  # aiming for beta1 = 0.9 at one node, ie kappa=B=4
-        beta2 = 1.0 - kappa * (1.0 - 0.9875)  # aiming for beta2 = 0.95 at one node, ie B=4
+        ) if beta1 is None else beta1
+        # aiming for beta2 = 0.95 at one node, ie B=4
+        beta2 = 1.0 - kappa * (1.0 - 0.9875) if beta2 is None else beta2
         eps = 2e-08 / np.sqrt(kappa)
 
         self.optimizer = torch.optim.AdamW(

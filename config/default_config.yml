@@ -131,6 +131,8 @@ lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "constant"
 lr_policy_cooldown: "linear"
+adam_beta1: null  # Becomes 0.8 with 2 nodes
+adam_beta2: null  # Becomes 0.9 with 2 nodes
 
 grad_clip: 1.0
 weight_decay: 0.1
