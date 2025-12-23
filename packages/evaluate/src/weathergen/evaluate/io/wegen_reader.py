@@ -309,7 +309,7 @@ class WeatherGenReader(Reader):
             Returns a Dataset where channels have been scaled if needed
         """
 
-        channels_z = [ch for ch in data.channel.values if str(ch).startswith("z_")]
+        channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
         data_scaled = data.copy()
         factor = 9.80665
 

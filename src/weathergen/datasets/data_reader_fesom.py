@@ -97,10 +97,10 @@ class DataReaderFesom(DataReaderTimestep):
         # print(f"checking stream info {list(stream_info.keys())}")
 
     def _get_mesh_size(self, group: zarr.Group) -> int:
-        if "n_points" in group.data.attrs:
-            return group.data.attrs["n_points"]
+        if "n_points" in group["data"].attrs:
+            return group["data"].attrs["n_points"]
         else:
-            return group.data.attrs["nod2"]
+            return group["data"].attrs["nod2"]
 
     def _reorder_groups(self, colnames: list[str], groups: list[zarr.Group]) -> list[da.Array]:
         reordered_data_arrays: list[da.Array] = []
@@ -144,8 +144,9 @@ class DataReaderFesom(DataReaderTimestep):
         s_groups: list[zarr.Group] = [zarr.open_group(name, mode="r") for name in self.filenames]
         t_groups: list[zarr.Group] = [zarr.open_group(name, mode="r") for name in self.target_files]
 
-        s_times: list[zarr.Array] = [group["dates"] for group in s_groups]
-        t_times: list[zarr.Array] = [group["dates"] for group in t_groups]
+        # Explicitly wrap in da.from_zarr
+        s_times: list[da.Array] = [da.from_zarr(group["dates"]) for group in s_groups]
+        t_times: list[da.Array] = [da.from_zarr(group["dates"]) for group in t_groups]
 
         self.source_time = da.concatenate(s_times, axis=0)
         self.target_time = da.concatenate(t_times, axis=0)
@@ -233,8 +234,8 @@ class DataReaderFesom(DataReaderTimestep):
             self._initialized = True
             return
 
-        self.source_colnames: list[str] = list(s_groups[0].data.attrs["colnames"])
-        self.target_colnames: list[str] = list(t_groups[0].data.attrs["colnames"])
+        self.source_colnames: list[str] = list(s_groups[0]["data"].attrs["colnames"])
+        self.target_colnames: list[str] = list(t_groups[0]["data"].attrs["colnames"])
 
         self.source_cols_idx = list(np.arange(len(self.source_colnames), dtype=int))
         self.target_cols_idx = list(np.arange(len(self.target_colnames), dtype=int))
@@ -259,21 +260,21 @@ class DataReaderFesom(DataReaderTimestep):
         self.target_cols_idx.remove(self.trg_lon_index)
         self.target_cols_idx = np.array(self.target_cols_idx)
 
-        self.properties = {"stream_id": s_groups[0].data.attrs["obs_id"]}
+        self.properties = {"stream_id": s_groups[0]["data"].attrs["obs_id"]}
 
         self.source_mean = np.concatenate(
-            (np.array([0, 0]), np.array(s_groups[0].data.attrs["means"]))
+            (np.array([0, 0]), np.array(s_groups[0]["data"].attrs["means"]))
         )
         self.source_stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(s_groups[0].data.attrs["std"])))
+            np.concatenate((np.array([1, 1]), np.array(s_groups[0]["data"].attrs["std"])))
         )
         self.source_stdev[self.source_stdev <= 1e-5] = 1.0
 
         self.target_mean = np.concatenate(
-            (np.array([0, 0]), np.array(t_groups[0].data.attrs["means"]))
+            (np.array([0, 0]), np.array(t_groups[0]["data"].attrs["means"]))
         )
         self.target_stdev = np.sqrt(
-            np.concatenate((np.array([1, 1]), np.array(t_groups[0].data.attrs["std"])))
+            np.concatenate((np.array([1, 1]), np.array(t_groups[0]["data"].attrs["std"])))
         )
         self.target_stdev[self.target_stdev <= 1e-5] = 1.0
 

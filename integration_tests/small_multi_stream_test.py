@@ -9,7 +9,6 @@ uv run pytest ./integration_tests/small_multi_stream_test.py
 
 import json
 import logging
-import os
 import shutil
 from pathlib import Path
 
@@ -78,7 +77,9 @@ def infer_multi_stream(run_id):
             "--run_id",
             run_id,
             "--streams_output",
-            "ERA5", "SurfaceCombined", "NPPATMS",
+            "ERA5",
+            "SurfaceCombined",
+            "NPPATMS",
             "--config",
             f"{WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml",
         ]
@@ -110,7 +111,7 @@ def evaluate_multi_stream_results(run_id):
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
                                 "sample": [0, 1],
-                                "forecast_step": [0],
+                                "forecast_step": [1],
                                 "plot_maps": True,
                                 "plot_histograms": True,
                                 "plot_animations": False,
@@ -122,7 +123,7 @@ def evaluate_multi_stream_results(run_id):
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
                                 "sample": [0, 1],
-                                "forecast_step": [0],
+                                "forecast_step": [1],
                                 "plot_maps": True,
                                 "plot_histograms": True,
                                 "plot_animations": False,
@@ -134,7 +135,7 @@ def evaluate_multi_stream_results(run_id):
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
                                 "sample": [0, 1],
-                                "forecast_step": [0],
+                                "forecast_step": [1],
                                 "plot_maps": True,
                                 "plot_histograms": True,
                                 "plot_animations": False,
@@ -173,7 +174,7 @@ def assert_metrics_file_exists(run_id):
 def assert_stream_losses_below_threshold(run_id, stage="train"):
     """
     Test that stream losses are below threshold for a given stage.
-    
+
     Args:
         run_id: The run identifier
         stage: Either "train" or "val"
@@ -200,16 +201,16 @@ def assert_stream_losses_below_threshold(run_id, stage="train"):
     for stream_name, threshold in stage_thresholds.items():
         loss = next(
             (
-                metric.get(f"loss.LossPhysical.{stream_name}.mse.loss_avg")
+                metric.get(f"LossPhysical.{stream_name}.mse.avg")
                 for metric in reversed(metrics)
                 if metric.get("stage") == stage
             ),
             None,
         )
 
-        assert loss is not None, f"'loss.LossPhysical.{stream_name}.mse.loss_avg' {stage} metric is missing"
+        assert loss is not None, f"'LossPhysical.{stream_name}.mse.avg' {stage} metric is missing"
         assert loss < threshold, (
-            f"'loss.LossPhysical.{stream_name}.mse.loss_avg' {stage} loss is {loss}, expected below {threshold}"
+            f"'LossPhysical.{stream_name}.mse.avg' {stage} loss is {loss}, expected below {threshold}"
         )
 
         losses[stream_name] = loss

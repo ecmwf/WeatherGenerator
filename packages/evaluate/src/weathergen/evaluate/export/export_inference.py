@@ -143,10 +143,20 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--template",
+        "--quaver-template-folder",
         type=str,
         help="Path to GRIB template file",
         required=False,
+        dest="quaver_template_folder",
+    )
+
+    parser.add_argument(
+        "--quaver-template-grid-type",
+        type=str,
+        help="Grid type to include in the output filename (i.e. 'O96/N320')",
+        required=False,
+        default="O96", 
+        dest="quaver_template_grid_type",
     )
 
     parser.add_argument(
