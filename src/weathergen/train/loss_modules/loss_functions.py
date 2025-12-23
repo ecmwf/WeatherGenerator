@@ -294,7 +294,6 @@ def masked_student_teacher_patch_softmax(
     n_masked_patches=None,
     masks_weight=None,
     """
-    # loss = torch.sum(t * F.log_softmax(s / self.student_temp, dim=-1), dim=-1)
     mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
     loss = softmax(teacher_patches_masked[mask], student_patches_masked[mask], student_temp)
     if masks_weight is None:
@@ -303,14 +302,14 @@ def masked_student_teacher_patch_softmax(
             .unsqueeze(-1)
             .expand_as(student_masks)  # [student_masks_flat]
         )
-    # if n_masked_patches is not None:
-    #     loss = loss[:n_masked_patches]
     loss = loss * masks_weight[mask]
     return -loss.sum() / student_masks.shape[0]
 
 
 def student_teacher_global_softmax(student_outputs, teacher_output, student_temp):
     """
+    This comment is outdated TODO fix. Leaving it for now so we remember the context
+
     This assumes that student_outputs : list[Tensor[2*batch_size, num_class_tokens, channel_size])
                  and  teacher_outputs : Tensor[2*batch_size, num_class_tokens, channel_size]
     The 2* is because there is two global views and they are concatenated in the batch dim

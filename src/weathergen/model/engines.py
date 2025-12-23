@@ -373,14 +373,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
-        self.ae_global_blocks.append(
-            torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
-        )
-
-        self.ae_global_blocks.append(
-            torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
-        )
-
     def forward(self, tokens, use_reentrant):
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
@@ -834,7 +826,7 @@ class TargetPredictionEngine(nn.Module):
 @dataclasses.dataclass
 class LatentState:
     """
-    A dataclass to encapsulate the output of latent heads.
+    A dataclass to encapsulate the latent state aka the intput to latent heads.
     """
 
     class_token: torch.Tensor
