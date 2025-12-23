@@ -202,7 +202,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 "length of MultiStreamDataSampler,"
                 f"{n_duplicates} duplicate samples will be sampled."
                 "To avoid this increase the the length of the"
-                f"global sampling window by {n_duplicates * cf.step_hrs} hours."
+                f"global sampling window by {n_duplicates * self.step_timedelta} hours."
             )
             logger.warning(msg)
         logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
