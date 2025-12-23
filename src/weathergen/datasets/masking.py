@@ -1,7 +1,10 @@
 import logging
+import warnings
 
+import astropy_healpix as hp
 import numpy as np
 import torch
+from numpy.typing import NDArray
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
@@ -47,11 +50,10 @@ class Masker:
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
-        "block", "healpix", "channel").
+        "healpix", "cropping_healpix").
         current_strategy (str): The current strategy in use, relevant
                                 when using "combination" strategy.
         "random" - random masking of tokens at the level of the data
-        "block" - masking out large blocks of tokens in 1D, without spatial meaning
         "healpix" - masking at the level of HEALPix cells, where all child cells
                     of a parent cell at a specific HEALpix level are masked
                     if the parent is masked.
@@ -59,12 +61,11 @@ class Masker:
                     e.g. masking_strategy_config = {"hl_mask": 1}
                     with hl_mask the level for masking that we want to apply
                     e.g. level 1 very large cells masked
-        "channel" - masking data channels, where channels of the data are masked
-                    can be done per-cell (each cell has different channels masked)
-                    or globally (all have the same channels masked).
-                    e.g. masking_strategy_config = {"mode": "per_cell"} or
-                    {"mode": "global"}
-        "causal" - masking the latest timesteps in each token, according to the masking rate.
+        "cropping_healpix" - spatial cropping that keeps spatially contiguous regions
+                    and masks everything else. Uses neighbor relationships or geodesic
+                    distance to ensure spatial contiguity. For DINO/JEPA/IBOT.
+                    e.g. masking_strategy_config = {"hl_mask": 0, "method": "geodesic_disk"}
+                    method: "disk" (neighbor growth), "random_walk", or "geodesic_disk" (circular)
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
         masking_strategy_config (dict): Configuration for the masking strategy, can include
                                         additional parameters like "hl_mask", etc.
@@ -159,6 +160,7 @@ class Masker:
 
         return flat_mask
 
+    # not currently functional
     def _generate_channel_mask(
         self,
         tokenized_data: list[torch.Tensor],
@@ -312,16 +314,14 @@ class Masker:
                 )
                 target_masks.add_mask(target_mask, mask_params, target_cfg)
 
-                # iterate over all source samples
-                # different strategies
                 for _i_source, source_cfg in enumerate(source_cfgs):
                     # samples per strategy
                     for _ in range(source_cfg.get("num_samples", 1)):
                         source_mask, mask_params = self._get_mask(
                             num_cells=num_cells,
                             strategy=source_cfg.get("masking_strategy"),
-                            masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
                             target_mask=target_mask,
+                            masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
                             relationship=source_cfg.get("relationship", "independent"),
                         )
                         source_masks.add_mask(source_mask, mask_params, source_cfg)
@@ -351,9 +351,6 @@ class Masker:
             instance default if None.
         masking_strategy_config : dict | None
             Optional override of strategy config (e.g., {'hl_mask': 3}).
-        constraint_keep_mask : np.ndarray | None
-            Optional boolean mask of allowed cells (True = allowed). Selection will be
-            limited to these cells. For subset/disjoint relationships.
 
         Returns
         -------
@@ -414,9 +411,6 @@ class Masker:
             instance default if None.
         masking_strategy_config : dict | None
             Optional override of strategy config (e.g., {'hl_mask': 3}).
-        constraint_keep_mask : np.ndarray | None
-            Optional boolean mask of allowed cells (True = allowed). Selection will be
-            limited to these cells. For subset/disjoint relationships.
 
         Returns
         -------
@@ -454,16 +448,11 @@ class Masker:
                 masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
 
         elif strategy == "healpix":
-            hl_data = self.healpix_level_data
-            hl_mask = cfg.get("hl_mask")
-            assert hl_mask is not None and hl_mask < hl_data, (
-                "For healpix keep mask generation, cfg['hl_mask'] must be set and < data level."
+            # prepare healpix-based masking
+            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
+                self._prepare_healpix_based_masking(cfg, keep_rate)
             )
-            num_parent_cells = 12 * (4**hl_mask)
-            level_diff = hl_data - hl_mask
-            num_children_per_parent = 4**level_diff
-            # number of parents to KEEP
-            num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
+
             if num_parents_to_keep == 0:
                 mask = np.zeros(num_cells, dtype=bool)
             else:
@@ -475,6 +464,29 @@ class Masker:
                 mask = np.zeros(num_cells, dtype=bool)
                 mask[child_indices] = True
 
+        # Spatial healpix based cropping, select contiguous region
+        elif strategy == "cropping_healpix":
+            # prepare healpix-based masking
+            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
+                self._prepare_healpix_based_masking(cfg, keep_rate)
+            )
+
+            if num_parents_to_keep == 0:
+                mask = np.zeros(num_cells, dtype=bool)
+            else:
+                # Spatial selection method
+                method = cfg.get("method", "geodesic_disk")  # default to geodesic_disk
+
+                # Use standard spatial selection
+                mask = self._select_spatially_contiguous_cells(
+                    healpix_level=hl_mask,
+                    num_cells=num_cells,
+                    num_cells_to_select=num_parents_to_keep,
+                    num_children_per_parent=num_children_per_parent,
+                    center_cell=None,
+                    method=method,
+                )
+
         else:
             raise NotImplementedError(
                 f"Cell selection strategy '{strategy}' not supported for keep mask generation."
@@ -483,3 +495,189 @@ class Masker:
         mask = to_bool_tensor(mask)
 
         return (mask, masking_params)
+
+    def _select_spatially_contiguous_cells(
+        self,
+        healpix_level: int,
+        num_cells: int,
+        num_cells_to_select: int,
+        num_children_per_parent: int,
+        center_cell: int | None = None,
+        method: str = "geodesic_disk",
+    ) -> NDArray:
+        """
+        Select spatially contiguous cells on the sphere using neighbor relationships.
+
+        This is the core spatial selection helper used for both masking and cropping.
+
+        Args:
+            healpix_level: HEALPix level for selection
+            num_cells: Total number of cells at data level
+            num_cells_to_select: Number of cells to select
+            num_children_per_parent: Number of child cells per parent cell
+            center_cell: Starting cell (None = random)
+            method: Selection method:
+                - "disk": Layer-by-layer neighbor growth (compact regions)
+                - "random_walk": Random neighbor selection (irregular shapes)
+                - "geodesic_disk": Angular distance selection (circular regions)
+
+        Returns:
+            Array of selected cell indices forming a spatially contiguous region
+
+        Examples:
+            # Independent crop
+            crop1 = _select_spatially_contiguous_cells(0, 9, method="geodesic_disk")
+        """
+
+        num_total_cells = 12 * (4**healpix_level)
+        nside = 2**healpix_level
+
+        assert num_cells_to_select <= num_total_cells
+
+        # Random starting point. Note we may want overlap here
+        # for now we basically control with chosen masking rates
+        center_cell = self.rng.integers(0, num_total_cells)
+
+        if method == "disk":
+            selected = self._select_disk(center_cell, num_cells_to_select, nside)
+        elif method == "random_walk":
+            selected = self._select_random_walk(center_cell, num_cells_to_select, nside)
+        elif method == "geodesic_disk":
+            selected = self._select_geodesic_disk(
+                center_cell, num_cells_to_select, nside, num_total_cells
+            )
+        else:
+            raise ValueError(f"Unknown selection method: {method}")
+
+        parent_ids = np.array(sorted(selected))
+
+        # Project to data level
+        child_offsets = np.arange(num_children_per_parent)
+        child_indices = (parent_ids[:, None] * num_children_per_parent + child_offsets).reshape(-1)
+
+        # Create mask: True = MASK (masked tokens), False = KEEP (kept tokens)
+        mask = np.zeros(num_cells, dtype=bool)
+        mask[child_indices] = True
+
+        return mask
+
+    # separate functions for the different methods of producing spatially contiguous regions
+    def _select_disk(self, center_cell: int, num_cells_to_select: int, nside: int) -> set[int]:
+        """
+        Select cells in a disk shape by expanding layer by layer.
+        """
+        selected = {center_cell}
+        frontier = {center_cell}
+
+        while len(selected) < num_cells_to_select and frontier:
+            # Expand frontier by one layer
+            next_frontier = set()
+            for cell in frontier:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="invalid value encountered")
+                    neighbors = hp.neighbours(cell, nside, order="nested")
+                valid_neighbors = [n for n in neighbors if n != -1 and n not in selected]
+                next_frontier.update(valid_neighbors)
+
+            if not next_frontier:
+                break
+
+            # Randomly select from frontier to reach target count
+            candidates = list(next_frontier)
+            self.rng.shuffle(candidates)
+            num_to_add = min(len(candidates), num_cells_to_select - len(selected))
+            selected.update(candidates[:num_to_add])
+            frontier = set(candidates[:num_to_add])
+
+        return selected
+
+    def _select_random_walk(
+        self, center_cell: int, num_cells_to_select: int, nside: int
+    ) -> set[int]:
+        """
+        Random walk through neighbors, creates elongated irregular regions
+        """
+        selected = {center_cell}
+        frontier = {center_cell}
+
+        while len(selected) < num_cells_to_select:
+            # Get all neighbors of current frontier
+            neighbors = set()
+            for cell in frontier:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="invalid value encountered")
+                    cell_neighbors = hp.neighbours(cell, nside, order="nested")
+                valid = [n for n in cell_neighbors if n != -1 and n not in selected]
+                neighbors.update(valid)
+
+            if not neighbors:
+                break
+
+            # Randomly pick one neighbor and continue from there
+            next_cell = self.rng.choice(list(neighbors))
+            selected.add(next_cell)
+            frontier = {next_cell}
+
+        return selected
+
+    def _select_geodesic_disk(
+        self, center_cell: int, num_cells_to_select: int, nside: int, num_total_cells: int
+    ) -> set:
+        """
+        Angular distance selection, creates most uniform somewhat circular regions
+        """
+
+        def lonlat_to_xyz(lon, lat):
+            """
+            Convert lon/lat to 3D cartesian coordinates.
+            """
+            return np.array([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)])
+
+        # Get center coordinates
+        center_lonlat = hp.healpix_to_lonlat(center_cell, nside, order="nested")
+        center_lon = float(
+            center_lonlat[0].value if hasattr(center_lonlat[0], "value") else center_lonlat[0]
+        )
+        center_lat = float(
+            center_lonlat[1].value if hasattr(center_lonlat[1], "value") else center_lonlat[1]
+        )
+        center_xyz = lonlat_to_xyz(center_lon, center_lat)
+
+        # Get all cell coordinates
+        all_indices = np.arange(num_total_cells)
+        all_lonlat = hp.healpix_to_lonlat(all_indices, nside, order="nested")
+        all_lon = all_lonlat[0].value if hasattr(all_lonlat[0], "value") else all_lonlat[0]
+        all_lat = all_lonlat[1].value if hasattr(all_lonlat[1], "value") else all_lonlat[1]
+
+        all_xyz = np.stack(
+            [
+                np.cos(all_lat) * np.cos(all_lon),
+                np.cos(all_lat) * np.sin(all_lon),
+                np.sin(all_lat),
+            ],
+            axis=1,
+        )
+        # Compute angular distances and select closest cells
+        dot_products = np.clip(np.dot(all_xyz, center_xyz), -1.0, 1.0)
+        angular_distances = np.arccos(dot_products)
+        selected = np.argsort(angular_distances)[:num_cells_to_select]
+
+        return selected
+
+    def _prepare_healpix_based_masking(self, cfg, keep_rate):
+        """
+        Prepare healpix masking related attributes.
+        """
+
+        hl_data = self.healpix_level_data
+        hl_mask = cfg.get("hl_mask")
+        assert hl_mask is not None and hl_mask < hl_data, (
+            "For healpix keep mask generation, cfg['hl_mask'] must be set and < data level."
+        )
+        num_parent_cells = 12 * (4**hl_mask)
+        level_diff = hl_data - hl_mask
+        num_children_per_parent = 4**level_diff
+        # number of parents to keep
+        num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
+
+        return hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep
