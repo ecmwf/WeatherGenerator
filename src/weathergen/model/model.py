@@ -638,7 +638,7 @@ class Model(torch.nn.Module):
         if not self.pred_heads:
             return output
 
-        # remove register tokens
+        # remove register  and class tokens
         tokens = tokens[:, self.class_token_idx :]
 
         # get 1-ring neighborhood for prediction
