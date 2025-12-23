@@ -106,11 +106,42 @@ training_config:
       LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]}
   # Example config for masking/diffusion
   model_input:
+    f
     - masking_strategy: "random" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
       num_samples: 1  # if student-teacher, the number of local (student) views to generate
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
       relationship: "complement"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
       num_steps_input: 1
+
+# ### Example validation and training config for student-teacher with JEPA
+# validation_config:
+#   losses:
+#     LossLatentSSLStudentTeacher: { 
+#       "weight": 1.0,
+#       "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
+# ### Student-teacher configuration (only used when training_mode == "student_teacher")
+# training_config:
+#   # when this is "masking", we are basically only using the model_input subconfig
+#   training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
+#   target_and_aux_calc: "EMATeacher"
+#   losses :  
+#     LossLatentSSLStudentTeacher: { 
+#       "weight": 1.0,
+#       "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
+#   model_input:
+#     - masking_strategy: "random" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+#       num_samples: 1  # if student-teacher, the number of local (student) views to generate
+#       masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+#       # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
+#       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+#       loss : jepa
+#       rate_sampling: False  # randomly sample the rate per batch
+# 
+#   target_input:
+#     - masking_strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
+#       masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 0 }
+#       num_samples: 1 # number of teacher views to generate
+#       rate_sampling: False  # randomly sample the rate per batch
 
 
     # - masking_strategy: "random"
@@ -217,37 +248,6 @@ training_config:
 #         method: "geodesic_disk"
 #       relationship: "independent"
 #       num_steps_input: 1
-
-
-# ### Example validation and training config for student-teacher with JEPA
-# validation_config:
-#   losses:
-#     LossLatentSSLStudentTeacher: { 
-#       "weight": 1.0,
-#       "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
-# ### Student-teacher configuration (only used when training_mode == "student_teacher")
-# training_config:
-#   # when this is "masking", we are basically only using the model_input subconfig
-#   training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
-#   target_and_aux_calc: "EMATeacher"
-#   losses :  
-#     LossLatentSSLStudentTeacher: { 
-#       "weight": 1.0,
-#       "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
-#   model_input:
-#     - masking_strategy: "random" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
-#       num_samples: 1  # if student-teacher, the number of local (student) views to generate
-#       masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
-#       # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
-#       relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-#       loss : jepa
-#       rate_sampling: False  # randomly sample the rate per batch
-# 
-#   target_input:
-#     - masking_strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
-#       masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 0 }
-#       num_samples: 1 # number of teacher views to generate
-#       rate_sampling: False  # randomly sample the rate per batch
 
 # ### Example validation and training config for student-teacher with iBOT and DINO
 # validation_config:

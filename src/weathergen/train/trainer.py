@@ -225,7 +225,7 @@ class Trainer(TrainerBase):
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
         if cf.training_config["training_mode"] == "student-teacher":
-            meta_ema_model = init_model_and_shard(
+            meta_ema_model, _ = init_model_and_shard(
                 cf,
                 self.dataset,
                 run_id_contd,
@@ -233,7 +233,7 @@ class Trainer(TrainerBase):
                 cf.training_config.training_mode,
                 devices[0],
                 {},
-            )[0]
+            )
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
@@ -243,7 +243,7 @@ class Trainer(TrainerBase):
             )
         elif self.validate_with_ema:
             # validate_with_ema is incompatible with student-teacher
-            meta_ema_model = init_model_and_shard(
+            meta_ema_model, _ = init_model_and_shard(
                 cf,
                 self.dataset,
                 run_id_contd,
@@ -251,7 +251,7 @@ class Trainer(TrainerBase):
                 cf.training_config.training_mode,
                 devices[0],
                 {},
-            )[0]
+            )
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
@@ -411,7 +411,7 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                outputs = self.model(self.model_params, batch)
+                preds = self.model(self.model_params, batch)
                 targets_and_auxs = self.target_and_aux_calculator.compute(
                     self.cf.istep,
                     batch,
@@ -419,7 +419,7 @@ class Trainer(TrainerBase):
                     self.model,
                 )
             loss = self.loss_calculator.compute_loss(
-                preds=outputs,
+                preds=preds,
                 targets=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
@@ -509,7 +509,7 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
-                        output = model_forward(self.model_params, batch)
+                        preds = model_forward(self.model_params, batch)
                         target_aux_output = self.target_and_aux_calculator.compute(
                             self.cf.istep,
                             batch,
@@ -517,7 +517,7 @@ class Trainer(TrainerBase):
                             self.model,
                         )
                     _ = self.loss_calculator_val.compute_loss(
-                        preds=output,
+                        preds=preds,
                         targets=target_aux_output,
                         metadata=extract_batch_metadata(batch),
                     )
@@ -526,7 +526,7 @@ class Trainer(TrainerBase):
                     if bidx < cf.log_validation:
                         dn_data = self.dataset_val.denormalize_target_channels
                         write_output(
-                            self.cf, mini_epoch, bidx, dn_data, batch, output, target_aux_output
+                            self.cf, mini_epoch, bidx, dn_data, batch, preds, target_aux_output
                         )
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
