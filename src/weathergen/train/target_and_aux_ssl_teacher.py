@@ -2,7 +2,7 @@ from typing import Any
 
 import torch
 
-from weathergen.train.ssl_losses_utils import (
+from weathergen.model.ssl_target_processing import (
     DINOTargetProcessing,
     JEPATargetProcessing,
     iBOTPatchTargetProcessing,
