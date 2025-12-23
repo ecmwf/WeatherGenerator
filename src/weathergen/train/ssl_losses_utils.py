@@ -52,6 +52,7 @@ class iBOTPatchTargetProcessing(nn.Module):
         self.len_teacher_patch_tokens = None
         self.async_batch_center = None
         self.teacher_style = teacher_style
+        self.center = None
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
@@ -173,6 +174,7 @@ class DINOTargetProcessing(nn.Module):
         self.len_teacher_output = None
         self.async_batch_center = None
         self.teacher_style = teacher_style
+        self.center = None
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()

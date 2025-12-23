@@ -284,6 +284,10 @@ class Model(torch.nn.Module):
 
         assert cf.forecast_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
+        self.latent_heads = None
+        self.norm = None
+        self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
+        self.register_token_idx = cf.num_register_tokens
 
     #########################################
     def create(self) -> "Model":
@@ -428,7 +432,6 @@ class Model(torch.nn.Module):
         # shared_heads = cf.get("shared_heads", False)
         self.latent_heads = nn.ModuleDict()
         self.norm = nn.LayerNorm(cf.ae_global_dim_embed)
-        # TODO make these values configurable
         self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
         self.register_token_idx = cf.num_register_tokens
         for loss, loss_conf in target_losses.items():
