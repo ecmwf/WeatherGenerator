@@ -45,7 +45,6 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         self.losses = {
             name: (local_conf["weight"], get_loss_function_ssl(name), local_conf["loss_extra_args"])
             for name, local_conf in losses.items()
-            # if name in self.valid_loss_names
         }
 
     def compute_loss(self, preds, targets, metadata) -> LossValues:
@@ -54,7 +53,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
         # initialize dictionaries for detailed loss tracking and standard deviation statistics
         # create tensor for each stream
-        # losses_all: dict[str, Tensor] = {loss: 0.0 for loss in self.losses}
+        losses_all: dict[str, float] = {loss: 0.0 for loss in self.losses}
 
         source2target_matching_idxs, output_info, target2source_matching_idxs, target_info = (
             metadata
@@ -70,9 +69,9 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             )
             loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
             loss = loss + (weight * loss_value)
-            # losses_all[name] = loss_value.item()
+            losses_all[name] = loss_value.item()
 
-        return LossValues(loss=loss, losses_all={}, stddev_all={})
+        return LossValues(loss=loss, losses_all=losses_all, stddev_all={})
 
     def gather_preds_for_loss(self, name, preds, metadata, target2source_matching_idxs):
         if name == "JEPA":
