@@ -450,7 +450,7 @@ class Masker:
 
         elif strategy == "healpix":
             # prepare healpix-based masking
-            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = self._prepare_healpix_masking(
+            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = self._prepare_healpix_based_masking(
                 cfg, keep_rate
             )
 
@@ -469,7 +469,7 @@ class Masker:
         elif strategy == "cropping_healpix":
             
             # prepare healpix-based masking
-            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = self._prepare_healpix_masking(
+            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = self._prepare_healpix_based_masking(
                 cfg, keep_rate
             )
 
@@ -668,7 +668,7 @@ class Masker:
 
         return selected
 
-    def _prepare_healpix_masking(self, cfg, keep_rate):
+    def _prepare_healpix_based_masking(self, cfg, keep_rate):
         """
         Prepare healpix masking related attributes.
         """
