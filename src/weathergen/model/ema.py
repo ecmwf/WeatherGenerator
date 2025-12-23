@@ -10,6 +10,7 @@
 
 import torch
 
+
 class EMAModel:
     """
     Taken and modified from https://github.com/NVlabs/edm2/tree/main

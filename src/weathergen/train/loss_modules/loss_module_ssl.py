@@ -59,8 +59,8 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         source2target_matching_idxs, output_info, target2source_matching_idxs, target_info = (
             metadata
         )
-        preds = preds.latent[0] # [0]  because we always want the first fstep
-        targets = targets.latent # [0]  because we always want the first fstep
+        preds = preds.latent[0]  # [0]  because we always want the first fstep
+        targets = targets.latent  # [0]  because we always want the first fstep
         for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = self.gather_preds_for_loss(
                 name, preds[name], output_info, target2source_matching_idxs
@@ -104,7 +104,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             return {
                 "student_patches_masked": torch.stack(
                     [
-                        p[self.num_class_tokens:]
+                        p[self.num_class_tokens :]
                         for p, info in zip(preds, metadata, strict=False)
                         if info.params["loss"] == "ibot"
                     ],
@@ -116,7 +116,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                 ).unsqueeze(1),
                 "student_class_masked": torch.stack(
                     [
-                        p[:self.num_class_tokens]
+                        p[: self.num_class_tokens]
                         for p, info in zip(preds, metadata, strict=False)
                         if info.params["loss"] == "ibot"
                     ],
@@ -133,7 +133,8 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                 ]
                 local2global_dino_student.append(local_preds)
             local2global_dino_student = [
-                torch.stack(latents, dim=0) for latents in zip(*local2global_dino_student, strict=False)
+                torch.stack(latents, dim=0)
+                for latents in zip(*local2global_dino_student, strict=False)
             ]
             return {
                 "local2global_dino_student": local2global_dino_student,
@@ -141,7 +142,8 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "dino" and info.params["relationship"] == "identity"
+                        if info.params["loss"] == "dino"
+                        and info.params["relationship"] == "identity"
                     ],
                     dim=0,
                 ),
@@ -150,7 +152,6 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             raise NotImplementedError(
                 f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
             )
-
 
     def gather_targets_for_loss(self, name, targets, metadata, target2source_matching_idxs):
         if name == "JEPA":
@@ -177,7 +178,10 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             """
             return {
                 "teacher_patches_masked": torch.stack(
-                    [p[self.num_class_tokens:] for p, info in zip(targets, metadata, strict=False)],
+                    [
+                        p[self.num_class_tokens :]
+                        for p, info in zip(targets, metadata, strict=False)
+                    ],
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
@@ -185,7 +189,10 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ).unsqueeze(1),
                 "teacher_class_masked": torch.stack(
-                    [p[:self.num_class_tokens] for p, info in zip(targets, metadata, strict=False)],
+                    [
+                        p[: self.num_class_tokens]
+                        for p, info in zip(targets, metadata, strict=False)
+                    ],
                     dim=0,
                 ),
             }
@@ -196,9 +203,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "global2global_dino_teacher": torch.stack(
-                    list(
-                        reversed([p for p, info in zip(targets, metadata, strict=False)])
-                    ),
+                    list(reversed([p for p, info in zip(targets, metadata, strict=False)])),
                     dim=0,
                 ),
             }
@@ -207,10 +212,11 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                 f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
             )
 
+
 def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, teacher_masks):
     # TODO remove as we deal with batch dimension
     student_masks = student_masks.squeeze(dim=1)
-    teacher_masks= teacher_masks.squeeze(dim=1)
+    teacher_masks = teacher_masks.squeeze(dim=1)
     masks_weight = (
         (1 / student_masks.sum(-1).clamp(min=1.0))
         .unsqueeze(-1)
@@ -219,7 +225,7 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
     mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
     loss = F.l1_loss(student_patches_masked[mask], teacher_patches_masked[mask])
     loss = loss * masks_weight[mask]
-    return loss.sum() # / student_masks.shape[0]
+    return loss.sum()  # / student_masks.shape[0]
 
 
 def ibot_loss(
@@ -232,7 +238,7 @@ def ibot_loss(
     student_temp,
 ):
     student_masks = student_masks.squeeze(dim=1)
-    teacher_masks= teacher_masks.squeeze(dim=1)
+    teacher_masks = teacher_masks.squeeze(dim=1)
     loss = loss_fns.masked_student_teacher_patch_softmax(
         student_patches_masked, teacher_patches_masked, student_masks, teacher_masks, student_temp
     ) + loss_fns.student_teacher_softmax(student_class_masked, teacher_class_masked, student_temp)
@@ -265,5 +271,3 @@ def get_loss_function_ssl(name):
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
         )
-
-

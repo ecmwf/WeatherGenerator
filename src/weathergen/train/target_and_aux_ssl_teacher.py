@@ -40,9 +40,7 @@ class EMATeacher(TargetAndAuxModuleBase):
             self.ema_model.ema_model.reshard()
         self.ema_model.update(istep, self.batch_size)
 
-    def compute(
-        self, bidx, batch, model_params, model
-    ) -> tuple[Any, Any]:
+    def compute(self, bidx, batch, model_params, model) -> tuple[Any, Any]:
         with torch.no_grad():
             outputs = self.ema_model.forward_eval(model_params, batch).get_latent_prediction(0)
             targets = {}

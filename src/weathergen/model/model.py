@@ -26,8 +26,8 @@ from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     EnsPredictionHead,
     ForecastingEngine,
-    LatentState,
     LatentPredictionHead,
+    LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -317,7 +317,7 @@ class Model(torch.nn.Module):
         # determine stream names once so downstream components use consistent keys
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
 
-        for i_obs, si in enumerate(cf.streams):
+        for i_obs, _ in enumerate(cf.streams):
             stream_name = self.stream_names[i_obs]
 
         loss_calculators = set(cf.training_config.losses.keys())
@@ -660,7 +660,6 @@ class Model(torch.nn.Module):
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
-                nn = stream_name
                 logger.warning(
                     (
                         f"Skipping prediction for {stream_name} because",

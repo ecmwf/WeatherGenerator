@@ -243,7 +243,7 @@ class EncoderModule(torch.nn.Module):
 
         # create register and latent tokens and prepend to latent spatial tokens
         tokens_global_register_class = positional_encoding_harmonic(
-            self.q_cells.repeat(rs, self.num_register_tokens+self.num_class_tokens, 1)
+            self.q_cells.repeat(rs, self.num_register_tokens + self.num_class_tokens, 1)
         )
         tokens_global = torch.cat([tokens_global_register_class, tokens_global], dim=1)
 
