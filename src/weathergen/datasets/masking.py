@@ -50,11 +50,10 @@ class Masker:
     Attributes:
         masking_rate (float): The base rate at which tokens are masked.
         masking_strategy (str): The strategy used for masking (e.g., "random",
-        "block", "healpix", "cropping_healpix").
+        "healpix", "cropping_healpix").
         current_strategy (str): The current strategy in use, relevant
                                 when using "combination" strategy.
         "random" - random masking of tokens at the level of the data
-        "block" - masking out large blocks of tokens in 1D, without spatial meaning
         "healpix" - masking at the level of HEALPix cells, where all child cells
                     of a parent cell at a specific HEALpix level are masked
                     if the parent is masked.
@@ -450,8 +449,8 @@ class Masker:
 
         elif strategy == "healpix":
             # prepare healpix-based masking
-            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = self._prepare_healpix_based_masking(
-                cfg, keep_rate
+            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
+                self._prepare_healpix_based_masking(cfg, keep_rate)
             )
 
             if num_parents_to_keep == 0:
@@ -467,10 +466,9 @@ class Masker:
 
         # Spatial healpix based cropping, select contiguous region
         elif strategy == "cropping_healpix":
-            
             # prepare healpix-based masking
-            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = self._prepare_healpix_based_masking(
-                cfg, keep_rate
+            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
+                self._prepare_healpix_based_masking(cfg, keep_rate)
             )
 
             if num_parents_to_keep == 0:
@@ -555,9 +553,7 @@ class Masker:
 
         # Project to data level
         child_offsets = np.arange(num_children_per_parent)
-        child_indices = (
-            parent_ids[:, None] * num_children_per_parent + child_offsets
-        ).reshape(-1)
+        child_indices = (parent_ids[:, None] * num_children_per_parent + child_offsets).reshape(-1)
 
         # Create mask: True = MASK (masked tokens), False = KEEP (kept tokens)
         mask = np.zeros(num_cells, dtype=bool)
@@ -685,4 +681,3 @@ class Masker:
         num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
 
         return hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep
-        
