@@ -56,7 +56,7 @@ forecast_policy: null
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
 forecast_with_step_conditioning: True # False
-fe_num_blocks: 6
+fe_num_blocks: 0
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -113,11 +113,11 @@ training_config:
       # loss : ibot
 
 
-num_register_tokens: 16
+num_register_tokens: 0
 
 num_mini_epochs: 32
-samples_per_mini_epoch: 512 #4096
-samples_per_validation: 32 #512
+samples_per_mini_epoch: 4096
+samples_per_validation: 512
 
 shuffle: True
 
@@ -140,7 +140,7 @@ log_grad_norms: False
 
 start_date: 1979-01-01T00:00
 end_date: 2022-12-31T00:00
-start_date_val: 2023-01-01T00:00
+start_date_val: 2023-10-01T00:00
 end_date_val: 2023-12-31T00:00
 time_window_step: 06:00:00
 time_window_len: 06:00:00

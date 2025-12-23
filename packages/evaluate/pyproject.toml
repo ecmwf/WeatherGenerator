@@ -5,6 +5,7 @@ description = "The WeatherGenerator Machine Learning Earth System Model"
 readme = "./README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "seaborn", 
     "cartopy>=0.24.1",
     "xskillscore",
     "xhistogram",
