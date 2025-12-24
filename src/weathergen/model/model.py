@@ -342,7 +342,9 @@ class Model(torch.nn.Module):
                     )
                     tr = si["target_readout"]
                     num_layers = tr["num_layers"]
-                    tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
+                    tr_mlp_hidden_factor = (
+                        tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
+                    )
                     tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
                     softcap = tr["softcap"] if "softcap" in tr else 0.0
 
@@ -415,7 +417,8 @@ class Model(torch.nn.Module):
                     final_activation = si["pred_head"].get("final_activation", "Identity")
                     if is_root():
                         logger.debug(
-                            f"{final_activation} activation of prediction head of {si['name']} stream"
+                            f"{final_activation} activation of prediction"
+                            f"head of {si['name']} stream"
                         )
                     self.pred_heads[stream_name] = EnsPredictionHead(
                         dims_embed[-1],
