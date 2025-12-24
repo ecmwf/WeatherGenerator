@@ -21,7 +21,7 @@ import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
 from zarr.storage import LocalStore
-
+import torch
 # experimental value, should be inferred more intelligently
 CHUNK_N_SAMPLES = 16392
 type DType = np.float32
@@ -108,6 +108,17 @@ class IOReaderData:
         Test if data object is empty
         """
         return len(self.data) == 0
+
+    def pin_memory(self):
+
+        """Pin all tensors in IOReaderData"""
+        if hasattr(self, 'coords') and isinstance(self.coords, torch.Tensor):
+            self.coords = self.coords.pin_memory()
+        if hasattr(self, 'data') and isinstance(self.data, torch.Tensor):
+            self.data = self.data.pin_memory()
+        if hasattr(self, 'geoinfos') and isinstance(self.geoinfos, torch.Tensor):
+            self.geoinfos = self.geoinfos.pin_memory()
+        return self
 
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
