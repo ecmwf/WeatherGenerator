@@ -365,6 +365,10 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            
+            # pin memory for faster CPU-GPU transfer
+            batch = batch.pin_memory()
+            
             batch.to_device(self.device)
 
             with torch.autocast(
