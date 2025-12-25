@@ -119,7 +119,7 @@ class TrainLogger:
         """
         Log training or validation data
         """
-        metrics: dict[str, float] = dict(num_samples=num_samples)
+        metrics: dict[str, float] = dict(num_samples=samples)
 
         if stage == "train":
             metrics["loss_avg_mean"] = np.nanmean(avg_loss)
