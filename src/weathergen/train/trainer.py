@@ -450,7 +450,7 @@ class Trainer(TrainerBase):
             self.lr_scheduler.step()
 
             self.target_and_aux_calculator.update_state_post_opt_step(
-                self.cf.istep * get_batch_size(self.cf, self.world_size_original), batch, self.model
+                self.cf.samples, batch, self.model
             )
             # EMA update
             if self.validate_with_ema:
