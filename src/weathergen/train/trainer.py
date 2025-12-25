@@ -313,17 +313,8 @@ class Trainer(TrainerBase):
         self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.device)
         self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.device)
 
-        # recover mini_epoch when continuing run
-        if self.world_size_original is None:
-            mini_epoch_base = int(self.cf.istep / len(self.data_loader))
-        else:
-            len_per_rank = (
-                len(self.dataset) // (self.world_size_original * cf.batch_size_per_gpu)
-            ) * cf.batch_size_per_gpu
-            mini_epoch_base = int(
-                self.cf.istep
-                / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
-            )
+        # recover mini_epoch from cumulative samples (invariant to world size change)
+        mini_epoch_base = int(self.cf.samples // self.cf.samples_per_mini_epoch)
 
         # torch.autograd.set_detect_anomaly(True)
         if cf.forecast_policy is not None:
@@ -552,10 +543,7 @@ class Trainer(TrainerBase):
 
             # EMA update
             if self.validate_with_ema:
-                self.ema_model.update(
-                    self.cf.istep * get_batch_size(self.cf, self.world_size_original),
-                    get_batch_size(self.cf, self.world_size_original),
-                )
+                self.ema_model.update(self.cf.samples, get_batch_size(self.cf, self.cf.world_size))
 
             # Collecting loss statistics for later inspection
             if bidx == 0:
@@ -612,7 +600,7 @@ class Trainer(TrainerBase):
                 self.loss_model_hist = []
 
             self.cf.istep += 1
-            self.cf.samples += self.cf.batch_size_per_gpu * self.world_size_original
+            self.cf.samples += self.cf.batch_size_per_gpu * self.cf.world_size
 
         self.dataset.advance()
 

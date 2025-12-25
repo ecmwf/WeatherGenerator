@@ -59,6 +59,11 @@ def inference_from_args(argl: list[str]):
         inference_overwrite,
         cli_overwrite,
     )
+
+    # Capture original world size before it is overwritten by init_ddp
+    if "world_size_original" not in cf:
+        cf.world_size_original = cf.get("world_size", 1)
+
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     devices = Trainer.init_torch()
@@ -108,6 +113,11 @@ def train_continue_from_args(argl: list[str]):
         *args.config,
         cli_overwrite,
     )
+
+    # Capture original world size before it is overwritten by init_ddp
+    if "world_size_original" not in cf:
+        cf.world_size_original = cf.get("world_size", 1)
+
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     devices = Trainer.init_torch()

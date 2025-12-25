@@ -66,6 +66,13 @@ class TrainLogger:
         self.cf = cf
         self.path_run = path_run
 
+        # Fallback for older runs where samples was not persisted
+        if "samples" not in self.cf or self.cf.samples == 0:
+            if self.cf.istep > 0:
+                self.cf.samples = (
+                    self.cf.istep * self.cf.batch_size_per_gpu * self.cf.get("world_size", 1)
+                )
+
     def log_metrics(self, stage: Stage, metrics: dict[str, float]) -> None:
         """
         Log metrics to a file.
