@@ -184,8 +184,10 @@ class EncoderModule(torch.nn.Module):
             if tokens_c.shape[0] == 0:
                 continue
 
+            # Calculate max_cell_lens_c
+            max_cell_lens_c = int(cell_lens_c.max())
             # local assimilation model
-            tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
+            tokens_c = self.ae_local_engine(tokens_c, max_cell_lens_c, cell_lens_c, use_reentrant=False)
 
             if self.cf.latent_noise_kl_weight > 0.0:
                 tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
@@ -201,6 +203,10 @@ class EncoderModule(torch.nn.Module):
             q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c]])
             cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_c[1:][mask_c]])
 
+            # Calculate max
+            max_q_cells_lens_unmasked_c = int(q_cells_lens_unmasked_c.max())
+            max_cell_lens_unmasked_c = int(cell_lens_unmasked_c.max())
+
             if l0 == l1 or tokens_c.shape[0] == 0:
                 tokens_global_unmasked_all += [tokens_global_unmasked_c]
                 continue
@@ -209,6 +215,8 @@ class EncoderModule(torch.nn.Module):
             tokens_global_unmasked_c = self.ae_local_global_engine(
                 tokens_c,
                 tokens_global_unmasked_c,
+                max_q_cells_lens_unmasked_c,
+                max_cell_lens_unmasked_c,
                 q_cells_lens_unmasked_c,
                 cell_lens_unmasked_c,
                 use_reentrant=False,
