@@ -158,7 +158,9 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, max_cell_lens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(block, tokens_c, max_cell_lens_c, cell_lens_c, use_reentrant=use_reentrant)
+            tokens_c = checkpoint(
+                block, tokens_c, max_cell_lens_c, cell_lens_c, use_reentrant=use_reentrant
+            )
         return tokens_c
 
 
@@ -221,7 +223,16 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens_c, tokens_global_c, max_q_cells_lens_c, max_cell_lens_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+    def forward(
+        self,
+        tokens_c,
+        tokens_global_c,
+        max_q_cells_lens_c,
+        max_cell_lens_c,
+        q_cells_lens_c,
+        cell_lens_c,
+        use_reentrant,
+    ):
         for block in self.ae_adapter:
             tokens_global_c = checkpoint(
                 block,
@@ -613,7 +624,16 @@ class TargetPredictionEngineClassic(nn.Module):
                 )
             )
 
-    def forward(self, latent, output, max_latent_lens, max_output_lens, latent_lens, output_lens, coordinates):
+    def forward(
+        self,
+        latent,
+        output,
+        max_latent_lens,
+        max_output_lens,
+        latent_lens,
+        output_lens,
+        coordinates,
+    ):
         tc_tokens = output
         tcs_lens = output_lens
         tokens_stream = latent
@@ -622,7 +642,9 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, max_output_lens, tcs_lens, tcs_aux, use_reentrant=False)
+                tc_tokens = checkpoint(
+                    block, tc_tokens, max_output_lens, tcs_lens, tcs_aux, use_reentrant=False
+                )
             else:
                 tc_tokens = checkpoint(
                     block,
@@ -782,7 +804,16 @@ class TargetPredictionEngine(nn.Module):
                     f"{self.cf.decoder_type} is not implemented for prediction heads"
                 )
 
-    def forward(self, latent, output, max_latent_lens, max_output_lens, latent_lens, output_lens, coordinates):
+    def forward(
+        self,
+        latent,
+        output,
+        max_latent_lens,
+        max_output_lens,
+        latent_lens,
+        output_lens,
+        coordinates,
+    ):
         latent = (
             self.dropout(self.latent_in_norm(latent + self.pos_embed))
             if self.cf.decoder_type != "PerceiverIOCoordConditioning"

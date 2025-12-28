@@ -618,8 +618,8 @@ class Model(torch.nn.Module):
                     ]
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
-                
-                # calculate max 
+
+                # calculate max
                 max_tcs_lens = int(tcs_lens.max())
                 max_tokens_nbors_lens = int(tokens_nbors_lens.max())
 

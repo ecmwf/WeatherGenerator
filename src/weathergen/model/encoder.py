@@ -187,7 +187,9 @@ class EncoderModule(torch.nn.Module):
             # Calculate max_cell_lens_c
             max_cell_lens_c = int(cell_lens_c.max())
             # local assimilation model
-            tokens_c = self.ae_local_engine(tokens_c, max_cell_lens_c, cell_lens_c, use_reentrant=False)
+            tokens_c = self.ae_local_engine(
+                tokens_c, max_cell_lens_c, cell_lens_c, use_reentrant=False
+            )
 
             if self.cf.latent_noise_kl_weight > 0.0:
                 tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
