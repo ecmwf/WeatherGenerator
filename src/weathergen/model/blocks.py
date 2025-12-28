@@ -74,10 +74,10 @@ class SelfAttentionBlock(nn.Module):
 
         self.apply(_basic_init)
 
-    def forward(self, x, x_lens, aux=None):
+    def forward(self, x, max_x_lens, x_lens, aux=None):
         # we have aux_lens as arg to be consistent with the CrossAttentionBlock
         assert self.with_adanorm ^ (aux is None), "Conditioning is not being used"
-        x = self.mhsa_block(x, aux, x_lens=x_lens)
+        x = self.mhsa_block(x, aux, max_x_lens=max_x_lens, x_lens=x_lens)
         x = self.mlp_block(x, aux)
         return x
 
@@ -131,7 +131,8 @@ class CrossAttentionBlock(nn.Module):
         else:
             self.ln_ca = nn.LayerNorm(dim_q, eps=kwargs["attention_kwargs"]["norm_eps"])
             self.cross_attn_block = (
-                lambda x, _, **kwargs: self.cross_attn(self.ln_ca(x), **kwargs) + x
+                lambda x, x_kv, max_x_q_lens, max_x_kv_lens, **kwargs: 
+                    self.cross_attn(self.ln_ca(x), x_kv, max_x_q_lens, max_x_kv_lens, **kwargs) + x
             )
 
         if self.with_mlp:
@@ -169,10 +170,10 @@ class CrossAttentionBlock(nn.Module):
 
         self.apply(_basic_init)
 
-    def forward(self, x, x_kv, aux, x_kv_lens=None, x_lens=None):
-        x = self.cross_attn_block(x, aux, x_kv=x_kv, x_lens=x_lens, x_kv_lens=x_kv_lens)
+    def forward(self, x, x_kv, aux, max_x_lens, max_x_kv_lens, x_kv_lens=None, x_lens=None):
+        x = self.cross_attn_block(x, aux, x_kv=x_kv, max_x_lens=max_x_lens, max_x_kv_lens=max_x_kv_lens, x_lens=x_lens, x_kv_lens=x_kv_lens)
         if self.with_self_attn:
-            x = self.mhsa_block(x, aux, x_lens=x_lens)
+            x = self.mhsa_block(x, aux, max_x_lens=max_x_lens, x_lens=x_lens)
         x = self.mlp_block(x, aux, x_lens=x_lens)
         return x
 
@@ -250,10 +251,10 @@ class OriginalPredictionBlock(nn.Module):
             )
         )
 
-    def forward(self, latent, output, coords, latent_lens, output_lens):
+    def forward(self, latent, output, coords, max_latent_lens, max_output_lens, latent_lens, output_lens):
         for layer in self.block:
             if isinstance(layer, MultiCrossAttentionHeadVarlen):
-                output = layer(output, latent, output_lens, latent_lens, coords)
+                output = layer(output, latent, max_output_lens, max_latent_lens,  output_lens, latent_lens, coords)
             else:
                 output = layer(output, output_lens, coords)
         return output
