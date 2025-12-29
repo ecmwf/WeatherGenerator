@@ -21,6 +21,7 @@ from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
+from weathergen.common.io import ZarrIO
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -485,6 +486,10 @@ class Trainer(TrainerBase):
         self.dataset.advance()
 
     def validate(self, mini_epoch):
+        with ZarrIO(config.get_path_output(self.cf, mini_epoch), create=True) as writer:
+            self._validate(mini_epoch, writer)
+
+    def _validate(self, mini_epoch, writer: ZarrIO):
         cf = self.cf
         self.model.eval()
 
@@ -526,7 +531,14 @@ class Trainer(TrainerBase):
                     if bidx < cf.log_validation:
                         dn_data = self.dataset_val.denormalize_target_channels
                         write_output(
-                            self.cf, mini_epoch, bidx, dn_data, batch, preds, target_aux_output
+                            self.cf,
+                            mini_epoch,
+                            bidx,
+                            dn_data,
+                            batch,
+                            preds,
+                            target_aux_output,
+                            writer,
                         )
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)

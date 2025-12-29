@@ -12,15 +12,16 @@ import timeit
 
 import torch
 
-import weathergen.common.config as config
 import weathergen.common.io as io
-from weathergen.common.io import TimeRange
+from weathergen.common.io import TimeRange, ZarrIO
 from weathergen.datasets.data_reader_base import TimeWindowHandler
 
 _logger = logging.getLogger(__name__)
 
 
-def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_output):
+def write_output(
+    cf, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_output, writer: ZarrIO
+):
     """
     Interface for writing model output
     """
@@ -130,9 +131,8 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
         cf.forecast_offset,
     )
 
-    with io.ZarrIO(config.get_path_output(cf, mini_epoch), create=True) as writer:
-        for subset in data.items():
-            start_time = timeit.default_timer()
-            writer.write_zarr(subset)
-            elapsed = timeit.default_timer() - start_time
-            _logger.info(f"writing subset: {subset} took {elapsed:.2f}")
+    for subset in data.items():
+        start_time = timeit.default_timer()
+        writer.write_zarr(subset)
+        elapsed = timeit.default_timer() - start_time
+        _logger.info(f"writing subset: {subset} took {elapsed:.2f}")
