@@ -321,14 +321,14 @@ class Model(torch.nn.Module):
         # determine stream names once so downstream components use consistent keys
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
 
-        for i_obs, _ in enumerate(cf.streams):
-            stream_name = self.stream_names[i_obs]
+        for i_stream, _ in enumerate(cf.streams):
+            stream_name = self.stream_names[i_stream]
 
         loss_calculators = set(cf.training_config.losses.keys())
         if "LossPhysical" in loss_calculators:
             if cf.training_config.losses["LossPhysical"].weight > 0.0:
-                for i_obs, si in enumerate(cf.streams):
-                    stream_name = self.stream_names[i_obs]
+                for i_stream, si in enumerate(cf.streams):
+                    stream_name = self.stream_names[i_stream]
 
                     # extract and setup relevant parameters
                     etc = si["embed_target_coords"]
@@ -338,7 +338,7 @@ class Model(torch.nn.Module):
                     dim_embed = si["embed_target_coords"]["dim_embed"]
                     dim_out = max(
                         dim_embed,
-                        si["token_size"] * self.targets_num_channels[i_obs],
+                        si["token_size"] * self.targets_num_channels[i_stream],
                     )
                     tr = si["target_readout"]
                     num_layers = tr["num_layers"]
@@ -355,7 +355,7 @@ class Model(torch.nn.Module):
                         ]
                     else:
                         if cf.pred_dyadic_dims:
-                            coord_dim = self.geoinfo_sizes[i_obs] * si["token_size"]
+                            coord_dim = self.geoinfo_sizes[i_stream] * si["token_size"]
                             dims_embed = torch.tensor(
                                 [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
                             )
@@ -371,7 +371,7 @@ class Model(torch.nn.Module):
                     if is_root():
                         logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
 
-                    dim_coord_in = self.targets_coords_size[i_obs]
+                    dim_coord_in = self.targets_coords_size[i_stream]
 
                     # embedding network for coordinates
                     if etc["net"] == "linear":
@@ -422,7 +422,7 @@ class Model(torch.nn.Module):
                         )
                     self.pred_heads[stream_name] = EnsPredictionHead(
                         dims_embed[-1],
-                        self.targets_num_channels[i_obs],
+                        self.targets_num_channels[i_stream],
                         si["pred_head"]["num_layers"],
                         si["pred_head"]["ens_size"],
                         norm_type=cf.norm_type,
