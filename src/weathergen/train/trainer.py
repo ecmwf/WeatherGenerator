@@ -168,7 +168,12 @@ class Trainer(TrainerBase):
         logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
-        self.validate(mini_epoch=0)
+        if is_root():
+            with ZarrIO(config.get_path_output(self.cf, mini_epoch=0), create=True) as writer:
+                self.validate(mini_epoch=0, writer=writer)
+        else:
+            self.validate(mini_epoch=0, writer=None)
+
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
@@ -376,14 +381,14 @@ class Trainer(TrainerBase):
 
         # validate once at the beginning as reference
         if cf.val_initial:
-            self.validate(-1)
+            self.validate(-1, writer=None)
 
         for mini_epoch in range(mini_epoch_base, cf.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: train.")
             self.train(mini_epoch)
 
             logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: validate.")
-            self.validate(mini_epoch)
+            self.validate(mini_epoch, writer=None)
 
             logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: save_model.")
             self.save_model(mini_epoch)
@@ -485,14 +490,12 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch):
-        if is_root():
-            with ZarrIO(config.get_path_output(self.cf, mini_epoch), create=True) as writer:
-                self._validate(mini_epoch, writer)
-        else:
-            self._validate(mini_epoch, None)
+    def validate(self, mini_epoch: int, writer: ZarrIO | None):
+        """
+        Docstring for validate
 
-    def _validate(self, mini_epoch, writer: ZarrIO | None):
+        :param writer: when provided, will write the batch to disk using this writer.
+        """
         cf = self.cf
         self.model.eval()
 
