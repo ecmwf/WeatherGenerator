@@ -32,7 +32,6 @@ class StreamEmbedTransformer(torch.nn.Module):
         num_heads,
         dropout_rate=0.0,
         norm_type="LayerNorm",
-        embed_size_centroids=64,
         unembed_mode="full",
         stream_name="stream_embed",
     ):
@@ -57,7 +56,6 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.dim_out = dim_out
         self.num_blocks = num_blocks
         self.num_heads = num_heads
-        self.embed_size_centroids = embed_size_centroids
         self.unembed_mode = unembed_mode
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
@@ -90,14 +88,11 @@ class StreamEmbedTransformer(torch.nn.Module):
                 self.ln_final = norm(num_channels * self.dim_embed, eps=1e-03)
                 self.unembed = torch.nn.Linear(
                     num_channels * self.dim_embed,
-                    self.num_tokens * self.dim_out - embed_size_centroids,
+                    self.num_tokens * self.dim_out,
                 )
 
             elif self.unembed_mode == "block":
-                # modify embed_size_centroids to ensure no additional padding is needed
-                rem = (self.num_tokens * self.dim_out - embed_size_centroids) % num_channels
-                embed_size_centroids += rem
-                dim_out = (self.num_tokens * self.dim_out - embed_size_centroids) // num_channels
+                dim_out = (self.num_tokens * self.dim_out) // num_channels
                 self.unembed = torch.nn.ModuleList(
                     [torch.nn.Linear(dim_embed, dim_out) for _ in range(num_channels)]
                     # [
@@ -116,7 +111,6 @@ class StreamEmbedTransformer(torch.nn.Module):
                 raise ValueError(f"Unknown unembed mode: {unembed_mode}")
 
         elif mode == "columns":
-            assert embed_size_centroids == 0
             self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
 
             assert self.unembed_mode == "block"  # only supported mode at the moment
@@ -125,7 +119,7 @@ class StreamEmbedTransformer(torch.nn.Module):
             self.out_pad = torch.nn.Parameter(torch.zeros(self.pad), requires_grad=False)
             self.unembed = torch.nn.Linear(
                 self.dim_embed,
-                self.num_tokens * ((self.dim_out - embed_size_centroids) // token_size),
+                self.num_tokens * (self.dim_out // token_size),
             )
             self.ln_final = norm(dim_out, eps=1e-6)
 
@@ -140,9 +134,8 @@ class StreamEmbedTransformer(torch.nn.Module):
             raise ValueError(f"Unknown mode: {mode}")
 
         self.dropout_final = torch.nn.Dropout(0.1)
-        self.embed_centroids = torch.nn.Linear(5, embed_size_centroids)
 
-    def forward_channels(self, x_in, centroids):
+    def forward_channels(self, x_in):
         peh = positional_encoding_harmonic
 
         # embed provided input data
@@ -163,11 +156,6 @@ class StreamEmbedTransformer(torch.nn.Module):
         else:
             raise ValueError(f"Unknown unembed mode: {self.unembed_mode}")
 
-        # append centroids
-        if self.embed_size_centroids > 0:
-            out = torch.cat([out, self.embed_centroids(centroids)], -1)
-        # if self.embed_size_centroids==0 and self.dim_out is not divisible by #channels with
-        # unembed_mode block then we need to pad to have the expected output shape
         if out.shape[-1] < self.dim_out:
             out = torch.nn.functional.pad(out, [0, self.dim_out - out.shape[-1]], value=0.0)
         # final reshape
@@ -175,7 +163,7 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         return out
 
-    def forward_columns(self, x_in, centroids):
+    def forward_columns(self, x_in):
         # embed provided input data
         x = positional_encoding_harmonic(checkpoint(self.embed, x_in, use_reentrant=False))
 
@@ -192,11 +180,11 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         return out.to(torch.float16)
 
-    def forward(self, x_in, centroids):
+    def forward(self, x_in):
         if self.mode == "channels":
-            return self.forward_channels(x_in, centroids)
+            return self.forward_channels(x_in)
         elif self.mode == "columns":
-            return self.forward_columns(x_in, centroids)
+            return self.forward_columns(x_in)
         else:
             raise ValueError(f"Unknown mode {self.mode}")
 
