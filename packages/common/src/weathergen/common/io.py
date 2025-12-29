@@ -427,8 +427,19 @@ class ZarrIO:
         return group
 
     def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
-        dataset_group = item_group.require_group(dataset.name)
-        self._write_metadata(dataset_group, dataset)
+        # dataset_group: Group
+        if dataset.name in item_group.group_keys():
+            # TODO: maybe there is a more elegant way to get it
+            dataset_group = item_group.require_group(dataset.name)
+        else:
+            # Create group with attributes.
+            # There is currently no GetOrCreate interface with attributes.
+            attributes = {
+                "channels": dataset.channels,
+                "geoinfo_channels": dataset.geoinfo_channels,
+                "source_interval": dataset.source_interval.as_dict(),
+            }
+            dataset_group = item_group.create_group(dataset.name, attributes=attributes)
         self._write_arrays(dataset_group, dataset)
 
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
