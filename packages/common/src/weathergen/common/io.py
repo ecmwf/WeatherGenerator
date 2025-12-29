@@ -24,6 +24,7 @@ from numpy import datetime64
 from numpy.typing import NDArray
 from tqdm import tqdm
 from zarr.storage import LocalStore, ZipStore
+from zarr.core.common import JSON
 
 # experimental value, should be inferred more intelligently
 SHARDING_ENABLED = True
@@ -427,19 +428,17 @@ class ZarrIO:
         return group
 
     def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
-        # dataset_group: Group
-        if dataset.name in item_group.group_keys():
-            # TODO: maybe there is a more elegant way to get it
-            dataset_group = item_group.require_group(dataset.name)
-        else:
-            # Create group with attributes.
-            # There is currently no GetOrCreate interface with attributes.
-            attributes = {
-                "channels": dataset.channels,
-                "geoinfo_channels": dataset.geoinfo_channels,
-                "source_interval": dataset.source_interval.as_dict(),
-            }
-            dataset_group = item_group.create_group(dataset.name, attributes=attributes)
+        # Constraint: the metadata has to be written at the same time as creating 
+        # a group. When using zipstore, each update of the metadata creates a new
+        # entry in the zipstore with the same name, which is potentially unreadable
+        # or could be misinterpreted with a python version change.
+        # The current metadata also gets updated with each array update => requires
+        # more serious investigation
+        # TODO: fix these 2 issues:
+        # - metadata has to be correct from the start
+        # - write all metadata once at creation of the node
+        dataset_group = item_group.require_group(dataset.name)
+        self._write_metadata(dataset_group, dataset)
         self._write_arrays(dataset_group, dataset)
 
     def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
