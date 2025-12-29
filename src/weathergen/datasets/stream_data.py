@@ -76,43 +76,61 @@ class StreamData:
         self.source_idxs_embed_pe = [torch.tensor([]) for _ in range(self.input_steps)]
 
     def pin_memory(self):
-        
         """Pin all tensors in this StreamData object to CPU pinned memory"""
-        
-        # Pin target tensors
-        self.target_coords = [t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t 
-                             for t in self.target_coords]
-        self.target_coords_lens = [t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t 
-                                   for t in self.target_coords_lens]
-        self.target_tokens = [t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t 
-                             for t in self.target_tokens]
-        self.target_tokens_lens = [t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t 
-                                   for t in self.target_tokens_lens]
-        self.idxs_inv = [t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t 
-                        for t in self.idxs_inv]
-        
-        # Pin target_coords_raw (list of tensors)
-        self.target_coords_raw = [t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
-                                 for t in self.target_coords_raw]
-        
-        # Pin source tensors
-        self.source_tokens_cells = [s.pin_memory() if s is not None and isinstance(s, torch.Tensor) else s 
-                                   for s in self.source_tokens_cells]
-        self.source_tokens_lens = [s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s 
-                                  for s in self.source_tokens_lens]
-        self.source_idxs_embed = [s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s 
-                                 for s in self.source_idxs_embed]
-        self.source_idxs_embed_pe = [s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s 
-                                    for s in self.source_idxs_embed_pe]
-        
-        # Pin source_raw (list of IOReaderData objects)
-        if hasattr(self, 'source_raw'):
-            for raw_data in self.source_raw:
-                if raw_data is not None and hasattr(raw_data, 'pin_memory'):
-                    raw_data.pin_memory()
-        
-        return self
 
+        # Pin target tensors
+        self.target_coords = [
+            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
+            for t in self.target_coords
+        ]
+        self.target_coords_lens = [
+            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
+            for t in self.target_coords_lens
+        ]
+        self.target_tokens = [
+            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
+            for t in self.target_tokens
+        ]
+        self.target_tokens_lens = [
+            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
+            for t in self.target_tokens_lens
+        ]
+        self.idxs_inv = [
+            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
+            for t in self.idxs_inv
+        ]
+
+        # Pin target_coords_raw (list of tensors)
+        self.target_coords_raw = [
+            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
+            for t in self.target_coords_raw
+        ]
+
+        # Pin source tensors
+        self.source_tokens_cells = [
+            s.pin_memory() if s is not None and isinstance(s, torch.Tensor) else s
+            for s in self.source_tokens_cells
+        ]
+        self.source_tokens_lens = [
+            s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s
+            for s in self.source_tokens_lens
+        ]
+        self.source_idxs_embed = [
+            s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s
+            for s in self.source_idxs_embed
+        ]
+        self.source_idxs_embed_pe = [
+            s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s
+            for s in self.source_idxs_embed_pe
+        ]
+
+        # Pin source_raw (list of IOReaderData objects)
+        if hasattr(self, "source_raw"):
+            for raw_data in self.source_raw:
+                if raw_data is not None and hasattr(raw_data, "pin_memory"):
+                    raw_data.pin_memory()
+
+        return self
 
     def to_device(self, device: str) -> None:
         """

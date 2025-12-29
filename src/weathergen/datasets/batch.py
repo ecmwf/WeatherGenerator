@@ -39,21 +39,21 @@ class Sample:
 
     def pin_memory(self):
         """Pin all tensors in this Sample to CPU pinned memory"""
-        
+
         # Pin StreamData objects in streams_data dict
-        if hasattr(self, 'streams_data') and isinstance(self.streams_data, dict):
-            for stream_name, stream_data in self.streams_data.items():
-                if stream_data is not None and hasattr(stream_data, 'pin_memory'):
+        if hasattr(self, "streams_data") and isinstance(self.streams_data, dict):
+            for _stream_name, stream_data in self.streams_data.items():
+                if stream_data is not None and hasattr(stream_data, "pin_memory"):
                     stream_data.pin_memory()
-        
+
         # Pin tensors in meta_info
-        if hasattr(self, 'meta_info') and isinstance(self.meta_info, dict):
-            for key, meta_data in self.meta_info.items():
+        if hasattr(self, "meta_info") and isinstance(self.meta_info, dict):
+            for _key, meta_data in self.meta_info.items():
                 if isinstance(meta_data, SampleMetaData):
                     # Pin mask tensor
                     if meta_data.mask is not None and isinstance(meta_data.mask, torch.Tensor):
                         meta_data.mask = meta_data.mask.pin_memory()
-        
+
         return self
 
     def __init__(self, streams: dict) -> None:
@@ -145,21 +145,20 @@ class ModelBatch:
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
-        
+
         # Pin all source samples
         for sample in self.source_samples:
             sample.pin_memory()
-        
+
         # Pin all target samples
         for sample in self.target_samples:
             sample.pin_memory()
-        
+
         # Pin source_tokens_lens
         if isinstance(self.source_tokens_lens, torch.Tensor):
             self.source_tokens_lens = self.source_tokens_lens.pin_memory()
-        
-        return self
 
+        return self
 
     def to_device(self, device):  # -> ModelBatch
         for sample in self.source_samples:
