@@ -346,7 +346,7 @@ class ZarrIO:
         if self.type == "zip":
             if self.create:
                 _logger.info("Creating zipstore")
-                self._store = ZipStore(self._store_path, mode="a")
+                self._store = ZipStore(self._store_path, mode="w")
                 self.data_root = zarr.group(store=self._store)
             else:
                 _logger.info("Opening zipstore as read-only")

@@ -486,10 +486,13 @@ class Trainer(TrainerBase):
         self.dataset.advance()
 
     def validate(self, mini_epoch):
-        with ZarrIO(config.get_path_output(self.cf, mini_epoch), create=True) as writer:
-            self._validate(mini_epoch, writer)
+        if is_root():
+            with ZarrIO(config.get_path_output(self.cf, mini_epoch), create=True) as writer:
+                self._validate(mini_epoch, writer)
+        else:
+            self._validate(mini_epoch, None)
 
-    def _validate(self, mini_epoch, writer: ZarrIO):
+    def _validate(self, mini_epoch, writer: ZarrIO | None):
         cf = self.cf
         self.model.eval()
 
@@ -530,16 +533,17 @@ class Trainer(TrainerBase):
                     # log output
                     if bidx < cf.log_validation:
                         dn_data = self.dataset_val.denormalize_target_channels
-                        write_output(
-                            self.cf,
-                            mini_epoch,
-                            bidx,
-                            dn_data,
-                            batch,
-                            preds,
-                            target_aux_output,
-                            writer,
-                        )
+                        if writer is not None:
+                            write_output(
+                                self.cf,
+                                mini_epoch,
+                                bidx,
+                                dn_data,
+                                batch,
+                                preds,
+                                target_aux_output,
+                                writer,
+                            )
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
