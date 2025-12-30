@@ -37,20 +37,28 @@ class LossPhysical(LossModuleBase):
     def __init__(
         self,
         cf: DictConfig,
-        loss_fcts: list,
+        mode_cfg: DictConfig,
         stage: Stage,
         device: str,
+        **loss_fcts,
     ):
         LossModuleBase.__init__(self)
         self.cf = cf
+        self.mode_cfg = mode_cfg
         self.stage = stage
         self.device = device
         self.name = "LossPhysical"
 
+        self.forecast_offset = mode_cfg.get("window_offset_prediction", 0)
+
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
-            [getattr(loss_fns, name if name != "mse" else "mse_channel_location_weighted"), w, name]
-            for name, w in loss_fcts
+            [
+                getattr(loss_fns, name if name != "mse" else "mse_channel_location_weighted"),
+                params.get("weight", 1.0),
+                name,
+            ]
+            for name, params in loss_fcts.items()
         ]
 
     def _get_weights(self, stream_info):
@@ -210,7 +218,7 @@ class LossPhysical(LossModuleBase):
             spoof_weight = 0.0 if stream_is_spoof else 1.0
             spoof_weight = torch.tensor(spoof_weight, device=self.device, requires_grad=False)
 
-            for fstep in range(self.cf.forecast_offset, targets.num_forecast_steps):
+            for fstep in range(self.forecast_offset, targets.num_forecast_steps):
                 fstep_weight = fstep_loss_weights[fstep]
 
                 # get current prediction and target
