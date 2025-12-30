@@ -63,6 +63,7 @@ class Trainer(TrainerBase):
         self.perf_mem = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
+        self.target_and_aux_calculators_val = None
         self.validate_with_ema: bool = False
         self.batch_size_per_gpu = -1
         self.batch_size_validation_per_gpu = -1
