@@ -478,7 +478,7 @@ class ForecastingEngine(torch.nn.Module):
                 tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
             else:
                 tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
-                
+
         return tokens
 
 

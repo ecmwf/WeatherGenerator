@@ -21,8 +21,8 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     EnsPredictionHead,
