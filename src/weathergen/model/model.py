@@ -326,7 +326,7 @@ class Model(torch.nn.Module):
 
         loss_calculators = set(cf.training_config.losses.keys())
         if "LossPhysical" in loss_calculators:
-            if cf.training_config.losses["LossPhysical"].weight > 0.0:
+            if cf.training_config.get("losses", {}).get("LossPhysical", {}).get("weight", -1) > 0.0:
                 for i_stream, si in enumerate(cf.streams):
                     stream_name = self.stream_names[i_stream]
 
