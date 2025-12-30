@@ -471,7 +471,7 @@ class ForecastingEngine(torch.nn.Module):
 
     def forward(self, tokens, fstep, coords=None):
         aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
-        for _b_idx, block in self.fe_blocks:
+        for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             elif isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
