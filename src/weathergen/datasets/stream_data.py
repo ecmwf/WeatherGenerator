@@ -13,6 +13,35 @@ import torch
 
 from weathergen.common.io import IOReaderData
 
+def _pin_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    """Pin a tensor to CPU pinned memory.
+    
+    Parameters
+    ----------
+    tensor : torch.Tensor
+    
+    Returns
+    -------
+    torch.Tensor
+        The pinned tensor.
+    """
+    return tensor.pin_memory() if isinstance(tensor, torch.Tensor) else tensor
+
+
+def _pin_tensor_list(tensor_list: list) -> list:
+    """Pin all tensors in a list to CPU pinned memory.
+        
+    Parameters
+    ----------
+    tensor_list : list
+        List of tensors (or other objects) to pin.
+    
+    Returns
+    -------
+    list
+        List with all torch.Tensor elements pinned to CPU pinned memory.
+    """
+    return [_pin_tensor(t) for t in tensor_list]
 
 class StreamData:
     """
@@ -79,50 +108,18 @@ class StreamData:
         """Pin all tensors in this StreamData object to CPU pinned memory"""
 
         # Pin target tensors
-        self.target_coords = [
-            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
-            for t in self.target_coords
-        ]
-        self.target_coords_lens = [
-            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
-            for t in self.target_coords_lens
-        ]
-        self.target_tokens = [
-            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
-            for t in self.target_tokens
-        ]
-        self.target_tokens_lens = [
-            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
-            for t in self.target_tokens_lens
-        ]
-        self.idxs_inv = [
-            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
-            for t in self.idxs_inv
-        ]
-
-        # Pin target_coords_raw (list of tensors)
-        self.target_coords_raw = [
-            t.pin_memory() if isinstance(t, torch.Tensor) and t.numel() > 0 else t
-            for t in self.target_coords_raw
-        ]
-
+        self.target_coords = _pin_tensor_list(self.target_coords)
+        self.target_coords_lens = _pin_tensor_list(self.target_coords_lens)
+        self.target_tokens = _pin_tensor_list(self.target_tokens)
+        self.target_tokens_lens = _pin_tensor_list(self.target_tokens_lens)
+        self.idxs_inv = _pin_tensor_list(self.idxs_inv)
+        self.target_coords_raw = _pin_tensor_list(self.target_coords_raw)
+        
         # Pin source tensors
-        self.source_tokens_cells = [
-            s.pin_memory() if s is not None and isinstance(s, torch.Tensor) else s
-            for s in self.source_tokens_cells
-        ]
-        self.source_tokens_lens = [
-            s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s
-            for s in self.source_tokens_lens
-        ]
-        self.source_idxs_embed = [
-            s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s
-            for s in self.source_idxs_embed
-        ]
-        self.source_idxs_embed_pe = [
-            s.pin_memory() if isinstance(s, torch.Tensor) and s.numel() > 0 else s
-            for s in self.source_idxs_embed_pe
-        ]
+        self.source_tokens_cells = _pin_tensor_list(self.source_tokens_cells)
+        self.source_tokens_lens = _pin_tensor_list(self.source_tokens_lens)
+        self.source_idxs_embed = _pin_tensor_list(self.source_idxs_embed)
+        self.source_idxs_embed_pe = _pin_tensor_list(self.source_idxs_embed_pe)
 
         # Pin source_raw (list of IOReaderData objects)
         if hasattr(self, "source_raw"):
