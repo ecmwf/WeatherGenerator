@@ -762,6 +762,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 batch = self._get_batch(idx, forecast_dt)
 
+                # pin memory for faster CPU-GPU transfer
+                batch = batch.pin_memory()
+
                 # skip completely empty batch item or when all targets are empty -> no grad
                 if not batch.is_empty():
                     break
