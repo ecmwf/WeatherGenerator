@@ -35,10 +35,7 @@ missing-attribute = false
 no-matching-overload = false
 bad-context-manager = false
 
-[tool.pyrefly.ignores]
-import-error = [
-    "torch",
-]
+
 
 
 # The linting configuration
