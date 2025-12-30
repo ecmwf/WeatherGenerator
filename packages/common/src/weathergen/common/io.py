@@ -16,7 +16,6 @@ import typing
 
 import dask.array as da
 import numpy as np
-import torch
 import xarray as xr
 import zarr
 from numpy import datetime64
@@ -109,16 +108,6 @@ class IOReaderData:
         Test if data object is empty
         """
         return len(self.data) == 0
-
-    def pin_memory(self):
-        """Pin all tensors in IOReaderData"""
-        if hasattr(self, "coords") and isinstance(self.coords, torch.Tensor):
-            self.coords = self.coords.pin_memory()
-        if hasattr(self, "data") and isinstance(self.data, torch.Tensor):
-            self.data = self.data.pin_memory()
-        if hasattr(self, "geoinfos") and isinstance(self.geoinfos, torch.Tensor):
-            self.geoinfos = self.geoinfos.pin_memory()
-        return self
 
     @classmethod
     def create(cls, other: typing.Any) -> "IOReaderData":
