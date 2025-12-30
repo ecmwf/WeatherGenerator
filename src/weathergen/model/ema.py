@@ -50,6 +50,10 @@ class EMAModel:
 
     @torch.no_grad()
     def update(self, cur_step, batch_size):
+        # ensure model remains sharded
+        if self.is_model_sharded:
+            self.ema_model.reshard()
+        # determine correct interpolation params
         halflife_steps = self.halflife_steps
         if self.rampup_ratio is not None:
             halflife_steps = min(halflife_steps, cur_step / 1e3 * self.rampup_ratio)
