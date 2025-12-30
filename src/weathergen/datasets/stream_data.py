@@ -13,13 +13,14 @@ import torch
 
 from weathergen.common.io import IOReaderData
 
+
 def _pin_tensor(tensor: torch.Tensor) -> torch.Tensor:
     """Pin a tensor to CPU pinned memory.
-    
+
     Parameters
     ----------
     tensor : torch.Tensor
-    
+
     Returns
     -------
     torch.Tensor
@@ -30,18 +31,19 @@ def _pin_tensor(tensor: torch.Tensor) -> torch.Tensor:
 
 def _pin_tensor_list(tensor_list: list) -> list:
     """Pin all tensors in a list to CPU pinned memory.
-        
+
     Parameters
     ----------
     tensor_list : list
         List of tensors (or other objects) to pin.
-    
+
     Returns
     -------
     list
         List with all torch.Tensor elements pinned to CPU pinned memory.
     """
     return [_pin_tensor(t) for t in tensor_list]
+
 
 class StreamData:
     """
@@ -114,7 +116,7 @@ class StreamData:
         self.target_tokens_lens = _pin_tensor_list(self.target_tokens_lens)
         self.idxs_inv = _pin_tensor_list(self.idxs_inv)
         self.target_coords_raw = _pin_tensor_list(self.target_coords_raw)
-        
+
         # Pin source tensors
         self.source_tokens_cells = _pin_tensor_list(self.source_tokens_cells)
         self.source_tokens_lens = _pin_tensor_list(self.source_tokens_lens)
