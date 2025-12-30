@@ -32,6 +32,7 @@ from weathergen.evaluate.io.wegen_reader import WeatherGenReader
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
+    merge,
     plot_data,
     plot_summary,
     triple_nested_dict,
@@ -188,35 +189,50 @@ def _process_stream(
         List of metrics to be processed.
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
-
     """
-    try:
-        type_ = run.get("type", "zarr")
-        reader = (
-            WeatherGenReader(run, run_id, private_paths)
-            if type_ == "zarr"
-            else CsvReader(run, run_id, private_paths)
+    # try:
+    type_ = run.get("type", "zarr")
+    reader = (
+        WeatherGenReader(run, run_id, private_paths)
+        if type_ == "zarr"
+        else CsvReader(run, run_id, private_paths)
+    )
+
+    stream_dict = reader.get_stream(stream)
+    if not stream_dict:
+        return run_id, stream, {}
+
+    # Parallel plotting
+    if stream_dict.get("plotting"):
+        plot_data(reader, stream, global_plotting_opts)
+
+    # Scoring per stream
+    if not stream_dict.get("evaluation"):
+        return run_id, stream, {}
+
+    stream_loaded_scores, missing_metrics = reader.load_scores(
+        stream,
+        regions,
+        metrics,
+    )
+    scores_dict = stream_loaded_scores
+
+    if missing_metrics or plot_score_maps:
+        regions_to_compute = list(set(missing_metrics.keys())) if missing_metrics else regions
+        metrics_to_compute = missing_metrics if missing_metrics else metrics
+
+        stream_computed_scores = calc_scores_per_stream(
+            reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
         )
 
-        stream_dict = reader.get_stream(stream)
-        if not stream_dict:
-            return run_id, stream, {}
+        scores_dict = merge(stream_loaded_scores, stream_computed_scores)
 
-        # Parallel plotting
-        if stream_dict.get("plotting"):
-            plot_data(reader, stream, global_plotting_opts)
+    return run_id, stream, scores_dict
 
-        # Scoring per stream
-        if not stream_dict.get("evaluation"):
-            return run_id, stream, {}
 
-        stream_scores = calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps)
-
-        return run_id, stream, stream_scores
-
-    except Exception as e:
-        _logger.error(f"Error processing {run_id} - {stream}: {e}")
-        return run_id, stream, {}
+# except Exception as e:
+#     _logger.error(f"Error processing {run_id} - {stream}: {e}")
+#     return run_id, stream, {}
 
 
 # Weird typing error from python: mp.Queue is seen as a method with a "|" operator => this fai
@@ -261,11 +277,14 @@ def evaluate_from_config(
     # Build tasks per stream
     for run_id, run in runs.items():
         type_ = run.get("type", "zarr")
-        reader = (
-            WeatherGenReader(run, run_id, private_paths)
-            if type_ == "zarr"
-            else CsvReader(run, run_id, private_paths)
-        )
+
+        if type_ == "zarr":
+            reader = WeatherGenReader(run, run_id, private_paths)
+        elif type_ == "csv":
+            reader = CsvReader(run, run_id, private_paths)
+        else:
+            raise ValueError(f"Unknown run type: {type_}")
+
         for stream in reader.streams:
             tasks.append(
                 {
@@ -334,7 +353,7 @@ def evaluate_from_config(
                     )
 
     # summary plots
-    if scores_dict and cfg.evaluation.get("summary_plots", True):
+    if scores_dict:
         _logger.info("Started creating summary plots...")
         plot_summary(cfg, scores_dict, summary_dir)
 
