@@ -83,10 +83,6 @@ class ModelParams(torch.nn.Module):
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
 
-        bs = cf.batch_size_per_gpu
-        nqs = 9
-        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
-
         ### POSITIONAL EMBEDDINGS ###
         len_token_seq = 1024
         self.pe_embed = torch.nn.Parameter(
@@ -114,13 +110,6 @@ class ModelParams(torch.nn.Module):
             torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32),
             requires_grad=False,
         )
-        # self.hp_nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
-
-        tokens_lens_value = nqs * s[2]
-        self.tokens_lens = torch.nn.Parameter(
-            tokens_lens_value * torch.ones(bs * s[1] + 1, dtype=torch.int32), requires_grad=False
-        )
-        self.tokens_lens.data[0] = 0
 
         self.q_cells_lens = torch.nn.Parameter(
             torch.ones(self.num_healpix_cells + 1, dtype=torch.int32), requires_grad=False
@@ -210,7 +199,6 @@ class ModelParams(torch.nn.Module):
         return
 
 
-####################################################################################################
 class Model(torch.nn.Module):
     """WeatherGenerator model architecture
 
@@ -250,7 +238,6 @@ class Model(torch.nn.Module):
         coordinates to its physical space.
     """
 
-    #########################################
     def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
         """
         Args:
@@ -272,8 +259,6 @@ class Model(torch.nn.Module):
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
 
-        self.forecast_offset = cf.forecast_offset
-
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
@@ -282,14 +267,15 @@ class Model(torch.nn.Module):
         self.stream_names: list[str] = None
         self.target_token_engines = None
 
-        assert cf.forecast_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
+        assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
+            "Local attention not adapted for register tokens"
+        )
         self.num_register_tokens = cf.num_register_tokens
         self.latent_heads = None
-        self.norm = None
+        self.latent_pre_norm = None
         self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
         self.register_token_idx = cf.num_register_tokens
 
-    #########################################
     def create(self) -> "Model":
         """Create each individual module of the model"""
         cf = self.cf
@@ -298,20 +284,9 @@ class Model(torch.nn.Module):
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
 
-        ###############
-        # forecasting engine
-        if isinstance(cf.forecast_steps, int):
-            assert not (cf.forecast_steps > 0 and cf.fe_num_blocks == 0), (
-                "Empty forecast engine (fe_num_blocks = 0), but forecast_steps > 0"
-            )
-        else:
-            assert not (min(cf.forecast_steps) > 0 and cf.fe_num_blocks == 0), (
-                "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
-            )
+        mode_cfg = cf.training_config
+        self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
 
-        self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
-
-        ###############
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
         self.embed_target_coords = torch.nn.ModuleDict()
@@ -324,8 +299,10 @@ class Model(torch.nn.Module):
         for i_obs, _ in enumerate(cf.streams):
             stream_name = self.stream_names[i_obs]
 
-        loss_calculators = set(cf.training_config.losses.keys())
-        if "LossPhysical" in loss_calculators:
+        loss_terms_train = [v.type for lt in cf.training_config.losses for k, v in lt.items()]
+        loss_terms_val = [v.type for lt in cf.validation_config.losses for k, v in lt.items()]
+
+        if "LossPhysical" in loss_terms_train or "LossPhysical" in loss_terms_val:
             for i_obs, si in enumerate(cf.streams):
                 stream_name = self.stream_names[i_obs]
 
@@ -427,38 +404,47 @@ class Model(torch.nn.Module):
                 )
 
         # Latent heads for losses
-        target_losses = cf["training_config"]["losses"].get("LossLatentSSLStudentTeacher", {})
-        # TODO implement later
-        # shared_heads = cf.get("shared_heads", False)
         self.latent_heads = nn.ModuleDict()
-        self.norm = nn.LayerNorm(cf.ae_global_dim_embed)
-        self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
-        self.register_token_idx = cf.num_register_tokens
-        for loss, loss_conf in target_losses.items():
-            if loss == "iBOT":
-                self.latent_heads[loss] = LatentPredictionHead(
-                    f"{loss}-head",
-                    cf.ae_global_dim_embed,
-                    loss_conf["out_dim"],
-                    class_token=True,
-                    patch_token=True,
-                )
-            elif loss == "JEPA":
-                self.latent_heads[loss] = LatentPredictionHead(
-                    f"{loss}-head",
-                    cf.ae_global_dim_embed,
-                    loss_conf["out_dim"],
-                    class_token=False,
-                    patch_token=True,
-                )
-            elif loss == "DINO":
-                self.latent_heads[loss] = LatentPredictionHead(
-                    f"{loss}-head",
-                    cf.ae_global_dim_embed,
-                    loss_conf["out_dim"],
-                    class_token=True,
-                    patch_token=False,
-                )
+        self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+
+        ssl_losses_idx = [
+            i for i, lt in enumerate(loss_terms_train) if lt == "LossLatentSSLStudentTeacher"
+        ]
+        # TODO: support multiple LossLatentSSLStudentTeacher terms
+        assert len(ssl_losses_idx) <= 1, "To be implemented."
+        for l_idx in ssl_losses_idx:
+            ssl_target_losses = cf.training_config.losses[l_idx]
+            # TODO implement later
+            # shared_heads = cf.get("shared_heads", False)
+            self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+            self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
+            self.register_token_idx = cf.num_register_tokens
+            for _, losses in ssl_target_losses.items():
+                for loss, loss_conf in losses.loss_fcts.items():
+                    if loss == "iBOT":
+                        self.latent_heads[loss] = LatentPredictionHead(
+                            f"{loss}-head",
+                            cf.ae_global_dim_embed,
+                            loss_conf["out_dim"],
+                            class_token=True,
+                            patch_token=True,
+                        )
+                    elif loss == "JEPA":
+                        self.latent_heads[loss] = LatentPredictionHead(
+                            f"{loss}-head",
+                            cf.ae_global_dim_embed,
+                            loss_conf["out_dim"],
+                            class_token=False,
+                            patch_token=True,
+                        )
+                    elif loss == "DINO":
+                        self.latent_heads[loss] = LatentPredictionHead(
+                            f"{loss}-head",
+                            cf.ae_global_dim_embed,
+                            loss_conf["out_dim"],
+                            class_token=True,
+                            patch_token=False,
+                        )
 
         return self
 
@@ -471,7 +457,6 @@ class Model(torch.nn.Module):
 
         self.apply(_reset_params)
 
-    #########################################
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
@@ -535,8 +520,9 @@ class Model(torch.nn.Module):
         ]
         print("-----------------")
 
-    #########################################
-    def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
+    def forward(
+        self, model_params: ModelParams, batch: ModelBatch, forecast_offset: int
+    ) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -557,23 +543,20 @@ class Model(torch.nn.Module):
         tokens = tokens.reshape(shape).sum(axis=1)
 
         # latents for output
-        z_pre_norm = tokens
-
-        z = self.norm(z_pre_norm)
+        z = self.latent_pre_norm(tokens)
         latent_state = LatentState(
             register_tokens=z[:, : self.register_token_idx],
             class_token=z[:, self.register_token_idx : self.class_token_idx],
             patch_tokens=z[:, self.class_token_idx :],
-            z_pre_norm=z_pre_norm,
+            z_pre_norm=tokens,
         )
         output.add_latent_prediction(0, "posteriors", posteriors)
         output.add_latent_prediction(0, "latent_state", latent_state)
         for name, head in self.latent_heads.items():
             output.add_latent_prediction(0, name, head(latent_state))
 
-        # forecasting
         # roll-out in latent space
-        for fstep in range(self.forecast_offset, batch.get_forecast_steps()):
+        for fstep in range(forecast_offset, batch.get_forecast_steps()):
             # prediction
             output = self.predict(model_params, fstep, tokens, batch, output)
 
@@ -597,7 +580,6 @@ class Model(torch.nn.Module):
 
         return output
 
-    #########################################
     def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
         """Advances latent space representation in time
 
@@ -615,7 +597,6 @@ class Model(torch.nn.Module):
 
         return tokens
 
-    #########################################
     def predict(
         self,
         model_params: ModelParams,
