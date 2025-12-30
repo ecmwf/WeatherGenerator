@@ -470,7 +470,7 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep, coords=None):
-        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
+        aux_info = None
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
