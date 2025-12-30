@@ -63,6 +63,8 @@ fe_impute_latent_noise_std: 1e-4  # 1e-4
 
 healpix_level: 5
 
+rope_2D: False
+
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
