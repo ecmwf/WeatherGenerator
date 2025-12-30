@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import torch
+from omegaconf import OmegaConf
 from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     fully_shard,
@@ -36,7 +37,7 @@ from weathergen.model.utils import freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import apply_overrides_to_dict, get_batch_size, get_dtype
+from weathergen.utils.utils import apply_overrides_to_dict, get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -256,20 +257,20 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
     ).create()
 
 
-def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
+def get_target_aux_calculator(
+    cf: Config, cfg: OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
+):
     """
     Create target aux calculator
     """
 
     target_aux = None
 
-    target_and_aux_calc = cf.training_config.get("target_and_aux_calc", "physical")
-    if target_and_aux_calc == "physical":
-        target_aux = PhysicalTargetAndAux(cf, model)
+    target_and_aux_calc = cfg.get("target_and_aux_calc", "Physical")
+    if target_and_aux_calc == "Physical":
+        target_aux = PhysicalTargetAndAux(cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
-        # batch_size = get_batch_size(cf, cf.world_size_original)
-
         meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device)
         ema_model = EMAModel(
             model,
@@ -279,9 +280,9 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
             is_model_sharded=(cf.with_ddp and cf.with_fsdp),
         )
 
-        target_aux = EMATeacher(
-            model, ema_model, get_batch_size(cf, cf.world_size_original), **cf.training_config
-        )
+        batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
+        target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
+
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
 
