@@ -311,7 +311,7 @@ def _check_logging(config: Config) -> Config:
     return config
 
 
-def merge_configs(base_config: Config, update_config: Config) -> OmegaConf:
+def merge_configs(base_config: Config, update_config: Config):
     """
     Merge two configs using OmegaConf's default strategy
     """
