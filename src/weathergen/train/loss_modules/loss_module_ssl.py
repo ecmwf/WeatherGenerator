@@ -19,7 +19,7 @@ import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import Stage
 
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class LossLatentSSLStudentTeacher(LossModuleBase):
@@ -33,7 +33,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
     valid_loss_names = set(["DINO", "iBOT", "JEPA"])
 
-    def __init__(self, cf: DictConfig, stage: Stage, device: str, **losses):
+    def __init__(self, cf: DictConfig, mode_cfg: DictConfig, stage: Stage, device: str, **losses):
         LossModuleBase.__init__(self)
         self.cf = cf
         self.stage = stage
@@ -67,6 +67,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             targets_for_loss = self.gather_targets_for_loss(
                 name, targets[name], target_info, target2source_matching_idxs
             )
+
             loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
             loss = loss + (weight * loss_value)
             losses_all[name] = loss_value.item()
@@ -89,7 +90,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask.to("cuda") for info in metadata if info.params["loss"] == "jepa"],
+                    [info.mask for info in metadata if info.params["loss"] == "jepa"],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -110,7 +111,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask.to("cuda") for info in metadata if info.params["loss"] == "ibot"],
+                    [info.mask for info in metadata if info.params["loss"] == "ibot"],
                     dim=0,
                 ).unsqueeze(1),
                 "student_class_masked": torch.stack(
@@ -221,9 +222,14 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
         .unsqueeze(-1)
         .expand_as(student_masks)  # [student_masks_flat]
     )
+
     mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+    if mask.sum() == 0:
+        logger.warning("jepa_loss mask is all true, likely incorrect masking config.")
+
     loss = F.l1_loss(student_patches_masked[mask], teacher_patches_masked[mask])
     loss = loss * masks_weight[mask]
+
     return loss.sum()  # / student_masks.shape[0]
 
 
