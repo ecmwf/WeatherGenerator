@@ -12,6 +12,7 @@ import json
 import torch
 
 from weathergen.common import config
+from weathergen.common.config import Config
 
 # TODO: remove this definition, it should directly using common.
 get_run_id = config.get_run_id
@@ -120,3 +121,16 @@ def extract_batch_metadata(batch):
         batch.target2source_matching_idxs,
         [list(sample.meta_info.values())[0] for sample in batch.target_samples],
     )
+
+
+def get_batch_size_from_config(config: Config) -> int:
+    """
+    Determine batch size from training/validation/test config by parsing num_samples
+    """
+
+    num_samples = 0
+    for source_cfg in config.model_input:
+        num_samples += source_cfg.get("num_samples", 1)
+    assert num_samples > 0, "Number of samples in source configs needs to greater than 0."
+
+    return num_samples
