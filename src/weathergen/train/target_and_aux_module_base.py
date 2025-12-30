@@ -1,3 +1,14 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+from __future__ import annotations
+
 import dataclasses
 
 import numpy as np
@@ -33,8 +44,8 @@ class TargetAndAuxModuleBase:
     def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
         pass
 
-    def to_device(self, device):
-        pass
+    def to_device(self, device) -> TargetAndAuxModuleBase:
+        return self
 
 
 class PhysicalTargetAndAux(TargetAndAuxModuleBase):
@@ -81,5 +92,5 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
 
         return TargetAuxOutput(forecast_steps, targets, None, aux_outputs)
 
-    def to_device(self, device):
-        return
+    def to_device(self, device) -> PhysicalTargetAndAux:
+        return self
