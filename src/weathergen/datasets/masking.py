@@ -1,3 +1,4 @@
+import copy
 import logging
 import warnings
 
@@ -36,6 +37,31 @@ class MaskData:
                 },
             )
         ]
+
+
+def validate_correspondence_mode(correspondence_mode, target_cfgs, source_cfgs):
+    """
+    Validate that the configs are consistent with the correspondence mode
+    """
+
+    num_target_samples = np.array([t.get("num_samples", 1) for t in target_cfgs]).sum()
+    num_source_samples = np.array([s.get("num_samples", 1) for s in source_cfgs]).sum()
+
+    if correspondence_mode == "one-to-one":
+        assert len(target_cfgs) == len(source_cfgs), (
+            "With target_correspondence_mode mode one-to-one, number of source and target "
+            + "strategies has to match."
+        )
+        assert num_target_samples.item() == num_source_samples.item(), (
+            "With target_correspondence_mode mode one-to-one, number of source and target "
+            + "samples has to match."
+        )
+
+    if correspondence_mode == "equal-split-all":
+        assert num_source_samples.item() % num_target_samples.item() == 0, (
+            "With target_correspondence_mode mode equal-split-all, number of source samples "
+            + "has to be divisible by number of target samples."
+        )
 
 
 # Convert to torch.bool
@@ -282,6 +308,25 @@ class Masker:
 
         return full_mask
 
+    def get_target_idx(
+        self,
+        correspondence_mode: str,
+        source_idx: int,
+        source_sample_idx: int,
+        source_cfg_idx: int,
+        num_target_samples,
+    ) -> int:
+        if correspondence_mode == "equal-split-all":
+            target_idx = source_idx % num_target_samples.sum()
+        if correspondence_mode == "equal-split-each":
+            target_idx = source_idx % num_target_samples.sum()
+        elif correspondence_mode == "one-to-one":
+            target_idx = source_idx
+        else:
+            assert False, "Unknown correspondence mode."
+
+        return target_idx
+
     def build_samples_for_stream(
         self, training_mode: str, num_cells: int, training_cfg: dict
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
@@ -295,15 +340,19 @@ class Masker:
 
         # target and source are assumed identical when target is not specified
         if len(target_cfgs) == 0:
-            target_cfgs = source_cfgs
+            target_cfgs = copy.deepcopy(source_cfgs)
+
+        # correspondence between source and target
+        correspondence_mode = training_cfg.get("target_correspondence_mode", "one-to-one")
+        validate_correspondence_mode(correspondence_mode, target_cfgs, source_cfgs)
 
         target_masks = MaskData()
         source_masks = MaskData()
         source_target_mapping = []
-        i_target = 0
+
         # iterate over all target samples
         # different strategies
-        for _, target_cfg in enumerate(target_cfgs):
+        for target_cfg in target_cfgs:
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
                 target_mask, mask_params = self._get_mask(
@@ -314,19 +363,28 @@ class Masker:
                 )
                 target_masks.add_mask(target_mask, mask_params, target_cfg)
 
-                for _i_source, source_cfg in enumerate(source_cfgs):
-                    # samples per strategy
-                    for _ in range(source_cfg.get("num_samples", 1)):
-                        source_mask, mask_params = self._get_mask(
-                            num_cells=num_cells,
-                            strategy=source_cfg.get("masking_strategy"),
-                            target_mask=target_mask,
-                            masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
-                            relationship=source_cfg.get("relationship", "independent"),
-                        )
-                        source_masks.add_mask(source_mask, mask_params, source_cfg)
-                        source_target_mapping += [i_target]
-                i_target += 1
+        i_source = 0
+        num_target_samples = np.array([t.get("num_samples", 1) for t in target_cfgs])
+        for source_cfg_idx, source_cfg in enumerate(source_cfgs):
+            # samples per strategy
+            for source_sample_idx in range(source_cfg.get("num_samples", 1)):
+                source_mask, mask_params = self._get_mask(
+                    num_cells=num_cells,
+                    strategy=source_cfg.get("masking_strategy"),
+                    target_mask=target_mask,
+                    masking_strategy_config=source_cfg.get("masking_strategy_config", {}),
+                    relationship=source_cfg.get("relationship", "independent"),
+                )
+                source_masks.add_mask(source_mask, mask_params, source_cfg)
+                i_target = self.get_target_idx(
+                    correspondence_mode,
+                    i_source,
+                    source_sample_idx,
+                    source_cfg_idx,
+                    num_target_samples,
+                )
+                source_target_mapping += [i_target]
+                i_source += 1
 
         source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
 
