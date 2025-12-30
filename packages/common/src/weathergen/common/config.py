@@ -81,7 +81,7 @@ OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
 OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
-def _sanitize_start_end_time_keys(sub_conf: OmegaConf) -> OmegaConf:
+def _sanitize_start_end_time_keys(sub_conf: OmegaConf):
     time_keys = ["start_date", "end_date"]
     for key in time_keys:
         if key in sub_conf:
@@ -90,7 +90,7 @@ def _sanitize_start_end_time_keys(sub_conf: OmegaConf) -> OmegaConf:
             sub_conf[key] = f"${{{_DATETIME_TYPE_NAME}:{sub_conf[key]}}}"
 
 
-def _sanitize_delta_time_keys(sub_conf: OmegaConf) -> OmegaConf:
+def _sanitize_delta_time_keys(sub_conf: OmegaConf):
     delta_keys = ["time_window_step", "time_window_len"]
     for key in delta_keys:
         if key in sub_conf:
