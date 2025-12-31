@@ -15,6 +15,7 @@ import random
 import string
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import yaml
 import yaml.constructor
@@ -31,6 +32,7 @@ _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
+StoreExt = Literal["zip", "zarr"]
 
 
 def get_run_id():
@@ -135,16 +137,13 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
         zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
         if zarr_path_new.exists() or zarr_path_new.is_dir():
-            zarr_path = zarr_path_new
-            return zarr_path
+            return zarr_path_new
         elif zarr_path_old.exists() or zarr_path_old.is_dir():
-            zarr_path = zarr_path_old
-            return zarr_path
-        else:
-            raise FileNotFoundError(
-                f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
-                f"exist or is not a directory."
-            )
+            return zarr_path_old
+        raise FileNotFoundError(
+            f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+            f"exist or is not a directory."
+        )
 
 
 def _apply_fixes(config: Config) -> Config:
@@ -490,12 +489,18 @@ def get_path_model(config: Config) -> Path:
     return Path(config.model_path) / config.run_id
 
 
+def _store_ext(store_type) -> StoreExt:
+    if store_type == "zip":
+        return "zip"
+    elif store_type == "local":
+        return "zarr"
+    else:
+        raise ValueError(f"Type of zarr store {store_type} is not recognised")
+
+
 def get_path_output(config: Config, mini_epoch: int) -> Path:
-    type = config.zarr_store
-    if type == "zip":
-        ext = "zip"
-    elif type == "local":
-        ext = "zarr"
+    store_type = config.get("zarr_store", "zip")
+    ext = _store_ext(store_type)
     base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 

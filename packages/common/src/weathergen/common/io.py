@@ -29,9 +29,11 @@ from zarr.storage import LocalStore, ZipStore
 SHARDING_ENABLED = True
 SHARD_N_SAMPLES = 40320
 CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
+SCALE_FACTOR = 4  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
+StoreType = typing.Literal["zip", "local"]
 
 _logger = logging.getLogger(__name__)
 
@@ -39,6 +41,15 @@ _logger = logging.getLogger(__name__)
 def is_ndarray(obj: typing.Any) -> bool:
     """Check if object is an ndarray (wraps the linter warning)."""
     return isinstance(obj, (np.ndarray))  # noqa: TID251
+
+
+def _store_type(store_path: pathlib.Path) -> StoreType:
+    ext = store_path.suffix[1:]
+    if ext == "zip":
+        return "zip"
+    elif ext == "zarr":
+        return "local"
+    raise ValueError(f"Extension {ext} of the zarr store path is not recognised")
 
 
 class TimeRange:
@@ -255,9 +266,9 @@ class OutputDataset:
         self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples=SHARD_N_SAMPLES
     ) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
-        chunks = (chunk_nsamples, *(max(x // 4, 1) for x in self.data.shape[1:]))
+        chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in self.data.shape[1:]))
         if SHARDING_ENABLED:
-            shards = (shard_nsamples, *(5 * x for x in chunks[1:]))
+            shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
             _logger.info(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
             shards = None
@@ -328,15 +339,11 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path, create=False):
+    def __init__(self, store_path: pathlib.Path, create: bool):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
         # determine type using extension
-        ext = self._store_path.suffix[1:]
-        if ext == "zip":
-            self.type = "zip"
-        elif ext == "zarr":
-            self.type = "local"
+        self.type = _store_type(store_path)
         self.create = create
 
     def __enter__(self) -> typing.Self:
@@ -443,21 +450,21 @@ class ZarrIO:
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = (CHUNK_N_SAMPLES, *(max(x // 4, 1) for x in array.shape[1:]))
-        _logger.info(
+            chunks = (CHUNK_N_SAMPLES, *(max(x // SCALE_FACTOR, 1) for x in array.shape[1:]))
+        _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + f"into group: {group}."
         )
         start_time = timeit.default_timer()
         if SHARDING_ENABLED and chunks != "auto":
-            shards = (SHARD_N_SAMPLES, *(5 * x for x in chunks[1:]))
+            shards = (SHARD_N_SAMPLES, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
             group.create_array(name, data=array, chunks=chunks, shards=shards)
-            _logger.info(f"sharding enabled with shards: {shards} and chunks: {chunks}")
+            _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
             group.create_array(name, data=array, chunks=chunks)
-            _logger.info(f"sharding disabled, writing with chunks: {chunks}")
+            _logger.debug(f"sharding disabled, writing with chunks: {chunks}")
         elapsed = timeit.default_timer() - start_time
-        _logger.info(f"writing array: {name} took {elapsed:.2f}")
+        _logger.debug(f"writing array: {name} took {elapsed:.2f}")
 
     @functools.cached_property
     def forecast_offset(self) -> int:
