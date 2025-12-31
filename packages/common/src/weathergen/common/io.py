@@ -621,7 +621,7 @@ class OutputBatchData:
         return slice(start, start + n_samples)
 
     def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
-        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints].numpy()
+        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints]
 
         # ensure _coords has size (?,2)
         if len(_coords) == 0:

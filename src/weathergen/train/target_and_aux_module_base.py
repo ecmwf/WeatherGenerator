@@ -30,7 +30,7 @@ class TargetAndAuxModuleBase:
     def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
         pass
 
-    def compute(self, sample, *args, **kwargs) -> TargetAuxOutput:
+    def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
         pass
 
     def to_device(self, device):
@@ -50,7 +50,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, batch, *args, **kwargs) -> TargetAuxOutput:
+    def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.target_samples[0].streams_data.items()]
         forecast_steps = batch.get_num_target_steps()
@@ -62,11 +62,20 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
             # collect targets for all forecast steps
             targets[stream_name] = []
             for fstep in range(forecast_steps):
-                targets_cur, target_times_cur = [], []
+                targets_cur, target_times_cur, target_coords_cur = [], [], []
                 for sample in batch.target_samples:
                     targets_cur += [sample.streams_data[stream_name].target_tokens[fstep]]
                     target_times_cur += [sample.streams_data[stream_name].target_times_raw[fstep]]
-                targets[stream_name] += [(torch.cat(targets_cur), np.concatenate(target_times_cur))]
+                    target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[fstep]]
+
+                targets[stream_name].append(
+                    {
+                        "target": torch.cat(targets_cur),
+                        "target_times": np.concatenate(target_times_cur),
+                        "target_coords": np.concatenate(target_coords_cur),
+                    }
+                )
+
             # use aux_outputs to collect spoof flag
             aux_outputs[stream_name] = {"is_spoof": sample.streams_data[stream_name].is_spoof()}
 

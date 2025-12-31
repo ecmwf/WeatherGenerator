@@ -62,6 +62,7 @@ class EncoderModule(torch.nn.Module):
 
         assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
+        self.num_class_tokens = cf.num_class_tokens
 
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
@@ -139,14 +140,7 @@ class EncoderModule(torch.nn.Module):
         num_steps_input = batch.get_num_source_steps()
 
         # combined cell lens for all tokens in batch across all input steps
-        # TODO: avoid 0-prepending of source_cell_lens
-        cell_lens = torch.cat(
-            [
-                sample.source_cell_lens[input_step][1:]
-                for sample in batch.source_samples
-                for input_step in range(num_steps_input)
-            ]
-        )
+        cell_lens = torch.sum(batch.source_tokens_lens, 2).flatten()
 
         rs = num_steps_input * batch.len_sources()
 
@@ -185,6 +179,11 @@ class EncoderModule(torch.nn.Module):
             tokens_global_c = tokens_global[i * clen : i_end]
             cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
             q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
+
+            # if we have a very sparse input, we may have no tokens in the chunk, tokens_c
+            # skip processing of the empty chunk in this case
+            if tokens_c.shape[0] == 0:
+                continue
 
             # local assimilation model
             tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
@@ -242,11 +241,11 @@ class EncoderModule(torch.nn.Module):
             + model_params.pe_global
         ).flatten(1, 2)
 
-        # create register tokens and prepend to latent spatial tokens
-        tokens_global_register = positional_encoding_harmonic(
-            self.q_cells.repeat(rs, self.num_register_tokens, 1)
+        # create register and latent tokens and prepend to latent spatial tokens
+        tokens_global_register_class = positional_encoding_harmonic(
+            self.q_cells.repeat(rs, self.num_register_tokens + self.num_class_tokens, 1)
         )
-        tokens_global = torch.cat([tokens_global_register, tokens_global], dim=1)
+        tokens_global = torch.cat([tokens_global_register_class, tokens_global], dim=1)
 
         # TODO: clean up above code and move to multiple functions
 

@@ -65,7 +65,9 @@ class StreamData:
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
-        self.source_tokens_lens = [[] for _ in range(self.input_steps)]
+        self.source_tokens_lens = [
+            torch.tensor([], dtype=torch.int32) for _ in range(self.input_steps)
+        ]
         # unprocessed source (for logging)
         self.source_raw = [None for _ in range(self.input_steps)]
         # auxiliary data for scatter operation that changes from stream-centric to cell-centric
@@ -89,6 +91,7 @@ class StreamData:
 
         dv = device
         self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
+        self.target_coords_lens = [t.to(dv, non_blocking=True) for t in self.target_coords_lens]
         self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
 
         # move to device if source data is present
