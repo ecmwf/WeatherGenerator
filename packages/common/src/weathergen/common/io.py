@@ -24,7 +24,6 @@ from numpy import datetime64
 from numpy.typing import NDArray
 from tqdm import tqdm
 from zarr.storage import LocalStore, ZipStore
-from zarr.core.common import JSON
 
 # experimental value, should be inferred more intelligently
 SHARDING_ENABLED = True
@@ -435,7 +434,7 @@ class ZarrIO:
         return group
 
     def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
-        # Constraint: the metadata has to be written at the same time as creating 
+        # Constraint: the metadata has to be written at the same time as creating
         # a group. When using zipstore, each update of the metadata creates a new
         # entry in the zipstore with the same name, which is potentially unreadable
         # or could be misinterpreted with a python version change.

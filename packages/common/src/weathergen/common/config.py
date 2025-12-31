@@ -40,6 +40,7 @@ _logger = logging.getLogger(__name__)
 Config = DictConfig
 StoreExt = Literal["zip", "zarr"]
 
+
 def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
     """
     Parse a value into a numpy timedelta64[ms].
