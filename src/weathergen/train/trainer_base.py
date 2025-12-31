@@ -27,7 +27,7 @@ class TrainerBase:
     def __init__(self):
         self.device_handles = []
         self.device_names = []
-        self.cf: Config | None = None
+        self.cf: Config
 
     @staticmethod
     def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="fork"):

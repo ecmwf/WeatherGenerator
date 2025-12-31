@@ -98,7 +98,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--config",
         type=Path,
-        nargs="+",
+        nargs="*",
         default=[],
         help="Optional experiment specfic configuration files in ascending order of precedence.",
     )

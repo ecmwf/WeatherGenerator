@@ -34,8 +34,9 @@ from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import apply_overrides_to_dict, get_dtype
+from weathergen.utils.utils import apply_overrides_to_dict, get_batch_size, get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,17 @@ def init_model_and_shard(
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
-    freeze_modules = cf.freeze_modules
-
     # freeze request model part
     for name, module in model.named_modules():
         name = module.name if hasattr(module, "name") else name
         # avoid the whole model element which has name ''
         if name == "":
             continue
-        if re.fullmatch(freeze_modules, name) is not None:
+        if re.fullmatch(cf.freeze_modules, name) is not None:
             freeze_weights(module)
+    # TODO: this should be handled in the encoder to be close where q_cells is defined
+    if "q_cells" in cf.freeze_modules:
+        model.encoder.q_cells.requires_grad = False
 
     if cf.with_ddp and not cf.with_fsdp:
         # create DDP model if running without FSDP
@@ -93,15 +95,15 @@ def init_model_and_shard(
             MultiSelfAttentionHeadVarlen,
         )
 
-        for module in model.ae_local_engine.ae_local_blocks.modules():
+        for module in model.encoder.ae_local_engine.ae_local_blocks.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
-        for module in model.ae_local_global_engine.ae_adapter.modules():
+        for module in model.encoder.ae_local_global_engine.ae_adapter.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
-        for module in model.ae_global_engine.ae_global_blocks.modules():
+        for module in model.encoder.ae_global_engine.ae_global_blocks.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
@@ -119,9 +121,6 @@ def init_model_and_shard(
                 else None
             ),
         }
-        for module in model.pred_adapter_kv.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **full_precision_fsdp_kwargs)
 
         for module in model.target_token_engines.modules():
             if isinstance(module, modules_to_shard):
@@ -137,7 +136,7 @@ def init_model_and_shard(
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.embed_engine.embeds.values():
+        for embed in model.encoder.embed_engine.embeds.values():
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
@@ -264,8 +263,8 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
 
     target_aux = None
 
-    target_and_aux_calc = cf.get("target_and_aux_calc", None)
-    if target_and_aux_calc is None or target_and_aux_calc == "identity":
+    target_and_aux_calc = cf.training_config.get("target_and_aux_calc", "physical")
+    if target_and_aux_calc == "physical":
         target_aux = PhysicalTargetAndAux(cf, model)
 
     elif target_and_aux_calc == "EMATeacher":
@@ -280,8 +279,9 @@ def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
             is_model_sharded=(cf.with_ddp and cf.with_fsdp),
         )
 
-        raise NotImplementedError(f"{target_and_aux_calc} is not implemented : {type(ema_model)}")
-
+        target_aux = EMATeacher(
+            model, ema_model, get_batch_size(cf, cf.world_size_original), **cf.training_config
+        )
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
 
