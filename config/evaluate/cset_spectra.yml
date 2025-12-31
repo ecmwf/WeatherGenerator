@@ -1,0 +1,56 @@
+category: Power Spectrum
+title: Power Spectrum $METHOD $VARNAME $LEVELTYPE $LEVEL
+description: |
+  Extracts and plots the power spectrum of $VARNAME from a
+  file at $LEVELTYPE level $LEVEL of $MODEL_NAME.
+
+  Power Spectra calculated on regional domains using Discrete Cosine Transform (DCT)
+  as described in
+  [Denis_etal_2002](https://doi.org/10.1175/1520-0493(2002)130<1812:SDOTDA>2.0.CO;2)
+  In case of ensemble data choose from postage stamp plot or
+  single plot via the single_plot option in the recipe directly.
+
+  Power spectra can be used to identify how the variance (energy) of a field is distributed across scales.
+  The power (energy) is plotted against wavenumber, where low wavenumbers represent large-scale features
+  and high numbers represent small-scale features.  Using a log-log scale for plotting allows for ease of
+  interpretation and the spectra are normalised to allow for comparison between different models.
+
+  The dominant scales of motion can be identified by peaks in the spectrum and the slope of the curve shows
+  how the energy cascades across scales; the slope can be used to identify, for example, the inertial subrange
+  (slope of gradient -5/3).  Caution is advised when interpreting the spectra at high wavenumbers due to,
+  for example, aliasing which can occur when the grid is too coarse to resolve the smallest-scale features
+  and often manifests as spurious spikes or increases in the power at the high wavenumbers.
+
+steps:
+  - operator: read.read_cubes
+    model_names: $MODEL_NAME
+    file_paths: $INPUT_PATHS
+    constraint:
+      operator: constraints.combine_constraints
+      variable_constraint:
+        operator: constraints.generate_var_constraint
+        varname: $VARNAME
+      cell_methods_constraint:
+        operator: constraints.generate_cell_methods_constraint
+        cell_methods: []
+        varname: $VARNAME
+      level_constraint:
+        operator: constraints.generate_level_constraint
+        coordinate: $LEVELTYPE
+        levels: $LEVEL
+    # subarea_type: $SUBAREA_TYPE
+    # subarea_extent: $SUBAREA_EXTENT
+  
+  - operator: collapse.collapse
+    coordinate: ["time"]
+    method: $METHOD
+
+  - operator: plot.plot_power_spectrum_series
+    sequence_coordinate: $SEQUENCE
+    # stamp_coordinate and single_plot optional and only required for ensemble data
+    stamp_coordinate: "realization"
+    single_plot: False
+
+
+  - operator: write.write_cube_to_nc
+    overwrite: True
