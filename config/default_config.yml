@@ -164,14 +164,14 @@ training_config:
   
   model_input:
     # "random", "healpix". Masking strategy to use for model input for masking
-    - masking_strategy: "forecast"
+    - masking_strategy: "random"
       num_samples: 2
       masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
       # relationship: "independent", "subset", "disjoint".
       relationship: "independent"
       num_steps_input: 1
       rate_sampling: False  # randomly sample the rate per batch
-      loss: jepa
+      loss: "JEPA"
 
   forecast :
       time_step: 06:00:00
@@ -226,6 +226,8 @@ validation_config:
       policy: null
       with_step_conditioning: True # False
 
+# test config; full test config is merge of validation and test config
+# test config is used by default when running inference
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val

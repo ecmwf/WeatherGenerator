@@ -85,12 +85,12 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "jepa"
+                        if info.params["loss"] == "JEPA"
                     ],
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask for info in metadata if info.params["loss"] == "jepa"],
+                    [info.mask for info in metadata if info.params["loss"] == "JEPA"],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -106,19 +106,19 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p[self.num_class_tokens :]
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "ibot"
+                        if info.params["loss"] == "iBOT"
                     ],
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask for info in metadata if info.params["loss"] == "ibot"],
+                    [info.mask for info in metadata if info.params["loss"] == "iBOT"],
                     dim=0,
                 ).unsqueeze(1),
                 "student_class_masked": torch.stack(
                     [
                         p[: self.num_class_tokens]
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "ibot"
+                        if info.params["loss"] == "iBOT"
                     ],
                     dim=0,
                 ),
@@ -129,7 +129,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                 local_preds = [
                     preds[sidx]
                     for sidx in student_indices
-                    if metadata[sidx].params["loss"] == "dino"
+                    if metadata[sidx].params["loss"] == "DINO"
                 ]
                 local2global_dino_student.append(local_preds)
             local2global_dino_student = [
@@ -142,7 +142,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "dino"
+                        if info.params["loss"] == "DINO"
                         and info.params["relationship"] == "identity"
                     ],
                     dim=0,
@@ -165,7 +165,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
-                    [info.mask.to("cuda") for info in metadata],
+                    [info.mask for info in metadata],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -185,7 +185,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
-                    [info.mask.to("cuda") for info in metadata],
+                    [info.mask for info in metadata],
                     dim=0,
                 ).unsqueeze(1),
                 "teacher_class_masked": torch.stack(
