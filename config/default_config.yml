@@ -338,7 +338,7 @@ log_validation: 0
 streams_output: ["ERA5"]
 
 istep: 0
-samples: 0
+samples: 0    # dynamic element of config that is incremented during training
 run_history: []
 
 desc: ""
