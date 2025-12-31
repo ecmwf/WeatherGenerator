@@ -72,6 +72,7 @@ class TrainLogger:
         # Fallback for older runs where samples was not persisted
         if "samples" not in self.cf or self.cf.samples == 0:
             if self.cf.istep > 0:
+                _logger.warning("Samples not found or wrong in config. Using istep as fallback, which might be inaccurate.")
                 self.cf.samples = (
                     self.cf.istep * self.cf.batch_size_per_gpu * self.cf.get("world_size", 1)
                 )
