@@ -362,11 +362,19 @@ wgtags:
   # This may be autofilled in the future. Expected values are lowercase strings of 
   # the organizations codenames in https://confluence.ecmwf.int/display/MAEL/Staff+Contact+List
   # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
-  org: None
+  org: null
+  # The Github issue corresponding to this run (number such as 1234)
+  # Github issues are the central point when running experiment and contain 
+  # links to hedgedocs, code branches, pull requests etc.
+  # It is recommended to associate a run with a Github issue.
+  issue: null
   # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
-  # This is expected to be the primary tag for comparing experiments in MLFlow.
+  # This is expected to be the primary tag for comparing experiments in MLFlow, along with the
+  # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: None
+  exp: null
   # *** Experiment-specific tags ***
-  grid: None
+  # All extra tags (including lists, dictionaries, etc.) are treated 
+  # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
+  grid: null
