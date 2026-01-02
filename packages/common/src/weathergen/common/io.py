@@ -408,7 +408,7 @@ class ZarrIO:
         return OutputItem(key=key, forecast_offset=self.forecast_offset, **datasets)
 
     def _get_datasets(self, key: ItemKey):
-        group = self._get_group(key, create = False)
+        group = self._get_group(key, create=False)
         return {
             name: OutputDataset.create(
                 name, key, dict(dataset.arrays()), dict(dataset.attrs).copy()
