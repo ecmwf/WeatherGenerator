@@ -367,7 +367,6 @@ class ZarrIO:
                 self.data_root = zarr.group(store=self._store)
             # Raise DeprecationWarning only if a ZarrUserWarning was raised
             if any(issubclass(w.category, zarr.errors.ZarrUserWarning) for w in caught):
-                # Optionally include the last ZarrUserWarning's message for context
                 last_msg = next(
                     (
                         str(w.message)
@@ -409,7 +408,7 @@ class ZarrIO:
         return OutputItem(key=key, forecast_offset=self.forecast_offset, **datasets)
 
     def _get_datasets(self, key: ItemKey):
-        group = self._get_group(key)
+        group = self._get_group(key, create = False)
         return {
             name: OutputDataset.create(
                 name, key, dict(dataset.arrays()), dict(dataset.attrs).copy()
@@ -417,7 +416,7 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
-    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group:
+    def _get_group(self, item: ItemKey, create: bool) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
             group = self.data_root.create_group(item.path)
