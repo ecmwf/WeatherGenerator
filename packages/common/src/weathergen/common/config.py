@@ -251,10 +251,10 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
             return zarr_path_new
         elif zarr_path_old.exists() or zarr_path_old.is_dir():
             return zarr_path_old
-        raise FileNotFoundError(
-            f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
-            f"exist or is not a directory."
-        )
+    raise FileNotFoundError(
+        f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+        f"exist or is not a directory."
+    )
 
 
 def _apply_fixes(config: Config) -> Config:
