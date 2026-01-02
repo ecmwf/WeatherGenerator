@@ -61,7 +61,7 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     """
     sample, fstep, run_id, stream, dtype, epoch, rank = args
     fname_zarr = get_model_results(run_id, epoch, rank)
-    with ZarrIO(fname_zarr) as zio:
+    with ZarrIO(fname_zarr, create = False) as zio:
         out = zio.get_data(sample, stream, fstep)
         if dtype == "target":
             data = out.target

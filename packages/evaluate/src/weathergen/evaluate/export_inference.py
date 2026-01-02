@@ -370,7 +370,7 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     """
     sample, fstep, run_id, stream, dtype, epoch, rank = args
     fname_zarr = get_model_results(run_id, epoch, rank)
-    with ZarrIO(fname_zarr) as zio:
+    with ZarrIO(fname_zarr, create = False) as zio:
         out = zio.get_data(sample, stream, fstep)
         if dtype == "target":
             data = out.target
@@ -417,7 +417,7 @@ def get_data(
         raise ValueError(f"Invalid type: {dtype}. Must be 'target' or 'prediction'.")
 
     fname_zarr = get_model_results(run_id, epoch, rank)
-    with ZarrIO(fname_zarr) as zio:
+    with ZarrIO(fname_zarr, create = False) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         zio_samples = sorted([int(sample) for sample in zio.samples])
         dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])

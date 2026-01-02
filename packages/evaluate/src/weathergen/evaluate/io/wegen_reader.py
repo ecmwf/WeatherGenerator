@@ -161,7 +161,7 @@ class WeatherGenReader(Reader):
         """
         # get type of zarr store
 
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr, create = False) as zio:
             stream_cfg = self.get_stream(stream)
             all_channels = self.get_channels(stream)
             _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
@@ -378,19 +378,19 @@ class WeatherGenReader(Reader):
         """
         stream_dict = {}
 
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr, create = False) as zio:
             if stream in zio.streams:
                 stream_dict = self.eval_cfg.streams.get(stream, {})
         return stream_dict
 
     def get_samples(self) -> set[int]:
         """Get the set of sample indices from the Zarr file."""
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr, create = False)  as zio:
             return set(int(s) for s in zio.samples)
 
     def get_forecast_steps(self) -> set[int]:
         """Get the set of forecast steps from the Zarr file."""
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr, create = False) as zio:
             return set(int(f) for f in zio.forecast_steps)
 
     def get_channels(self, stream: str) -> list[str]:
@@ -425,7 +425,7 @@ class WeatherGenReader(Reader):
         _logger.debug(f"Getting ensembles for stream {stream}...")
 
         # TODO: improve this to get ensemble from io class
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr, create = False) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
 
@@ -443,7 +443,7 @@ class WeatherGenReader(Reader):
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
-        with ZarrIO(self.fname_zarr) as zio:
+        with ZarrIO(self.fname_zarr, create = False) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
 
             sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
