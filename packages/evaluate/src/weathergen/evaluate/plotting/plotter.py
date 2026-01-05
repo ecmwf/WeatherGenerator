@@ -844,13 +844,13 @@ class LinePlots:
         data_list, label_list = self._check_lengths(data, labels)
 
         assert x_dim in data_list[0].dims or x_dim in data_list[0].coords, (
-            f"x dimension '{x_dim}' not found in data dimensions {data_list[0].dims} or coords {data_list[0].coords}."
+            f"x dimension '{x_dim}' not found in data dimensions "
+            f"{data_list[0].dims} or coords {data_list[0].coords}."
         )
 
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
 
         for i, data in enumerate(data_list):
-          
             non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
 
             if self.plot_ensemble and "ens" in non_zero_dims:
@@ -1077,7 +1077,6 @@ class LinePlots:
         global_max = float("-inf")
 
         for ax, data, label in zip(axes[0], data_list, labels, strict=False):
-        
             time_steps = sorted(data[x_dim].values)
 
             # Use the first time step as reference
@@ -1100,7 +1099,7 @@ class LinePlots:
             cmap = plt.get_cmap("magma_r") if lower_is_better(metric) else plt.get_cmap("magma")
             global_min = min(global_min, float(heatmap_data.min()))
             global_max = max(global_max, float(heatmap_data.max()))
-            
+
             last_hm = sns.heatmap(
                 heatmap_data.values.T,
                 ax=ax,

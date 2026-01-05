@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+
 import numpy as np
 
 _logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ def plot_metric_region(
                 # skip if channel is missing or contains NaN
                 if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
                     continue
-                
+
                 data, time_dim = _assign_time_coord(data)
 
                 selected_data.append(data.sel(channel=ch))
@@ -115,6 +116,7 @@ def plot_metric_region(
                     print_summary=print_summary,
                 )
 
+
 def _assign_time_coord(data: object) -> object:
     """Ensure that lead_time coordinate exists in the data array.
 
@@ -127,14 +129,12 @@ def _assign_time_coord(data: object) -> object:
     -------
     xarray.DataArray
         The data array with lead_time coordinate ensured.
-    
+
     time_dim : str
         The name of the time dimension used for x-axis.
     """
     if "forecast_step" not in data.dims and "forecast_step" not in data.coords:
-        raise ValueError(
-            "forecast_step coordinate not found in data dimensions or coordinates."
-        )
+        raise ValueError("forecast_step coordinate not found in data dimensions or coordinates.")
 
     time_dim = "forecast_step"
 
@@ -144,8 +144,9 @@ def _assign_time_coord(data: object) -> object:
     # Prefer lead_time as x_dim if present in dimensions
     if "lead_time" in data.dims:
         time_dim = "lead_time"
-   
+
     return data, time_dim
+
 
 def ratio_plot_metric_region(
     metric: str,
@@ -239,7 +240,7 @@ def heat_maps_metric_region(
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
             if data.isnull().all():
                 continue
-            
+
             data, time_dim = _assign_time_coord(data)
 
             selected_data.append(data)
@@ -259,6 +260,7 @@ def heat_maps_metric_region(
                 tag=name,
                 x_dim=time_dim,
             )
+
 
 def score_card_metric_region(
     metric: str,

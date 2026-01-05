@@ -102,7 +102,7 @@ def calc_scores_per_stream(
     ensemble = available_data.ensemble
     is_regular = reader.is_regular(stream)
     group_by_coord = None if is_regular else "sample"
-    step_hrs = reader.step_hrs if hasattr(reader, "step_hrs") else 1
+
     output_data = reader.get_data(
         stream,
         fsteps=fsteps,
@@ -175,7 +175,7 @@ def calc_scores_per_stream(
                 )
                 if score is not None:
                     valid_scores.append(score)
-           
+
             valid_metric_names = [
                 metric
                 for metric, score in zip(metrics, valid_scores, strict=False)
@@ -201,32 +201,36 @@ def calc_scores_per_stream(
                 criteria["ens"] = combined_metrics.ens
 
             metric_stream.loc[criteria] = combined_metrics
-           
-            lead_time_map[fstep] = np.unique(combined_metrics.lead_time.values.astype('timedelta64[h]')) if "lead_time" in combined_metrics.coords else None
-            
+
+            lead_time_map[fstep] = (
+                np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
+                if "lead_time" in combined_metrics.coords
+                else None
+            )
+
             if is_regular and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
                 _plot_score_maps_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
                 )
 
-        lead_time_values = np.array([
-            lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values
-        ]).squeeze()
-        
+        lead_time_values = np.array(
+            [lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values]
+        ).squeeze()
+
         if lead_time_values.shape == metric_stream.forecast_step.shape:
             metric_stream = metric_stream.assign_coords(
                 lead_time=("forecast_step", lead_time_values)
             )
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-        
+
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
                 reader.run_id
             ] = metric_stream.sel({"metric": metric})
-   
+
     return local_scores
 
 
@@ -475,10 +479,9 @@ def metric_list_to_json(
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
 
     for metric, metric_stream in metrics_dict.items():
-       for region in regions: 
+        for region in regions:
             metric_now = metric_stream[region][stream]
             for run_id in metric_now.keys():
-          
                 metric_now = metric_now[run_id]
 
                 # Match the expected filename pattern

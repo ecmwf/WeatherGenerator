@@ -153,10 +153,10 @@ class CsvReader(Reader):
         da = da.assign_coords(
             lead_time=("forecast_step", lead_time_map.loc[da.forecast_step.values].values)
         )
-        
+
         da.attrs["npoints_per_sample"] = self.npoints_per_sample
         da["metric"] = [metric]
-        
+
         return da
 
     def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray:
@@ -209,7 +209,7 @@ class CsvReader(Reader):
                             "metric": [metric],
                         },
                         attrs={"npoints_per_sample": self.npoints_per_sample},
-                    )                
+                    )
 
                 local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
                     self.run_id

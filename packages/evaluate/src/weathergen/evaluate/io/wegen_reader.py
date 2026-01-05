@@ -256,7 +256,7 @@ class WeatherGenReader(Reader):
                 da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
                 da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
 
-                #add lead time coordinate
+                # add lead time coordinate
                 da_tars_fs = self.add_lead_time_coord(da_tars_fs)
                 da_preds_fs = self.add_lead_time_coord(da_preds_fs)
 
@@ -305,10 +305,9 @@ class WeatherGenReader(Reader):
 
         lead_time has dims (sample, ipoint) and dtype timedelta64[ns].
         """
-    
-        lead_time = np.unique(da["valid_time"]) -  da["source_interval_start"]
-        return da.assign_coords(lead_time=lead_time)
 
+        lead_time = np.unique(da["valid_time"]) - da["source_interval_start"]
+        return da.assign_coords(lead_time=lead_time)
 
     def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
         """
