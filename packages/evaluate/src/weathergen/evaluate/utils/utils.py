@@ -208,8 +208,8 @@ def calc_scores_per_stream(
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
-        metric_stream["forecast_step"] = metric_stream["forecast_step"] * step_hrs
-
+        metric_stream["lead_time"] = metric_stream["forecast_step"] * step_hrs
+        
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
@@ -433,10 +433,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
 
 def metric_list_to_json(
     reader: Reader,
-    metrics_list: list[xr.DataArray],
-    npoints_sample_list: list[xr.DataArray],
-    streams: list[str],
-    region: str,
+    stream: str,
+    metrics_dict: list[xr.DataArray],
+    regions: list[str],
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -461,34 +460,25 @@ def metric_list_to_json(
     mini_epoch :
         Mini_epoch number.
     """
-    assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
-        "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
-    )
-
+    # stream_loaded_scores['rmse']['nhem']['ERA5']['jjqce6x5']
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    for s_idx, stream in enumerate(streams):
-        metrics_stream, npoints_sample_stream = (
-            metrics_list[s_idx],
-            npoints_sample_list[s_idx],
-        )
+    for metric, metric_stream in metrics_dict.items():
+       for region in regions: 
+            metric_now = metric_stream[region][stream]
+            for run_id in metric_now.keys():
+          
+                metric_now = metric_now[run_id]
 
-        for metric in metrics_stream.coords["metric"].values:
-            metric_now = metrics_stream.sel(metric=metric)
+                # Match the expected filename pattern
+                save_path = (
+                    reader.metrics_dir
+                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
+                )
 
-            # Save as individual DataArray, not Dataset
-            metric_now.attrs["npoints_per_sample"] = npoints_sample_stream.values.tolist()
-            metric_dict = metric_now.to_dict()
-
-            # Match the expected filename pattern
-            save_path = (
-                reader.metrics_dir
-                / f"{reader.run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
-            )
-
-            _logger.info(f"Saving results to {save_path}")
-            with open(save_path, "w") as f:
-                json.dump(metric_dict, f, indent=4)
+                _logger.info(f"Saving results to {save_path}")
+                with open(save_path, "w") as f:
+                    json.dump(metric_now.to_dict(), f, indent=4)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "

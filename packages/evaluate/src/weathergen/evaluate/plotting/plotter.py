@@ -814,7 +814,7 @@ class LinePlots:
         data: xr.DataArray | list,
         labels: str | list,
         tag: str = "",
-        x_dim: str = "forecast_step",
+        x_dim: str = "lead_time",
         y_dim: str = "value",
         print_summary: bool = False,
         plot_ensemble: str | bool = False,
@@ -843,13 +843,14 @@ class LinePlots:
 
         data_list, label_list = self._check_lengths(data, labels)
 
-        assert x_dim in data_list[0].dims, (
-            "x dimension '{x_dim}' not found in data dimensions {data_list[0].dims}"
+        assert x_dim in data_list[0].dims or x_dim in data_list[0].coords, (
+            f"x dimension '{x_dim}' not found in data dimensions {data_list[0].dims} or coords {data_list[0].coords}."
         )
 
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
 
         for i, data in enumerate(data_list):
+          
             non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
 
             if self.plot_ensemble and "ens" in non_zero_dims:
@@ -1035,6 +1036,7 @@ class LinePlots:
         labels: str | list,
         metric: str,
         tag: str = "",
+        x_dim: str = "forecast_step",
     ) -> None:
         """
         Plot a heat map comparing multiple datasets.
@@ -1060,7 +1062,7 @@ class LinePlots:
         x_ticks_names = set()
 
         for data in data_list:
-            da = data.isel(forecast_step=0)
+            da = data.isel({x_dim: 0})
             x_ticks_names.update(map(str, da.channel.values))
 
         ref_ticks_names = sorted(x_ticks_names, key=channel_sort_key)
@@ -1073,9 +1075,11 @@ class LinePlots:
         global_max = float("-inf")
 
         for ax, data, label in zip(axes[0], data_list, labels, strict=False):
-            fsteps = sorted(data.forecast_step.values)
+        
+            time_steps = sorted(data[x_dim].values)
 
-            ref = data.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps[0])
+            # Use the first time step as reference
+            ref = data.reindex(channel=ref_ticks_names).sel({x_dim: time_steps[0]})
             ref = self._preprocess_data(ref, "channel", verbose=False)
 
             if ref.isnull().all():
@@ -1085,8 +1089,9 @@ class LinePlots:
                 )
                 continue
 
-            num = self._preprocess_data(data, ["forecast_step", "channel"], verbose=False)
-            num = num.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps)
+            # Compute ratio for all time steps
+            num = self._preprocess_data(data, [x_dim, "channel"], verbose=False)
+            num = num.reindex(channel=ref_ticks_names).sel({x_dim: time_steps})
 
             heatmap_data = num / ref
 
@@ -1100,21 +1105,21 @@ class LinePlots:
                 cmap=cmap,
                 vmin=global_min,
                 vmax=global_max,
-                xticklabels=fsteps,
+                xticklabels=time_steps,
                 yticklabels=ref_ticks_names,
                 annot=False,
                 fmt=".2f",
                 cbar=False,
             )
             ax.set_title(f"Heatmap {metric} – {label}")
-            ax.set_xlabel("Forecast Step (h)")
+            ax.set_xlabel(f"{x_dim.replace('_', ' ').title()} (h)")
             ax.set_ylabel("Variable")
             plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
         cbar = fig.colorbar(
             last_hm.collections[0], ax=axes.ravel().tolist(), shrink=0.6, location="right", pad=0.02
         )
-        cbar.set_label(f"{metric} - fstep[0]/fstep[x]")
+        cbar.set_label(rf"{metric} - $t_{{\mathrm{{step}}}}[0] / t_{{\mathrm{{step}}}}[x]$")
         parts = ["heat_map", metric, tag]
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")

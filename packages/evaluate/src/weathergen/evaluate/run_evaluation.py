@@ -32,6 +32,7 @@ from weathergen.evaluate.io.wegen_reader import WeatherGenReader
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
+    metric_list_to_json, 
     merge,
     plot_data,
     plot_summary,
@@ -224,7 +225,8 @@ def _process_stream(
         stream_computed_scores = calc_scores_per_stream(
             reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
         )
-
+        
+        metric_list_to_json(reader, stream, stream_computed_scores, regions)
         scores_dict = merge(stream_loaded_scores, stream_computed_scores)
 
     return run_id, stream, scores_dict
