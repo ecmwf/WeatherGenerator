@@ -321,110 +321,114 @@ class Model(torch.nn.Module):
         # determine stream names once so downstream components use consistent keys
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
 
-        for i_obs, _ in enumerate(cf.streams):
-            stream_name = self.stream_names[i_obs]
+        for i_stream, _ in enumerate(cf.streams):
+            stream_name = self.stream_names[i_stream]
 
         loss_calculators = set(cf.training_config.losses.keys())
         if "LossPhysical" in loss_calculators:
-            for i_obs, si in enumerate(cf.streams):
-                stream_name = self.stream_names[i_obs]
+            if cf.training_config.get("losses", {}).get("LossPhysical", {}).get("weight", -1) > 0.0:
+                for i_stream, si in enumerate(cf.streams):
+                    stream_name = self.stream_names[i_stream]
 
-                # extract and setup relevant parameters
-                etc = si["embed_target_coords"]
-                tro_type = (
-                    si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
-                )
-                dim_embed = si["embed_target_coords"]["dim_embed"]
-                dim_out = max(
-                    dim_embed,
-                    si["token_size"] * self.targets_num_channels[i_obs],
-                )
-                tr = si["target_readout"]
-                num_layers = tr["num_layers"]
-                tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
-                tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
-                softcap = tr["softcap"] if "softcap" in tr else 0.0
+                    # extract and setup relevant parameters
+                    etc = si["embed_target_coords"]
+                    tro_type = (
+                        si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
+                    )
+                    dim_embed = si["embed_target_coords"]["dim_embed"]
+                    dim_out = max(
+                        dim_embed,
+                        si["token_size"] * self.targets_num_channels[i_stream],
+                    )
+                    tr = si["target_readout"]
+                    num_layers = tr["num_layers"]
+                    tr_mlp_hidden_factor = (
+                        tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
+                    )
+                    tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
+                    softcap = tr["softcap"] if "softcap" in tr else 0.0
 
-                if tro_type == "obs_value":
-                    # fixed dimension for obs_value type
-                    dims_embed = [
-                        si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
-                    ]
-                else:
-                    if cf.pred_dyadic_dims:
-                        coord_dim = self.geoinfo_sizes[i_obs] * si["token_size"]
-                        dims_embed = torch.tensor(
-                            [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
-                        )
-                        dims_embed[dims_embed < coord_dim] = dims_embed[
-                            torch.where(dims_embed >= coord_dim)[0][0]
+                    if tro_type == "obs_value":
+                        # fixed dimension for obs_value type
+                        dims_embed = [
+                            si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
                         ]
-                        dims_embed = dims_embed.tolist()
                     else:
-                        dims_embed = torch.linspace(
-                            dim_embed, dim_out, num_layers + 1, dtype=torch.int32
-                        ).tolist()
+                        if cf.pred_dyadic_dims:
+                            coord_dim = self.geoinfo_sizes[i_stream] * si["token_size"]
+                            dims_embed = torch.tensor(
+                                [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
+                            )
+                            dims_embed[dims_embed < coord_dim] = dims_embed[
+                                torch.where(dims_embed >= coord_dim)[0][0]
+                            ]
+                            dims_embed = dims_embed.tolist()
+                        else:
+                            dims_embed = torch.linspace(
+                                dim_embed, dim_out, num_layers + 1, dtype=torch.int32
+                            ).tolist()
 
-                if is_root():
-                    logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
+                    if is_root():
+                        logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
 
-                dim_coord_in = self.targets_coords_size[i_obs]
+                    dim_coord_in = self.targets_coords_size[i_stream]
 
-                # embedding network for coordinates
-                if etc["net"] == "linear":
-                    self.embed_target_coords[stream_name] = NamedLinear(
-                        f"embed_target_coords_{stream_name}",
-                        in_features=dim_coord_in,
-                        out_features=dims_embed[0],
-                        bias=False,
+                    # embedding network for coordinates
+                    if etc["net"] == "linear":
+                        self.embed_target_coords[stream_name] = NamedLinear(
+                            f"embed_target_coords_{stream_name}",
+                            in_features=dim_coord_in,
+                            out_features=dims_embed[0],
+                            bias=False,
+                        )
+                    elif etc["net"] == "mlp":
+                        self.embed_target_coords[stream_name] = MLP(
+                            dim_coord_in,
+                            dims_embed[0],
+                            hidden_factor=8,
+                            with_residual=False,
+                            dropout_rate=dropout_rate,
+                            norm_eps=self.cf.mlp_norm_eps,
+                            stream_name=f"embed_target_coords_{stream_name}",
+                        )
+                    else:
+                        assert False
+
+                    # target prediction engines
+                    tte_version = (
+                        TargetPredictionEngine
+                        if cf.decoder_type != "PerceiverIOCoordConditioning"
+                        else TargetPredictionEngineClassic
                     )
-                elif etc["net"] == "mlp":
-                    self.embed_target_coords[stream_name] = MLP(
+                    tte = tte_version(
+                        cf,
+                        dims_embed,
                         dim_coord_in,
-                        dims_embed[0],
-                        hidden_factor=8,
-                        with_residual=False,
-                        dropout_rate=dropout_rate,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        stream_name=f"embed_target_coords_{stream_name}",
+                        tr_dim_head_proj,
+                        tr_mlp_hidden_factor,
+                        softcap,
+                        tro_type,
+                        stream_name=stream_name,
                     )
-                else:
-                    assert False
 
-                # target prediction engines
-                tte_version = (
-                    TargetPredictionEngine
-                    if cf.decoder_type != "PerceiverIOCoordConditioning"
-                    else TargetPredictionEngineClassic
-                )
-                tte = tte_version(
-                    cf,
-                    dims_embed,
-                    dim_coord_in,
-                    tr_dim_head_proj,
-                    tr_mlp_hidden_factor,
-                    softcap,
-                    tro_type,
-                    stream_name=stream_name,
-                )
+                    self.target_token_engines[stream_name] = tte
 
-                self.target_token_engines[stream_name] = tte
-
-                # ensemble prediction heads to provide probabilistic prediction
-                final_activation = si["pred_head"].get("final_activation", "Identity")
-                if is_root():
-                    logger.debug(
-                        f"{final_activation} activation of prediction head of {si['name']} stream"
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of prediction"
+                            f"head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_stream],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
                     )
-                self.pred_heads[stream_name] = EnsPredictionHead(
-                    dims_embed[-1],
-                    self.targets_num_channels[i_obs],
-                    si["pred_head"]["num_layers"],
-                    si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
-                    final_activation=final_activation,
-                    stream_name=stream_name,
-                )
 
         # Latent heads for losses
         target_losses = cf["training_config"]["losses"].get("LossLatentSSLStudentTeacher", {})
