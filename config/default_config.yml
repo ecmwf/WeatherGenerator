@@ -94,37 +94,6 @@ validate_with_ema: True
 ema_ramp_up_ratio: 0.09
 ema_halflife_in_thousands: 1e-3
 
-<<<<<<< HEAD
-# training mode: "forecast" or "masking" (masked token modeling)
-# for "masking" to train with auto-encoder mode, forecast_offset should be 0
-training_mode: "masking"
-training_mode_config: {"losses": {LossPhysical: {weight: 0.7, loss_fcts: [['mse', 0.8], ['mae', 0.2]]},}
-                      }
-# training_mode_config: {"loss": {LossPhysical: [['mse', 0.7]],
-#                                             LossLatent: [['mse', 0.3]],
-#                                             LossStudentTeacher: [{'iBOT': {<options>}, 'JEPA': {options}}],}
-#                       }
-validation_mode_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}
-                        }
-# masking rate when training mode is "masking"; ignored in foreacast mode
-masking_rate: 0.6
-# sample the masking rate (with normal distribution centered at masking_rate)
-# note that a sampled masking rate leads to varying requirements
-masking_rate_sampling: True
-# sample a subset of all target points, useful e.g. to reduce memory requirements (also can specify per-stream)
-sampling_rate_target: 1.0
-# include a masking strategy here, currently only supporting "random", "block", "healpix", "channel", "causal" and "combination"
-masking_strategy: "random"
-# masking_strategy_config is a dictionary of additional parameters for the masking strategy
-# required for "healpix" and "channel" masking strategies
-# "healpix": requires healpix mask level to be specified with `hl_mask`
-# "channel": requires "mode" to be specified, "per_cell" or "global",
-masking_strategy_config: {"strategies": ["random", "healpix", "channel"], 
-                          "probabilities": [0.34, 0.33, 0.33],
-                          "hl_mask": 3, "mode": "per_cell",
-                          "same_strategy_per_batch": false
-                          }
-=======
 ### Example validation and training config for mask token modelling in physical space
 validation_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}}
 # Student-teacher configuration (only used when training_mode == "student_teacher")
@@ -330,7 +299,6 @@ training_config:
 #       num_samples: 2 # number of teacher views to generate
 #       rate_sampling: False  # randomly sample the rate per batch
 
->>>>>>> develop
 
 num_mini_epochs: 32
 samples_per_mini_epoch: 4096 # 250000 for student-teacher because validation is meaningless
@@ -343,15 +311,7 @@ lr_start: 1e-6
 lr_max: 5e-5
 lr_final_decay: 1e-6
 lr_final: 0.0
-<<<<<<< HEAD
-lr_steps_warmup: 512 
-=======
-<<<<<<< HEAD
-lr_steps_warmup: 256
-=======
 lr_steps_warmup: 512
->>>>>>> dfcf3e16754e2af518dd6e76e9a9ccfb7564ec41
->>>>>>> develop
 lr_steps_cooldown: 512
 lr_policy_warmup: "cosine"
 lr_policy_decay: "constant"
@@ -390,11 +350,6 @@ train_log_freq:
   metrics: 20
   checkpoint: 250
 
-<<<<<<< HEAD
-multiprocessing_method: "fork"
-
-=======
->>>>>>> develop
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val
 # The tags are free-form, with the following rules:
@@ -423,3 +378,5 @@ wgtags:
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null
+
+multiprocessing_method: "fork"
