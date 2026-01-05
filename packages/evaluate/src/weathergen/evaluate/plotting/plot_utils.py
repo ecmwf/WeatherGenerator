@@ -98,7 +98,7 @@ def plot_metric_region(
                     continue
                 
                 data, time_dim = _assign_time_coord(data)
-                
+
                 selected_data.append(data.sel(channel=ch))
                 labels.append(runs[run_id].get("label", run_id))
                 run_ids.append(run_id)
@@ -259,7 +259,6 @@ def heat_maps_metric_region(
                 tag=name,
                 x_dim=time_dim,
             )
-
 
 def score_card_metric_region(
     metric: str,

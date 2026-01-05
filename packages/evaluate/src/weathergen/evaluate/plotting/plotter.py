@@ -1035,8 +1035,8 @@ class LinePlots:
         data: xr.DataArray | list,
         labels: str | list,
         metric: str,
+        x_dim,
         tag: str = "",
-        x_dim: str = "forecast_step",
     ) -> None:
         """
         Plot a heat map comparing multiple datasets.
@@ -1048,6 +1048,8 @@ class LinePlots:
             Label or list of labels for each dataset
         metric:
             Metric for which we are plotting
+        x_dim:
+            Dimension to be used for the x-axis. The code will average over all other dimensions.
         tag:
             Tag to be added to the plot title and filename
         Returns
@@ -1098,7 +1100,7 @@ class LinePlots:
             cmap = plt.get_cmap("magma_r") if lower_is_better(metric) else plt.get_cmap("magma")
             global_min = min(global_min, float(heatmap_data.min()))
             global_max = max(global_max, float(heatmap_data.max()))
-
+            
             last_hm = sns.heatmap(
                 heatmap_data.values.T,
                 ax=ax,
@@ -1208,7 +1210,7 @@ class ScoreCards:
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
                 # Perform Wilcoxon test
-                if diff["forecast_step"].item() > 1.0:
+                if len(diff["forecast_step"].values) > 1:
                     stat, p = wilcoxon(diff, alternative=alt)
 
                     # Draw rectangle border for significance

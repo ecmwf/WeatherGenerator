@@ -110,7 +110,8 @@ def train_continue_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    devices = Trainer.init_torch()
+    mp_method = cf.get("multiprocessing_method", "fork")
+    devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
     init_loggers(cf.run_id)
@@ -155,7 +156,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.data_loader_rng_seed = int(time.time())
-    devices = Trainer.init_torch()
+    mp_method = cf.get("multiprocessing_method", "fork")
+    devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
     # if cf.rank == 0:
@@ -183,7 +185,7 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 if __name__ == "__main__":
     # Entry point for slurm script.
     # Check whether --from_run_id passed as argument.
-    if next((True for arg in sys.argv if "--from_run_id" in arg), False):
+    if any("--from_run_id" in arg for arg in sys.argv):
         train_continue()
     else:
         train()

@@ -40,7 +40,7 @@ class WeatherGenReader(Reader):
         super().__init__(eval_cfg, run_id, private_paths)
 
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
-        self.mini_epoch = getattr(eval_cfg, "mini_epoch", getattr(eval_cfg, "epoch", -1))
+        self.mini_epoch = eval_cfg.get("mini_epoch", eval_cfg.get("epoch"))
         self.rank = eval_cfg.rank
 
         # Load model configuration and set (run-id specific) directories
@@ -325,7 +325,7 @@ class WeatherGenReader(Reader):
             Returns a Dataset where channels have been scaled if needed
         """
 
-        channels_z = [ch for ch in data.channel.values if str(ch).startswith("z_")]
+        channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
         data_scaled = data.copy()
         factor = 9.80665
 
@@ -513,7 +513,6 @@ class WeatherGenReader(Reader):
                 _logger.debug(f"Looking for: {score_path}")
 
                 if score_path.exists():
-
                     with open(score_path) as f:
                         data_dict = json.load(f)
                         score_dict = xr.DataArray.from_dict(data_dict)

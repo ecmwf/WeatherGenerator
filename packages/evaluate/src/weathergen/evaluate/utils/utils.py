@@ -139,6 +139,8 @@ def calc_scores_per_stream(
             },
         )
 
+        lead_time_map = {}
+
         for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
             if preds.ipoint.size == 0:
                 _logger.warning(
@@ -173,7 +175,7 @@ def calc_scores_per_stream(
                 )
                 if score is not None:
                     valid_scores.append(score)
-
+           
             valid_metric_names = [
                 metric
                 for metric, score in zip(metrics, valid_scores, strict=False)
@@ -199,23 +201,32 @@ def calc_scores_per_stream(
                 criteria["ens"] = combined_metrics.ens
 
             metric_stream.loc[criteria] = combined_metrics
-
+           
+            lead_time_map[fstep] = np.unique(combined_metrics.lead_time.values.astype('timedelta64[h]')) if "lead_time" in combined_metrics.coords else None
+            
             if is_regular and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
                 _plot_score_maps_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
                 )
 
-        _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
+        lead_time_values = np.array([
+            lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values
+        ]).squeeze()
+        
+        if lead_time_values.shape == metric_stream.forecast_step.shape:
+            metric_stream = metric_stream.assign_coords(
+                lead_time=("forecast_step", lead_time_values)
+            )
 
-        metric_stream["lead_time"] = metric_stream["forecast_step"] * step_hrs
+        _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
         
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
                 reader.run_id
             ] = metric_stream.sel({"metric": metric})
-
+   
     return local_scores
 
 
