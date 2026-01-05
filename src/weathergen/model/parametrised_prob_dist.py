@@ -24,6 +24,12 @@ class DiagonalGaussianDistribution:
     def __init__(self, deterministic=False, channel_dim=1):
         self.deterministic = deterministic
         self.channel_dim = channel_dim
+        self.parameters = None
+        self.mean = None
+        self.logvar = None
+        self.sum_dims = None
+        self.std = None
+        self.var = None
 
     def reset_parameters(self, parameters):
         self.parameters = parameters.float()

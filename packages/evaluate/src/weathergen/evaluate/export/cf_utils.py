@@ -66,7 +66,7 @@ class CfParser:
                 Scaled data array.
         """
         var_config = self.mapping.get(var_short, {})
-        raw = var_config.get("scale_factor", 1.0)
+        raw = var_config.get("scale_factor", "1.0")
         parts = raw.split("/")
         scale_factor = float(parts[0]) / float(parts[1]) if len(parts) == 2 else float(parts[0])
 

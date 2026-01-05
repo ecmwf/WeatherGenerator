@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
+
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
@@ -32,96 +34,90 @@ from weathergen.utils.utils import get_dtype
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
-    def __init__(self, cf: Config, sources_size) -> None:
+    def __init__(self, cf: Config, sources_size, stream_names: list[str]) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param sources_size: List of source sizes for each stream.
+        :param stream_names: Ordered list of stream identifiers aligned with cf.streams.
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
+        self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
-        self.embeds = torch.nn.ModuleList()
+        self.embeds = torch.nn.ModuleDict()
+        self.stream_names = list(stream_names)
 
-        for i, si in enumerate(self.cf.streams):
-            stream_name = si.get("name", i)
+        assert len(self.stream_names) == len(self.cf.streams), (
+            "stream_names must align with cf.streams"
+        )
 
+        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
-                self.embeds.append(torch.nn.Identity())
+                self.embeds[stream_name] = torch.nn.Identity()
                 continue
 
             if si["embed"]["net"] == "transformer":
-                self.embeds.append(
-                    StreamEmbedTransformer(
-                        mode=self.cf.embed_orientation,
-                        num_tokens=si["embed"]["num_tokens"],
-                        token_size=si["token_size"],
-                        num_channels=self.sources_size[i],
-                        dim_embed=si["embed"]["dim_embed"],
-                        dim_out=self.cf.ae_local_dim_embed,
-                        num_blocks=si["embed"]["num_blocks"],
-                        num_heads=si["embed"]["num_heads"],
-                        dropout_rate=self.cf.embed_dropout_rate,
-                        norm_type=self.cf.norm_type,
-                        embed_size_centroids=self.cf.embed_size_centroids,
-                        unembed_mode=self.cf.embed_unembed_mode,
-                        stream_name=stream_name,
-                    )
+                self.embeds[stream_name] = StreamEmbedTransformer(
+                    mode=self.cf.embed_orientation,
+                    num_tokens=si["embed"]["num_tokens"],
+                    token_size=si["token_size"],
+                    num_channels=self.sources_size[i],
+                    dim_embed=si["embed"]["dim_embed"],
+                    dim_out=self.cf.ae_local_dim_embed,
+                    num_blocks=si["embed"]["num_blocks"],
+                    num_heads=si["embed"]["num_heads"],
+                    dropout_rate=self.cf.embed_dropout_rate,
+                    norm_type=self.cf.norm_type,
+                    unembed_mode=self.cf.embed_unembed_mode,
+                    stream_name=stream_name,
                 )
             elif si["embed"]["net"] == "linear":
-                self.embeds.append(
-                    StreamEmbedLinear(
-                        self.sources_size[i] * si["token_size"],
-                        self.cf.ae_local_dim_embed,
-                        stream_name=stream_name,
-                    )
+                self.embeds[stream_name] = StreamEmbedLinear(
+                    self.sources_size[i] * si["token_size"],
+                    self.cf.ae_local_dim_embed,
+                    stream_name=stream_name,
                 )
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def forward(self, streams_data, pe_embed, dtype, device):
-        source_tokens_lens = torch.stack(
-            [
-                torch.stack(
-                    [
-                        s.source_tokens_lens if len(s.source_tokens_lens) > 0 else torch.tensor([])
-                        for s in stl_b
-                    ]
-                )
-                for stl_b in streams_data
-            ]
-        )
-        offsets_base = source_tokens_lens.sum(1).sum(0).cumsum(0)
+    def forward(self, batch, pe_embed):
+        num_steps_input = batch.get_num_source_steps()
 
+        num_tokens = torch.sum(batch.source_tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
-            (int(offsets_base[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device
+            (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
-        for _, sb in enumerate(streams_data):
-            for _, (s, embed) in enumerate(zip(sb, self.embeds, strict=False)):
-                if not s.source_empty():
-                    idxs = s.source_idxs_embed.to(device)
-                    idxs_pe = s.source_idxs_embed_pe.to(device)
+        # iterate over all streams
+        for stream_name in self.stream_names:
+            # collect all source tokens from all input_steps and all samples in the batch
+            sdata, scatter_idxs, pe_idxs = [], [], []
+            for istep in range(num_steps_input):
+                for sample in batch.source_samples:
+                    # token data
+                    sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
+                    # indices for positional encoding
+                    pe_idxs += [sample.streams_data[stream_name].source_idxs_embed_pe[istep]]
+                    # scatter idxs for switching from stream to cell-based ordering
+                    scatter_idxs += [sample.streams_data[stream_name].source_idxs_embed[istep]]
 
-                    # create full scatter index
-                    # (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s.source_tokens_cells, s.source_centroids).flatten(0, 1)
-                    # there's undocumented limitation in flash_attn that will make embed fail if
-                    # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat(
-                    #     [
-                    #         embed(s_c, c_c).flatten(0, 1)
-                    #         for s_c, c_c in zip(
-                    #             torch.split(s.source_tokens_cells, 49152),
-                    #             torch.split(s.source_centroids, 49152),
-                    #         )
-                    #     ]
-                    # )
+            sdata = torch.cat(sdata)
+            # skip empty stream
+            if len(sdata) == 0:
+                continue
 
-                    # scatter write to reorder from per stream to per cell ordering
-                    tokens_all.scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
+            scatter_idxs = torch.cat(scatter_idxs)
+            scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+            pe_idxs = torch.cat(pe_idxs)
+
+            # embedding from physical space to per patch latent representation
+            x_embed = self.embeds[stream_name](sdata).flatten(0, 1)
+
+            # switch from stream to cell-based ordering
+            tokens_all.scatter_(0, scatter_idxs, x_embed + pe_embed[pe_idxs])
+
         return tokens_all
 
 
@@ -197,32 +193,35 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
         )
-        self.ae_adapter.append(
-            MLP(
-                self.cf.ae_global_dim_embed,
-                self.cf.ae_global_dim_embed,
-                with_residual=True,
-                dropout_rate=self.cf.ae_adapter_dropout_rate,
-                norm_type=self.cf.norm_type,
-                norm_eps=self.cf.mlp_norm_eps,
+
+        ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
+        for _ in range(ae_adapter_num_blocks - 1):
+            self.ae_adapter.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=self.cf.ae_adapter_dropout_rate,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
             )
-        )
-        self.ae_adapter.append(
-            MultiCrossAttentionHeadVarlenSlicedQ(
-                self.cf.ae_global_dim_embed,
-                self.cf.ae_local_dim_embed,
-                num_slices_q=self.cf.ae_local_num_queries,
-                dim_head_proj=self.cf.ae_adapter_embed,
-                num_heads=self.cf.ae_adapter_num_heads,
-                with_residual=self.cf.ae_adapter_with_residual,
-                with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
-                dropout_rate=self.cf.ae_adapter_dropout_rate,
-                with_flash=self.cf.with_flash_attention,
-                norm_type=self.cf.norm_type,
-                norm_eps=self.cf.norm_eps,
-                attention_dtype=get_dtype(self.cf.attention_dtype),
+            self.ae_adapter.append(
+                MultiCrossAttentionHeadVarlenSlicedQ(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_local_dim_embed,
+                    num_slices_q=self.cf.ae_local_num_queries,
+                    dim_head_proj=self.cf.ae_adapter_embed,
+                    num_heads=self.cf.ae_adapter_num_heads,
+                    with_residual=self.cf.ae_adapter_with_residual,
+                    with_qk_lnorm=self.cf.ae_adapter_with_qk_lnorm,
+                    dropout_rate=self.cf.ae_adapter_dropout_rate,
+                    with_flash=self.cf.with_flash_attention,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
+                )
             )
-        )
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
         for block in self.ae_adapter:
@@ -235,6 +234,77 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 use_reentrant=use_reentrant,
             )
         return tokens_global_c
+
+
+class QueryAggregationEngine(torch.nn.Module):
+    name: "QueryAggregationEngine"
+
+    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
+        """
+        Initialize the QueryAggregationEngine with the configuration.
+
+        This engine is used for aggregating information from all query tokens coming
+        from healpix cells, that are not masked.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param num_healpix_cells: Number of healpix cells used for local queries.
+        """
+        super(QueryAggregationEngine, self).__init__()
+        self.cf = cf
+        self.num_healpix_cells = num_healpix_cells
+
+        self.ae_aggregation_blocks = torch.nn.ModuleList()
+
+        global_rate = int(1 / self.cf.ae_aggregation_att_dense_rate)
+        for i in range(self.cf.ae_aggregation_num_blocks):
+            ## Alternate between local and global attention
+            #  as controlled by cf.ae_dense_local_att_dense_rate
+            # Last block is always global attention
+            if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
+                self.ae_aggregation_blocks.append(
+                    MultiSelfAttentionHead(
+                        self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.ae_aggregation_num_heads,
+                        dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                        with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
+                        with_flash=self.cf.with_flash_attention,
+                        norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
+                    )
+                )
+            else:
+                self.ae_aggregation_blocks.append(
+                    MultiSelfAttentionHeadLocal(
+                        self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.ae_aggregation_num_heads,
+                        qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
+                        block_factor=self.cf.ae_aggregation_block_factor,
+                        dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                        with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
+                        with_flash=self.cf.with_flash_attention,
+                        norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
+                    )
+                )
+            # MLP block
+            self.ae_aggregation_blocks.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                    hidden_factor=self.cf.ae_aggregation_mlp_hidden_factor,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
+            )
+
+    def forward(self, tokens, use_reentrant):
+        for block in self.ae_aggregation_blocks:
+            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+        return tokens
 
 
 class GlobalAssimilationEngine(torch.nn.Module):
@@ -298,6 +368,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
+        if self.cf.get("ae_global_trailing_layer_norm", False):
+            self.ae_global_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
 
     def forward(self, tokens, use_reentrant):
         for block in self.ae_global_blocks:
@@ -308,7 +382,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
-    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
+    def __init__(self, cf: Config, num_healpix_cells: int, dim_aux: int = None) -> None:
         """
         Initialize the ForecastingEngine with the configuration.
 
@@ -333,7 +407,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=1,
+                            dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
@@ -349,7 +423,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=1,
+                            dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                         )
@@ -362,10 +436,23 @@ class ForecastingEngine(torch.nn.Module):
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
-                        dim_aux=1,
+                        dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
+                # Optionally, add LayerNorm after i-th layer
+                if i in self.cf.get("fe_layer_norm_after_blocks", []):
+                    self.fe_blocks.append(
+                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+                    )
+
+            self.fe_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
+
+            self.fe_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
@@ -377,10 +464,12 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
-        aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
-        for block in self.fe_blocks:
-            tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
-
+        aux_info = None
+        for _b_idx, block in enumerate(self.fe_blocks):
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                tokens = block(tokens)
+            else:
+                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -732,3 +821,35 @@ class TargetPredictionEngine(nn.Module):
             else output
         )
         return output
+
+
+@dataclasses.dataclass
+class LatentState:
+    """
+    A dataclass to encapsulate the latent state aka the intput to latent heads.
+    """
+
+    class_token: torch.Tensor
+    register_tokens: torch.Tensor
+    patch_tokens: torch.Tensor
+    z_pre_norm: torch.Tensor
+
+
+class LatentPredictionHead(nn.Module):
+    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
+        super().__init__()
+
+        self.name = name
+        self.class_token = class_token
+        self.patch_token = patch_token
+        # For now this is a Linear Layer TBD what this architecture should be
+        self.layer = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, x: LatentState):
+        outputs = []
+        if self.class_token:
+            outputs.append(self.layer(x.class_token))
+        if self.patch_token:
+            outputs.append(self.layer(x.patch_tokens))
+        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        return torch.cat(outputs, dim=1)
