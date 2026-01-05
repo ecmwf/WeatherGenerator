@@ -7,25 +7,31 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+# Standard library
 import json
 import logging
+from collections import defaultdict
 from pathlib import Path
 
+# Third-party
 import numpy as np
 import omegaconf as oc
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.evaluate.clim_utils import get_climatology
-from weathergen.evaluate.io_reader import Reader
-from weathergen.evaluate.plot_utils import (
+# Local application / package
+from weathergen.evaluate.io.io_reader import Reader
+from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
+    heat_maps_metric_region,
     plot_metric_region,
+    ratio_plot_metric_region,
     score_card_metric_region,
 )
-from weathergen.evaluate.plotter import BarPlots, LinePlots, Plotter, ScoreCards
-from weathergen.evaluate.score import VerifiedData, get_score
-from weathergen.evaluate.score_utils import RegionBoundingBox
+from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, ScoreCards
+from weathergen.evaluate.scores.score import VerifiedData, get_score
+from weathergen.evaluate.utils.clim_utils import get_climatology
+from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -50,12 +56,11 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
 
 def calc_scores_per_stream(
     reader: Reader,
-    scores_dict: dict,
     stream: str,
-    regions: list,
-    metrics: list[str],
+    regions: list[str],
+    metrics_dict: dict,
     plot_score_maps: bool = False,
-) -> tuple[xr.DataArray, xr.DataArray]:
+):
     """
     Calculate scores for a given run and stream using the specified metrics.
 
@@ -69,8 +74,8 @@ def calc_scores_per_stream(
         Dictionary for scores with structure scores_dict[metric][region][stream][run_id]
     regions :
         List of regions to calculate scores on.
-    metrics :
-        List of metric names to calculate.
+    metrics_dict :
+        Dictionary mapping regions to lists of metric names to calculate.
     plot_score_maps :
         When it is True and the stream is on a regular grid the scores are
         recomputed as a function of the "ipoint" and plotted on a 2D scatter map.
@@ -81,8 +86,7 @@ def calc_scores_per_stream(
     -------
     Dictionary containing scores for each metric and stream.
     """
-
-    _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
+    local_scores = {}  # top-level dict: metric -> region -> stream -> run_id
     if plot_score_maps:
         _logger.info(f"RUN {reader.run_id} - {stream}: Plotting scores is enabled.")
 
@@ -92,14 +96,13 @@ def calc_scores_per_stream(
         _logger.info(f"RUN {reader.run_id} - {stream}: Saving plotted scores to {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
-
     fsteps = available_data.fsteps
     samples = available_data.samples
     channels = available_data.channels
     ensemble = available_data.ensemble
     is_regular = reader.is_regular(stream)
     group_by_coord = None if is_regular else "sample"
-
+    step_hrs = reader.step_hrs if hasattr(reader, "step_hrs") else 1
     output_data = reader.get_data(
         stream,
         fsteps=fsteps,
@@ -108,15 +111,19 @@ def calc_scores_per_stream(
         ensemble=ensemble,
         return_counts=True,
     )
-
     da_preds = output_data.prediction
     da_tars = output_data.target
-    points_per_sample = output_data.points_per_sample
 
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
     for region in regions:
         bbox = RegionBoundingBox.from_region_name(region)
+        metrics = metrics_dict[region]
+
+        _logger.info(
+            f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
+            f" and metrics {metrics}..."
+        )
 
         metric_stream = xr.DataArray(
             np.full(
@@ -147,6 +154,7 @@ def calc_scores_per_stream(
                 _logger.debug(
                     f"Applying bounding box mask for region '{region}' to targets and predictions."
                 )
+
             tars, preds, tars_next, preds_next = [
                 bbox.apply_mask(x) if x is not None else None
                 for x in (tars, preds, tars_next, preds_next)
@@ -158,48 +166,39 @@ def calc_scores_per_stream(
 
             # Add it only if it is not None
             valid_scores = []
+
             for metric in metrics:
                 score = get_score(
-                    score_data,
-                    metric,
-                    agg_dims="ipoint",
-                    group_by_coord=group_by_coord,
+                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
                 )
                 if score is not None:
                     valid_scores.append(score)
 
-            # Keep only metrics corresponding to valid_scores
             valid_metric_names = [
                 metric
                 for metric, score in zip(metrics, valid_scores, strict=False)
                 if score is not None
             ]
+            if not valid_scores:
+                continue
 
             combined_metrics = xr.concat(valid_scores, dim="metric")
             combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
-
-            _logger.debug(f"Running computation of metrics for stream {stream}...")
             combined_metrics = combined_metrics.compute()
 
             for coord in ["channel", "sample", "ens"]:
                 combined_metrics = scalar_coord_to_dim(combined_metrics, coord)
 
-            assert int(combined_metrics.forecast_step) == int(fstep), (
-                "Different steps in data and metrics. Please check."
-            )
-
             criteria = {
-                "forecast_step": int(combined_metrics.forecast_step),
+                "forecast_step": int(fstep),
                 "sample": combined_metrics.sample,
                 "channel": combined_metrics.channel,
                 "metric": combined_metrics.metric,
             }
-
             if "ens" in combined_metrics.dims:
                 criteria["ens"] = combined_metrics.ens
-            metric_stream.loc[criteria] = combined_metrics
 
-            #########
+            metric_stream.loc[criteria] = combined_metrics
 
             if is_regular and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
@@ -209,20 +208,15 @@ def calc_scores_per_stream(
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
-        metric_list_to_json(
-            reader,
-            [metric_stream],
-            [points_per_sample],
-            [stream],
-            region,
-        )
+        metric_stream["forecast_step"] = metric_stream["forecast_step"] * step_hrs
 
+        # Build local dictionary for this region
         for metric in metrics:
-            scores_dict[metric][region][stream][reader.run_id] = metric_stream.sel(
-                {"metric": metric}
-            )
+            local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
+                reader.run_id
+            ] = metric_stream.sel({"metric": metric})
 
-    return scores_dict
+    return local_scores
 
 
 def _plot_score_maps_per_stream(
@@ -291,7 +285,7 @@ def _plot_score_maps_per_stream(
 
     for metric in plot_metrics.coords["metric"].values:
         for ens_val in tqdm(ens_values, f"Plotting metric - {metric}"):
-            tag = f"score_maps_{region}_{metric}_fstep_{fstep}" + (
+            tag = f"score_maps_{metric}_fstep_{fstep}" + (
                 f"_ens_{ens_val}" if ens_val is not None else ""
             )
             for channel in plot_metrics.coords["channel"].values:
@@ -303,7 +297,7 @@ def _plot_score_maps_per_stream(
                 title = f"{metric} - {channel}: fstep {fstep}" + (
                     f", ens {ens_val}" if ens_val is not None else ""
                 )
-                plotter.scatter_plot(data, map_dir, channel, tag=tag, title=title)
+                plotter.scatter_plot(data, map_dir, channel, region, tag=tag, title=title)
 
 
 def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
@@ -343,9 +337,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
         "fps": global_plotting_opts.get("fps", 2),
+        "regions": global_plotting_opts.get("regions", ["global"]),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
-
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")
@@ -515,7 +509,6 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         Dictionary containing scores for each metric and stream.
     """
     _logger.info("Plotting summary of evaluation results...")
-
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
     print_summary = cfg.evaluation.get("print_summary", False)
@@ -538,7 +531,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     br_plotter = BarPlots(plot_cfg, summary_dir)
     for region in regions:
         for metric in metrics:
-            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("summary_plots", True):
+                plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("ratio_plots", False):
+                ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("heat_maps", False):
+                heat_maps_metric_region(metric, region, runs, scores_dict, plotter)
             if eval_opt.get("score_cards", False):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
@@ -675,3 +673,36 @@ def scalar_coord_to_dim(da: xr.DataArray, name: str, axis: int = -1) -> xr.DataA
         da = da.drop_vars(name)
         da = da.expand_dims({name: [val]}, axis=axis)
     return da
+
+
+def nested_dict():
+    """Two-level nested dict factory: dict[key1][key2] = value"""
+    return defaultdict(dict)
+
+
+def triple_nested_dict():
+    """Three-level nested dict factory: dict[key1][key2][key3] = value"""
+    return defaultdict(nested_dict)
+
+
+def merge(dst: dict, src: dict) -> dict:
+    """
+    Recursively merge src into dst.
+    Values in src overwrite values in dst.
+    Parameters
+    ----------
+    dst : dict
+        Destination dictionary.
+    src : dict
+        Source dictionary.
+    Returns
+    -------
+    dict
+        Merged dictionary.
+    """
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst

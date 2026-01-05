@@ -49,12 +49,18 @@ except Exception as e:
 if st.session_state.get("authentication_status"):
     pg = st.navigation(
         {
-            "Engineering": [st.Page("eng_overview.py", title="overview")],
+            "Engineering": [
+                st.Page("eng_overview.py", title="overview"),
+                st.Page("exp_tracker.py", title="run details"),
+            ],
             "Model:atmo": [
                 st.Page("atmo_training.py", title="training"),
                 st.Page("atmo_eval.py", title="evaluation"),
             ],
-            "Data": [st.Page("data_overview.py", title="overview")],
+            "Data": [
+                st.Page("data_overview.py", title="overview"),
+                st.Page("data_sources.py", title="sources"),
+            ],
         }
     )
     pg.run()
