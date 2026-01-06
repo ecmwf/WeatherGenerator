@@ -8,10 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from collections.abc import Iterable, Sequence
 
 import numpy as np
-from typing import Iterable, Sequence
-from pathlib import Path
 
 _logger = logging.getLogger(__name__)
 
@@ -107,9 +106,7 @@ def plot_metric_region(
             if selected_data:
                 _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
                 name = create_filename(
-                    prefix=[metric, region],
-                    middle=sorted(set(run_ids)),
-                    suffix=[stream, ch]
+                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
                 )
                 plotter.plot(
                     selected_data,
@@ -166,11 +163,9 @@ def ratio_plot_metric_region(
 
         if len(selected_data) > 0:
             _logger.info(f"Creating Ratio plot for {metric} - {stream}")
-           
+
             name = create_filename(
-                prefix=[metric, region],
-                middle=sorted(set(run_ids)),
-                suffix=[stream]
+                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
             plotter.ratio_plot(
                 selected_data,
@@ -228,9 +223,7 @@ def heat_maps_metric_region(
         if len(selected_data) > 0:
             _logger.info(f"Creating Heat maps for {metric} - {stream}")
             name = create_filename(
-                prefix=[metric, region],
-                middle=sorted(set(run_ids)),
-                suffix=[stream]
+                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
             plotter.heat_map(
                 selected_data,
@@ -376,7 +369,7 @@ class DefaultMarkerSize:
 
 
 def create_filename(
-    *, 
+    *,
     prefix: Sequence[str] = (),
     middle: Iterable[str] = (),
     suffix: Sequence[str] = (),
@@ -410,14 +403,18 @@ def create_filename(
     fixed = sep.join(pref + suf)
     avail = max_len - len(fixed)
 
-    if mid and pref: avail -= len(sep)
-    if mid and suf: avail -= len(sep)
-    
+    if mid and pref:
+        avail -= len(sep)
+    if mid and suf:
+        avail -= len(sep)
+
     truncated_middle, used = [], 0
 
     for x in mid:
         d = len(x) + (len(sep) if truncated_middle else 0)
-        if used + d > avail: break
-        truncated_middle.append(x); used += d
+        if used + d > avail:
+            break
+        truncated_middle.append(x)
+        used += d
 
     return sep.join(prefix + truncated_middle + suffix)
