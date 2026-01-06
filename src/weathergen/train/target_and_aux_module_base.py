@@ -30,7 +30,7 @@ class TargetAndAuxModuleBase:
     def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
         pass
 
-    def compute(self, sample, *args, **kwargs) -> TargetAuxOutput:
+    def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
         pass
 
     def to_device(self, device):
@@ -50,7 +50,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, batch, *args, **kwargs) -> TargetAuxOutput:
+    def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.target_samples[0].streams_data.items()]
         forecast_steps = batch.get_num_target_steps()

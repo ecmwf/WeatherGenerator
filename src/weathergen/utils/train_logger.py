@@ -127,7 +127,7 @@ class TrainLogger:
         for key, value in stddev_all.items():
             metrics[key] = np.nanmean(value)
 
-        self.log_metrics("train", metrics)
+        self.log_metrics(stage, metrics)
 
     #######################################
     @staticmethod

@@ -146,7 +146,12 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = init_model_and_shard(
-            cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
+            cf,
+            self.dataset,
+            run_id_contd,
+            mini_epoch_contd,
+            cf.training_config.training_mode,
+            devices[0],
         )
 
         self.target_and_aux_calculator = get_target_aux_calculator(
@@ -206,7 +211,12 @@ class Trainer(TrainerBase):
         )
 
         self.model, self.model_params = init_model_and_shard(
-            cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
+            cf,
+            self.dataset,
+            run_id_contd,
+            mini_epoch_contd,
+            cf.training_config.training_mode,
+            devices[0],
         )
 
         if cf.compile_model:
@@ -214,11 +224,16 @@ class Trainer(TrainerBase):
 
         self.validate_with_ema = cf.get("validate_with_ema", False)
         self.ema_model = None
-        if self.validate_with_ema:
-            # validate_with_ema is incompatible with student-teacher
-            meta_ema_model = init_model_and_shard(
-                cf, self.dataset, run_id_contd, mini_epoch_contd, "student", devices[0]
-            )[0]
+        if cf.training_config["training_mode"] == "student-teacher":
+            meta_ema_model, _ = init_model_and_shard(
+                cf,
+                self.dataset,
+                run_id_contd,
+                mini_epoch_contd,
+                cf.training_config.training_mode,
+                devices[0],
+                {},
+            )
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
@@ -226,6 +241,30 @@ class Trainer(TrainerBase):
                 rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
+        elif self.validate_with_ema:
+            # validate_with_ema is incompatible with student-teacher
+            meta_ema_model, _ = init_model_and_shard(
+                cf,
+                self.dataset,
+                run_id_contd,
+                mini_epoch_contd,
+                cf.training_config.training_mode,
+                devices[0],
+                {},
+            )
+            self.ema_model = EMAModel(
+                self.model,
+                meta_ema_model,
+                halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
+                rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
+                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            )
+
+        self.target_and_aux_calculator = get_target_aux_calculator(
+            cf, self.dataset, self.model, self.device
+        )
+
+        self.target_and_aux_calculator.to_device(self.device)
 
         self.target_and_aux_calculator = get_target_aux_calculator(
             cf, self.dataset, self.model, self.device
@@ -372,22 +411,19 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                # evaluate model
                 preds = self.model(self.model_params, batch)
-
-                # evaluate targets and aux
                 targets_and_auxs = self.target_and_aux_calculator.compute(
-                    batch, self.model_params, self.model
+                    self.cf.istep,
+                    batch,
+                    self.model_params,
+                    self.model,
                 )
-
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
                 targets=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
-
             # TODO re-enable this, need to think on how to make it compatible with
-            # TODO: CL, this should become a regular loss term
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:
             #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
@@ -419,11 +455,12 @@ class Trainer(TrainerBase):
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
 
-            self.target_and_aux_calculator.update_state_post_opt_step(bidx, batch, self.model)
-
             # update learning rate
             self.lr_scheduler.step()
 
+            self.target_and_aux_calculator.update_state_post_opt_step(
+                self.cf.istep * get_batch_size(self.cf, self.world_size_original), batch, self.model
+            )
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(
@@ -472,14 +509,15 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
-                        output = model_forward(self.model_params, batch)
+                        preds = model_forward(self.model_params, batch)
                         target_aux_output = self.target_and_aux_calculator.compute(
+                            self.cf.istep,
                             batch,
                             self.model_params,
                             self.model,
                         )
                     _ = self.loss_calculator_val.compute_loss(
-                        preds=output,
+                        preds=preds,
                         targets=target_aux_output,
                         metadata=extract_batch_metadata(batch),
                     )
@@ -488,7 +526,7 @@ class Trainer(TrainerBase):
                     if bidx < cf.log_validation:
                         dn_data = self.dataset_val.denormalize_target_channels
                         write_output(
-                            self.cf, mini_epoch, bidx, dn_data, batch, output, target_aux_output
+                            self.cf, mini_epoch, bidx, dn_data, batch, preds, target_aux_output
                         )
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)

@@ -245,16 +245,24 @@ class ModelBatch:
 
     def get_num_source_steps(self) -> int:
         """
-        Get number of input/source steps
+        Get number of input/source steps from smallest of all available streams
         """
         # TODO: define explicitly
-        # TODO: ensure that num_input_steps is constant across batch with different strategies
-        return len(self.source_samples[0].streams_data["ERA5"].source_tokens_cells)
+        lens = [
+            len(stream.source_tokens_cells)
+            for _, stream in self.target_samples[0].streams_data.items()
+        ]
+
+        return min(lens)
 
     def get_num_target_steps(self) -> int:
         """
-        Get number of input/source steps
+        Get number of input/source steps from smallest of all available streams
         """
         # TODO: define explicitly
         # TODO: ensure that num_input_steps is constant across batch with different strategies
-        return len(self.target_samples[0].streams_data["ERA5"].target_tokens)
+        lens = [
+            len(stream.target_tokens) for _, stream in self.target_samples[0].streams_data.items()
+        ]
+
+        return min(lens)
