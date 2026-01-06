@@ -189,12 +189,12 @@ class CsvReader(Reader):
         for metric in metrics:
             for region in regions:
                 # fill it only for matching metric
-                da = self.get_values(
+                data = self.get_values(
                     region=region, metric=metric, forecast_steps=fsteps, channels=channels
                 )
 
-                if da.size == 0:
-                    da = xr.DataArray(
+                if data.size == 0:
+                    data = xr.DataArray(
                         np.full(
                             (len(samples), len(fsteps), len(channels), 1),
                             np.nan,
@@ -213,7 +213,7 @@ class CsvReader(Reader):
 
                 local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
                     self.run_id
-                ] = da
+                ] = data
 
         return local_scores, None
 

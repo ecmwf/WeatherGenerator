@@ -144,6 +144,10 @@ def _assign_time_coord(data: object) -> object:
     # Prefer lead_time as x_dim if present in dimensions
     if "lead_time" in data.dims:
         time_dim = "lead_time"
+    else:
+        _logger.warning(
+            "lead_time coordinate not found or mismatched size; using forecast_step as x-axis."
+        )
 
     return data, time_dim
 
