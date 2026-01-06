@@ -1,0 +1,68 @@
+streams_directory: "./integration_tests/streams/"
+run_path: "./results"
+model_path: "./models"
+loss_fcts: [["mse", 1.0]]
+loss_fcts_val: [["mse", 1.0]]
+num_mini_epochs: 1
+samples_per_mini_epoch: 100
+samples_per_validation: 5
+lr_steps: 4
+lr_steps_cooldown: 2
+loader_num_workers: 8
+
+train_log:
+  log_interval: 1
+
+
+
+### Example validation and training config for student-teacher with iBOT and DINO
+validation_config:
+  losses:
+    LossPhysical: {'weight': 0.0}
+    LossLatentSSLStudentTeacher: { 
+      "weight": 1.0,
+      "iBOT": {'weight': 0.75, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 16384, "teacher_temp": 0.1,
+          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      "DINO": {'weight': 0.25, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 16384, "teacher_temp": 0.1,
+          "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      }
+
+### Student-teacher configuration (only used when training_mode == "student_teacher")
+training_config:
+  # when this is "masking", we are basically only using the model_input subconfig
+  training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
+  target_and_aux_calc: "EMATeacher"
+  losses :  
+    LossPhysical: {weight: 0.0}
+    LossLatentSSLStudentTeacher: { 
+      "weight": 1.0,
+      "iBOT": {'weight': 0.75, "loss_extra_args": { "student_temp": 0.1,},"out_dim": 4096, # 16384, 
+          "teacher_temp": 0.1, "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      "DINO": {'weight': 0.25, "loss_extra_args": { "student_temp": 0.1,}, "out_dim": 4096, # 16384, 
+          "teacher_temp": 0.1, "teacher_style": "softmax_center", "center_momentum": 0.9}, 
+      }
+  model_input:
+    - masking_strategy: "random" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+      num_samples: 1  # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      rate_sampling: False  # randomly sample the rate per batch
+      loss : ibot
+    - masking_strategy: "healpix"
+      num_samples: 2 # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 1 }
+      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      rate_sampling: False  # randomly sample the rate per batch
+      loss : dino
+    - masking_strategy: "healpix"
+      num_samples: 1 # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 1 }
+      relationship: "identity"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      rate_sampling: False  # randomly sample the rate per batch
+      loss : dino
+
+  target_input:
+    - masking_strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 0 }
+      num_samples: 2 # number of teacher views to generate
+      rate_sampling: False  # randomly sample the rate per batch
