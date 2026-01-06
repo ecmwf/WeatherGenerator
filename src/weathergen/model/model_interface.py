@@ -271,7 +271,8 @@ def get_target_aux_calculator(
         target_aux = PhysicalTargetAndAux(cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
-        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device)
+        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device,
+                                                 overrides=cf.ema_teacher_overrides)
         ema_model = EMAModel(
             model,
             meta_ema_model,

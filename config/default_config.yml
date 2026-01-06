@@ -80,6 +80,8 @@ freeze_modules: ""
 
 norm_type: "LayerNorm"
 
+ema_teacher_overrides:
+  ae_global_num_blocks: 2
 
 #####################################
 
