@@ -42,9 +42,11 @@ class EMAModel:
         FSDP2 is used.
         """
         self.ema_model.to_empty(device="cuda")
+        for p in self.ema_model.parameters():
+            p.requires_grad = False
         maybe_sharded_sd = self.original_model.state_dict()
         # this copies correctly tested in pdb
-        mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=True, assign=False)
+        mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
 
     @torch.no_grad()
     def update(self, cur_step, batch_size):
@@ -61,7 +63,6 @@ class EMAModel:
     def forward_eval(self, *args, **kwargs):
         self.ema_model.eval()
         out = self.ema_model(*args, **kwargs)
-        self.ema_model.train()
         return out
 
     def state_dict(self):

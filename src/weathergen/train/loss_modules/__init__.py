@@ -8,5 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 from .loss_module_physical import LossPhysical
+from .loss_module_ssl import LossLatentSSLStudentTeacher
 
-__all__ = [LossPhysical]
+__all__ = [LossPhysical, LossLatentSSLStudentTeacher]

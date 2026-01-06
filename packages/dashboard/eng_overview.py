@@ -6,6 +6,7 @@ import polars.selectors as ps
 import streamlit as st
 from polars import col as C
 
+from weathergen.dashboard.colors import clusters_color_map, unknown_color
 from weathergen.dashboard.metrics import all_runs, latest_runs, setup_mflow
 
 _logger = logging.getLogger("eng_overview")
@@ -78,6 +79,72 @@ st.plotly_chart(
         x="month",
         y="run_id",
         color="tags.hpc",
+        color_discrete_map=clusters_color_map,
+        color_discrete_sequence=[unknown_color],
+    )
+)
+
+
+st.markdown(
+    """
+            
+**Training runs by organization**
+
+Note: some runs may not have org tags.
+
+"""
+)
+
+
+st.plotly_chart(
+    px.bar(
+        all_runs_pdf.filter(C("tags.stage").eq("train"))
+        .with_columns(
+            pl.date(C("start_time").dt.year(), C("start_time").dt.month(), 1).alias("month")
+        )
+        .select(["month", C("params.wgtags.org").fill_null("unknown"), "tags.run_id"])
+        .filter(C("tags.run_id").is_not_null())
+        .group_by("params.wgtags.org", "month")
+        .agg(pl.count("tags.run_id"))
+        .to_pandas(),
+        y="tags.run_id",
+        x="month",
+        color="params.wgtags.org",
+        # hover_data=["start_time", "tags.uploader"],
+    )
+)
+
+
+st.markdown(
+    """
+            
+**The number of samples processed by HPC.**
+
+(only includes runs for which evaluation data has been uploaded)
+
+The number of samples is a good indicator of the amount of processing being done by experiment.
+
+"""
+)
+
+process_samples_stats = (
+    all_runs_pdf.sort("start_time")
+    # Just keep start_time, run_id, mlflow_run_id, and num_samples
+    .select(["start_time", "metrics.num_samples", "tags.run_id", "tags.hpc"])
+    .drop_nulls()
+    .with_columns(pl.date(C("start_time").dt.year(), C("start_time").dt.month(), 1).alias("month"))
+    .group_by(["month", "tags.hpc"])
+    .agg(C("metrics.num_samples").sum())
+)
+
+st.plotly_chart(
+    px.bar(
+        process_samples_stats.to_pandas(),
+        y="metrics.num_samples",
+        x="month",
+        color="tags.hpc",
+        color_discrete_map=clusters_color_map,
+        color_discrete_sequence=[unknown_color],
     )
 )
 
@@ -94,16 +161,28 @@ st.markdown(
 
 st.plotly_chart(
     px.scatter(
-        all_runs_pdf.filter(pl.col("params.num_ranks").is_not_null())
-        .select(["params.num_ranks", "start_time", "tags.hpc"])
+        all_runs_pdf
+        # world_size used to be called num_ranks
+        .with_columns(
+            pl.max_horizontal(
+                pl.col("params.num_ranks").fill_null(0), pl.col("params.world_size").fill_null(0)
+            )
+            .cast(int)
+            .alias("world_size")
+        )
+        .filter(pl.col("world_size") > 0)
+        .select(["world_size", "start_time", "tags.hpc"])
         .to_pandas(),
-        y="params.num_ranks",
+        y="world_size",
         x="start_time",
         color="tags.hpc",
         # hover_data=["start_time", "tags.uploader"],
+        color_discrete_map=clusters_color_map,
+        color_discrete_sequence=[unknown_color],
         log_y=True,
     )
 )
+
 
 st.markdown(
     """
@@ -197,9 +276,18 @@ Total number of metrics tracked: {len(all_metrics)}.
 )
 
 st.dataframe(
-    all_runs_pdf.select(ps.starts_with("metrics."))
-    .select([pl.count(c) for c in all_metrics])
-    .transpose(include_header=True)
-    .sort(by="column_0", descending=True)
+    # The final dataframe is of the form:
+    # - metric: str (the name of the metric)
+    # - example_run_id: str (a run id associated with this metric)
+    # - count: int
+    # Unpivot take a list of columns and converts them to values
+    all_runs_pdf.unpivot(ps.starts_with("metrics."), index="tags.run_id", variable_name="metric")
+    .drop_nulls()
+    .group_by("metric")
+    .agg(
+        pl.col("tags.run_id").first().alias("example_run_id"),
+        pl.col("tags.run_id").count().alias("count"),
+    )
+    .sort(by="count", descending=True)
     .to_pandas()
 )

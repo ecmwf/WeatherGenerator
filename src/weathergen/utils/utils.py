@@ -7,7 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
+
 import torch
+
+from weathergen.common.config import Config
+
+
+def apply_overrides_to_dict(cf: Config, overrides: dict) -> Config:
+    copied_cf = copy.deepcopy(cf)
+    for key, val in overrides.items():
+        copied_cf[key] = val
+    return copied_cf
 
 
 def get_dtype(value: str) -> torch.dtype:
@@ -24,3 +35,7 @@ def get_dtype(value: str) -> torch.dtype:
         raise NotImplementedError(
             f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
         )
+
+
+def get_batch_size(cf: Config, world_size: int) -> int:
+    return world_size * cf.batch_size_per_gpu
