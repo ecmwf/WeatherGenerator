@@ -21,7 +21,25 @@ from weathergen.datasets.tokenizer_utils import (
     tokenize_apply_mask_target,
     tokenize_space,
     tokenize_spacetime,
+    tokenize_apply_mask_source,
+    tokenize_apply_mask_target,
+    tokenize_space,
+    tokenize_spacetime,
 )
+
+
+def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
+    """
+    Convert data, coords, and geoinfos to torch tensor
+    """
+    if type(rdata.coords) is not torch.Tensor:
+        rdata.coords = torch.tensor(rdata.coords)
+    if type(rdata.geoinfos) is not torch.Tensor:
+        rdata.geoinfos = torch.tensor(rdata.geoinfos)
+    if type(rdata.data) is not torch.Tensor:
+        rdata.data = torch.tensor(rdata.data)
+
+    return rdata
 
 
 def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
@@ -103,13 +121,67 @@ class TokenizerMasking(Tokenizer):
         return (mask_tokens, mask_channels)
 
     def get_source(
+    def get_tokens_windows(self, stream_info, data, pad_tokens):
+        """
+        Tokenize data (to amortize over the different views that are generated)
+
+        """
+
+        tok_spacetime = stream_info.get("tokenize_spacetime", False)
+        tok = tokenize_spacetime if tok_spacetime else tokenize_space
+        hl = self.healpix_level
+        token_size = stream_info["token_size"]
+
+        tokens = []
+        for rdata in data:
+            idxs_cells, idxs_cells_lens = tok(
+                readerdata_to_torch(rdata), token_size, hl, pad_tokens
+            )
+            tokens += [(idxs_cells, idxs_cells_lens)]
+
+        return tokens
+
+    def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
+        """ """
+
+        mask_tokens, mask_channels = None, None
+        num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
+
+        # If there are no tokens, return empty lists.
+        if num_tokens == 0:
+            return (mask_tokens, mask_channels)
+
+        # TODO, TODO, TODO: use np.repeat
+        # https://stackoverflow.com/questions/26038778/repeat-each-values-of-an-array-different-times
+        # build token level mask: for each cell replicate the keep flag across its tokens
+        token_level_flags: list[np.typing.NDArray] = []
+        for km, lens_cell in zip(mask, idxs_cells_lens, strict=True):
+            num_tokens_cell = len(lens_cell)
+            if num_tokens_cell == 0:
+                continue
+            token_level_flags.append(
+                np.ones(num_tokens_cell, dtype=bool)
+                if km
+                else np.zeros(num_tokens_cell, dtype=bool)
+            )
+        if token_level_flags:
+            mask_tokens = np.concatenate(token_level_flags)
+        else:
+            mask_tokens = np.array([], dtype=bool)
+
+        return (mask_tokens, mask_channels)
+
+    def get_source(
         self,
         stream_info: dict,
         rdata: IOReaderData,
         idxs_cells_data,
+        idxs_cells_data,
         time_win: tuple,
         cell_mask: torch.Tensor,
+        cell_mask: torch.Tensor,
     ):
+        stream_id = stream_info["stream_id"]
         stream_id = stream_info["stream_id"]
         is_diagnostic = stream_info.get("diagnostic", False)
 
@@ -117,6 +189,12 @@ class TokenizerMasking(Tokenizer):
         if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
             source_tokens_cells = [torch.tensor([])]
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
+            mask_state = {
+                "strategy": self.masker.current_strategy,
+                "mask_tokens": None,
+                "mask_channels": None,
+            }
+            return (source_tokens_cells, source_tokens_lens, mask_state)
             mask_state = {
                 "strategy": self.masker.current_strategy,
                 "mask_tokens": None,
@@ -155,12 +233,17 @@ class TokenizerMasking(Tokenizer):
         return (source_tokens_cells, source_tokens_lens, mask_state)
 
     # batchify_target_for_view now unified into batchify_target via optional mask_state
+        return (source_tokens_cells, source_tokens_lens, mask_state)
 
+    # batchify_target_for_view now unified into batchify_target via optional mask_state
+
+    def get_target(
     def get_target(
         self,
         stream_info: dict,
         sampling_rate_target: float,
         rdata: IOReaderData,
+        token_data,
         token_data,
         time_win: tuple,
         mask_state: dict | None = None,

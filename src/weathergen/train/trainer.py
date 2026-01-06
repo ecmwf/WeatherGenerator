@@ -34,7 +34,6 @@ from weathergen.train.utils import extract_batch_metadata
 from weathergen.utils.distributed import ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_batch_size, get_dtype
-from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 

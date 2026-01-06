@@ -61,6 +61,7 @@ class StreamData:
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
         ]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(forecast_steps + 1)]
+        self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(forecast_steps + 1)]
 
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
