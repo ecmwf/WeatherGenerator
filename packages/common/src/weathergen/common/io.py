@@ -43,14 +43,6 @@ def is_ndarray(obj: typing.Any) -> bool:
     return isinstance(obj, (np.ndarray))  # noqa: TID251
 
 
-def _store_type(store_path: pathlib.Path) -> StoreType:
-    ext = store_path.suffix[1:]
-    if ext == "zip":
-        return "zip"
-    elif ext == "zarr":
-        return "local"
-    raise ValueError(f"Extension {ext} of the zarr store path is not recognised")
-
 
 class TimeRange:
     """
@@ -342,45 +334,36 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path, create: bool):
+    def __init__(self, store_path: pathlib.Path, read_only: bool):
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
-        # determine type using extension
-        self.type = _store_type(store_path)
-        self.create = create
+        self.read_only = read_only
+
+    @property
+    def _mode(self):
+        return "r" if self.read_only else "w"
 
     def __enter__(self) -> typing.Self:
-        if self.type == "zip":
-            if self.create:
-                _logger.info("Creating zipstore")
-                self._store = ZipStore(self._store_path, mode="w")
-                self.data_root = zarr.group(store=self._store)
-            else:
-                _logger.info("Opening zipstore as read-only")
-                self._store = ZipStore(self._store_path, read_only=True)
-                self.data_root = zarr.open_group(store=self._store, mode="r")
-
-        elif self.type == "local":
-            # Capture warnings emitted during store creation/open
-            with warnings.catch_warnings(record=True) as caught:
-                self._store = LocalStore(self._store_path)
-                self.data_root = zarr.group(store=self._store)
-            # Raise DeprecationWarning only if a ZarrUserWarning was raised
-            if any(issubclass(w.category, zarr.errors.ZarrUserWarning) for w in caught):
-                last_msg = next(
-                    (
-                        str(w.message)
-                        for w in reversed(caught)
-                        if issubclass(w.category, zarr.errors.ZarrUserWarning)
-                    ),
-                    "",
-                )
-                # warnings.warn(f"Zarr2 conflict: {last_msg}",
-                #                 DeprecationWarning
-                # )
-                _logger.warning(
-                    f"Future Deprecation Zarr2 conflict: {last_msg} , Opened local zarr store"
-                )
+        # Capture warnings emitted during store creation/open
+        with warnings.catch_warnings(record=True) as caught:
+            self._store = LocalStore(self._store_path, read_only=self.read_only)
+            self.data_root = zarr.open_group(store=self._store, mode=self._mode)
+        # Raise DeprecationWarning only if a ZarrUserWarning was raised
+        if any(issubclass(w.category, zarr.errors.ZarrUserWarning) for w in caught):
+            last_msg = next(
+                (
+                    str(w.message)
+                    for w in reversed(caught)
+                    if issubclass(w.category, zarr.errors.ZarrUserWarning)
+                ),
+                "",
+            )
+            # warnings.warn(f"Zarr2 conflict: {last_msg}",
+            #                 DeprecationWarning
+            # )
+            _logger.warning(
+                f"Future Deprecation Zarr2 conflict: {last_msg} , Opened local zarr store"
+            )
 
         return self
 
@@ -519,6 +502,15 @@ class ZarrIO:
             return all_steps[1:]  # exclude fstep with no targets/preds
         else:
             return all_steps
+
+
+class ZipZarrIO:
+    def __enter__(self) -> typing.Self:
+        _logger.info(f"Opening zipstore, read-only: {self.read_only}")
+        self._store = ZipStore(self._store_path, read_only=self.read_only)
+        self.data_root = zarr.open_group(store=self._store, mode=self._mode)
+
+        return self
 
 
 @dataclasses.dataclass
@@ -745,3 +737,39 @@ class OutputBatchData:
         _logger.debug(f"source shape: {source_dataset.data.shape}")
 
         return source_dataset
+
+
+def reader(store_path: pathlib.Path) -> ZarrIO:
+    """
+    Get the proper io-reader for a given store.
+
+    Args:
+        store_path: Full path to the storage location.
+    """
+
+    return _get_backend(store_path, read_only=True)
+
+
+def writer(store_path: pathlib.Path) -> ZarrIO:
+    """
+    Get the proper io-writer for a given store.
+
+    Args:
+        store_path: Full path to the storage location.
+    """
+
+    return _get_backend(store_path, read_only=False)
+
+
+def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
+    """Get the proper io backend for a given store."""
+    ext = store_path.suffix[1:]
+
+
+def _store_type(store_path: pathlib.Path) -> type:
+    ext = store_path.suffix[1:]
+    if ext == "zip":
+        return ZipZarrIO
+    elif ext == "zarr":
+        return ZarrIO
+    raise ValueError(f"Extension {ext} of the zarr store path is not recognised")

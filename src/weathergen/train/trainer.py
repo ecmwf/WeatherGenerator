@@ -21,7 +21,7 @@ from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
-from weathergen.common.io import ZarrIO
+from weathergen.common.io import ZarrIO, writer
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -169,8 +169,8 @@ class Trainer(TrainerBase):
 
         # inference validation set
         if is_root():
-            with ZarrIO(config.get_path_output(self.cf, mini_epoch=0), create=True) as writer:
-                self.validate(mini_epoch=0, writer=writer)
+            with writer(config.get_path_output(self.cf, mini_epoch=0)) as io_writer:
+                self.validate(mini_epoch=0, writer=io_writer)
         else:
             self.validate(mini_epoch=0, writer=None)
 
