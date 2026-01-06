@@ -8,7 +8,7 @@ from weathergen.common.io import IOReaderData
 @runtime_checkable
 class Pinnable(Protocol):
     """
-    Protocol that allows the pytorch content of this data structure
+    Protocol that allows the pytorch content of a data structure
     to be pinned to the memory of the current accelerator.
 
     This extends the pin_memory() capability of a torch Tensor
