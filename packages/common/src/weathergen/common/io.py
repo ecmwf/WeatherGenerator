@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import dataclasses
+import enum
 import functools
 import itertools
 import logging
@@ -33,7 +34,6 @@ SCALE_FACTOR = 4  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
-StoreType = typing.Literal["zip", "local"]
 
 _logger = logging.getLogger(__name__)
 
@@ -42,6 +42,14 @@ def is_ndarray(obj: typing.Any) -> bool:
     """Check if object is an ndarray (wraps the linter warning)."""
     return isinstance(obj, (np.ndarray))  # noqa: TID251
 
+
+class StoreType(enum.StrEnum):
+    ZIP = "zip"
+    LOCAL = "zarr"
+
+    @classmethod
+    def extensions(cls) -> list[str]:
+        return [store_type.value for store_type in cls]
 
 
 class TimeRange:
@@ -761,15 +769,10 @@ def writer(store_path: pathlib.Path) -> ZarrIO:
     return _get_backend(store_path, read_only=False)
 
 
+_IO_CLASSES: dict[StoreType, type] = {StoreType.ZIP: ZipZarrIO, StoreType.LOCAL: ZarrIO}
+
+
 def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
-
-
-def _store_type(store_path: pathlib.Path) -> type:
-    ext = store_path.suffix[1:]
-    if ext == "zip":
-        return ZipZarrIO
-    elif ext == "zarr":
-        return ZarrIO
-    raise ValueError(f"Extension {ext} of the zarr store path is not recognised")
+    return _IO_CLASSES[StoreType(ext)](read_only)
