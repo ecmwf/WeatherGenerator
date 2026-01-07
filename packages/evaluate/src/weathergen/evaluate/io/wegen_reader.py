@@ -593,3 +593,232 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
         aligned.append(a_sorted)
 
     return xr.concat(aligned, dim="sample")
+
+
+class WeatherGenMergeReader(Reader):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+        """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
+
+        self.run_ids = eval_cfg.get("merge_run_ids", [])
+        super().__init__(eval_cfg, run_id, private_paths)
+        self.readers = []
+        _logger.info(f"MERGE READERS: {self.run_ids} ...")
+
+        for run_id in self.run_ids:
+            reader = WeatherGenReader(self.eval_cfg, run_id, self.private_paths)
+            self.readers.append(reader)
+
+    def get_data(
+        self,
+        stream: str,
+        samples: list[int] | None = None,
+        fsteps: list[str] | None = None,
+        channels: list[str] | None = None,
+        ensemble: list[str] | None = None,
+        return_counts: bool = False,
+    ) -> ReaderOutput:
+        """
+        Retrieve prediction and target data for a given run from the Zarr store.
+
+        Parameters
+        ----------
+        cfg :
+            Configuration dictionary containing all information for the evaluation.
+        
+        results_dir : Path
+            Directory where the inference results are stored.
+            Expected scheme `<results_base_dir>/<run_id>`.          
+        stream :
+            Stream name to retrieve data for.
+        samples :
+            List of sample indices to retrieve. If None, all samples are retrieved.
+        fsteps :
+            List of forecast steps to retrieve. If None, all forecast steps are retrieved.
+        channels :
+            List of channel names to retrieve. If None, all channels are retrieved.
+        return_counts :
+            If True, also return the number of points per sample.
+        Returns
+        -------
+        ReaderOutput
+            A dataclass containing:
+            - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
+            - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
+            - points_per_sample: xarray DataArray containing the number of points per sample,
+              if `return_counts` is True.
+        """ 
+
+        da_tars, da_preds = [], []
+
+        points_per_sample = None
+        fsteps_final = []
+
+        for reader in self.readers:
+            _logger.info(f"MERGE READERS: Processing run_id {reader.run_id}...")
+           
+            out = reader.get_data(
+                stream,
+                samples,
+                fsteps,
+                channels,
+                ensemble,
+                return_counts,
+            )
+
+            for fstep in out.target.keys():
+                _logger.info(f"MERGE READERS: Processing fstep {fstep}...")
+
+                da_tars.append(out.target[fstep])
+                da_preds.append(out.prediction[fstep])
+                fsteps_final.append(fstep)
+
+                if return_counts:
+                    if points_per_sample is None:
+                        points_per_sample = out.points_per_sample
+                    else:
+                        points_per_sample += out.points_per_sample
+
+        # Safer than a list
+        breakpoint()
+        da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)}
+        da_preds = {fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)}
+
+        return ReaderOutput(
+            target=da_tars, prediction=da_preds, points_per_sample=points_per_sample
+        )
+
+    def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray | None:
+        """
+        Load the pre-computed scores for a given run, stream and metric and epoch.
+
+        Parameters
+        ----------
+        reader :
+            Reader object containing all info for a specific run_id
+        stream :
+            Stream name.
+        regions :
+            Region names.
+        metrics :
+            Metric names.
+        Returns
+        -------
+        xr.DataArray
+            The metric DataArray.
+        missing_metrics:
+            dictionary of missing regions and metrics that need to be recomputed.
+        """ 
+        local_scores = {}
+        missing_metrics = {}
+        for reader in self.readers:
+            _logger.info(f"MERGE READERS: Loading scores for run_id {reader.run_id}...")
+            local_scores_run, missing_metrics_run = reader.load_scores(stream, regions, metrics)
+            local_scores.update(local_scores_run)
+            missing_metrics.update(missing_metrics_run)
+
+        breakpoint()
+        return local_scores, missing_metrics
+       
+    
+    def get_climatology_filename(self, stream: str) -> str | None:
+        """
+        Get the climatology filename for a given stream from the inference configuration.
+        Parameters
+        ----------
+        stream :
+            Name of the data stream.
+        Returns
+        -------
+            Climatology filename if specified, otherwise None.
+        """
+        for reader in self.readers:
+            clim_data_path = reader.get_climatology_filename(stream)
+            if clim_data_path:
+                return clim_data_path
+        return None
+    
+    def get_stream(self, stream: str):
+        """
+        returns the dictionary associated to a particular stream.
+        Returns an empty dictionary if the stream does not exist in the Zarr file.
+
+        Parameters
+        ----------
+        stream:
+            the stream name
+
+        Returns
+        -------
+            The config dictionary associated to that stream
+        """
+        stream_dict = self.eval_cfg.streams.get(stream, {})
+        return stream_dict
+
+    def get_samples(self) -> set[int]:
+        """Get the set of sample indices from the Zarr file."""
+        samples = []
+        for reader in self.readers:
+            samples.append(reader.get_samples())
+        return set.union(*samples)
+       
+
+    def get_forecast_steps(self) -> set[int]:
+        """Get the set of forecast steps from the Zarr file."""
+        forecast_steps = []
+        for reader in self.readers:
+            forecast_steps.append(reader.get_forecast_steps())
+        return set.union(*forecast_steps)
+
+    def get_channels(self, stream: str) -> list[str]:
+        """
+        Get the list of channels for a given stream from the config.
+
+        Parameters
+        ----------
+        stream :
+            The name of the stream to get channels for.
+
+        Returns
+        -------
+            A list of channel names.
+        """
+        all_channels = []
+        for reader in self.readers:
+            all_channels.append(reader.get_channels(stream))
+        
+        return set.union(*all_channels)
+
+    def get_ensemble(self, stream: str | None = None) -> list[str]:
+        """Get the list of ensemble member names for a given stream from the config.
+        Parameters
+        ----------
+        stream :
+            The name of the stream to get channels for.
+
+        Returns
+        -------
+            A list of ensemble members.
+        """
+        _logger.debug(f"Getting ensembles for stream {stream}...")
+        all_ensembles = []
+        for reader in self.readers:
+            all_ensembles.append(reader.get_ensemble(stream))  
+        return set.union(*all_ensembles)
+        
+    # TODO: improve this
+    def is_regular(self, stream: str) -> bool:
+        """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
+        Parameters
+        ----------
+        stream :
+            The name of the stream to get channels for.
+
+        Returns
+        -------
+            True if the stream is regularly spaced. False otherwise.
+        """
+        _logger.debug(f"Checking regular spacing for stream {stream}...")
+        for reader in self.readers:
+            if not reader.is_regular(stream):
+                return False
+        return True
