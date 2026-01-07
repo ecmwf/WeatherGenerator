@@ -30,6 +30,7 @@ from weathergen.model.engines import (
     LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
+    BilinearDecoder,
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
@@ -411,6 +412,13 @@ class Model(torch.nn.Module):
                         stream_name=stream_name,
                     )
 
+                    if True:
+                        tte = BilinearDecoder(
+                            stream_name,
+                            dims_embed[0],
+                            cf.ae_global_dim_embed,
+                            self.targets_num_channels[i_stream],
+                        )
                     self.target_token_engines[stream_name] = tte
 
                     # ensemble prediction heads to provide probabilistic prediction
@@ -696,16 +704,27 @@ class Model(torch.nn.Module):
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
-                tc_tokens = self.target_token_engines[stream_name](
-                    latent=tokens_nbors,
-                    output=tc_tokens,
-                    latent_lens=tokens_nbors_lens,
-                    output_lens=tcs_lens,
-                    coordinates=t_coords,
-                )
+                if True:
+                    pred = checkpoint(
+                        self.target_token_engines[stream_name],
+                        tc_tokens,
+                        tokens_nbors,
+                        tcs_lens,
+                        use_reentrant=False,
+                    )
+                else:
+                    tc_tokens = self.target_token_engines[stream_name](
+                        latent=tokens_nbors,
+                        output=tc_tokens,
+                        latent_lens=tokens_nbors_lens,
+                        output_lens=tcs_lens,
+                        coordinates=t_coords,
+                    )
 
-                # final prediction head to map back to physical space
-                pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+                    # final prediction head to map back to physical space
+                    pred = checkpoint(
+                        self.pred_heads[stream_name], tc_tokens, use_reentrant=False
+                    )
 
             output.add_physical_prediction(fstep, stream_name, pred)
 

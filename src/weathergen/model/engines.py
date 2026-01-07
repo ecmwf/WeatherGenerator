@@ -853,3 +853,20 @@ class LatentPredictionHead(nn.Module):
             outputs.append(self.layer(x.patch_tokens))
         # We concatenate in the token dimension [Batch, Tokens, Dim]
         return torch.cat(outputs, dim=1)
+
+class BilinearDecoder(nn.Module):
+
+    def __init__(self, name, coord_dim, latent_dim, out_dim):
+        super().__init__()
+
+        self.name = name 
+        self.latent_dim = latent_dim
+        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False) 
+
+    def forward(self, coords, latent, tcs_lens):
+        # 9* because 9 neighbours
+        latent = latent.reshape(-1, 9, self.latent_dim)[:,0]
+        latent = torch.repeat_interleave(latent, tcs_lens[1:], 0)
+        return self.bilin(coords, latent).unsqueeze(0)
+        
+
