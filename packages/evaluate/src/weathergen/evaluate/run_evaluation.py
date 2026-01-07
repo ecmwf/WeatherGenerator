@@ -284,8 +284,8 @@ def evaluate_from_config(
             reader = WeatherGenZarrReader(run, run_id, private_paths)
         elif type_ == "csv":
             reader = CsvReader(run, run_id, private_paths)
-        elif type == "json":
-            reader = WeatherGenJSONReader(run, run_id, private_paths, cfg.evaluation)
+        elif type_ == "json":
+            reader = WeatherGenJSONReader(run, run_id, private_paths, cfg.evaluation.regions[0], cfg.evaluation.metrics[0])
         else:
             raise ValueError(f"Unknown run type: {type_}")
 

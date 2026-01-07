@@ -151,9 +151,9 @@ class WeatherGenReader(Reader):
         _logger.debug(f"Channels found in config: {all_channels}")
         return all_channels
 
-    def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray | None:
+    def load_scores(self, stream: str, regions: list[str], metrics: list[str]) -> xr.DataArray | None:
         """
-        Load the pre-computed scores for a given run, stream and metric and epoch.
+        Load multiple pre-computed scores for a given run, stream and metric and epoch.
 
         Parameters
         ----------
@@ -178,28 +178,18 @@ class WeatherGenReader(Reader):
         missing_metrics = {}
         for region in regions:
             for metric in metrics:
-                score_path = (
-                    Path(self.metrics_dir)
-                    / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
-                )
-                _logger.debug(f"Looking for: {score_path}")
-
-                if score_path.exists():
-                    with open(score_path) as f:
-                        data_dict = json.load(f)
-                        score_dict = xr.DataArray.from_dict(data_dict)
-
-                    available_data = self.check_availability(stream, score_dict, mode="evaluation")
-
+                score = self.load_single_score(stream, region, metric)
+                if score is not None:
+                    available_data = self.check_availability(stream, score, mode="evaluation")
                     if available_data.score_availability:
-                        score_dict = score_dict.sel(
+                        score = score.sel(
                             sample=available_data.samples,
                             channel=available_data.channels,
                             forecast_step=available_data.fsteps,
                         )
                         local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
                             stream, {}
-                        )[self.run_id] = score_dict
+                        )[self.run_id] = score
                         continue
 
                 # all other cases: recompute scores
@@ -207,6 +197,23 @@ class WeatherGenReader(Reader):
                 continue
 
         return local_scores, missing_metrics
+
+    def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+        '''
+        Load a single pre-computed score for a given run, stream and metric
+        '''
+        score_path = (
+                    Path(self.metrics_dir)
+                    / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
+                )
+        _logger.debug(f"Looking for: {score_path}")
+        if score_path.exists():
+            with open(score_path) as f:
+                data_dict = json.load(f)
+                score = xr.DataArray.from_dict(data_dict) # not a dict though
+        else:
+            score = None
+        return score
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
@@ -233,13 +240,11 @@ class WeatherGenReader(Reader):
 
 class WeatherGenJSONReader(WeatherGenReader):
 
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, actual_eval_cfg: dict = {}):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, region: str = "global", metric: str = "rmse"):
         super().__init__(eval_cfg, run_id, private_paths)
         # is this the best way to learn which steps and samples are available? 
         stream=list(self.eval_cfg.streams.keys())[0]
-        region=actual_eval_cfg.regions[0]
-        metric=actual_eval_cfg.metrics[0] 
-        dummy = self.load_scores( stream, region, metric ) 
+        dummy = self.load_single_score( stream, region, metric ) 
         if dummy is None:
             raise ValueError(f"JSONreader could not find {metric} for {run_id}, stream {stream}, region {region}. "
                                "use type: zarr instead if possible")
