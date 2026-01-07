@@ -364,5 +364,5 @@ class TokenizerMasking(Tokenizer):
             t if mask.item() == 1 else t[:0]
             for t, mask in zip(tensor_list, selected_indices, strict=False)
         ]
-        
+
         return selected_tensors
