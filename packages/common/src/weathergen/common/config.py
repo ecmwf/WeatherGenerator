@@ -15,7 +15,6 @@ import random
 import string
 import subprocess
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -24,6 +23,8 @@ import yaml.constructor
 import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
+
+from weathergen.common.io import StoreType
 
 _REPO_ROOT = Path(
     __file__
@@ -38,7 +39,6 @@ _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
-StoreExt = Literal["zip", "zarr"]
 
 
 def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
@@ -243,7 +243,7 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
-    for ext in ["zarr", "zip"]:
+    for ext in StoreType.extensions():
         zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
         zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
@@ -604,18 +604,8 @@ def get_path_model(config: Config) -> Path:
     return Path(config.model_path) / config.run_id
 
 
-def _store_ext(store_type) -> StoreExt:
-    if store_type == "zip":
-        return "zip"
-    elif store_type == "local":
-        return "zarr"
-    else:
-        raise ValueError(f"Type of zarr store {store_type} is not recognised")
-
-
 def get_path_output(config: Config, mini_epoch: int) -> Path:
-    store_type = config.get("zarr_store", "zip")
-    ext = _store_ext(store_type)
+    ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 

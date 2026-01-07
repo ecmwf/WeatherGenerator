@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from weathergen.common.io import StoreType
+
 
 def get_train_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -66,9 +68,12 @@ def get_inference_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--zarr-store",
-        default="zip",
-        help="Specify which type of Zarr storage to use. Default 'zip', which uses ZipStore.",
-        choices=["zip", "local"],
+        default=StoreType.ZIP.value,
+        help=(
+            "Specify which type of Zarr storage to use.",
+            "Default 'zip', which uses ZipStore.'zarr' uses a LocalStore",
+        ),
+        choices=StoreType.extensions(),
         type=str,
     )
 
