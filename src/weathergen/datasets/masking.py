@@ -8,7 +8,6 @@ from numpy.typing import NDArray
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
-from weathergen.datasets.batch import SampleMetaData
 
 _logger = logging.getLogger(__name__)
 
