@@ -137,13 +137,16 @@ def lp_loss(
     By default, the Lp-norm is normalized by the number of samples (i.e. with_mean=True).
     * For example: p=1 corresponds to MAE; p=2 corresponds to MSE.
     The samples are weighted by location if weights_points is not None.
-    The norm can optionally normalised by the pth root.
+    The norm can optionally be normalised by the pth root.
     * For example: p=2 and with_p_root=True corresponds to RMSE.
     The mean across all channels can optionally be weighted by channel weights.
 
     The function implements:
 
-    loss = Mean_{channels}(weight_channels * Mean_{data_pts}(|(target - pred)|**p * weights_points))
+    loss = Mean_{channels}  ( weight_channels *
+                                ( Mean_{data_pts}(|(target - pred)|**p * weights_points)
+                                ) ** (1/p)
+                            )
 
     Geometrically,
 
@@ -171,7 +174,7 @@ def lp_loss(
 
     Params:
         target : tensor of shape ( num_data_points , num_channels )
-        target : tensor of shape ( ens_dim , num_data_points , num_channels)
+        pred : tensor of shape ( ens_dim , num_data_points , num_channels)
         p_norm : integer defining the p the type of the norm
         with_mean : boolean defining whether the norm is summed or averaged
         with_p_root : boolean defining whether the p-th root of the norm is returned
@@ -179,7 +182,7 @@ def lp_loss(
         weights_points (optional): tensor of shape = (num_data_points)
 
     Return:
-        loss : (weighted) loss for gradient computation
+        loss : (weighted) scalar loss (e.g. for gradient computation)
         loss_chs : losses per channel (if given with location weighting but no channel weighting)
     """
 
@@ -206,6 +209,10 @@ def mse(
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
 ):
+    """
+    Computes the mean squared error (mse).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
     return lp_loss(
         target=target,
         pred=pred,
@@ -217,12 +224,16 @@ def mse(
     )
 
 
-def sse(
+def rss(
     target: torch.Tensor,
     pred: torch.Tensor,
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
 ):
+    """
+    Computes the residual sum of squares (rss).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
     return lp_loss(
         target=target,
         pred=pred,
@@ -240,6 +251,10 @@ def rmse(
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
 ):
+    """
+    Computes the root mean squared error (rmse).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
     return lp_loss(
         target=target,
         pred=pred,
@@ -257,6 +272,10 @@ def mae(
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
 ):
+    """
+    Computes the mean absolute error (mae).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
     return lp_loss(
         target=target,
         pred=pred,
