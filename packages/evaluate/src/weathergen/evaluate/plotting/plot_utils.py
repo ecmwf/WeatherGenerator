@@ -417,4 +417,10 @@ def create_filename(
         truncated_middle.append(x)
         used += d
 
+    if len(truncated_middle) < len(mid):
+        _logger.warning(
+            f"Filename truncated: only {len(truncated_middle)} of {len(mid)} middle parts used "
+            f"to keep length <= {max_len}."
+        )
+
     return sep.join(prefix + truncated_middle + suffix)
