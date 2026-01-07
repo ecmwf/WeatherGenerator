@@ -261,6 +261,11 @@ class WeatherGenJSONReader(WeatherGenReader):
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         return self.ens
 
+    def get_data(self, *args, **kwargs):
+        # TODO this should not be needed, the reader should not even be created if this is the case
+        # it can still happen when a particular score was available for a different channel
+        raise ValueError(f"Missing JSON data for run {self.run_id}.")
+
 
 class WeatherGenZarrReader(WeatherGenReader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
