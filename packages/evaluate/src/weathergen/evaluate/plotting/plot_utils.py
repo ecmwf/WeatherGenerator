@@ -98,6 +98,8 @@ def plot_metric_region(
                 if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
                     continue
 
+                data, time_dim = _assign_time_coord(data)
+
                 selected_data.append(data.sel(channel=ch))
                 labels.append(runs[run_id].get("label", run_id))
                 run_ids.append(run_id)
@@ -109,10 +111,45 @@ def plot_metric_region(
                     selected_data,
                     labels,
                     tag=name,
-                    x_dim="forecast_step",
+                    x_dim=time_dim,
                     y_dim=metric,
                     print_summary=print_summary,
                 )
+
+
+def _assign_time_coord(data: object) -> object:
+    """Ensure that lead_time coordinate exists in the data array.
+
+    Parameters
+    ----------
+    data : xarray.DataArray
+        The data array to check.
+
+    Returns
+    -------
+    xarray.DataArray
+        The data array with lead_time coordinate ensured.
+
+    time_dim : str
+        The name of the time dimension used for x-axis.
+    """
+    if "forecast_step" not in data.dims and "forecast_step" not in data.coords:
+        raise ValueError("forecast_step coordinate not found in data dimensions or coordinates.")
+
+    time_dim = "forecast_step"
+
+    if "lead_time" in data.coords and data["forecast_step"].size == data["lead_time"].size:
+        data = data.swap_dims({"forecast_step": "lead_time"})
+
+    # Prefer lead_time as x_dim if present in dimensions
+    if "lead_time" in data.dims:
+        time_dim = "lead_time"
+    else:
+        _logger.warning(
+            "lead_time coordinate not found or mismatched size; using forecast_step as x-axis."
+        )
+
+    return data, time_dim
 
 
 def ratio_plot_metric_region(
@@ -207,6 +244,9 @@ def heat_maps_metric_region(
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
             if data.isnull().all():
                 continue
+
+            data, time_dim = _assign_time_coord(data)
+
             selected_data.append(data)
             label = runs[run_id].get("label", run_id)
             if label != run_id:
@@ -222,6 +262,7 @@ def heat_maps_metric_region(
                 labels,
                 metric=metric,
                 tag=name,
+                x_dim=time_dim,
             )
 
 

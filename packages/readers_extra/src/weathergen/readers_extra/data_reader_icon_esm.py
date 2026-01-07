@@ -202,9 +202,9 @@ class DataReaderIconEsm(DataReaderTimestep):
                 coords_list = list(self.ds[ch_base].coords)
                 if ch_base not in channels_exclude:
                     if (
-                        ("plev" in coords_list and ch_num in self.plev) or 
-                        ("depth" in coords_list and ch_num in self.depth) or 
-                        ("lev" in coords_list and ch_num in self.lev)
+                        ("plev" in coords_list and ch_num in self.plev)
+                        or ("depth" in coords_list and ch_num in self.depth)
+                        or ("lev" in coords_list and ch_num in self.lev)
                     ):
                         new_colnames.append(ch)
                 else:
