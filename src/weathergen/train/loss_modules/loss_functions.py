@@ -10,6 +10,7 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 stat_loss_fcts = ["stats", "kernel_crps"]  # Names of loss functions that need std computed
 
@@ -59,10 +60,6 @@ def stats_normalized_erf(target, ens, mu, stddev):
     delta = -torch.abs(target - mu)
     d = 0.5 + torch.special.erf(delta / (np.sqrt(2.0) * stddev))
     return torch.mean(d * d)  # + torch.mean( torch.sqrt( stddev) )
-
-
-def mse(target, ens, mu, *kwargs):
-    return torch.nn.functional.mse_loss(target, mu)
 
 
 def mse_ens(target, ens, mu, stddev):
@@ -126,7 +123,7 @@ def kernel_crps(
     return torch.mean(kcrps_chs), kcrps_chs
 
 
-def mse_channel_location_weighted(
+def mse(
     target: torch.Tensor,
     pred: torch.Tensor,
     weights_channels: torch.Tensor | None,
@@ -158,20 +155,20 @@ def mse_channel_location_weighted(
     where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
 
     The computations are:
-    1. weight the rows of (target - pred) by wp = weights_points
+    1. weight the rows of (target - pred) by wp = weights_points (if given)
     2. take the mean over the row
-    3. weight the collapsed cols by wc = weights_channels
+    3. weight the collapsed cols by wc = weights_channels (if given)
     4. take the mean over the channel-weighted cols
 
     Params:
         target : shape ( num_data_points , num_channels )
         target : shape ( ens_dim , num_data_points , num_channels)
-        weights_channels : shape = (num_channels,)
-        weights_points : shape = (num_data_points)
+        weights_channels (optional): shape = (num_channels,)
+        weights_points (optional): shape = (num_data_points)
 
     Return:
-        loss : weight loss for gradient computation
-        loss_chs : losses per channel with location weighting but no channel weighting
+        loss : (weighted) loss for gradient computation
+        loss_chs : losses per channel (if given with location weighting but no channel weighting)
     """
 
     mask_nan = ~torch.isnan(target)
@@ -255,3 +252,68 @@ def gamma_decay(forecast_steps, gamma):
     fsteps = np.arange(forecast_steps)
     weights = gamma**fsteps
     return weights * (len(fsteps) / np.sum(weights))
+
+
+def student_teacher_softmax(student_patches, teacher_patches, student_temp):
+    """
+    Cross-entropy between softmax outputs of the teacher and student networks.
+    student_patches: (B, N, D) tensor
+    teacher_patches: (B, N, D) tensor
+    student_temp: float
+    """
+    loss = torch.sum(
+        teacher_patches * F.log_softmax(student_patches / student_temp, dim=-1), dim=-1
+    )
+    loss = torch.mean(loss, dim=-1)
+    return -loss.mean()
+
+
+def softmax(t, s, temp):
+    return torch.sum(t * F.log_softmax(s / temp, dim=-1), dim=-1)
+
+
+def masked_student_teacher_patch_softmax(
+    student_patches_masked,
+    teacher_patches_masked,
+    student_masks,
+    teacher_masks,
+    student_temp,
+    n_masked_patches=None,
+    masks_weight=None,
+):
+    """
+    Cross-entropy between softmax outputs of the teacher and student networks.
+    student_patches_masked,
+    teacher_patches_masked,
+    student_masks_flat,
+    student_temp,
+    n_masked_patches=None,
+    masks_weight=None,
+    """
+    mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+    loss = softmax(teacher_patches_masked[mask], student_patches_masked[mask], student_temp)
+    if masks_weight is None:
+        masks_weight = (
+            (1 / student_masks.sum(-1).clamp(min=1.0))
+            .unsqueeze(-1)
+            .expand_as(student_masks)  # [student_masks_flat]
+        )
+    loss = loss * masks_weight[mask]
+    return -loss.sum() / student_masks.shape[0]
+
+
+def student_teacher_global_softmax(student_outputs, teacher_output, student_temp):
+    """
+    This comment is outdated TODO fix. Leaving it for now so we remember the context
+
+    This assumes that student_outputs : list[Tensor[2*batch_size, num_class_tokens, channel_size])
+                 and  teacher_outputs : Tensor[2*batch_size, num_class_tokens, channel_size]
+    The 2* is because there is two global views and they are concatenated in the batch dim
+    in DINOv2 as far as I can tell.
+    """
+    total_loss = 0
+    for s in student_outputs:
+        lsm = F.log_softmax(s / student_temp, dim=-1)
+        loss = torch.sum(teacher_output * lsm, dim=-1)
+        total_loss -= loss.mean()
+    return total_loss
