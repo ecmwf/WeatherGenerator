@@ -62,10 +62,6 @@ def stats_normalized_erf(target, ens, mu, stddev):
     return torch.mean(d * d)  # + torch.mean( torch.sqrt( stddev) )
 
 
-def mse(target, ens, mu, *kwargs):
-    return torch.nn.functional.mse_loss(target, mu)
-
-
 def mse_ens(target, ens, mu, stddev):
     mse_loss = torch.nn.functional.mse_loss
     return torch.stack([mse_loss(target, mem) for mem in ens], 0).mean()
@@ -127,7 +123,7 @@ def kernel_crps(
     return torch.mean(kcrps_chs), kcrps_chs
 
 
-def mse_channel_location_weighted(
+def mse(
     target: torch.Tensor,
     pred: torch.Tensor,
     weights_channels: torch.Tensor | None,
@@ -159,20 +155,20 @@ def mse_channel_location_weighted(
     where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
 
     The computations are:
-    1. weight the rows of (target - pred) by wp = weights_points
+    1. weight the rows of (target - pred) by wp = weights_points (if given)
     2. take the mean over the row
-    3. weight the collapsed cols by wc = weights_channels
+    3. weight the collapsed cols by wc = weights_channels (if given)
     4. take the mean over the channel-weighted cols
 
     Params:
         target : shape ( num_data_points , num_channels )
         target : shape ( ens_dim , num_data_points , num_channels)
-        weights_channels : shape = (num_channels,)
-        weights_points : shape = (num_data_points)
+        weights_channels (optional): shape = (num_channels,)
+        weights_points (optional): shape = (num_data_points)
 
     Return:
-        loss : weight loss for gradient computation
-        loss_chs : losses per channel with location weighting but no channel weighting
+        loss : (weighted) loss for gradient computation
+        loss_chs : losses per channel (if given with location weighting but no channel weighting)
     """
 
     mask_nan = ~torch.isnan(target)
