@@ -123,18 +123,30 @@ def kernel_crps(
     return torch.mean(kcrps_chs), kcrps_chs
 
 
-def mse(
+def lp_loss(
     target: torch.Tensor,
     pred: torch.Tensor,
-    weights_channels: torch.Tensor | None,
-    weights_points: torch.Tensor | None,
+    p_norm: int,
+    with_p_root: bool = False,
+    with_mean: bool = True,
+    weights_channels: torch.Tensor | None = None,
+    weights_points: torch.Tensor | None = None,
 ):
     """
-    Compute weighted MSE loss for one window or step
+    This function computes the Lp-norm for any arbitrary integer p < inf.
+    By default, the Lp-norm is normalized by the number of samples (i.e. with_mean=True).
+    * For example: p=1 corresponds to MAE; p=2 corresponds to MSE.
+    The samples are weighted by location if weights_points is not None.
+    The norm can optionally be normalised by the pth root.
+    * For example: p=2 and with_p_root=True corresponds to RMSE.
+    The mean across all channels can optionally be weighted by channel weights.
 
     The function implements:
 
-    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_points ))
+    loss = Mean_{channels}  ( weight_channels *
+                                ( Mean_{data_pts}(|(target - pred)|**p * weights_points)
+                                ) ** (1/p)
+                            )
 
     Geometrically,
 
@@ -155,32 +167,103 @@ def mse(
     where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
 
     The computations are:
-    1. weight the rows of (target - pred) by wp = weights_points (if given)
+    1. weight the rows of |(target - pred)|**p by wp = weights_points (if given)
     2. take the mean over the row
     3. weight the collapsed cols by wc = weights_channels (if given)
     4. take the mean over the channel-weighted cols
 
     Params:
-        target : shape ( num_data_points , num_channels )
-        target : shape ( ens_dim , num_data_points , num_channels)
-        weights_channels (optional): shape = (num_channels,)
-        weights_points (optional): shape = (num_data_points)
+        target : tensor of shape ( num_data_points , num_channels )
+        pred : tensor of shape ( ens_dim , num_data_points , num_channels)
+        p_norm : integer defining the p the type of the norm
+        with_mean : boolean defining whether the norm is summed or averaged
+        with_p_root : boolean defining whether the p-th root of the norm is returned
+        weights_channels (optional): tensor of shape = (num_channels,)
+        weights_points (optional): tensor of shape = (num_data_points)
 
     Return:
-        loss : (weighted) loss for gradient computation
+        loss : (weighted) scalar loss (e.g. for gradient computation)
         loss_chs : losses per channel (if given with location weighting but no channel weighting)
     """
+
+    assert type(p_norm) is int, "Only integer p supported for p-norm loss"
 
     mask_nan = ~torch.isnan(target)
     pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
 
-    diff2 = torch.square(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
+    diff_p = torch.pow(
+        torch.abs(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0)), p_norm
+    )
     if weights_points is not None:
-        diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
-    loss_chs = diff2.mean(0)
+        diff_p = (diff_p.transpose(1, 0) * weights_points).transpose(1, 0)
+    loss_chs = diff_p.mean(0) if with_mean else diff_p.sum(0)
+    loss_chs = torch.pow(loss_chs, 1.0 / p_norm) if with_p_root else loss_chs
     loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
 
     return loss, loss_chs
+
+
+def mse(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Computes the mean squared error (mse).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
+    return lp_loss(
+        target=target,
+        pred=pred,
+        p_norm=2,
+        with_p_root=False,
+        with_mean=True,
+        weights_channels=weights_channels,
+        weights_points=weights_points,
+    )
+
+
+def rss(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Computes the residual sum of squares (rss).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
+    return lp_loss(
+        target=target,
+        pred=pred,
+        p_norm=2,
+        with_p_root=False,
+        with_mean=False,
+        weights_channels=weights_channels,
+        weights_points=weights_points,
+    )
+
+
+def rmse(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Computes the root mean squared error (rmse).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
+    return lp_loss(
+        target=target,
+        pred=pred,
+        p_norm=2,
+        with_p_root=True,
+        with_mean=True,
+        weights_channels=weights_channels,
+        weights_points=weights_points,
+    )
 
 
 def mae(
@@ -190,57 +273,18 @@ def mae(
     weights_points: torch.Tensor | None,
 ):
     """
-    Compute weighted MAE loss for one window or step
-
-    The function implements:
-
-    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_points ))
-
-    Geometrically,
-
-        ------------------------     -
-        |                      |    |  |
-        |                      |    |  |
-        |                      |    |  |
-        |     target - pred    | x  |wp|
-        |                      |    |  |
-        |                      |    |  |
-        |                      |    |  |
-        ------------------------     -
-                    x
-        ------------------------
-        |          wc          |
-        ------------------------
-
-    where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
-
-    The computations are:
-    1. weight the rows of (target - pred) by wp = weights_points
-    2. take the mean over the row
-    3. weight the collapsed cols by wc = weights_channels
-    4. take the mean over the channel-weighted cols
-
-    Params:
-        target : shape ( num_data_points , num_channels )
-        target : shape ( ens_dim , num_data_points , num_channels)
-        weights_channels : shape = (num_channels,)
-        weights_points : shape = (num_data_points)
-
-    Return:
-        loss : weight loss for gradient computation
-        loss_chs : losses per channel with location weighting but no channel weighting
+    Computes the mean absolute error (mae).
+    See lp_loss function above for a detailed explanation of arguments.
     """
-
-    mask_nan = ~torch.isnan(target)
-    pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
-
-    diff2 = torch.abs(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
-    if weights_points is not None:
-        diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
-    loss_chs = diff2.mean(0)
-    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
-
-    return loss, loss_chs
+    return lp_loss(
+        target=target,
+        pred=pred,
+        p_norm=1,
+        with_p_root=False,
+        with_mean=True,
+        weights_channels=weights_channels,
+        weights_points=weights_points,
+    )
 
 
 def cosine_latitude(stream_data, forecast_offset, fstep, min_value=1e-3, max_value=1.0):
