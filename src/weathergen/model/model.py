@@ -12,13 +12,13 @@
 import logging
 import math
 import warnings
+from functools import partial
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
@@ -31,7 +31,7 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
-from weathergen.model.utils import get_num_parameters
+from weathergen.model.utils import cond_checkpoint, get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
@@ -283,6 +283,14 @@ class Model(torch.nn.Module):
 
         assert cf.forecast_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
+
+        self.checkpoint_fn_embed = partial(
+            cond_checkpoint, self.cf.get("embed_gradient_checkpoint_enabled", True)
+        )
+
+        self.checkpoint_fn_pred = partial(
+            cond_checkpoint, self.cf.get("pred_head_gradient_checkpoint_enabled", True)
+        )
 
     #########################################
     def create(self) -> "Model":
@@ -593,7 +601,7 @@ class Model(torch.nn.Module):
             )
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
+            tc_tokens = self.checkpoint_fn_embed(tc_embed, t_coords, use_reentrant=False)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
@@ -628,7 +636,9 @@ class Model(torch.nn.Module):
                 )
 
                 # final prediction head to map back to physical space
-                pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+                pred = self.checkpoint_fn_pred(
+                    self.pred_heads[stream_name], tc_tokens, use_reentrant=False
+                )
 
             output.add_physical_prediction(fstep, stream_name, pred)
 
