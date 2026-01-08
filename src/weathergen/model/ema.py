@@ -42,6 +42,8 @@ class EMAModel:
         FSDP2 is used.
         """
         self.ema_model.to_empty(device="cuda")
+        for p in self.ema_model.parameters():
+            p.requires_grad = False
         maybe_sharded_sd = self.original_model.state_dict()
         # this copies correctly tested in pdb
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
@@ -53,7 +55,7 @@ class EMAModel:
             halflife_steps = min(halflife_steps, cur_step / 1e3 * self.rampup_ratio)
         beta = 0.5 ** (batch_size / max(halflife_steps * 1e3, 1e-6))
         for p_net, p_ema in zip(
-            self.original_model.parameters(), self.ema_model.parameters(), strict=False
+            self.original_model.parameters(), self.ema_model.parameters(), strict=True
         ):
             p_ema.lerp_(p_net, 1 - beta)
 
@@ -61,7 +63,6 @@ class EMAModel:
     def forward_eval(self, *args, **kwargs):
         self.ema_model.eval()
         out = self.ema_model(*args, **kwargs)
-        self.ema_model.train()
         return out
 
     def state_dict(self):

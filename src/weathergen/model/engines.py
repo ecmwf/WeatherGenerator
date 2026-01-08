@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from functools import partial
+import dataclasses
 
 import torch
 import torch.nn as nn
@@ -472,6 +473,10 @@ class ForecastingEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
+            self.fe_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
+
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.001)
@@ -856,14 +861,33 @@ class TargetPredictionEngine(nn.Module):
         return output
 
 
+@dataclasses.dataclass
 class LatentState:
     """
-    A dataclass to encapsulate the latent state
+    A dataclass to encapsulate the latent state aka the intput to latent heads.
     """
 
+    class_token: torch.Tensor
     register_tokens: torch.Tensor
-    latent_tokens: torch.Tensor
+    patch_tokens: torch.Tensor
+    z_pre_norm: torch.Tensor
 
-    def __init__(self, num_register_tokens: int, tokens: torch.Tensor):
-        self.register_tokens = tokens[:, :num_register_tokens].clone()
-        self.latent_tokens = tokens[:, num_register_tokens:].clone()
+
+class LatentPredictionHead(nn.Module):
+    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
+        super().__init__()
+
+        self.name = name
+        self.class_token = class_token
+        self.patch_token = patch_token
+        # For now this is a Linear Layer TBD what this architecture should be
+        self.layer = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, x: LatentState):
+        outputs = []
+        if self.class_token:
+            outputs.append(self.layer(x.class_token))
+        if self.patch_token:
+            outputs.append(self.layer(x.patch_tokens))
+        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        return torch.cat(outputs, dim=1)
