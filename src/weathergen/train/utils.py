@@ -117,9 +117,9 @@ def unflatten_dict(d, separator="."):
 def extract_batch_metadata(batch):
     return (
         batch.source2target_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.source_samples],
+        [list(sample.meta_info.values())[0] for sample in batch.source_samples.get_samples()],
         batch.target2source_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.target_samples],
+        [list(sample.meta_info.values())[0] for sample in batch.target_samples.get_samples()],
     )
 
 
@@ -129,7 +129,7 @@ def get_batch_size_from_config(config: Config) -> int:
     """
 
     num_samples = 0
-    for source_cfg in config.model_input:
+    for _, source_cfg in config.model_input.items():
         num_samples += source_cfg.get("num_samples", 1)
     assert num_samples > 0, "Number of samples in source configs needs to greater than 0."
 

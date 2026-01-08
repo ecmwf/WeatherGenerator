@@ -224,8 +224,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             else cf.data_loading.rng_seed * 97
         )
 
-        masker = Masker(cf)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, masker)
+        self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level))
 
         self.mini_epoch = 0
 
@@ -598,19 +597,27 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         masks = {}
         for stream_info in self.streams:
             # Build source and target sample masks
-            masks[stream_info["name"]] = self.tokenizer.masker.build_samples_for_stream(
+            masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
                 training_mode, self.num_healpix_cells, self.mode_cfg
             )
+            # identical for all streams
             num_target_samples = len(masks[stream_info["name"]][0])
             num_source_samples = len(masks[stream_info["name"]][1])
 
         return masks, num_source_samples, num_target_samples
 
-    def _preprocess_model_batch(self, batch: ModelBatch, input_steps: int, forecast_dt: int):
+    def _preprocess_model_batch(
+        self, batch: ModelBatch, source_input_steps: int, target_input_steps: int
+    ):
         """
         Perform necessary pre-processing of model batch
         """
-        batch.source_tokens_lens = get_tokens_lens(self.streams, batch.source_samples, input_steps)
+        batch.source_samples.tokens_lens = get_tokens_lens(
+            self.streams, batch.source_samples, source_input_steps
+        )
+        batch.target_samples.tokens_lens = get_tokens_lens(
+            self.streams, batch.target_samples, target_input_steps
+        )
 
         return batch
 
@@ -621,17 +628,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         mode = self.mode_cfg.get("training_mode")
         source_cfgs = self.mode_cfg.get("model_input")
+        target_cfgs = self.mode_cfg.get("target_input", {})
 
         # get/coordinate masks
         masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
 
-        if mode == "masking":
-            source_select = ["network_input", "target_coords"]
-            target_select = ["target_values"]
-        elif mode == "student_teacher" or mode == "latent_loss":
-            source_select = ["network_input"]
-            target_select = ["network_input"]
-        else:
+        source_select, target_select = [], []
+        if "masking" in mode:
+            source_select += ["network_input", "target_coords"]
+            target_select += ["target_values"]
+        if "student_teacher" in mode or mode == "latent_loss" in mode:
+            source_select += ["network_input"]
+            target_select += ["network_input"]
+        # remove duplicates
+        source_select, target_select = list(set(source_select)), list(set(target_select))
+        if len(source_select) == 0 or len(target_select) == 0:
             raise NotImplementedError(f"Unsupported training mode {mode}.")
 
         batch = ModelBatch(self.streams, num_source_samples, num_target_samples)
@@ -643,7 +654,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
 
             # max number of input steps
-            input_steps = np.array([sc.get("num_steps_input", 1) for sc in source_cfgs])
+            input_steps = np.array([sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()])
             assert input_steps.min() == input_steps.max(), (
                 "Number of input steps has to be constant across configs."
             )
@@ -705,7 +716,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 ]
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
 
-        batch = self._preprocess_model_batch(batch, input_steps.max().item(), forecast_dt)
+        source_in_steps = input_steps.max().item()
+        target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
+        target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
+        batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
         return batch
 

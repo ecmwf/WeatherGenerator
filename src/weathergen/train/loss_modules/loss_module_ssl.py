@@ -85,12 +85,12 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "JEPA"
+                        if "JEPA" in info.global_params["loss"]
                     ],
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask for info in metadata if info.params["loss"] == "JEPA"],
+                    [info.mask for info in metadata if "JEPA" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -106,19 +106,19 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p[self.num_class_tokens :]
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "iBOT"
+                        if "iBOT" in info.global_params["loss"]
                     ],
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask for info in metadata if info.params["loss"] == "iBOT"],
+                    [info.mask for info in metadata if "iBOT" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
                 "student_class_masked": torch.stack(
                     [
                         p[: self.num_class_tokens]
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "iBOT"
+                        if "iBOT" in info.global_params["loss"]
                     ],
                     dim=0,
                 ),
@@ -129,7 +129,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                 local_preds = [
                     preds[sidx]
                     for sidx in student_indices
-                    if metadata[sidx].params["loss"] == "DINO"
+                    if "DINO" in metadata[sidx].global_params["loss"]
                 ]
                 local2global_dino_student.append(local_preds)
             local2global_dino_student = [
@@ -142,8 +142,8 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "DINO"
-                        and info.params["relationship"] == "identity"
+                        if "DINO" in info.global_params["loss"]
+                        and info.global_params["relationship"] == "identity"
                     ],
                     dim=0,
                 ),

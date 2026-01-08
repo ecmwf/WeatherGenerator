@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from astropy_healpix.healpy import ang2pix
 
-from weathergen.datasets.batch import Sample
+from weathergen.datasets.batch import BatchSamples
 
 
 ####################################################################################################
@@ -266,7 +266,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-def get_tokens_lens(streams: dict, batch_data: list[Sample], input_steps: int) -> torch.Tensor:
+def get_tokens_lens(streams: dict, batch_data: BatchSamples, input_steps: int) -> torch.Tensor:
     """
     TODO
     """
@@ -281,7 +281,7 @@ def get_tokens_lens(streams: dict, batch_data: list[Sample], input_steps: int) -
                             for stream_info in streams
                         ]
                     )
-                    for sample in batch_data
+                    for sample in batch_data.samples
                 ]
             )
             for i in range(input_steps)

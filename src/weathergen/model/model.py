@@ -299,8 +299,8 @@ class Model(torch.nn.Module):
         for i_obs, _ in enumerate(cf.streams):
             stream_name = self.stream_names[i_obs]
 
-        loss_terms_train = [v.type for lt in cf.training_config.losses for k, v in lt.items()]
-        loss_terms_val = [v.type for lt in cf.validation_config.losses for k, v in lt.items()]
+        loss_terms_train = [v.type for _, v in cf.training_config.losses.items()]
+        loss_terms_val = [v.type for _, v in cf.validation_config.losses.items()]
 
         if "LossPhysical" in loss_terms_train or "LossPhysical" in loss_terms_val:
             for i_obs, si in enumerate(cf.streams):
@@ -407,44 +407,44 @@ class Model(torch.nn.Module):
         self.latent_heads = nn.ModuleDict()
         self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
 
-        ssl_losses_idx = [
-            i for i, lt in enumerate(loss_terms_train) if lt == "LossLatentSSLStudentTeacher"
+        ssl_losses_cfgs = [
+            v
+            for _, v in cf.training_config.losses.items()
+            if v.type == "LossLatentSSLStudentTeacher"
         ]
         # TODO: support multiple LossLatentSSLStudentTeacher terms
-        assert len(ssl_losses_idx) <= 1, "To be implemented."
-        for l_idx in ssl_losses_idx:
-            ssl_target_losses = cf.training_config.losses[l_idx]
+        assert len(ssl_losses_cfgs) <= 1, "To be implemented."
+        for ssl_target_losses in ssl_losses_cfgs:
             # TODO implement later
             # shared_heads = cf.get("shared_heads", False)
             self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
             self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
             self.register_token_idx = cf.num_register_tokens
-            for _, losses in ssl_target_losses.items():
-                for loss, loss_conf in losses.loss_fcts.items():
-                    if loss == "iBOT":
-                        self.latent_heads[loss] = LatentPredictionHead(
-                            f"{loss}-head",
-                            cf.ae_global_dim_embed,
-                            loss_conf["out_dim"],
-                            class_token=True,
-                            patch_token=True,
-                        )
-                    elif loss == "JEPA":
-                        self.latent_heads[loss] = LatentPredictionHead(
-                            f"{loss}-head",
-                            cf.ae_global_dim_embed,
-                            loss_conf["out_dim"],
-                            class_token=False,
-                            patch_token=True,
-                        )
-                    elif loss == "DINO":
-                        self.latent_heads[loss] = LatentPredictionHead(
-                            f"{loss}-head",
-                            cf.ae_global_dim_embed,
-                            loss_conf["out_dim"],
-                            class_token=True,
-                            patch_token=False,
-                        )
+            for loss, loss_conf in ssl_target_losses.loss_fcts.items():
+                if loss == "iBOT":
+                    self.latent_heads[loss] = LatentPredictionHead(
+                        f"{loss}-head",
+                        cf.ae_global_dim_embed,
+                        loss_conf["out_dim"],
+                        class_token=True,
+                        patch_token=True,
+                    )
+                elif loss == "JEPA":
+                    self.latent_heads[loss] = LatentPredictionHead(
+                        f"{loss}-head",
+                        cf.ae_global_dim_embed,
+                        loss_conf["out_dim"],
+                        class_token=False,
+                        patch_token=True,
+                    )
+                elif loss == "DINO":
+                    self.latent_heads[loss] = LatentPredictionHead(
+                        f"{loss}-head",
+                        cf.ae_global_dim_embed,
+                        loss_conf["out_dim"],
+                        class_token=True,
+                        patch_token=False,
+                    )
 
         return self
 
@@ -538,7 +538,7 @@ class Model(torch.nn.Module):
         tokens, posteriors = self.encoder(model_params, batch)
 
         # recover batch dimension and separate input_steps
-        shape = (batch.len_sources(), batch.get_num_source_steps(), *tokens.shape[1:])
+        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
@@ -626,7 +626,7 @@ class Model(torch.nn.Module):
         tokens = tokens[:, self.class_token_idx :]
 
         # get 1-ring neighborhood for prediction
-        batch_size = batch.len_sources()
+        batch_size = len(batch)
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
         tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
@@ -639,12 +639,16 @@ class Model(torch.nn.Module):
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
-            t_coords = torch.cat(
-                [
-                    batch.source_samples[i_b].streams_data[stream_name].target_coords[fstep]
-                    for i_b in range(batch_size)
-                ]
-            )
+            t_coords = [
+                batch.samples[i_b].streams_data[stream_name].target_coords[fstep]
+                for i_b in range(batch_size)
+            ]
+            t_coords_lens = [len(t) for t in t_coords]
+            t_coords = torch.cat(t_coords)
+
+            if len(t_coords) == 0:
+                continue
+
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
             tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
@@ -668,7 +672,7 @@ class Model(torch.nn.Module):
                 tcls = torch.cat(
                     [
                         sample.streams_data[stream_name].target_coords_lens[fstep]
-                        for sample in batch.source_samples
+                        for sample in batch.samples
                     ]
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
@@ -683,6 +687,8 @@ class Model(torch.nn.Module):
 
                 # final prediction head to map back to physical space
                 pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+                # recover batch dimension (ragged, so as list)
+                pred = torch.split(pred, t_coords_lens, dim=1)
 
             output.add_physical_prediction(fstep, stream_name, pred)
 

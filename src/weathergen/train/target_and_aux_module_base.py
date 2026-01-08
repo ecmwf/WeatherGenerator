@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import dataclasses
 
-import numpy as np
 import torch
 
 
@@ -63,8 +62,8 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
 
     def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
-        stream_names = [k for k, _ in batch.target_samples[0].streams_data.items()]
-        forecast_steps = batch.get_num_target_steps()
+        stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
+        forecast_steps = batch.get_num_steps()
 
         # collect all targets, concatenating across batch dimension since this is also how it
         # happens for predictions in the model
@@ -74,16 +73,16 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
             targets[stream_name] = []
             for fstep in range(forecast_steps):
                 targets_cur, target_times_cur, target_coords_cur = [], [], []
-                for sample in batch.target_samples:
+                for sample in batch.samples:
                     targets_cur += [sample.streams_data[stream_name].target_tokens[fstep]]
                     target_times_cur += [sample.streams_data[stream_name].target_times_raw[fstep]]
                     target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[fstep]]
 
                 targets[stream_name].append(
                     {
-                        "target": torch.cat(targets_cur),
-                        "target_times": np.concatenate(target_times_cur),
-                        "target_coords": np.concatenate(target_coords_cur),
+                        "target": targets_cur,
+                        "target_times": target_times_cur,
+                        "target_coords": target_coords_cur,
                     }
                 )
 

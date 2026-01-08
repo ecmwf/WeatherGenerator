@@ -84,9 +84,9 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, batch, pe_embed):
-        num_steps_input = batch.get_num_source_steps()
+        num_steps_input = batch.get_num_steps()
 
-        num_tokens = torch.sum(batch.source_tokens_lens, 2).flatten().sum().item()
+        num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
@@ -97,7 +97,7 @@ class EmbeddingEngine(torch.nn.Module):
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
-                for sample in batch.source_samples:
+                for sample in batch.get_samples():
                     sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
 
             sdata = torch.cat(sdata)
@@ -111,7 +111,7 @@ class EmbeddingEngine(torch.nn.Module):
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
         # computer scatter index across batch items and input steps
-        tok_counts = batch.source_tokens_lens.permute([2, 0, 1, 3]).flatten()
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten()
         repeat = torch.repeat_interleave
         scatter_idxs = repeat(
             torch.ones(len(tok_counts), dtype=torch.int64, device=tok_counts.device), tok_counts
@@ -121,7 +121,7 @@ class EmbeddingEngine(torch.nn.Module):
         scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
         # per cell indices into positional encoding
-        tok_counts = batch.source_tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
         pe_idxs = torch.cat([torch.arange(c) for c in tok_counts])
 
         # actual scatter operation

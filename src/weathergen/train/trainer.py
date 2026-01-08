@@ -132,14 +132,11 @@ class Trainer(TrainerBase):
         batch_size = get_batch_size_from_config(mode_cfg)
 
         # get target_aux calculators for different loss terms
-        target_and_aux_calculators = []
-        for loss_term in mode_cfg.losses:
-            for _, loss_cfg in loss_term.items():
-                target_and_aux_calculators += [
-                    get_target_aux_calculator(
-                        self.cf, loss_cfg, self.dataset, self.model, self.device, batch_size
-                    ).to_device(self.device)
-                ]
+        target_and_aux_calculators = {}
+        for loss_name, loss_cfg in mode_cfg.losses.items():
+            target_and_aux_calculators[loss_name] = get_target_aux_calculator(
+                self.cf, loss_cfg, self.dataset, self.model, self.device, batch_size
+            ).to_device(self.device)
 
         return target_and_aux_calculators
 
@@ -345,7 +342,7 @@ class Trainer(TrainerBase):
         # training loop
 
         # validate once at the beginning as reference
-        if self.validation_cfg.get("before_training", False):
+        if self.validation_cfg.get("validate_before_training", False):
             self.validate(-1)
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
@@ -384,18 +381,23 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 preds = self.model(
-                    self.model_params, batch, self.training_cfg.window_offset_prediction
+                    self.model_params,
+                    batch.get_source_samples(),
+                    self.training_cfg.window_offset_prediction,
                 )
-                targets_and_auxs = [
-                    target_aux.compute(
+
+                targets_and_auxs = {}
+                for loss_name, target_aux in self.target_and_aux_calculators.items():
+                    tc = self.training_cfg.losses[loss_name].get("target_source_correspondence")
+                    target_idxs = list(tc.keys()) if tc is not None else None
+                    targets_and_auxs[loss_name] = target_aux.compute(
                         self.cf.general.istep,
-                        batch,
+                        batch.get_target_samples(target_idxs),
                         self.model_params,
                         self.model,
-                        self.validation_cfg.window_offset_prediction,
+                        self.training_cfg.window_offset_prediction,
                     )
-                    for target_aux in self.target_and_aux_calculators
-                ]
+
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
                 targets=targets_and_auxs,
@@ -409,11 +411,11 @@ class Trainer(TrainerBase):
 
             [
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for target_aux in self.target_and_aux_calculators
+                for _, target_aux in self.target_and_aux_calculators.items()
             ]
             [
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for target_aux in self.target_and_aux_calculators_val
+                for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
 
             # backward pass
@@ -444,11 +446,11 @@ class Trainer(TrainerBase):
             step = batch_size_total * self.cf.general.istep
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
-                for target_aux in self.target_and_aux_calculators
+                for _, target_aux in self.target_and_aux_calculators.items()
             ]
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
-                for target_aux in self.target_and_aux_calculators_val
+                for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
             # EMA update
             if self.validate_with_ema:

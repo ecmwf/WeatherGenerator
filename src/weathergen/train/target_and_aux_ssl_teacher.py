@@ -35,8 +35,7 @@ class EMATeacher(TargetAndAuxModuleBase):
 
         losses_cfg = [
             v.loss_fcts
-            for loss_term in training_cfg.losses
-            for k, v in loss_term.items()
+            for k, v in training_cfg.losses.items()
             if v.type == "LossLatentSSLStudentTeacher"
         ]
         # TODO: support multiple LossLatentSSLStudentTeacher loss terms
