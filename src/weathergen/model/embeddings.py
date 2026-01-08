@@ -7,9 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from functools import partial
+
 import numpy as np
 import torch
-from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import MultiSelfAttentionHead
 from weathergen.model.layers import MLP
@@ -17,11 +18,13 @@ from weathergen.model.layers import MLP
 # from weathergen.model.mlp import MLP
 from weathergen.model.norms import RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
+from weathergen.model.utils import cond_checkpoint
 
 
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
         self,
+        cf,
         mode,
         num_tokens,
         token_size,
@@ -57,6 +60,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.num_blocks = num_blocks
         self.num_heads = num_heads
         self.unembed_mode = unembed_mode
+        self.cf = cf
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
 
@@ -135,21 +139,29 @@ class StreamEmbedTransformer(torch.nn.Module):
 
         self.dropout_final = torch.nn.Dropout(0.1)
 
+        self.checkpoint_stream_embed = partial(
+            cond_checkpoint, self.cf.get("stream_embed_gradient_checkpoint_enabled", True)
+        )
+
     def forward_channels(self, x_in):
         peh = positional_encoding_harmonic
 
         # embed provided input data
-        x = peh(checkpoint(self.embed, x_in.transpose(-2, -1), use_reentrant=False))
+        x = peh(
+            self.checkpoint_stream_embed(self.embed, x_in.transpose(-2, -1), use_reentrant=False)
+        )
 
         for layer in self.layers:
-            x = checkpoint(layer, x, use_reentrant=False)
+            x = self.checkpoint_stream_embed(layer, x, use_reentrant=False)
 
         # read out
         if self.unembed_mode == "full":
-            out = checkpoint(self.unembed, self.ln_final(x.flatten(-2, -1)), use_reentrant=False)
+            out = self.checkpoint_stream_embed(
+                self.unembed, self.ln_final(x.flatten(-2, -1)), use_reentrant=False
+            )
         elif self.unembed_mode == "block":
             out = [
-                checkpoint(ue, ln(x[:, i]), use_reentrant=False)
+                self.checkpoint_stream_embed(ue, ln(x[:, i]), use_reentrant=False)
                 for i, (ue, ln) in enumerate(zip(self.unembed, self.ln_final, strict=True))
             ]
             out = torch.stack(out, dim=1).flatten(-2, -1)
@@ -165,14 +177,18 @@ class StreamEmbedTransformer(torch.nn.Module):
 
     def forward_columns(self, x_in):
         # embed provided input data
-        x = positional_encoding_harmonic(checkpoint(self.embed, x_in, use_reentrant=False))
+        x = positional_encoding_harmonic(
+            self.checkpoint_stream_embed(self.embed, x_in, use_reentrant=False)
+        )
 
         for layer in self.layers:
-            x = checkpoint(layer, x, use_reentrant=False)
+            x = self.checkpoint_stream_embed(layer, x, use_reentrant=False)
 
-        out = checkpoint(self.unembed1, x, use_reentrant=False)
+        out = self.checkpoint_stream_embed(self.unembed1, x, use_reentrant=False)
         out = self.unembed_nonlin(out)
-        out = checkpoint(self.unembed2, out.transpose(-2, -1), use_reentrant=False)
+        out = self.checkpoint_stream_embed(
+            self.unembed2, out.transpose(-2, -1), use_reentrant=False
+        )
         out = out.flatten(-2, -1).unsqueeze(1)
 
         # final normalize and dropout

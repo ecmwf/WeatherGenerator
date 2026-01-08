@@ -8,10 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 import dataclasses
+from functools import partial
 
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.model.attention import (
@@ -27,7 +27,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.utils import ActivationFactory
+from weathergen.model.utils import ActivationFactory, cond_checkpoint
 from weathergen.utils.utils import get_dtype
 
 
@@ -72,6 +72,7 @@ class EmbeddingEngine(torch.nn.Module):
                     norm_type=self.cf.norm_type,
                     unembed_mode=self.cf.embed_unembed_mode,
                     stream_name=stream_name,
+                    cf=self.cf,
                 )
             elif si["embed"]["net"] == "linear":
                 self.embeds[stream_name] = StreamEmbedLinear(
@@ -158,9 +159,15 @@ class LocalAssimilationEngine(torch.nn.Module):
                 )
             )
 
+        self.checkpoint_ae_local_blocks = partial(
+            cond_checkpoint, self.cf.get("ae_local_blocks_grdient_checkpoint_enabled", True)
+        )
+
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+            tokens_c = self.checkpoint_ae_local_blocks(
+                block, tokens_c, cell_lens_c, use_reentrant=use_reentrant
+            )
         return tokens_c
 
 
@@ -223,9 +230,13 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
+        self.checkpoint_ae_adapter = partial(
+            cond_checkpoint, self.cf.get("ae_adapter_grdient_checkpoint_enabled", True)
+        )
+
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
         for block in self.ae_adapter:
-            tokens_global_c = checkpoint(
+            tokens_global_c = self.checkpoint_ae_adapter(
                 block,
                 tokens_global_c,
                 tokens_c,
@@ -301,9 +312,13 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
+        self.checkpoint_ae_aggregation = partial(
+            cond_checkpoint, self.cf.get("ae_aggregation_gradient_checkpoint_enabled", True)
+        )
+
     def forward(self, tokens, use_reentrant):
         for block in self.ae_aggregation_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            tokens = self.checkpoint_ae_aggregation(block, tokens, use_reentrant=use_reentrant)
         return tokens
 
 
@@ -373,9 +388,17 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
+        self.ae_global_blocks.append(
+            torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+        )
+
+        self.checkpoint_ae_global = partial(
+            cond_checkpoint, self.cf.get("ae_global_gradient_checkpoint_enabled", True)
+        )
+
     def forward(self, tokens, use_reentrant):
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            tokens = self.checkpoint_ae_global(block, tokens, use_reentrant=use_reentrant)
         return tokens
 
 
@@ -463,13 +486,17 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
+        self.checkpoint_fe = partial(
+            cond_checkpoint, self.cf.get("fe_gradient_checkpoint_enabled", True)
+        )
+
     def forward(self, tokens, fstep):
         aux_info = None
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             else:
-                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+                tokens = self.checkpoint_fe(block, tokens, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -613,6 +640,11 @@ class TargetPredictionEngineClassic(nn.Module):
                 )
             )
 
+        self.checkpoint_pred = partial(
+            cond_checkpoint,
+            self.cf.get("target_pred_engine_classic_gradient_checkpoint_enabled", True),
+        )
+
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
         tc_tokens = output
         tcs_lens = output_lens
@@ -622,9 +654,11 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
+                tc_tokens = self.checkpoint_pred(
+                    block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False
+                )
             else:
-                tc_tokens = checkpoint(
+                tc_tokens = self.checkpoint_pred(
                     block,
                     tc_tokens,
                     tokens_stream,
@@ -780,6 +814,10 @@ class TargetPredictionEngine(nn.Module):
                     f"{self.cf.decoder_type} is not implemented for prediction heads"
                 )
 
+        self.checkpoint_target = partial(
+            cond_checkpoint, self.cf.get("target_pred_engine_gradient_checkpoint_enabled", True)
+        )
+
     def forward(self, latent, output, latent_lens, output_lens, coordinates):
         latent = (
             self.dropout(self.latent_in_norm(latent + self.pos_embed))
@@ -788,7 +826,7 @@ class TargetPredictionEngine(nn.Module):
         )
         for layer in self.tte:
             if isinstance(layer, OriginalPredictionBlock):
-                output = checkpoint(
+                output = self.checkpoint_target(
                     layer,
                     latent=latent.flatten(0, 1),
                     output=output,
@@ -798,7 +836,7 @@ class TargetPredictionEngine(nn.Module):
                     use_reentrant=False,
                 )
             elif isinstance(layer, CrossAttentionBlock):
-                output = checkpoint(
+                output = self.checkpoint_target(
                     layer,
                     x=output,
                     x_kv=latent.flatten(0, 1),
@@ -808,7 +846,7 @@ class TargetPredictionEngine(nn.Module):
                     use_reentrant=False,
                 )
             else:
-                output = checkpoint(
+                output = self.checkpoint_target(
                     layer,
                     x=output,
                     x_lens=output_lens,
