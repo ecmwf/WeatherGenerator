@@ -605,9 +605,9 @@ class WeatherGenMergeReader(Reader):
 
         super().__init__(eval_cfg, run_id, private_paths)
         self.readers = []
-        
+
         _logger.info(f"MERGE READERS: {self.run_ids} ...")
-       
+
         for run_id in self.run_ids:
             reader = WeatherGenReader(self.eval_cfg, run_id, self.private_paths)
             self.readers.append(reader)
@@ -628,10 +628,10 @@ class WeatherGenMergeReader(Reader):
         ----------
         cfg :
             Configuration dictionary containing all information for the evaluation.
-        
+
         results_dir : Path
             Directory where the inference results are stored.
-            Expected scheme `<results_base_dir>/<run_id>`.          
+            Expected scheme `<results_base_dir>/<run_id>`.
         stream :
             Stream name to retrieve data for.
         samples :
@@ -650,24 +650,22 @@ class WeatherGenMergeReader(Reader):
             - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
             - points_per_sample: xarray DataArray containing the number of points per sample,
               if `return_counts` is True.
-        """ 
+        """
 
         da_tars_merge, da_preds_merge, fsteps_merge = [], [], []
-        
-        n_readers = len(self.readers)
 
         points_per_sample = None
 
         for reader in self.readers:
             da_tars, da_preds, da_fsteps = [], [], []
             _logger.info(f"MERGE READERS: Processing run_id {reader.run_id}...")
-           
+
             out = reader.get_data(
                 stream,
                 samples,
                 fsteps,
                 channels,
-                ensemble = "mean",
+                ensemble="mean",
             )
 
             for fstep in out.target.keys():
@@ -682,18 +680,18 @@ class WeatherGenMergeReader(Reader):
                         points_per_sample = out.points_per_sample
                     else:
                         points_per_sample += out.points_per_sample
-            
+
             da_tars_merge.append(da_tars)
             da_preds_merge.append(da_preds)
             fsteps_merge.append(da_fsteps)
 
         da_tars_merge = self._concat_over_ens(da_tars_merge, fsteps_merge)
         da_preds_merge = self._concat_over_ens(da_preds_merge, fsteps_merge)
-        
+
         return ReaderOutput(
             target=da_tars_merge, prediction=da_preds_merge, points_per_sample=points_per_sample
         )
-    
+
     def _concat_over_ens(self, da_merge, fsteps_merge):
         """
         Parameters
@@ -716,10 +714,7 @@ class WeatherGenMergeReader(Reader):
         da_ens = {}
         for k, fstep in enumerate(fsteps):
             da_list = [da_merge[i][k] for i in range(n_readers)]
-            da_ens[fstep] = (
-                xr.concat(da_list, dim="ens")
-                .assign_coords(ens=range(n_readers))
-            )
+            da_ens[fstep] = xr.concat(da_list, dim="ens").assign_coords(ens=range(n_readers))
 
         return da_ens
 
@@ -743,20 +738,18 @@ class WeatherGenMergeReader(Reader):
             The metric DataArray.
         missing_metrics:
             dictionary of missing regions and metrics that need to be recomputed.
-        """ 
-        #TODO: implement this properly. Not it is skipping loading scores
+        """
+        # TODO: implement this properly. Not it is skipping loading scores
 
         local_scores = {}
         missing_metrics = {}
         for region in regions:
             for metric in metrics:
-
                 # all other cases: recompute scores
                 missing_metrics.setdefault(region, []).append(metric)
 
         return local_scores, missing_metrics
-       
-    
+
     def get_climatology_filename(self, stream: str) -> str | None:
         """
         Get the climatology filename for a given stream from the inference configuration.
@@ -773,7 +766,7 @@ class WeatherGenMergeReader(Reader):
             if clim_data_path:
                 return clim_data_path
         return None
-    
+
     def get_stream(self, stream: str):
         """
         returns the dictionary associated to a particular stream.
@@ -797,7 +790,6 @@ class WeatherGenMergeReader(Reader):
         for reader in self.readers:
             samples.append(reader.get_samples())
         return set.intersection(*map(set, samples))
-       
 
     def get_forecast_steps(self) -> set[int]:
         """Get the set of forecast steps from the Zarr file."""
@@ -820,10 +812,10 @@ class WeatherGenMergeReader(Reader):
             A list of channel names.
         """
         all_channels = []
-  
+
         for reader in self.readers:
             all_channels.append(reader.get_channels(stream))
-        
+
         return set.intersection(*map(set, all_channels))
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:
@@ -840,7 +832,7 @@ class WeatherGenMergeReader(Reader):
         _logger.debug(f"Getting ensembles for stream {stream}...")
         all_ensembles = []
         for reader in self.readers:
-            all_ensembles.append(reader.get_ensemble(stream))  
+            all_ensembles.append(reader.get_ensemble(stream))
 
         if all(e == ["0"] or e == [0] for e in all_ensembles):
             return set(range(len(self.readers)))
@@ -848,8 +840,8 @@ class WeatherGenMergeReader(Reader):
             raise NotImplementedError(
                 "Merging readers with multiple ensemble members is not supported yet."
             )
-        return 
-        
+        return
+
     # TODO: improve this
     def is_regular(self, stream: str) -> bool:
         """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
@@ -863,7 +855,4 @@ class WeatherGenMergeReader(Reader):
             True if the stream is regularly spaced. False otherwise.
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
-        for reader in self.readers:
-            if not reader.is_regular(stream):
-                return False
-        return True
+        return all(reader.is_regular(stream) for reader in self.readers)
