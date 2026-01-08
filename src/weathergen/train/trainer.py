@@ -30,7 +30,11 @@ from weathergen.model.model_interface import (
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.train.utils import extract_batch_metadata, get_batch_size_from_config
+from weathergen.train.utils import (
+    extract_batch_metadata,
+    get_batch_size_from_config,
+    get_target_idxs_from_cfg,
+)
 from weathergen.utils.distributed import ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
@@ -388,8 +392,9 @@ class Trainer(TrainerBase):
 
                 targets_and_auxs = {}
                 for loss_name, target_aux in self.target_and_aux_calculators.items():
-                    tc = self.training_cfg.losses[loss_name].get("target_source_correspondence")
-                    target_idxs = list(tc.keys()) if tc is not None else None
+                    # find targets for this target-aux calculator
+                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                    # apply target-aux calculator
                     targets_and_auxs[loss_name] = target_aux.compute(
                         self.cf.general.istep,
                         batch.get_target_samples(target_idxs),
@@ -400,7 +405,7 @@ class Trainer(TrainerBase):
 
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
-                targets=targets_and_auxs,
+                targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
             # TODO re-enable this, need to think on how to make it compatible with
@@ -505,9 +510,7 @@ class Trainer(TrainerBase):
 
                         targets_and_auxs = {}
                         for loss_name, target_aux in self.target_and_aux_calculators_val.items():
-                            tc_key = "target_source_correspondence"
-                            tc = self.validation_cfg.losses[loss_name].get(tc_key)
-                            target_idxs = list(tc.keys()) if tc is not None else None
+                            target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
                                 batch.get_target_samples(target_idxs),
@@ -518,7 +521,7 @@ class Trainer(TrainerBase):
 
                     _ = self.loss_calculator_val.compute_loss(
                         preds=preds,
-                        targets=targets_and_auxs,
+                        targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
                     )
 

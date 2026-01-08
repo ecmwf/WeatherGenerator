@@ -72,17 +72,19 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
             # collect targets for all forecast steps
             targets[stream_name] = []
             for fstep in range(forecast_steps):
-                targets_cur, target_times_cur, target_coords_cur = [], [], []
+                targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
                 for sample in batch.samples:
                     targets_cur += [sample.streams_data[stream_name].target_tokens[fstep]]
                     target_times_cur += [sample.streams_data[stream_name].target_times_raw[fstep]]
                     target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[fstep]]
+                    meta_data += [sample.meta_info]
 
                 targets[stream_name].append(
                     {
                         "target": targets_cur,
                         "target_times": target_times_cur,
                         "target_coords": target_coords_cur,
+                        "target_metda_data": meta_data,
                     }
                 )
 

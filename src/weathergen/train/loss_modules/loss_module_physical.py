@@ -236,16 +236,25 @@ class LossPhysical(LossModuleBase):
 
                 targets_batch = targets.physical[stream_name][fstep]["target"]
                 target_times_batch = targets.physical[stream_name][fstep]["target_times"]
+                targets_params = targets.physical[stream_name][fstep]["target_metda_data"]
 
-                assert len(targets_batch) == len(targets_batch), (
-                    "batch size between target and predictions does not match"
-                )
-
-                num_samples_s = get_num_samples(self.mode_cfg.get("model_input"))
                 loss_batch = torch.tensor(0.0, device=self.device, requires_grad=True)
-                ctr_batch, i_src_cfg = 0, 0
-                for i_batch, pred in enumerate(preds_batch):
-                    i_src_cfg += 1 if i_batch >= num_samples_s[: (i_src_cfg + 1)].sum() else 0
+                ctr_batch = 0
+                for pred, pred_params in zip(preds_batch, output_info, strict=True):
+                    # source has a unique target but index is not invariant with multiple
+                    # target_aux calculators
+                    target_idx_native = pred_params.global_params.get("correspondence", -1)
+                    target_idx = [
+                        i
+                        for i, t in enumerate(targets_params)
+                        if t[stream_name].global_params["idx"] == target_idx_native
+                    ]
+                    # source/model_input has no target for physical loss
+                    if len(target_idx) == 0:
+                        continue
+                    # source -> target correspondence has to be unique
+                    assert len(target_idx) == 1
+                    target_idx = target_idx[0]
 
                     # get weights for locations
                     # TODO: fix -> stream_data is not present and TargetAuxCalculator must be set up
@@ -259,10 +268,9 @@ class LossPhysical(LossModuleBase):
                     loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
                     ctr_loss_fcts = 0
                     for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
-                        if loss_fct_name not in output_info[i_batch].global_params["loss"]:
+                        # skip is loss is not computed for this sample
+                        if loss_fct_name not in pred_params.global_params["loss"]:
                             continue
-
-                        target_idx = i_batch
 
                         target = targets_batch[target_idx]
                         target_times = target_times_batch[target_idx]

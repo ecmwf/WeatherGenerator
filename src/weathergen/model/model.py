@@ -61,10 +61,15 @@ class ModelOutput:
     def add_latent_prediction(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
         self.latent[fstep][latent_name] = pred
 
-    def get_physical_prediction(self, fstep: int, stream_name: StreamName | None = None):
+    def get_physical_prediction(
+        self, fstep: int, stream_name: StreamName | None = None, sample_idx: int | None = None
+    ):
         pred = self.physical[fstep]
         if stream_name is not None:
             pred = pred.get(stream_name, None)
+            if sample_idx is not None:
+                assert sample_idx < len(pred), "Invalid sample index."
+                pred = pred[sample_idx]
         return pred
 
     def get_latent_prediction(self, fstep: int):

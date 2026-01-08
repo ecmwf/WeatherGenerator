@@ -24,18 +24,16 @@ class MaskData:
     def __len__(self):
         return len(self.masks)
 
-    def add_mask(self, mask, params, cfg, losses):
+    def add_mask(self, mask, params, cfg, losses, idx, correspondence):
         self.masks += [mask]
         self.metadata += [
             SampleMetaData(
                 params={**cfg, **params},
                 mask=mask,
                 global_params={
+                    "idx": idx,
+                    "correspondence": correspondence,
                     "loss": losses,
-                    "masking_strategy": cfg.get("strategy", {}),
-                    "target_relationship": cfg.get("masking_strategy_config", {}).get(
-                        "target_relationship", {"independent": None}
-                    ),
                 },
             )
         ]
@@ -180,44 +178,42 @@ class Masker:
         # collect target-source correspondence for all loss terms
         corrs = []
         for _, loss_term in losses.items():
-            corr = loss_term.get("target_source_correspondence", None)
-            loss_names = list(loss_term.loss_fcts.keys())
+            for loss_name, loss_fct in loss_term.loss_fcts.items():
+                corr = loss_fct.get("target_source_correspondence", None)
 
-            # correspondence not specified; falling back to default 1-to-1 correspondence
-            # at the level of the configs
-            if corr is None:
-                assert len(target_cfgs) == len(source_cfgs), (
-                    "No source/target correspondence specified but number of source and target "
-                    + "configs also not matching."
-                )
-                corr = dict([(i, i) for i in range(len(target_cfgs))])
+                # correspondence not specified; falling back to default 1-to-1 correspondence
+                # at the level of the configs
+                if corr is None:
+                    assert len(target_cfgs) == len(source_cfgs), (
+                        "No source/target correspondence specified but number of source and target "
+                        + "configs also not matching."
+                    )
+                    corr = dict([(i, i) for i in range(len(target_cfgs))])
 
-            corr_dict = {}
-            for target_idx, source_spec in corr.items():
-                # process into common long format
-                if type(source_spec) is omegaconf.dictconfig.DictConfig:
-                    # TODO: check format of dict
-                    # append loss_name
-                    corr_dict[target_idx] = dict(
-                        [(k, (v, loss_names)) for k, v in source_spec.items()]
-                    )
-                elif type(source_spec) is omegaconf.listconfig.ListConfig:
-                    corr_dict[target_idx] = dict(
-                        [(v, ("independent", loss_names)) for v in source_spec]
-                    )
-                elif type(source_spec) is int:
-                    corr_dict[target_idx] = {source_spec: ("independent", loss_names)}
-                else:
-                    assert False, (
-                        "Invalid target_source_correspondence specification. Needs to be integer "
-                        + "corresponding to a specific source, list of source or a dictionary "
-                        + "specifying the correspondence."
-                    )
+                corr_dict = {}
+                for target_idx, source_spec in corr.items():
+                    # process into common long format
+                    if type(source_spec) is omegaconf.dictconfig.DictConfig:
+                        # TODO: check format of dict
+                        # append loss_name
+                        corr_dict[target_idx] = dict(
+                            [(k, (v, loss_name)) for k, v in source_spec.items()]
+                        )
+                    elif type(source_spec) is omegaconf.listconfig.ListConfig:
+                        corr_dict[target_idx] = dict([(v, (None, loss_name)) for v in source_spec])
+                    elif type(source_spec) is int:
+                        corr_dict[target_idx] = {source_spec: (None, loss_name)}
+                    else:
+                        assert False, (
+                            "Invalid target_source_correspondence specification. Needs to be "
+                            + "integer corresponding to a specific source, list of source or a "
+                            + "dictionary specifying the correspondence."
+                        )
 
-            corrs += [corr_dict]
+                corrs += [corr_dict]
 
         # merge correspondences
-        corr_dict = dict([(i, []) for i in range(len(source_cfgs))])
+        corr_dict = {}
         for k_target in range(len(target_cfgs)):
             # require identical relationship type when target has same source correspondence in
             # different loss terms
@@ -240,18 +236,17 @@ class Masker:
                         f"target_source_correspondence contains non-existent source {k_target}."
                     )
                     continue
-                # sources can only have one target ()
-                assert len(corr_dict[k_source]) == 0
                 # add valid entry, source-target pair can have multiple losses
-                losses = [i for ii in [rl[1] for rl in rel_loss] for i in ii]
+                losses = [rl[1] for rl in rel_loss]
                 corr_dict[k_source] = (k_target, (rel_loss[0][0], losses))
 
-        # check validity of target_source_correspondence with target and source cfgs
+        # TODO: check validity of target_source_correspondence with target and source cfgs
 
         target_masks = MaskData()
 
         # iterate over all target samples
         # different strategies
+        i_target = 0
         for i_cfg, (_, target_cfg) in enumerate(target_cfgs.items()):
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
@@ -262,22 +257,39 @@ class Masker:
                     target_relationship_mask=("independent", None),
                 )
                 # get all losses and flatten
-                losses = [v[1][1] for _, v in corr_dict.items() if v[0] == i_cfg]
-                losses = [i for ii in losses for i in ii]
+                losses = [v[1][1] for _, v in corr_dict.items() if len(v) > 0 and v[0] == i_cfg]
+                losses = [ll for lt in losses for ll in lt]
+                # corresponding sources
+                corr = [k for k, v in corr_dict.items() if len(v) > 0 and v[0] == i_cfg]
+                # skip items that do not appear in loss
+                if len(corr) == 0:
+                    continue
                 # add
-                target_masks.add_mask(target_mask, mask_params, target_cfg, losses)
+                target_masks.add_mask(target_mask, mask_params, target_cfg, losses, i_target, corr)
+                i_target += 1
 
         source_masks = MaskData()
         source_target_mapping = []
         target_num_samples = get_num_samples(target_cfgs)
         i_source = 0
         for i_src_cfg, (_, source_cfg) in enumerate(source_cfgs.items()):
+            # skip items that do not appear in loss
+            if i_src_cfg not in corr_dict:
+                continue
             # samples per strategy
             for i_sample in range(source_cfg.get("num_samples", 1)):
                 masking_config = source_cfg.get("masking_strategy_config", {})
                 # extract corresponding target
                 target_cfg_idx, rel_losses = corr_dict[i_src_cfg]
                 relationship, losses = rel_losses
+                # ensure proper default relationships
+                if relationship is None:
+                    if source_cfg.get("masking_strategy") == "random":
+                        # default for masked token modeling
+                        relationship = "complement"
+                    else:
+                        # default for forecasting
+                        relationship = "independent"
                 target_idx = target_num_samples[:target_cfg_idx].sum()
                 # iterate sequentially through targets (to enable 1-to-1 correspondence when no
                 # target is specified)
@@ -289,7 +301,8 @@ class Masker:
                     masking_strategy_config=masking_config,
                     target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                 )
-                source_masks.add_mask(source_mask, mask_params, source_cfg, losses)
+                corr = target_idx
+                source_masks.add_mask(source_mask, mask_params, source_cfg, losses, i_source, corr)
 
                 source_target_mapping += [target_idx]
                 i_source += 1

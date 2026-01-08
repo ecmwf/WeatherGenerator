@@ -80,14 +80,14 @@ class LossCalculator:
     def compute_loss(
         self,
         preds: ModelOutput,
-        targets: TargetAuxOutput,
+        targets_and_aux: TargetAuxOutput,
         metadata: dict,
     ):
         losses_all = defaultdict(dict)
         stddev_all = defaultdict(dict)
         loss = torch.tensor(0.0, requires_grad=True)
         for loss_term_name, calc_term in self.loss_calculators.items():
-            target = targets[loss_term_name]
+            target = targets_and_aux[loss_term_name]
             for weight, calculator in calc_term:
                 if weight > 0.0:
                     loss_values = calculator.compute_loss(

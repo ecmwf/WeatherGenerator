@@ -55,11 +55,12 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         # create tensor for each stream
         losses_all: dict[str, float] = {loss: 0.0 for loss in self.losses}
 
-        source2target_matching_idxs, output_info, target2source_matching_idxs, target_info = (
-            metadata
-        )
-        preds = preds.latent[0]  # [0]  because we always want the first fstep
-        targets = targets.latent  # [0]  because we always want the first fstep
+        source2target_matching_idxs, output_info, target2source_matching_idxs, _ = metadata
+
+        preds = preds.latent[0]  # [0] because we always want the first fstep
+        target_info = targets.aux_outputs
+        targets = targets.latent
+
         for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = self.gather_preds_for_loss(
                 name, preds[name], output_info, target2source_matching_idxs
@@ -161,7 +162,11 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             """
             return {
                 "teacher_patches_masked": torch.stack(
-                    [p for p, info in zip(targets, metadata, strict=False)],
+                    [
+                        p
+                        for p, info in zip(targets, metadata, strict=True)
+                        if "JEPA" in info.global_params["loss"]
+                    ],
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(

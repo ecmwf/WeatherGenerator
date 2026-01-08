@@ -64,7 +64,11 @@ class EMATeacher(TargetAndAuxModuleBase):
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
-            return TargetAuxOutput(0, physical={}, latent=targets, aux_outputs={})
+
+            # collect target meta-information for selected samples
+            aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
+
+            return TargetAuxOutput(0, physical={}, latent=targets, aux_outputs=aux_outputs)
 
     def to_device(self, device) -> EMATeacher:
         for _, module in self.postprocess_targets.items():
