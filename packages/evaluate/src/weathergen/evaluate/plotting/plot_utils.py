@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -106,7 +107,9 @@ def plot_metric_region(
 
             if selected_data:
                 _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
-                name = "_".join([metric, region] + sorted(set(run_ids)) + [stream, ch])
+                name = create_filename(
+                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
+                )
                 plotter.plot(
                     selected_data,
                     labels,
@@ -197,7 +200,10 @@ def ratio_plot_metric_region(
 
         if len(selected_data) > 0:
             _logger.info(f"Creating Ratio plot for {metric} - {stream}")
-            name = "_".join([metric] + sorted(set(run_ids)) + [stream])
+
+            name = create_filename(
+                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
+            )
             plotter.ratio_plot(
                 selected_data,
                 run_ids,
@@ -256,7 +262,9 @@ def heat_maps_metric_region(
 
         if len(selected_data) > 0:
             _logger.info(f"Creating Heat maps for {metric} - {stream}")
-            name = "_".join(sorted(set(run_ids)) + [stream])
+            name = create_filename(
+                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
+            )
             plotter.heat_map(
                 selected_data,
                 labels,
@@ -399,3 +407,61 @@ class DefaultMarkerSize:
             List of stream names.
         """
         return list(cls._marker_size_stream.keys())
+
+
+def create_filename(
+    *,
+    prefix: Sequence[str] = (),
+    middle: Iterable[str] = (),
+    suffix: Sequence[str] = (),
+    sep: str = "_",
+    max_len: int = 255,
+):
+    """
+    Join strings as: prefix + middle + suffix, truncating only `middle`
+    to ensure the final string does not exceed max_len.
+
+    Parameters
+    ----------
+    prefix : Sequence[str]
+        Parts that must appear before the truncated section.
+    middle : Iterable[str]
+        Parts that may be truncated (order preserved).
+    suffix : Sequence[str]
+        Parts that must appear after the truncated section.
+    sep : str
+        Separator used for joining.
+    max_len : int
+        Maximum total length of the joined string.
+
+    Returns
+    -------
+    str
+        The joined string, with only `middle` truncated if necessary.
+    """
+
+    pref, mid, suf = map(lambda x: list(map(str, x)), (prefix, middle, suffix))
+    fixed = sep.join(pref + suf)
+    avail = max_len - len(fixed)
+
+    if mid and pref:
+        avail -= len(sep)
+    if mid and suf:
+        avail -= len(sep)
+
+    truncated_middle, used = [], 0
+
+    for x in mid:
+        d = len(x) + (len(sep) if truncated_middle else 0)
+        if used + d > avail:
+            break
+        truncated_middle.append(x)
+        used += d
+
+    if len(truncated_middle) < len(mid):
+        _logger.warning(
+            f"Filename truncated: only {len(truncated_middle)} of {len(mid)} middle parts used "
+            f"to keep length <= {max_len}."
+        )
+
+    return sep.join(prefix + truncated_middle + suffix)

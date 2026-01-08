@@ -49,7 +49,7 @@ class LossPhysical(LossModuleBase):
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
-            [getattr(loss_fns, name if name != "mse" else "mse_channel_location_weighted"), w, name]
+            [getattr(loss_fns, name), w, name]
             for name, w in loss_fcts
         ]
 
