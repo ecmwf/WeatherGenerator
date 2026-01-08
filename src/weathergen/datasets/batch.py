@@ -99,10 +99,12 @@ class BatchSamples:
 
     samples: list[Sample]
     tokens_lens: torch.Tensor | None
+    device: str | None
 
     def __init__(self, streams: dict, num_samples: int) -> None:
         self.samples = [Sample(streams) for _ in range(num_samples)]
         self.tokens_lens = None
+        self.device = None
 
     def __len__(self) -> int:
         return len(self.samples)
