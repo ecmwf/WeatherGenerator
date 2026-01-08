@@ -76,7 +76,8 @@ def inference_from_args(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -126,7 +127,8 @@ def train_continue_from_args(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -179,7 +181,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 if __name__ == "__main__":
