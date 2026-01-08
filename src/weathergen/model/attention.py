@@ -68,7 +68,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x, x_lens, ada_ln_aux=None):
+    def forward(self, x, max_x_lens, x_lens, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
@@ -91,8 +91,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
             vs,
             cum_x_lens,
             cum_x_lens,
-            x_lens.max(),
-            x_lens.max(),
+            max_x_lens,
+            max_x_lens,
             softcap=self.softcap,
             dropout_p=dropout_rate,
         )
@@ -320,7 +320,9 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
+    def forward(
+        self, x_q, x_kv, max_x_q_lens, max_x_kv_lens, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None
+    ):
         if self.with_residual:
             x_q_in = x_q
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
@@ -346,8 +348,8 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
                 vs,
                 cum_x_q_lens,
                 cum_x_kv_lens,
-                x_q_lens.max(),
-                x_kv_lens.max(),
+                max_x_q_lens,
+                max_x_kv_lens,
                 softcap=self.softcap,
                 dropout_p=dropout_rate,
             )
@@ -427,7 +429,9 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported at the moment"
 
-    def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
+    def forward(
+        self, x_q, x_kv, max_x_q_lens, max_x_kv_lens, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None
+    ):
         if self.with_residual:
             x_q_in = x_q
         x_q = self.lnorm_in_q(x_q) if ada_ln_aux is None else self.lnorm_in_q(x_q, ada_ln_aux)
@@ -458,8 +462,8 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
                     vs,
                     cum_x_q_lens,
                     cum_x_kv_lens,
-                    x_q_lens.max(),
-                    x_kv_lens.max(),
+                    max_x_q_lens,
+                    max_x_kv_lens,
                     softcap=self.softcap,
                     dropout_p=dropout_rate,
                 )

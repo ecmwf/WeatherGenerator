@@ -696,9 +696,15 @@ class Model(torch.nn.Module):
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
+                # calculate max
+                max_tcs_lens = int(tcs_lens.max())
+                max_tokens_nbors_lens = int(tokens_nbors_lens.max())
+
                 tc_tokens = self.target_token_engines[stream_name](
                     latent=tokens_nbors,
                     output=tc_tokens,
+                    max_latent_lens=max_tokens_nbors_lens,
+                    max_output_lens=max_tcs_lens,
                     latent_lens=tokens_nbors_lens,
                     output_lens=tcs_lens,
                     coordinates=t_coords,
