@@ -58,10 +58,10 @@ class LossPhysical(LossModuleBase):
 
         self.forecast_offset = mode_cfg.get("window_offset_prediction", 0)
 
-        # Dynamically load loss functions based on configuration and stage
+        # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [
-                getattr(loss_fns, name if name != "mse" else "mse_channel_location_weighted"),
+                getattr(loss_fns, name),
                 params.get("weight", 1.0),
                 name,
             ]

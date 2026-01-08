@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -98,21 +99,60 @@ def plot_metric_region(
                 if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
                     continue
 
+                data, time_dim = _assign_time_coord(data)
+
                 selected_data.append(data.sel(channel=ch))
                 labels.append(runs[run_id].get("label", run_id))
                 run_ids.append(run_id)
 
             if selected_data:
                 _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
-                name = "_".join([metric, region] + sorted(set(run_ids)) + [stream, ch])
+                name = create_filename(
+                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
+                )
                 plotter.plot(
                     selected_data,
                     labels,
                     tag=name,
-                    x_dim="forecast_step",
+                    x_dim=time_dim,
                     y_dim=metric,
                     print_summary=print_summary,
                 )
+
+
+def _assign_time_coord(data: object) -> object:
+    """Ensure that lead_time coordinate exists in the data array.
+
+    Parameters
+    ----------
+    data : xarray.DataArray
+        The data array to check.
+
+    Returns
+    -------
+    xarray.DataArray
+        The data array with lead_time coordinate ensured.
+
+    time_dim : str
+        The name of the time dimension used for x-axis.
+    """
+    if "forecast_step" not in data.dims and "forecast_step" not in data.coords:
+        raise ValueError("forecast_step coordinate not found in data dimensions or coordinates.")
+
+    time_dim = "forecast_step"
+
+    if "lead_time" in data.coords and data["forecast_step"].size == data["lead_time"].size:
+        data = data.swap_dims({"forecast_step": "lead_time"})
+
+    # Prefer lead_time as x_dim if present in dimensions
+    if "lead_time" in data.dims:
+        time_dim = "lead_time"
+    else:
+        _logger.warning(
+            "lead_time coordinate not found or mismatched size; using forecast_step as x-axis."
+        )
+
+    return data, time_dim
 
 
 def ratio_plot_metric_region(
@@ -160,7 +200,10 @@ def ratio_plot_metric_region(
 
         if len(selected_data) > 0:
             _logger.info(f"Creating Ratio plot for {metric} - {stream}")
-            name = "_".join([metric] + sorted(set(run_ids)) + [stream])
+
+            name = create_filename(
+                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
+            )
             plotter.ratio_plot(
                 selected_data,
                 run_ids,
@@ -207,6 +250,9 @@ def heat_maps_metric_region(
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
             if data.isnull().all():
                 continue
+
+            data, time_dim = _assign_time_coord(data)
+
             selected_data.append(data)
             label = runs[run_id].get("label", run_id)
             if label != run_id:
@@ -216,12 +262,15 @@ def heat_maps_metric_region(
 
         if len(selected_data) > 0:
             _logger.info(f"Creating Heat maps for {metric} - {stream}")
-            name = "_".join(sorted(set(run_ids)) + [stream])
+            name = create_filename(
+                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
+            )
             plotter.heat_map(
                 selected_data,
                 labels,
                 metric=metric,
                 tag=name,
+                x_dim=time_dim,
             )
 
 
@@ -358,3 +407,61 @@ class DefaultMarkerSize:
             List of stream names.
         """
         return list(cls._marker_size_stream.keys())
+
+
+def create_filename(
+    *,
+    prefix: Sequence[str] = (),
+    middle: Iterable[str] = (),
+    suffix: Sequence[str] = (),
+    sep: str = "_",
+    max_len: int = 255,
+):
+    """
+    Join strings as: prefix + middle + suffix, truncating only `middle`
+    to ensure the final string does not exceed max_len.
+
+    Parameters
+    ----------
+    prefix : Sequence[str]
+        Parts that must appear before the truncated section.
+    middle : Iterable[str]
+        Parts that may be truncated (order preserved).
+    suffix : Sequence[str]
+        Parts that must appear after the truncated section.
+    sep : str
+        Separator used for joining.
+    max_len : int
+        Maximum total length of the joined string.
+
+    Returns
+    -------
+    str
+        The joined string, with only `middle` truncated if necessary.
+    """
+
+    pref, mid, suf = map(lambda x: list(map(str, x)), (prefix, middle, suffix))
+    fixed = sep.join(pref + suf)
+    avail = max_len - len(fixed)
+
+    if mid and pref:
+        avail -= len(sep)
+    if mid and suf:
+        avail -= len(sep)
+
+    truncated_middle, used = [], 0
+
+    for x in mid:
+        d = len(x) + (len(sep) if truncated_middle else 0)
+        if used + d > avail:
+            break
+        truncated_middle.append(x)
+        used += d
+
+    if len(truncated_middle) < len(mid):
+        _logger.warning(
+            f"Filename truncated: only {len(truncated_middle)} of {len(mid)} middle parts used "
+            f"to keep length <= {max_len}."
+        )
+
+    return sep.join(prefix + truncated_middle + suffix)

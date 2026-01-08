@@ -102,7 +102,7 @@ def calc_scores_per_stream(
     ensemble = available_data.ensemble
     is_regular = reader.is_regular(stream)
     group_by_coord = None if is_regular else "sample"
-    step_hrs = reader.step_hrs if hasattr(reader, "step_hrs") else 1
+
     output_data = reader.get_data(
         stream,
         fsteps=fsteps,
@@ -138,6 +138,8 @@ def calc_scores_per_stream(
                 "ens": ensemble,
             },
         )
+
+        lead_time_map = {}
 
         for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
             if preds.ipoint.size == 0:
@@ -200,15 +202,28 @@ def calc_scores_per_stream(
 
             metric_stream.loc[criteria] = combined_metrics
 
+            lead_time_map[fstep] = (
+                np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
+                if "lead_time" in combined_metrics.coords
+                else None
+            )
+
             if is_regular and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
                 _plot_score_maps_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
                 )
 
-        _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
+        lead_time_values = np.array(
+            [lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values]
+        ).squeeze()
 
-        metric_stream["forecast_step"] = metric_stream["forecast_step"] * step_hrs
+        if lead_time_values.shape == metric_stream.forecast_step.shape:
+            metric_stream = metric_stream.assign_coords(
+                lead_time=("forecast_step", lead_time_values)
+            )
+
+        _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
         # Build local dictionary for this region
         for metric in metrics:
@@ -433,10 +448,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
 
 def metric_list_to_json(
     reader: Reader,
-    metrics_list: list[xr.DataArray],
-    npoints_sample_list: list[xr.DataArray],
-    streams: list[str],
-    region: str,
+    stream: str,
+    metrics_dict: list[xr.DataArray],
+    regions: list[str],
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -461,34 +475,24 @@ def metric_list_to_json(
     mini_epoch :
         Mini_epoch number.
     """
-    assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
-        "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
-    )
-
+    # stream_loaded_scores['rmse']['nhem']['ERA5']['jjqce6x5']
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    for s_idx, stream in enumerate(streams):
-        metrics_stream, npoints_sample_stream = (
-            metrics_list[s_idx],
-            npoints_sample_list[s_idx],
-        )
+    for metric, metric_stream in metrics_dict.items():
+        for region in regions:
+            metric_now = metric_stream[region][stream]
+            for run_id in metric_now.keys():
+                metric_now = metric_now[run_id]
 
-        for metric in metrics_stream.coords["metric"].values:
-            metric_now = metrics_stream.sel(metric=metric)
+                # Match the expected filename pattern
+                save_path = (
+                    reader.metrics_dir
+                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
+                )
 
-            # Save as individual DataArray, not Dataset
-            metric_now.attrs["npoints_per_sample"] = npoints_sample_stream.values.tolist()
-            metric_dict = metric_now.to_dict()
-
-            # Match the expected filename pattern
-            save_path = (
-                reader.metrics_dir
-                / f"{reader.run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
-            )
-
-            _logger.info(f"Saving results to {save_path}")
-            with open(save_path, "w") as f:
-                json.dump(metric_dict, f, indent=4)
+                _logger.info(f"Saving results to {save_path}")
+                with open(save_path, "w") as f:
+                    json.dump(metric_now.to_dict(), f, indent=4)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "
