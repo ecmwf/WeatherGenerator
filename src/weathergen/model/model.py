@@ -24,13 +24,13 @@ from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
+    BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
     LatentPredictionHead,
     LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
-    BilinearDecoder,
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
@@ -708,7 +708,7 @@ class Model(torch.nn.Module):
                 if self.cf.decoder_type == "Linear":
                     pred = checkpoint(
                         self.target_token_engines[stream_name],
-                        tc_tokens.unsqueeze(0), # adding the batch dimension
+                        tc_tokens.unsqueeze(0),  # adding the batch dimension
                         tokens,
                         tcs_lens,
                         use_reentrant=False,
@@ -723,9 +723,7 @@ class Model(torch.nn.Module):
                     )
 
                     # final prediction head to map back to physical space
-                    pred = checkpoint(
-                        self.pred_heads[stream_name], tc_tokens, use_reentrant=False
-                    )
+                    pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
 
             output.add_physical_prediction(fstep, stream_name, pred)
 
