@@ -40,7 +40,7 @@ ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
-decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
+decoder_type: PerceiverIOCoordConditioning # Linear
 pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False

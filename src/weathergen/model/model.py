@@ -395,30 +395,31 @@ class Model(torch.nn.Module):
                     else:
                         assert False
 
-                    # target prediction engines
-                    tte_version = (
-                        TargetPredictionEngine
-                        if cf.decoder_type != "PerceiverIOCoordConditioning"
-                        else TargetPredictionEngineClassic
-                    )
-                    tte = tte_version(
-                        cf,
-                        dims_embed,
-                        dim_coord_in,
-                        tr_dim_head_proj,
-                        tr_mlp_hidden_factor,
-                        softcap,
-                        tro_type,
-                        stream_name=stream_name,
-                    )
-
-                    if True:
+                    if cf.decoder_type == "Linear":
                         tte = BilinearDecoder(
                             stream_name,
                             dims_embed[0],
                             cf.ae_global_dim_embed,
                             self.targets_num_channels[i_stream],
                         )
+                    else:
+                        # target prediction engines
+                        tte_version = (
+                            TargetPredictionEngine
+                            if cf.decoder_type != "PerceiverIOCoordConditioning"
+                            else TargetPredictionEngineClassic
+                        )
+                        tte = tte_version(
+                            cf,
+                            dims_embed,
+                            dim_coord_in,
+                            tr_dim_head_proj,
+                            tr_mlp_hidden_factor,
+                            softcap,
+                            tro_type,
+                            stream_name=stream_name,
+                        )
+
                     self.target_token_engines[stream_name] = tte
 
                     # ensemble prediction heads to provide probabilistic prediction
@@ -704,11 +705,11 @@ class Model(torch.nn.Module):
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
-                if True:
+                if self.cf.decoder_type == "Linear":
                     pred = checkpoint(
                         self.target_token_engines[stream_name],
-                        tc_tokens,
-                        tokens_nbors,
+                        tc_tokens.unsqueeze(0), # adding the batch dimension
+                        tokens,
                         tcs_lens,
                         use_reentrant=False,
                     )

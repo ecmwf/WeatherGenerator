@@ -854,19 +854,22 @@ class LatentPredictionHead(nn.Module):
         # We concatenate in the token dimension [Batch, Tokens, Dim]
         return torch.cat(outputs, dim=1)
 
-class BilinearDecoder(nn.Module):
 
-    def __init__(self, name, coord_dim, latent_dim, out_dim):
+class BilinearDecoder(nn.Module):
+    def __init__(self, stream_name, coord_dim, latent_dim, out_dim):
         super().__init__()
 
-        self.name = name 
+        self.name = f"BilinearDecoder_{stream_name}"
         self.latent_dim = latent_dim
-        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False) 
+        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
 
-    def forward(self, coords, latent, tcs_lens):
-        # 9* because 9 neighbours
-        latent = latent.reshape(-1, 9, self.latent_dim)[:,0]
-        latent = torch.repeat_interleave(latent, tcs_lens[1:], 0)
-        return self.bilin(coords, latent).unsqueeze(0)
-        
-
+    def forward(self, coords_BMD, latent_BND, tcs_lens_BN1):
+        """
+        Using Noam Shazeer notation
+        B = Batchsize
+        N = Number of latent tokens (N1 means N+1)
+        M = Number of coordinates to decode
+        D = Hidden dimension
+        """
+        latent_BMD = torch.repeat_interleave(latent_BND, tcs_lens_BN1[1:], 1)
+        return self.bilin(coords_BMD, latent_BMD)
