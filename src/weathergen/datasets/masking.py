@@ -126,16 +126,21 @@ class Masker:
         """
         self.rng = rng
 
-    def _get_sampling_rate(self, base_rate):
+    def _get_sampling_rate(self, cfg):
         """
         Get the sampling, if requested by sampling it itself
         """
 
-        rate = np.clip(
-            np.abs(self.rng.normal(loc=base_rate, scale=1.0 / (2.5 * np.pi))),
-            0.01,
-            0.99,
-        )
+        rate = cfg.get("rate", None)
+        assert rate is not None, 'No sampling rate "rate" specified.'
+
+        if cfg.get("rate_sampling", False):
+            rate = np.clip(
+                np.abs(self.rng.normal(loc=rate, scale=1.0 / (2.5 * np.pi))),
+                0.01,
+                0.99,
+            )
+        assert 0.0 <= rate <= 1.0, f"keep_rate out of bounds: {rate}"
 
         return rate
 
@@ -380,16 +385,6 @@ class Masker:
         # params describing the masking
         masking_params = {}
 
-        # get config for mask
-
-        cfg = masking_strategy_config
-        keep_rate = cfg.get("rate", None)
-        assert keep_rate is not None, 'No sampling rate "rate" specified.'
-
-        if masking_strategy_config.get("rate_sampling", False):
-            keep_rate = self._get_sampling_rate()
-
-        assert 0.0 <= keep_rate <= 1.0, f"keep_rate out of bounds: {keep_rate}"
         assert num_cells == self.healpix_num_cells, (
             "num_cells inconsistent with configured healpix level."
         )
@@ -397,6 +392,7 @@ class Masker:
         # generate cell mask
 
         if strategy == "random":
+            keep_rate = self._get_sampling_rate(masking_strategy_config)
             mask = self.rng.uniform(0, 1, num_cells) < keep_rate
 
         elif "forecast" in strategy or strategy == "causal":
@@ -407,8 +403,9 @@ class Masker:
 
         elif strategy == "healpix":
             # prepare healpix-based masking
+            keep_rate = self._get_sampling_rate(masking_strategy_config)
             hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
-                self._prepare_healpix_based_masking(cfg, keep_rate)
+                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
             )
 
             if num_parents_to_keep == 0:
@@ -425,15 +422,16 @@ class Masker:
         # Spatial healpix based cropping, select contiguous region
         elif strategy == "cropping_healpix":
             # prepare healpix-based masking
+            keep_rate = self._get_sampling_rate(masking_strategy_config)
             hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
-                self._prepare_healpix_based_masking(cfg, keep_rate)
+                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
             )
 
             if num_parents_to_keep == 0:
                 mask = np.zeros(num_cells, dtype=bool)
             else:
                 # Spatial selection method
-                method = cfg.get("method", "geodesic_disk")  # default to geodesic_disk
+                method = masking_strategy_config.get("method", "geodesic_disk")
 
                 # Use standard spatial selection
                 mask = self._select_spatially_contiguous_cells(
