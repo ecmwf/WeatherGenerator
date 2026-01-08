@@ -71,7 +71,7 @@ class EmbeddingEngine(torch.nn.Module):
                     norm_type=self.cf.norm_type,
                     unembed_mode=self.cf.embed_unembed_mode,
                     stream_name=stream_name,
-                    cf=self.cf
+                    cf=self.cf,
                 )
             elif si["embed"]["net"] == "linear":
                 self.embeds[stream_name] = StreamEmbedLinear(
@@ -481,7 +481,9 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-        self.checkpoint_fe = partial(cond_checkpoint, self.cf.get("fe_gradient_checkpoint_enabled", True))
+        self.checkpoint_fe = partial(
+            cond_checkpoint, self.cf.get("fe_gradient_checkpoint_enabled", True)
+        )
 
     def forward(self, tokens, fstep):
         aux_info = None
@@ -634,7 +636,8 @@ class TargetPredictionEngineClassic(nn.Module):
             )
 
         self.checkpoint_pred = partial(
-            cond_checkpoint, self.cf.get("target_pred_engine_classic_gradient_checkpoint_enabled", True)
+            cond_checkpoint,
+            self.cf.get("target_pred_engine_classic_gradient_checkpoint_enabled", True),
         )
 
     def forward(self, latent, output, latent_lens, output_lens, coordinates):

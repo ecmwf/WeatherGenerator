@@ -7,10 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from collections.abc import Callable
+
 import torch
 import torch.nn as nn
-from typing import Callable, Optional
 from torch.utils.checkpoint import checkpoint
+
 
 #########################################
 def get_num_parameters(block):
@@ -26,17 +28,18 @@ def freeze_weights(block):
 
 ########################################
 def cond_checkpoint(
-        enable_checkpoint: bool,
-        function: Callable,
-        *args,
-        use_reentrant: Optional[bool] = None,
-        **kwargs
+    enable_checkpoint: bool,
+    function: Callable,
+    *args,
+    use_reentrant: bool | None = None,
+    **kwargs,
 ):
     if enable_checkpoint:
-        checkpoint_kwargs = {'use_reentrant': use_reentrant} if use_reentrant is not None else {}
+        checkpoint_kwargs = {"use_reentrant": use_reentrant} if use_reentrant is not None else {}
         return checkpoint(function, *args, **checkpoint_kwargs, **kwargs)
     else:
         return function(*args, **kwargs)
+
 
 #########################################
 class ActivationFactory:

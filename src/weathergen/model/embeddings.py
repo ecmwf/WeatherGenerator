@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from functools import partial
+
 import numpy as np
 import torch
 
@@ -18,7 +20,6 @@ from weathergen.model.norms import RMSNorm
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 from weathergen.model.utils import cond_checkpoint
 
-from functools import partial
 
 class StreamEmbedTransformer(torch.nn.Module):
     def __init__(
@@ -176,7 +177,9 @@ class StreamEmbedTransformer(torch.nn.Module):
 
     def forward_columns(self, x_in):
         # embed provided input data
-        x = positional_encoding_harmonic(checkpoint(self.embed, x_in, use_reentrant=False))
+        x = positional_encoding_harmonic(
+            self.checkpoint_stream_embed(self.embed, x_in, use_reentrant=False)
+        )
 
         for layer in self.layers:
             x = self.checkpoint_stream_embed(layer, x, use_reentrant=False)
