@@ -165,7 +165,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
-                    [info.mask for info in metadata],
+                    [info.mask for info in metadata if "JEPA" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -185,7 +185,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
-                    [info.mask for info in metadata],
+                    [info.mask for info in metadata if "iBOT" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
                 "teacher_class_masked": torch.stack(

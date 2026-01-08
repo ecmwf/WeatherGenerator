@@ -252,7 +252,7 @@ class Masker:
 
         # iterate over all target samples
         # different strategies
-        for _, target_cfg in target_cfgs.items():
+        for i_cfg, (_, target_cfg) in enumerate(target_cfgs.items()):
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
                 target_mask, mask_params = self._get_mask(
@@ -261,7 +261,11 @@ class Masker:
                     masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
                     target_relationship_mask=("independent", None),
                 )
-                target_masks.add_mask(target_mask, mask_params, target_cfg, None)
+                # get all losses and flatten
+                losses = [v[1][1] for _, v in corr_dict.items() if v[0] == i_cfg]
+                losses = [i for ii in losses for i in ii]
+                # add
+                target_masks.add_mask(target_mask, mask_params, target_cfg, losses)
 
         source_masks = MaskData()
         source_target_mapping = []
