@@ -1,4 +1,5 @@
 # ruff: noqa: N801, N806
+# pylint: disable=W0201
 
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
@@ -52,7 +53,7 @@ class iBOTPatchTargetProcessing(nn.Module):
         self.len_teacher_patch_tokens = None
         self.async_batch_center = None
         self.teacher_style = teacher_style
-        self.center = None
+        # self.center cannot be initialised with None then the code breaks hence the disabled pylint
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
@@ -174,7 +175,7 @@ class DINOTargetProcessing(nn.Module):
         self.len_teacher_output = None
         self.async_batch_center = None
         self.teacher_style = teacher_style
-        self.center = None
+        # self.center cannot be initialised with None then the code breaks hence the disabled pylint
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
