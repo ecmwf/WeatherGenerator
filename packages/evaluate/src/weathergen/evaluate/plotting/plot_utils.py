@@ -10,6 +10,7 @@
 import logging
 
 import numpy as np
+import xarray as xr
 
 _logger = logging.getLogger(__name__)
 
@@ -98,8 +99,6 @@ def plot_metric_region(
                 if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
                     continue
 
-                data, time_dim = _assign_time_coord(data)
-
                 selected_data.append(data.sel(channel=ch))
                 labels.append(runs[run_id].get("label", run_id))
                 run_ids.append(run_id)
@@ -107,6 +106,9 @@ def plot_metric_region(
             if selected_data:
                 _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
                 name = "_".join([metric, region] + sorted(set(run_ids)) + [stream, ch])
+
+                selected_data, time_dim = _assign_time_coord(selected_data)
+
                 plotter.plot(
                     selected_data,
                     labels,
@@ -117,12 +119,12 @@ def plot_metric_region(
                 )
 
 
-def _assign_time_coord(data: object) -> object:
+def _assign_time_coord(selected_data: list[xr.DataArray]) -> tuple[xr.DataArray, str]:
     """Ensure that lead_time coordinate exists in the data array.
 
     Parameters
     ----------
-    data : xarray.DataArray
+    selected_data : list[xarray.DataArray]
         The data array to check.
 
     Returns
@@ -133,23 +135,30 @@ def _assign_time_coord(data: object) -> object:
     time_dim : str
         The name of the time dimension used for x-axis.
     """
-    if "forecast_step" not in data.dims and "forecast_step" not in data.coords:
-        raise ValueError("forecast_step coordinate not found in data dimensions or coordinates.")
 
     time_dim = "forecast_step"
 
-    if "lead_time" in data.coords and data["forecast_step"].size == data["lead_time"].size:
-        data = data.swap_dims({"forecast_step": "lead_time"})
+    for data in selected_data:
+        if "forecast_step" not in data.dims and "forecast_step" not in data.coords:
+            raise ValueError(
+                "forecast_step coordinate not found in data dimensions or coordinates."
+            )
 
-    # Prefer lead_time as x_dim if present in dimensions
-    if "lead_time" in data.dims:
-        time_dim = "lead_time"
-    else:
-        _logger.warning(
-            "lead_time coordinate not found or mismatched size; using forecast_step as x-axis."
-        )
+        if "lead_time" not in data.coords:
+            _logger.warning(
+                "lead_time coordinate not found for all plotted data; "
+                "using forecast_step as x-axis."
+            )
+            return selected_data, time_dim
 
-    return data, time_dim
+    # Swap forecast_step with lead_time if all available run_ids have lead_time coord
+    time_dim = "lead_time"
+
+    for i, data in enumerate(selected_data):
+        if data.coords["lead_time"].shape == data.coords["forecast_step"].shape:
+            selected_data[i] = data.swap_dims({"forecast_step": "lead_time"})
+
+    return selected_data, time_dim
 
 
 def ratio_plot_metric_region(
@@ -245,8 +254,6 @@ def heat_maps_metric_region(
             if data.isnull().all():
                 continue
 
-            data, time_dim = _assign_time_coord(data)
-
             selected_data.append(data)
             label = runs[run_id].get("label", run_id)
             if label != run_id:
@@ -257,6 +264,9 @@ def heat_maps_metric_region(
         if len(selected_data) > 0:
             _logger.info(f"Creating Heat maps for {metric} - {stream}")
             name = "_".join(sorted(set(run_ids)) + [stream])
+
+            selected_data, time_dim = _assign_time_coord(selected_data)
+
             plotter.heat_map(
                 selected_data,
                 labels,
