@@ -9,7 +9,8 @@
 
 import torch
 import torch.nn as nn
-
+from typing import Callable, Optional
+from torch.utils.checkpoint import checkpoint
 
 #########################################
 def get_num_parameters(block):
@@ -22,6 +23,20 @@ def freeze_weights(block):
     for p in block.parameters():
         p.requires_grad = False
 
+
+########################################
+def cond_checkpoint(
+        enable_checkpoint: bool,
+        function: Callable,
+        *args,
+        use_reentrant: Optional[bool] = None,
+        **kwargs
+):
+    if enable_checkpoint:
+        checkpoint_kwargs = {'use_reentrant': use_reentrant} if use_reentrant is not None else {}
+        return checkpoint(function, *args, **checkpoint_kwargs, **kwargs)
+    else:
+        return function(*args, **kwargs)
 
 #########################################
 class ActivationFactory:
