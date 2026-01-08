@@ -288,6 +288,8 @@ def evaluate_from_config(
             reader = WeatherGenReader(run, run_id, private_paths)
         elif type_ == "csv":
             reader = CsvReader(run, run_id, private_paths)
+        elif type_ == "merge":
+            reader = WeatherGenMergeReader(run, run_id, private_paths)
         else:
             raise ValueError(f"Unknown run type: {type_}")
 
