@@ -27,14 +27,13 @@ def write_output(
     """
 
     # TODO: how to handle multiple physical loss terms
-    idx_physical = [
-        i
-        for i, loss_term in enumerate(val_cfg.losses)
-        for _, v in loss_term.items()
-        if v.type == "LossPhysical"
+    outputs_physical = [
+        loss_name
+        for i, (loss_name, loss_term) in enumerate(val_cfg.losses.items())
+        if loss_term.type == "LossPhysical"
     ]
-    assert len(idx_physical) == 1
-    target_aux_out = target_aux_out[idx_physical[0]]
+    assert len(outputs_physical) == 1
+    target_aux_out = target_aux_out[outputs_physical[0]]
 
     # collect all target / prediction-related information
     fp32 = torch.float32
@@ -49,23 +48,30 @@ def write_output(
         targets_times_all += [[]]
         for stream_info in cf.streams:
             # predictions
-            pred = model_output.get_physical_prediction(fstep, stream_info["name"]).to(fp32)
-            target = target_aux_out.physical[stream_info["name"]][fstep]["target"].to(fp32)
+            preds = model_output.get_physical_prediction(fstep, stream_info["name"])
+            targets = target_aux_out.physical[stream_info["name"]][fstep]["target"]
 
-            if not (target.shape[0] > 0 and pred.shape[0] > 0):
-                continue
+            for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
+                pred, target = pred.to(fp32), target.to(fp32)
 
-            # extract data/coords and remove token dimension if it exists
-            pred = pred.reshape([pred.shape[0], *target.shape])
-            assert pred.shape[1] > 0
+                if not (target.shape[0] > 0 and pred.shape[0] > 0):
+                    continue
 
-            # TODO: the inner lists here should not be needed
-            preds_all[-1] += [[dn_data(stream_info["name"], pred).detach().cpu().numpy()]]
-            targets_all[-1] += [[dn_data(stream_info["name"], target).detach().cpu().numpy()]]
+                # extract data/coords and remove token dimension if it exists
+                pred = pred.reshape([pred.shape[0], *target.shape])
+                assert pred.shape[1] > 0
 
-            sname = stream_info["name"]
-            targets_coords_all[-1] += [target_aux_out.physical[sname][fstep]["target_coords"]]
-            targets_times_all[-1] += [target_aux_out.physical[sname][fstep]["target_times"]]
+                # TODO: the inner lists here should not be needed
+                preds_all[-1] += [[dn_data(stream_info["name"], pred).detach().cpu().numpy()]]
+                targets_all[-1] += [[dn_data(stream_info["name"], target).detach().cpu().numpy()]]
+
+                sname = stream_info["name"]
+                targets_coords_all[-1] += [
+                    target_aux_out.physical[sname][fstep]["target_coords"][i_batch].cpu().numpy()
+                ]
+                targets_times_all[-1] += [
+                    target_aux_out.physical[sname][fstep]["target_times"][i_batch]
+                ]
 
     #         # TODO: re-enable
     #           if len(idxs_inv) > 0:
@@ -79,7 +85,7 @@ def write_output(
 
     # collect source information
     sources = []
-    for sample in batch.source_samples:
+    for sample in batch.get_source_samples().get_samples():
         sources += [[]]
         for _, stream_data in sample.streams_data.items():
             # TODO: support multiple input steps
@@ -87,7 +93,7 @@ def write_output(
 
     sample_idxs = [
         [sdata.sample_idx for _, sdata in sample.streams_data.items()]
-        for sample in batch.source_samples
+        for sample in batch.get_source_samples().get_samples()
     ]
     sample_idxs = [s[0].item() for s in sample_idxs]
 

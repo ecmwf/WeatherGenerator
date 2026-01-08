@@ -498,21 +498,27 @@ class Trainer(TrainerBase):
                             else self.ema_model.forward_eval
                         )
                         preds = model_forward(
-                            self.model_params, batch, self.validation_cfg.window_offset_prediction
+                            self.model_params,
+                            batch.get_source_samples(),
+                            self.validation_cfg.window_offset_prediction,
                         )
-                        target_aux_output = [
-                            target_aux.compute(
+
+                        targets_and_auxs = {}
+                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                            tc_key = "target_source_correspondence"
+                            tc = self.validation_cfg.losses[loss_name].get(tc_key)
+                            target_idxs = list(tc.keys()) if tc is not None else None
+                            targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
-                                batch,
+                                batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
                                 self.validation_cfg.window_offset_prediction,
                             )
-                            for target_aux in self.target_and_aux_calculators_val
-                        ]
+
                     _ = self.loss_calculator_val.compute_loss(
                         preds=preds,
-                        targets=target_aux_output,
+                        targets=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
                     )
 
@@ -532,7 +538,7 @@ class Trainer(TrainerBase):
                             dn_data,
                             batch,
                             preds,
-                            target_aux_output,
+                            targets_and_auxs,
                         )
 
                     pbar.update(self.batch_size_validation_per_gpu)
