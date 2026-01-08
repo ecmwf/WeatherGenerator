@@ -48,10 +48,7 @@ class LossPhysical(LossModuleBase):
         self.name = "LossPhysical"
 
         # Dynamically load loss functions based on configuration and stage
-        self.loss_fcts = [
-            [getattr(loss_fns, name), w, name]
-            for name, w in loss_fcts
-        ]
+        self.loss_fcts = [[getattr(loss_fns, name), w, name] for name, w in loss_fcts]
 
     def _get_weights(self, stream_info):
         """
