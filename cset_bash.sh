@@ -20,8 +20,7 @@ export CFLAGS="-I$LIBMO_DIR/include"
 export LDFLAGS="-L$LIBMO_DIR/lib"
 export PKG_CONFIG_PATH="$LIBMO_DIR/lib/pkgconfig:$PKG_CONFIG_PATH"
 
-uv pip install --no-binary :all: git+https://github.com/SciTools/mo_pack.git
-uv pip install numpy==1.26.4
-uv pip install CSET==25.12.1
+uv pip install --no-binary :all: git+https://github.com/SciTools/mo_pack.git@8fb088227f4ffd1b45823309feb65cc6495fb19a
+uv pip install numpy==1.26.4 CSET==25.12.1
 
 echo $LD_LIBRARY_PATH

@@ -1,0 +1,39 @@
+# Name of the recipe.
+title: Surface air temperature spatial plot
+# Category of recipe, used to group together multiple recipes in output.
+category: Quick look
+# Description will be displayed alongside output.
+description: |
+  Extended description that can go across multiple lines. It is written in
+  [Markdown](https://commonmark.org/help/) and can thus contain links and
+  _formatting_.
+
+# Sequence of steps to run.
+steps:
+  # Specify the operator to run in each step.
+  - operator: read.read_cubes
+    # Specify the name of the argument, and its value.
+    file_paths: "/users/sowens/WeatherGenerator/test_CSETinput/*.nc"
+
+  - operator: filters.filter_cubes
+    # Can specify extra keyword arguments as sub-maps.
+    constraint:
+      operator: constraints.combine_constraints
+      var_constraint:
+        # Can nest in another operator to use its output as an argument,
+        # multiple levels deep if needed.
+        operator: constraints.generate_var_constraint
+        # Input implicitly taken from the previous step, but can be overridden
+        # by using the appropriate keyword argument.
+        varname: m01s03i236
+      cell_method_constraint:
+        operator: constraints.generate_cell_methods_constraint
+        # Values can be more than just strings, such as this empty list.
+        cell_methods: []
+
+  # Save a sequence of plots, one per time.
+  - operator: plot.spatial_pcolormesh_plot
+
+  # Save a single cube with all the processed data.
+  - operator: write.write_cube_to_nc
+    overwrite: True
