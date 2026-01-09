@@ -546,7 +546,7 @@ class Trainer(TrainerBase):
 
                     pbar.update(self.batch_size_validation_per_gpu)
 
-                self._log_terminal(bidx, mini_epoch, VAL)
+                self._log_terminal( 0, mini_epoch, VAL)
                 self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
