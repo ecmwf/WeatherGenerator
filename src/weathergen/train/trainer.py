@@ -98,9 +98,14 @@ class Trainer(TrainerBase):
         self.freeze_modules = cf.get("freeze_modules", "")
 
         self.training_cfg = cf.get("training_config")
-        # validation and test configs are training config, updated by specified keys
+        # validation and test configs are training confforecastig, updated by specified keys
+        
         self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
         self.test_cfg = merge_configs(self.validation_cfg, cf.get("test_config", {}))
+
+        
+        cf.validation_config = self.validation_cfg
+        cf.test_config = self.test_cfg
 
         # batch sizes
         self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)

@@ -24,7 +24,7 @@ class MaskData:
     def __len__(self):
         return len(self.masks)
 
-    def add_mask(self, mask, params, cfg, losses, idx, correspondence):
+    def add_mask(self, mask, params, cfg, losses, idx, correspondence, relationship):
         self.masks += [mask]
         self.metadata += [
             SampleMetaData(
@@ -34,6 +34,7 @@ class MaskData:
                     "idx": idx,
                     "correspondence": correspondence,
                     "loss": losses,
+                    "relationship": relationship,
                 },
             )
         ]
@@ -268,7 +269,9 @@ class Masker:
                 if len(corr) == 0:
                     continue
                 # add
-                target_masks.add_mask(target_mask, mask_params, target_cfg, losses, i_target, corr)
+                target_masks.add_mask(
+                    target_mask, mask_params, target_cfg, losses, i_target, corr, None
+                )
                 i_target += 1
 
         source_masks = MaskData()
@@ -305,7 +308,9 @@ class Masker:
                     target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                 )
                 corr = target_idx
-                source_masks.add_mask(source_mask, mask_params, source_cfg, losses, i_source, corr)
+                source_masks.add_mask(
+                    source_mask, mask_params, source_cfg, losses, i_source, corr, relationship
+                )
 
                 source_target_mapping += [target_idx]
                 i_source += 1

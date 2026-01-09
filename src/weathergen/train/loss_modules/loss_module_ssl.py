@@ -131,6 +131,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     preds[sidx]
                     for sidx in student_indices
                     if "DINO" in metadata[sidx].global_params["loss"]
+                    and metadata[sidx].global_params["relationship"] != "identity"
                 ]
                 local2global_dino_student.append(local_preds)
             local2global_dino_student = [
@@ -251,7 +252,8 @@ def ibot_loss(
     teacher_masks = teacher_masks.squeeze(dim=1)
     loss = loss_fns.masked_student_teacher_patch_softmax(
         student_patches_masked, teacher_patches_masked, student_masks, teacher_masks, student_temp
-    ) + loss_fns.student_teacher_softmax(student_class_masked, teacher_class_masked, student_temp)
+    ) 
+    loss = loss + loss_fns.student_teacher_softmax(student_class_masked, teacher_class_masked, student_temp)
     return loss / 2
 
 
