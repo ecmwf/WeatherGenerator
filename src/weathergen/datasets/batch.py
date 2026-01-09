@@ -128,6 +128,7 @@ class BatchSamples:
         if subset is None:
             return self
         else:
+            assert len(list(set(subset))) == len(subset), "subset contains duplicates"
             # create copy and then select subset for samples and tokens_lens
             bs = copy.deepcopy(self)
             bs.samples = [bs.samples[i] for i in subset]
