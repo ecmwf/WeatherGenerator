@@ -238,6 +238,9 @@ class Masker:
                     continue
                 # add valid entry, source-target pair can have multiple losses
                 losses = [rl[1] for rl in rel_loss]
+                # add, making sure that each source has only one target (subset relationships
+                # but also physical loss )
+                assert corr_dict.get(k_source) is None, "source cfg needs unique target"
                 corr_dict[k_source] = (k_target, (rel_loss[0][0], losses))
 
         # TODO: check validity of target_source_correspondence with target and source cfgs
