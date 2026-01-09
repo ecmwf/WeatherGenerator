@@ -187,4 +187,4 @@ wgtags:
   # Examples: "rollout_ablation_grid"  
   exp: "rollout_params"
   # *** Experiment-specific tags ***
-  grid_search: 1
+  grid_search: "dropout"
