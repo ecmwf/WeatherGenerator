@@ -10,6 +10,7 @@
 # Standard library
 import json
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 # Third-party
@@ -151,7 +152,9 @@ class WeatherGenReader(Reader):
         _logger.debug(f"Channels found in config: {all_channels}")
         return all_channels
 
-    def load_scores(self, stream: str, regions: list[str], metrics: list[str]) -> xr.DataArray | None:
+    def load_scores(
+        self, stream: str, regions: list[str], metrics: list[str]
+    ) -> xr.DataArray | None:
         """
         Load multiple pre-computed scores for a given run, stream and metric and epoch.
 
@@ -199,18 +202,18 @@ class WeatherGenReader(Reader):
         return local_scores, missing_metrics
 
     def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
-        '''
+        """
         Load a single pre-computed score for a given run, stream and metric
-        '''
+        """
         score_path = (
-                    Path(self.metrics_dir)
-                    / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
-                )
+            Path(self.metrics_dir)
+            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
+        )
         _logger.debug(f"Looking for: {score_path}")
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
-                score = xr.DataArray.from_dict(data_dict) # not a dict though
+                score = xr.DataArray.from_dict(data_dict)  # not a dict though
         else:
             score = None
         return score
@@ -238,28 +241,57 @@ class WeatherGenReader(Reader):
                 return stream.get(key, default)
         return default
 
-class WeatherGenJSONReader(WeatherGenReader):
 
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, region: str = "global", metric: str = "rmse"):
+class WeatherGenJSONReader(WeatherGenReader):
+    def __init__(
+        self,
+        eval_cfg: dict,
+        run_id: str,
+        private_paths: dict | None = None,
+        regions: list[str] | None = None,
+        metrics: list[str] | None = None,
+    ):
         super().__init__(eval_cfg, run_id, private_paths)
-        # is this the best way to learn which steps and samples are available? 
-        stream=list(self.eval_cfg.streams.keys())[0]
-        dummy = self.load_single_score( stream, region, metric ) 
-        if dummy is None:
-            raise ValueError(f"JSONreader could not find {metric} for {run_id}, stream {stream}, region {region}. "
-                               "use type: zarr instead if possible")
-        self.samples = set(dummy.sample.values)
-        self.fsteps = set(dummy.forecast_step.values)
-        self.ens = list(dummy.ens.values)
+        # goes looking for the coordinates available for all streams, regions, metrics
+        streams = list(self.eval_cfg.streams.keys())
+        coord_names = ["sample", "forecast_step", "ens"]
+        all_coords = {name: [] for name in coord_names}  # collect all available coordinates
+        provenance = {
+            name: defaultdict(list) for name in coord_names
+        }  # remember who had which coords, so we can warn about it later.
+        for stream in streams:
+            for region in regions:
+                for metric in metrics:
+                    score = self.load_single_score(stream, region, metric)
+                    if score is None:
+                        raise ValueError(
+                            f"JSONreader couldn't find {metric} for {run_id}, stream {stream}, "
+                            f"region {region}. Use type: zarr instead if possible."
+                        )
+                    else:
+                        for name in coord_names:
+                            vals = set(score[name].values)
+                            all_coords[name].append(vals)
+                            for val in vals:
+                                provenance[name][val].append((stream, region, metric))
+        self.common_coords = {name: set.intersection(*all_coords[name]) for name in coord_names}
+        # issue warnings for skipped coords
+        for name in coord_names:
+            skipped = set.union(*all_coords[name]) - self.common_coords[name]
+            if skipped:
+                message = [f"Some {name}(s) were not common among streams, regions and metrics:"]
+                for val in skipped:
+                    message.append(f" {val} only in {provenance[name][val]}")
+                _logger.warning("\n".join(message))
 
     def get_samples(self) -> set[int]:
-        return self.samples
+        return self.common_coords["sample"]
 
     def get_forecast_steps(self) -> set[int]:
-        return self.fsteps
-    
+        return self.common_coords["forecast_step"]
+
     def get_ensemble(self, stream: str | None = None) -> list[str]:
-        return self.ens
+        return self.common_coords["ens"]
 
     def get_data(self, *args, **kwargs):
         # TODO this should not be needed, the reader should not even be created if this is the case
@@ -289,7 +321,6 @@ class WeatherGenZarrReader(WeatherGenReader):
             raise FileNotFoundError(
                 f"Zarr file {self.fname_zarr} does not exist or is not a directory."
             )
-
 
     def get_data(
         self,
@@ -597,7 +628,6 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         _logger.debug("Latitude and longitude coordinates are regularly spaced.")
         return True
-
 
 
 ################### Helper functions ########################
