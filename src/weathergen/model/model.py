@@ -304,10 +304,11 @@ class Model(torch.nn.Module):
         for i_stream, _ in enumerate(cf.streams):
             stream_name = self.stream_names[i_stream]
 
-        loss_terms_train = [v.type for _, v in cf.training_config.losses.items()]
-        loss_terms_val = [v.type for _, v in cf.validation_config.losses.items()]
+        loss_terms = [v.type for _, v in cf.training_config.losses.items()]
+        if cf.validation_config.get("losses"):
+            loss_terms += [v.type for _, v in cf.validation_config.losses.items()]
 
-        if "LossPhysical" in loss_terms_train or "LossPhysical" in loss_terms_val:
+        if "LossPhysical" in loss_terms:
             for i_stream, si in enumerate(cf.streams):
                 stream_name = self.stream_names[i_stream]
 
@@ -572,6 +573,8 @@ class Model(torch.nn.Module):
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
             tokens = self.forecast(model_params, tokens, fstep)
+
+            # safe latent prediction
             latent_state = LatentState(
                 register_tokens=tokens[:, : self.register_token_idx],
                 class_token=tokens[:, self.register_token_idx : self.class_token_idx],
