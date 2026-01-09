@@ -63,7 +63,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
-        forecast_steps = batch.get_num_steps()
+        forecast_steps = batch.get_forecast_steps()
 
         # collect all targets, concatenating across batch dimension since this is also how it
         # happens for predictions in the model
