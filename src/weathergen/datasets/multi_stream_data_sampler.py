@@ -305,73 +305,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.tokenizer.reset_rng(self.rng)
 
     def denormalize_source_channels(self, stream_name, data) -> torch.Tensor:
-        # TODO: with multiple ds per stream we need to distinguish these here
+        # [0]: with multiple ds per stream we use the first one
         return self.streams_datasets[stream_name][0].denormalize_source_channels(data)
 
     def denormalize_target_channels(self, stream_name, data) -> torch.Tensor:
-        # TODO: with multiple ds per stream we need to distinguish these here
+        # [0]: with multiple ds per stream we use the first one
         return self.streams_datasets[stream_name][0].denormalize_target_channels(data)
-
-    def _build_stream_data(
-        self,
-        modes: str,
-        base_idx: TIndex,
-        forecast_dt: int,
-        stream_info: dict,
-        num_steps_input: int,
-        input_data: list,
-        output_data: list,
-        input_tokens: list,
-        output_tokens: list,
-        output_mask,
-        input_mask,
-    ) -> StreamData:
-        """
-        Return one batch of data
-        Build a StreamData object for a single view (teacher or student).
-
-        Args:
-            modes :
-            stream_data :
-            base_idx: Time index for this sample
-            forecast_dt: Number of forecast steps
-            stream_info: Stream configuration dict
-            stream_ds: List of dataset readers for this stream
-
-            output_mask : mask for output/prediction/target
-            input_mask : mask for network input (can be source or target)
-
-
-        Returns:
-            StreamData with source and targets masked according to view_meta
-        """
-
-        dt = self.forecast_offset + forecast_dt
-        stream_data = StreamData(base_idx, num_steps_input, dt, self.num_healpix_cells)
-
-        stream_data = self._build_stream_data_input(
-            modes,
-            stream_data,
-            base_idx,
-            stream_info,
-            num_steps_input,
-            input_data,
-            input_tokens,
-            input_mask,
-        )
-
-        stream_data = self._build_stream_data_output(
-            modes,
-            stream_data,
-            base_idx,
-            stream_info,
-            forecast_dt,
-            output_data,
-            output_tokens,
-            output_mask,
-        )
-
-        return stream_data
 
     def _build_stream_data_input(
         self,
@@ -511,7 +450,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             StreamData with source and targets masked according to view_meta
         """
 
-        dt = self.forecast_offset + forecast_dt
+        # self.forecast_offset and forecast_dt are zero for pure masking
+        dt = max(1, self.forecast_offset + forecast_dt)
         stream_data = StreamData(base_idx, num_steps_input, dt, self.num_healpix_cells)
 
         stream_data = self._build_stream_data_input(
