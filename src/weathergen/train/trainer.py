@@ -163,7 +163,7 @@ class Trainer(TrainerBase):
         self.dataset_val = self.dataset
 
         # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(cf.samples_per_validation, cf.data_loading.num_workers)
+        loader_num_workers = min(self.test_cfg.samples, cf.data_loading.num_workers)
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
@@ -195,7 +195,7 @@ class Trainer(TrainerBase):
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
         # inference validation set
-        self.validate(mini_epoch=0)
+        self.validate(mini_epoch=0, mode_cfg=self.test_cfg)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
@@ -342,7 +342,7 @@ class Trainer(TrainerBase):
 
         # validate once at the beginning as reference
         if self.validation_cfg.get("validate_before_training", False):
-            self.validate(-1)
+            self.validate(epoch=-1, mode_cfg=self.validation_cfg)
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
@@ -351,7 +351,7 @@ class Trainer(TrainerBase):
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
             )
-            self.validate(mini_epoch)
+            self.validate(mini_epoch, mode_cfg=self.validation_cfg)
 
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
@@ -472,7 +472,7 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch):
+    def validate(self, mini_epoch, mode_cfg):
         cf = self.cf
         self.model.eval()
 
@@ -500,7 +500,7 @@ class Trainer(TrainerBase):
                         preds = model_forward(
                             self.model_params,
                             batch.get_source_samples(),
-                            self.validation_cfg.window_offset_prediction,
+                            mode_cfg.window_offset_prediction,
                         )
 
                         targets_and_auxs = {}
@@ -511,7 +511,7 @@ class Trainer(TrainerBase):
                                 batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
-                                self.validation_cfg.window_offset_prediction,
+                                mode_cfg.window_offset_prediction,
                             )
 
                     _ = self.loss_calculator_val.compute_loss(
@@ -522,14 +522,13 @@ class Trainer(TrainerBase):
 
                     # log output
                     num_samples = (
-                        self.validation_cfg.get("write_num_samples", 0)
-                        * self.batch_size_validation_per_gpu
+                        mode_cfg.get("write_num_samples", 0) * self.batch_size_validation_per_gpu
                     )
                     if bidx < num_samples:
                         dn_data = self.dataset_val.denormalize_target_channels
                         write_output(
                             self.cf,
-                            self.validation_cfg,
+                            mode_cfg,
                             self.batch_size_validation_per_gpu,
                             mini_epoch,
                             bidx,
