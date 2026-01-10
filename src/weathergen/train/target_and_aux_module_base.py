@@ -67,17 +67,19 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
 
         # collect all targets, concatenating across batch dimension since this is also how it
         # happens for predictions in the model
-        targets, aux_outputs = {}, {}
+        targets = {}
         for stream_name in stream_names:
             # collect targets for all forecast steps
             targets[stream_name] = []
             for fstep in range(forecast_steps):
                 targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
+                is_spoof = []
                 for sample in batch.samples:
                     targets_cur += [sample.streams_data[stream_name].target_tokens[fstep]]
                     target_times_cur += [sample.streams_data[stream_name].target_times_raw[fstep]]
                     target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[fstep]]
                     meta_data += [sample.meta_info]
+                    is_spoof += [sample.streams_data[stream_name].is_spoof()]
 
                 targets[stream_name].append(
                     {
@@ -85,12 +87,11 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                         "target_times": target_times_cur,
                         "target_coords": target_coords_cur,
                         "target_metda_data": meta_data,
+                        "is_spoof": is_spoof,
                     }
                 )
 
-            # use aux_outputs to collect spoof flag
-            aux_outputs[stream_name] = {"is_spoof": sample.streams_data[stream_name].is_spoof()}
-
+        aux_outputs = {}
         return TargetAuxOutput(forecast_steps, targets, None, aux_outputs)
 
     def to_device(self, device) -> PhysicalTargetAndAux:

@@ -207,6 +207,7 @@ class LossPhysical(LossModuleBase):
         # TODO: iterate over batch dimension
         for stream_info in self.cf.streams:
             stream_name = stream_info["name"]
+            # TODO: avoid this
             target_channels = (
                 stream_info.val_target_channels
                 if self.stage == "val"
@@ -222,11 +223,6 @@ class LossPhysical(LossModuleBase):
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
 
-            # spoofed inputs are masked in the output calculations
-            stream_is_spoof = targets.aux_outputs[stream_name].get("is_spoof", False)
-            spoof_weight = 0.0 if stream_is_spoof else 1.0
-            spoof_weight = torch.tensor(spoof_weight, device=self.device, requires_grad=False)
-
             for fstep in range(self.forecast_offset, targets.num_forecast_steps):
                 fstep_weight = fstep_loss_weights[fstep]
 
@@ -235,8 +231,9 @@ class LossPhysical(LossModuleBase):
                 preds_batch = preds.physical[fstep].get(stream_name, [])
 
                 targets_batch = targets.physical[stream_name][fstep]["target"]
-                target_times_batch = targets.physical[stream_name][fstep]["target_times"]
+                targets_times_batch = targets.physical[stream_name][fstep]["target_times"]
                 targets_params = targets.physical[stream_name][fstep]["target_metda_data"]
+                targets_is_spoof = targets.physical[stream_name][fstep]["is_spoof"]
 
                 loss_batch = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_batch = 0
@@ -273,7 +270,11 @@ class LossPhysical(LossModuleBase):
                             continue
 
                         target = targets_batch[target_idx]
-                        target_times = target_times_batch[target_idx]
+                        target_times = targets_times_batch[target_idx]
+
+                        # spoofed inputs are masked in the output calculations
+                        sw = 0.0 if targets_is_spoof[target_idx] else 1.0
+                        spoof_weight = torch.tensor(sw, device=self.device, requires_grad=False)
 
                         # skip if either target or prediction has no data points
                         if not (target.shape[0] > 0 and pred.shape[0] > 0):
@@ -315,14 +316,18 @@ class LossPhysical(LossModuleBase):
                 loss_fsteps = loss_fsteps + loss_batch
                 ctr_fsteps += 1 if ctr_batch > 0 else 0
 
-            loss = loss + (
-                (spoof_weight * stream_loss_weight * loss_fsteps)
-                / (ctr_fsteps if ctr_fsteps > 0 else 1.0)
-            )
-            ctr_streams += 1 if ctr_fsteps > 0 and not stream_is_spoof else 0
+            denom = ctr_fsteps if ctr_fsteps > 0 else 1.0
+            loss = loss + (stream_loss_weight * loss_fsteps) / denom
+
+            ctr_streams += 1 if ctr_fsteps > 0 else 0
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
+        if loss == 0.0:
+            _logger.warning(
+                "Loss is 0.0, likely incorrect configuration. Check stream"
+                " support time and training configuration."
+            )
         loss = loss / ctr_streams
 
         def _nested_dict():
