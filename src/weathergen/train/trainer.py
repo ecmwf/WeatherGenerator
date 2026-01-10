@@ -163,7 +163,7 @@ class Trainer(TrainerBase):
         self.dataset_val = self.dataset
 
         # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(self.test_cfg.samples, cf.data_loading.num_workers)
+        loader_num_workers = min(self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers)
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
