@@ -279,7 +279,7 @@ class Trainer(TrainerBase):
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
         # https://arxiv.org/pdf/2111.06377
-        kappa = self.batch_size_per_gpu * cf.world_size
+        kappa = self.get_batch_size_total(self.batch_size_per_gpu)
         # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
         # aiming for beta2 = 0.95 at one node, ie B=4
@@ -645,7 +645,7 @@ class Trainer(TrainerBase):
             loss_calculator.stddev_unweighted_hist,
         )
 
-        samples = self.cf.general.istep * self.batch_size_per_gpu * self.cf.world_size
+        samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
 
         if is_root():
             # plain logger
