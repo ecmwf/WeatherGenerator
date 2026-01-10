@@ -157,13 +157,8 @@ class Trainer(TrainerBase):
         # only one needed since we only run the validation code path
         self.dataset = MultiStreamDataSampler(
             cf,
-            cf.start_date_val,
-            cf.end_date_val,
-            self.test_config,
-            cf.batch_size_validation_per_gpu,
-            cf.samples_per_validation,
+            self.test_cfg,
             stage=VAL,
-            shuffle=cf.shuffle,
         )
         self.dataset_val = self.dataset
 
