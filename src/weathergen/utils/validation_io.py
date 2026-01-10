@@ -9,6 +9,7 @@
 
 import logging
 
+import numpy as np
 import torch
 
 import weathergen.common.config as config
@@ -41,15 +42,22 @@ def write_output(
 
     window_offset_prediction = val_cfg.get("window_offset_prediction", 0)
     forecast_steps = val_cfg.get("forecast", {}).get("num_steps", 1)
-    for fstep in range(window_offset_prediction, forecast_steps + 1):
+    targets_lens = []
+    # for fstep in range(window_offset_prediction, forecast_steps + 1):
+    for fstep in range(window_offset_prediction, forecast_steps):
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
         targets_times_all += [[]]
+        targets_lens += [[]]
         for stream_info in cf.streams:
+            sname = stream_info["name"]
             # predictions
             preds = model_output.get_physical_prediction(fstep, stream_info["name"])
             targets = target_aux_out.physical[stream_info["name"]][fstep]["target"]
+
+            preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
+            targets_lens[-1] += [[]]
 
             for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
                 pred, target = pred.to(fp32), target.to(fp32)
@@ -61,17 +69,20 @@ def write_output(
                 pred = pred.reshape([pred.shape[0], *target.shape])
                 assert pred.shape[1] > 0
 
-                # TODO: the inner lists here should not be needed
-                preds_all[-1] += [[dn_data(stream_info["name"], pred).detach().cpu().numpy()]]
-                targets_all[-1] += [[dn_data(stream_info["name"], target).detach().cpu().numpy()]]
+                preds_s += [dn_data(sname, pred).detach().cpu().numpy()]
+                targets_s += [dn_data(sname, target).detach().cpu().numpy()]
 
-                sname = stream_info["name"]
-                targets_coords_all[-1] += [
-                    target_aux_out.physical[sname][fstep]["target_coords"][i_batch].cpu().numpy()
-                ]
-                targets_times_all[-1] += [
-                    target_aux_out.physical[sname][fstep]["target_times"][i_batch]
-                ]
+                key = "target_coords"
+                t_coords_s += [target_aux_out.physical[sname][fstep][key][i_batch].cpu().numpy()]
+                key = "target_times"
+                t_times_s += [target_aux_out.physical[sname][fstep][key][i_batch]]
+
+            targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
+
+            preds_all[-1] += [np.concatenate(preds_s, axis=1)]
+            targets_all[-1] += [np.concatenate(targets_s)]
+            targets_coords_all[-1] += [np.concatenate(t_coords_s)]
+            targets_times_all[-1] += [np.concatenate(t_times_s)]
 
     #         # TODO: re-enable
     #           if len(idxs_inv) > 0:
@@ -79,9 +90,6 @@ def write_output(
     #               target = target[idxs_inv]
     #               targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
     #               targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
-
-    # TODO: remove
-    targets_lens = [[[t[0].shape[0]] for t in tt] for tt in targets_all]
 
     # collect source information
     sources = []
