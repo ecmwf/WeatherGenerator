@@ -307,7 +307,8 @@ class LossPhysical(LossModuleBase):
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
-                        loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * fstep_weight)
+                        loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * fstep_weight
+                        loss_fstep = loss_fstep + loss_cur_w
                         ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
 
                     loss_batch = loss_batch + loss_fstep
