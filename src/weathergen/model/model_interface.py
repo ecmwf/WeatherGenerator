@@ -258,7 +258,7 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
 
 
 def get_target_aux_calculator(
-    cf: Config, cfg: OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
+    cf: Config, loss_term_cfg: OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
 ):
     """
     Create target aux calculator
@@ -266,9 +266,9 @@ def get_target_aux_calculator(
 
     target_aux = None
 
-    target_and_aux_calc = cfg.get("target_and_aux_calc", "Physical")
+    target_and_aux_calc = loss_term_cfg.get("target_and_aux_calc", "Physical")
     if target_and_aux_calc == "Physical":
-        target_aux = PhysicalTargetAndAux(cfg, model)
+        target_aux = PhysicalTargetAndAux(loss_term_cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
         meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device)
