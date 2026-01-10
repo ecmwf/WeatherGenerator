@@ -224,13 +224,13 @@ class LearningRateScheduler:
         # switch scheduler when learning rate regime completed
         if self.i_step == self.n_steps_warmup:
             self.cur_scheduler = self.scheduler_decay
-            str = f"Switching scheduler to {self.cur_scheduler} at scheduler step = {self.i_step}."
+            str = f"Switching scheduler to '{self.policy_decay}' at step = {self.i_step}."
             logging.getLogger("obslearn").info(str)
 
         # switch scheduler when learning rate completed
         if self.i_step == self.n_steps_warmup + self.n_steps_decay:
             self.cur_scheduler = self.scheduler_cooldown
-            str = f"Switching scheduler to {self.cur_scheduler} at scheduler step = {self.i_step}."
+            str = f"Switching scheduler to '{self.policy_cooldown}' at step = {self.i_step}."
             logging.getLogger("obslearn").info(str)
 
         self.i_step += 1
