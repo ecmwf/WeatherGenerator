@@ -79,8 +79,8 @@ class iBOTPatchTargetProcessing(nn.Module):
     ):
         teacher_output = teacher_output.float()
         world_size = dist.get_world_size() if dist.is_initialized() else 1
-        B, C, K = teacher_output.shape
-        teacher_output = teacher_output.view(B*C, K)
+        batch_size, C, K = teacher_output.shape # C = num of tokens
+        teacher_output = teacher_output.view(batch_size*C, K)
         Q = torch.exp(
             teacher_output / teacher_temp
         ).t()  # Q is K-by-B for consistency with notations from our paper
@@ -108,7 +108,7 @@ class iBOTPatchTargetProcessing(nn.Module):
             Q /= B
 
         Q *= B  # the columns must sum to 1 so that Q is an assignment
-        return Q.t().view(B,C,K)
+        return Q.t().view(batch_size,C,K)
 
     def forward(self, teacher_output):
         if self.teacher_style == "softmax_center":
@@ -191,7 +191,8 @@ class DINOTargetProcessing(nn.Module):
         teacher_output = teacher_output.float()
         world_size = dist.get_world_size() if dist.is_initialized() else 1
         B, C, K = teacher_output.shape
-        teacher_output = teacher_output.view(B*C, K)
+        batch_size, C, K = teacher_output.shape # C = num of tokens
+        teacher_output = teacher_output.view(batch_size*C, K)
         Q = torch.exp(
             teacher_output / teacher_temp
         ).t()  # Q is K-by-B for consistency with notations from our paper
@@ -217,7 +218,7 @@ class DINOTargetProcessing(nn.Module):
             Q /= B
 
         Q *= B  # the columns must sum to 1 so that Q is an assignment
-        return Q.t().view(B,C,K)
+        return Q.t().view(batch_size,C,K)
 
     def forward(self, teacher_output):
         if self.teacher_style == "softmax_center":
