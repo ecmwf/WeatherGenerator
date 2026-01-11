@@ -207,16 +207,8 @@ class Trainer(TrainerBase):
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
 
         # create data loaders
-        self.dataset = MultiStreamDataSampler(
-            cf,
-            self.training_cfg,
-            stage=TRAIN,
-        )
-        self.dataset_val = MultiStreamDataSampler(
-            cf,
-            self.validation_cfg,
-            stage=VAL,
-        )
+        self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
+        self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
 
         loader_params = {
             "batch_size": None,
@@ -330,10 +322,6 @@ class Trainer(TrainerBase):
                 )
             )
 
-        # # torch.autograd.set_detect_anomaly(True)
-        # if cf.forecast_policy is not None:
-        #     torch._dynamo.config.optimize_ddp = False
-
         if is_root():
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
@@ -342,7 +330,7 @@ class Trainer(TrainerBase):
 
         # validate once at the beginning as reference
         if self.validation_cfg.get("validate_before_training", False):
-            self.validate(epoch=-1, mode_cfg=self.validation_cfg)
+            self.validate(mini_epoch=-1, mode_cfg=self.validation_cfg)
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
