@@ -15,10 +15,6 @@ import torch
 from weathergen.common.config import Config
 from weathergen.datasets.stream_data import StreamData
 
-# TODO: Add a store for a random number for diffusion
-# TODO: GetTimestep to get the timestep
-# TODO: GetMetaData: then this gets the right rn for the timestep!
-
 
 @dataclass
 class SampleMetaData:
@@ -39,7 +35,6 @@ class Sample:
     streams_data: dict[str, StreamData | None]
 
     def __init__(self, streams: dict) -> None:
-        # TODO: can we pass this right away?
         self.meta_info = {}
 
         self.streams_data = {}
@@ -174,9 +169,8 @@ class ModelBatch:
     target_samples: BatchSamples
 
     # index of corresponding target (for source samples) or source (for target samples)
-    # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
+    # these are in 1-to-1 corresponding for classical training modes (e.g. MTM, forecasting) but
     # can be more complex for strategies like student-teacher training
-    # TODO @CL and @SHickman can we make these tensors?
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
