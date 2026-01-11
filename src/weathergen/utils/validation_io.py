@@ -41,7 +41,7 @@ def write_output(
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
     window_offset_prediction = val_cfg.get("window_offset_prediction", 0)
-    forecast_steps = val_cfg.get("forecast", {}).get("num_steps", 1)
+    forecast_steps = max(1, val_cfg.get("forecast", {}).get("num_steps", 1))
     targets_lens = []
     # for fstep in range(window_offset_prediction, forecast_steps + 1):
     for fstep in range(window_offset_prediction, forecast_steps):
@@ -90,6 +90,10 @@ def write_output(
     #               target = target[idxs_inv]
     #               targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
     #               targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
+
+    if len(preds_all) == 0:
+        _logger.warning("Writing no data since predictions are empty.")
+        return
 
     # collect source information
     sources = []
