@@ -41,14 +41,16 @@ def inference_from_args(argl: list[str]):
     parser = cli.get_inference_parser()
     args = parser.parse_args(argl)
 
-    inference_overwrite = dict(
-        shuffle=False,
-        start_date_val=args.start_date,
-        end_date_val=args.end_date,
-        samples_per_validation=args.samples,
-        log_validation=args.samples if args.save_samples else 0,
-        streams_output=args.streams_output,
-    )
+    inference_overwrite = {
+        "test_config": dict(
+            shuffle=False,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            samples_per_mini_epoch=args.samples,
+            write_num_samples=args.samples if args.save_samples else 0,
+            streams_output=args.streams_output,
+        )
+    }
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
@@ -99,13 +101,12 @@ def train_continue_from_args(argl: list[str]):
     parser = cli.get_continue_parser()
     args = parser.parse_args(argl)
 
-    finetune_overwrite = dict()
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
-        finetune_overwrite,
+        {},
         *args.config,
         cli_overwrite,
     )
