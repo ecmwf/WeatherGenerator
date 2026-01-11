@@ -94,15 +94,14 @@ general:
 
   # local_rank, 
   # with_ddp,
-  # paths in the private config
   # data_path_*, 
   # model_path, 
   # run_path, 
   # path_shared_
-  # multiprocessing_method
+
+  multiprocessing_method: "fork"
 
   desc: ""
-
   run_id: ???
   run_history: []
 
@@ -378,5 +377,3 @@ wgtags:
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null
-
-multiprocessing_method: "fork"
