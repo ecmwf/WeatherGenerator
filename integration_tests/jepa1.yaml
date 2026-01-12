@@ -1,0 +1,48 @@
+streams_directory: "./integration_tests/streams/"
+run_path: "./results"
+model_path: "./models"
+loss_fcts: [["mse", 1.0]]
+loss_fcts_val: [["mse", 1.0]]
+num_mini_epochs: 1
+samples_per_mini_epoch: 100
+samples_per_validation: 5
+lr_steps: 4
+lr_steps_warmup: 2
+lr_steps_cooldown: 2
+loader_num_workers: 8
+
+train_log:
+  log_interval: 1
+### Example validation and training config for student-teacher with JEPA
+validation_config:
+  losses:
+    # null
+    LossPhysical: {'weight': 0.0}
+    LossLatentSSLStudentTeacher: { 
+      "weight": 1.0,
+      "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
+### Student-teacher configuration (only used when training_mode == "student_teacher")
+training_config:
+  # null
+  # when this is "masking", we are basically only using the model_input subconfig
+  training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
+  target_and_aux_calc: "EMATeacher"
+  losses :  
+    LossPhysical: {weight: 0.0}
+    LossLatentSSLStudentTeacher: { 
+      "weight": 1.0,
+      "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
+  model_input:
+    - masking_strategy: "random" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
+      num_samples: 1  # if student-teacher, the number of local (student) views to generate
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4 }
+      # relationship: "independent" #, "subset", "disjoint". Relationship of student views to teacher view.
+      relationship: "subset"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
+      loss : jepa
+      rate_sampling: False  # randomly sample the rate per batch
+
+  target_input:
+    - masking_strategy: "healpix"  # Strategy for teacher (global) view: "random", "healpix"
+      masking_strategy_config : { diffusion_rn : False, rate : 0.4, hl_mask: 0 }
+      num_samples: 1 # number of teacher views to generate
+      rate_sampling: False  # randomly sample the rate per batch

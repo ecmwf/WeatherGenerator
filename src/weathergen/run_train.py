@@ -77,7 +77,8 @@ def inference_from_args(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -111,7 +112,8 @@ def train_continue_from_args(argl: list[str]):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    devices = Trainer.init_torch()
+    mp_method = cf.get("multiprocessing_method", "fork")
+    devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
     init_loggers(cf.run_id)
@@ -126,7 +128,8 @@ def train_continue_from_args(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -156,7 +159,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.data_loader_rng_seed = int(time.time())
-    devices = Trainer.init_torch()
+    mp_method = cf.get("multiprocessing_method", "fork")
+    devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
     # if cf.rank == 0:
@@ -178,7 +182,8 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 if __name__ == "__main__":
