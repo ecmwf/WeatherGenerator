@@ -228,9 +228,6 @@ def _process_stream(
         stream_computed_scores = calc_scores_per_stream(
             reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
         )
-        stream_dict = reader.get_stream(stream)
-        if not stream_dict:
-            return run_id, stream, {}
 
         metric_list_to_json(reader, stream, stream_computed_scores, regions)
         scores_dict = merge(stream_loaded_scores, stream_computed_scores)
