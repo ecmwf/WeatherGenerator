@@ -366,7 +366,7 @@ class ZarrIO:
     def __enter__(self) -> typing.Self:
         # Capture warnings emitted during store creation/open
         with warnings.catch_warnings(record=True) as caught:
-            self._store = LocalStore(self._store_path, read_only=self.read_only)
+            self._store = LocalStore(self._store_path)
             self.data_root = zarr.group(store=self._store)
         # Warns user of future deprecation only if a ZarrUserWarning was raised
         if any(issubclass(w.category, zarr.errors.ZarrUserWarning) for w in caught):
