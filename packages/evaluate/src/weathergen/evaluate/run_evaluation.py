@@ -28,7 +28,7 @@ from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
-from weathergen.evaluate.io.wegen_reader import WeatherGenReader
+from weathergen.evaluate.io.wegen_reader import WeatherGenMergeReader, WeatherGenReader
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
@@ -193,11 +193,14 @@ def _process_stream(
     """
     # try:
     type_ = run.get("type", "zarr")
-    reader = (
-        WeatherGenReader(run, run_id, private_paths)
-        if type_ == "zarr"
-        else CsvReader(run, run_id, private_paths)
-    )
+    if type_ == "zarr":
+        reader = WeatherGenReader(run, run_id, private_paths)
+    elif type_ == "csv":
+        reader = CsvReader(run, run_id, private_paths)
+    elif type_ == "merge":
+        reader = WeatherGenMergeReader(run, run_id, private_paths)
+    else:
+        raise ValueError(f"Unknown run type: {type_}")
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
@@ -284,6 +287,8 @@ def evaluate_from_config(
             reader = WeatherGenReader(run, run_id, private_paths)
         elif type_ == "csv":
             reader = CsvReader(run, run_id, private_paths)
+        elif type_ == "merge":
+            reader = WeatherGenMergeReader(run, run_id, private_paths)
         else:
             raise ValueError(f"Unknown run type: {type_}")
 
