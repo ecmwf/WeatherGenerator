@@ -240,15 +240,9 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     Get the path to the model results zarr store from a given run_id and mini_epoch.
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
+    zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
 
-    zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
-    zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.zarr"
-
-    if zarr_path_new.exists() or zarr_path_new.is_dir():
-        zarr_path = zarr_path_new
-    elif zarr_path_old.exists() or zarr_path_old.is_dir():
-        zarr_path = zarr_path_old
-    else:
+    if not (zarr_path.exists() or zarr_path.is_dir()):
         raise FileNotFoundError(
             f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
             f"exist or is not a directory."
@@ -340,11 +334,6 @@ def load_merge_configs(
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
     c = _add_interpolation(c)
-
-    # Ensure the config has mini-epoch notation
-    if hasattr(c, "samples_per_epoch"):
-        c.samples_per_mini_epoch = c.samples_per_epoch
-        c.num_mini_epochs = c.num_epochs
 
     return c
 

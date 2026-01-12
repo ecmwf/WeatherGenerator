@@ -71,17 +71,9 @@ class WeatherGenReader(Reader):
             self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
         )
 
-        fname_zarr_new = self.results_dir.joinpath(
+        self.fname_zarr = self.results_dir.joinpath(
             f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
         )
-        fname_zarr_old = self.results_dir.joinpath(
-            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
-        )
-
-        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
-            self.fname_zarr = fname_zarr_new
-        else:
-            self.fname_zarr = fname_zarr_old
 
         if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
