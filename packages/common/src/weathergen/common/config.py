@@ -510,7 +510,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
         case _:
             _logger.info("Deserialize default configuration.")
             conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
-    assert isinstance(c, Config)
+    assert isinstance(conf, Config)
     return conf
 
 
