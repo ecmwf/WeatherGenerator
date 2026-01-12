@@ -94,18 +94,19 @@ class LossPhysical(LossModuleBase):
         return stream_info_loss_weight, weights_channels
 
     def _get_fstep_weights(self, forecast_steps):
-        timestep_weight_config = self.cf.get("timestep_weight")
+        timestep_weight_config = self.mode_cfg.forecast.get("timestep_weight")
         if timestep_weight_config is None:
             return [1.0 for _ in range(forecast_steps)]
-        weights_timestep_fct = getattr(loss_fns, timestep_weight_config[0])
-        return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
+        weights_timestep_fct = getattr(loss_fns, list(timestep_weight_config.keys())[0])
+        decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
+        return weights_timestep_fct(forecast_steps, decay_factor)
 
-    def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
+    def _get_location_weights(self, stream_info, target_coords):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
             return None
         weights_locations_fct = getattr(loss_fns, location_weight_type)
-        weights_locations = weights_locations_fct(stream_data, forecast_offset, fstep)
+        weights_locations = weights_locations_fct(target_coords)
         weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
         return weights_locations
@@ -231,6 +232,7 @@ class LossPhysical(LossModuleBase):
                 preds_batch = preds.physical[fstep].get(stream_name, [])
 
                 targets_batch = targets.physical[stream_name][fstep]["target"]
+                targets_coords_batch = targets.physical[stream_name][fstep]["target_coords"]
                 targets_times_batch = targets.physical[stream_name][fstep]["target_times"]
                 targets_params = targets.physical[stream_name][fstep]["target_metda_data"]
                 targets_is_spoof = targets.physical[stream_name][fstep]["is_spoof"]
@@ -254,12 +256,9 @@ class LossPhysical(LossModuleBase):
                     target_idx = target_idx[0]
 
                     # get weights for locations
-                    # TODO: fix -> stream_data is not present and TargetAuxCalculator must be set up
-                    # weights_locations = self._get_location_weights(
-                    #     stream_info, stream_data, self.forecast_offset, fstep
-                    # )
-                    weights_locations = None
-                    weights_channels = None
+                    weights_locations = self._get_location_weights(
+                        stream_info, targets_coords_batch[target_idx]
+                    )
 
                     # accumulate loss from different loss functions
                     loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
