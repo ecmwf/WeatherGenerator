@@ -106,6 +106,7 @@ def plot_metric_region(
 
             if selected_data:
                 _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
+
                 name = create_filename(
                     prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
                 )
@@ -213,7 +214,6 @@ def ratio_plot_metric_region(
             name = create_filename(
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
-
             plotter.ratio_plot(
                 selected_data,
                 run_ids,
