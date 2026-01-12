@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-import timeit
 
 import torch
 
@@ -132,7 +131,4 @@ def write_output(
     )
 
     for subset in data.items():
-        start_time = timeit.default_timer()
         writer.write_zarr(subset)
-        elapsed = timeit.default_timer() - start_time
-        _logger.info(f"writing subset: {subset} took {elapsed:.2f}")
