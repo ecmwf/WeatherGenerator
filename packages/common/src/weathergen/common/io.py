@@ -43,6 +43,18 @@ def is_ndarray(obj: typing.Any) -> bool:
     return isinstance(obj, (np.ndarray))  # noqa: TID251
 
 
+def _get_shards(shard_nsamples: tuple[int], chunks: tuple[int]) -> tuple[int] | None:
+    """Helper function to find number of shards from chunks and predefined size of shards"""
+    shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
+    return shards
+
+
+def _get_chunks(chunk_nsamples: tuple[int], data_shape: tuple[int]) -> tuple[int] | None:
+    """Helper function to find chunks from shape of data and predefined size of chunks"""
+    chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in data_shape[1:]))
+    return chunks
+
+
 class StoreType(enum.StrEnum):
     ZIP = "zip"
     LOCAL = "zarr"
@@ -269,13 +281,13 @@ class OutputDataset:
         self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples=SHARD_N_SAMPLES
     ) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
-        chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in self.data.shape[1:]))
+        chunks = _get_chunks(chunk_nsamples, self.data.shape)
         if SHARDING_ENABLED:
-            shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
-            _logger.info(f"sharding enabled with shards: {shards} and chunks: {chunks}")
+            shards = _get_shards(shard_nsamples, chunks)
+            _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
             shards = None
-            _logger.info(f"sharding disabled, using chunks: {chunks}")
+            _logger.debug(f"sharding disabled, using chunks: {chunks}")
         # maybe do dask conversion earlier? => usefull for parallel writing?
         data = da.from_zarr(
             self.data, chunks=chunks, shards=shards
@@ -355,8 +367,8 @@ class ZarrIO:
         # Capture warnings emitted during store creation/open
         with warnings.catch_warnings(record=True) as caught:
             self._store = LocalStore(self._store_path, read_only=self.read_only)
-            self.data_root = zarr.open_group(store=self._store, mode=self._mode)
-        # Raise DeprecationWarning only if a ZarrUserWarning was raised
+            self.data_root = zarr.group(store=self._store)
+        # Warns user of future deprecation only if a ZarrUserWarning was raised
         if any(issubclass(w.category, zarr.errors.ZarrUserWarning) for w in caught):
             last_msg = next(
                 (
@@ -366,11 +378,9 @@ class ZarrIO:
                 ),
                 "",
             )
-            # warnings.warn(f"Zarr2 conflict: {last_msg}",
-            #                 DeprecationWarning
-            # )
             _logger.warning(
-                f"Future Deprecation Zarr2 conflict: {last_msg} , Opened local zarr store"
+                f"Future Deprecation, error arises from opening older Zarr2 stores:\
+                    {last_msg}, Opened local zarr store"
             )
 
         return self
@@ -410,6 +420,7 @@ class ZarrIO:
     def _get_group(self, item: ItemKey, create: bool) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
+            assert self.data_root.get(item.path) is None, "Group already exists, stop overwriting"
             group = self.data_root.create_group(item.path)
         else:
             try:
@@ -424,15 +435,6 @@ class ZarrIO:
         return group
 
     def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
-        # Constraint: the metadata has to be written at the same time as creating
-        # a group. When using zipstore, each update of the metadata creates a new
-        # entry in the zipstore with the same name, which is potentially unreadable
-        # or could be misinterpreted with a python version change.
-        # The current metadata also gets updated with each array update => requires
-        # more serious investigation
-        # TODO: fix these 2 issues:
-        # - metadata has to be correct from the start
-        # - write all metadata once at creation of the node
         dataset_group = item_group.require_group(dataset.name)
         self._write_metadata(dataset_group, dataset)
         self._write_arrays(dataset_group, dataset)
@@ -452,14 +454,14 @@ class ZarrIO:
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = (CHUNK_N_SAMPLES, *(max(x // SCALE_FACTOR, 1) for x in array.shape[1:]))
+            chunks = _get_chunks(CHUNK_N_SAMPLES, array.shape)
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
             + f"into group: {group}."
         )
         start_time = timeit.default_timer()
         if SHARDING_ENABLED and chunks != "auto":
-            shards = (SHARD_N_SAMPLES, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
+            shards = _get_shards(SHARD_N_SAMPLES, chunks)
             group.create_array(name, data=array, chunks=chunks, shards=shards)
             _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
         else:
@@ -512,11 +514,14 @@ class ZarrIO:
             return all_steps
 
 
-class ZipZarrIO:
+class ZipZarrIO(ZarrIO):
     def __enter__(self) -> typing.Self:
         _logger.info(f"Opening zipstore, read-only: {self.read_only}")
-        self._store = ZipStore(self._store_path, read_only=self.read_only)
-        self.data_root = zarr.open_group(store=self._store, mode=self._mode)
+        self._store = ZipStore(self._store_path, mode=self._mode, read_only=self.read_only)
+        if self.read_only:
+            self.data_root = zarr.open_group(store=self._store, mode=self._mode)
+        else:
+            self.data_root = zarr.group(store=self._store)
 
         return self
 
@@ -775,4 +780,4 @@ _IO_CLASSES: dict[StoreType, type] = {StoreType.ZIP: ZipZarrIO, StoreType.LOCAL:
 def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
-    return _IO_CLASSES[StoreType(ext)](read_only)
+    return _IO_CLASSES[StoreType(ext)](store_path, read_only)

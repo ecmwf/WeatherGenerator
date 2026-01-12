@@ -324,7 +324,6 @@ def load_merge_configs(
             c = _load_overwrite_conf(overwrite)
             c = _load_streams_in_config(c)
             overwrite_configs.append(c)
-
     private_config = set_paths(private_config)
 
     if from_run_id is None:
@@ -334,6 +333,9 @@ def load_merge_configs(
             from_run_id, mini_epoch, private_config.get("model_path", None)
         )
         from_run_id = base_config.run_id
+    for _ in overwrite_configs:
+        if _.get("zarr_store", "null") is None:
+            _.zarr_store = base_config.zarr_store
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
