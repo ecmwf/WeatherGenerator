@@ -304,6 +304,7 @@ num_mini_epochs: 32
 samples_per_mini_epoch: 4096 # 250000 for student-teacher because validation is meaningless
 samples_per_validation: 512
 
+repeat_data_in_mini_epoch: False
 shuffle: True
 
 lr_scaling_policy: "sqrt"
