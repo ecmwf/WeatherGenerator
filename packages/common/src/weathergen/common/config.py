@@ -503,15 +503,15 @@ def _load_base_conf(base: Path | Config | None) -> Config:
     match base :
         case Path():
             _logger.info(f"Loading specified base config from file: {base}.")
-            c = OmegaConf.load(base)
+            conf = OmegaConf.load(base)
         case Config():
             _logger.info(f"Using existing config as base: {base}.")
-            c = base
+            conf = base
         case _:
             _logger.info("Deserialize default configuration.")
-            c = OmegaConf.load(_DEFAULT_CONFIG_PTH)
+            conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
     assert isinstance(c, Config)
-    return c
+    return conf
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
