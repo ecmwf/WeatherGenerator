@@ -251,9 +251,6 @@ class Trainer(TrainerBase):
             self.validate_with_ema = False
         self.ema_model = None
         if self.validate_with_ema:
-            import code
-
-            code.interact(local=locals())
             meta_ema_model, _ = init_model_and_shard(
                 cf,
                 self.dataset,
