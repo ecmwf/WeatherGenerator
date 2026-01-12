@@ -34,6 +34,7 @@ def match_climatology_time(target_datetime: pd.Timestamp, clim_data: xr.Dataset)
     int or None
         Matching time index, or None if no match found
     """
+
     # Convert numpy datetime64 to pandas datetime if needed
     if isinstance(target_datetime, np.datetime64):
         target_datetime = pd.to_datetime(target_datetime)
@@ -130,7 +131,7 @@ def align_clim_data(
             )
             sel_mask = {sel_key: sel_val}
 
-            timestamp = target_data.sel(sel_mask).valid_time.values[0]
+            timestamp = np.unique(target_data.sel(sel_mask).valid_time.values)[0]
             # Prepare climatology data for each sample
             matching_time_idx = match_climatology_time(timestamp, clim_data)
 
