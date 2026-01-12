@@ -610,7 +610,7 @@ def get_path_output(config: Config, mini_epoch: int) -> Path:
 
     return base_path / fname
 
-
+@functools.cached_property
 def get_shared_wg_path(local_path: str | Path) -> Path:
     """
     Resolves a local, relative path to an absolute path within the configured shared working
