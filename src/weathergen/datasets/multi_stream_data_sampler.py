@@ -198,9 +198,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     )
                     logger.warning(msg)
         else:
-            assert samples_per_mini_epoch, (
-                "Must specify samples_per_mini_epoch if repeat_data_in_mini_epoch."
-            )
             self.len = samples_per_mini_epoch
 
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
@@ -313,7 +310,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             f"dataset size ({idx_end}) too small for forecast length plus offset "
             f"({forecast_len + self.forecast_offset}) – dataset size must be strictly bigger. "
             "to fix this, it usually suffices to increase the data range "
-            "(or decrease forecast steps or offset..)"
         )
         assert adjusted_idx_end > 0, msg
         self.perms = np.arange(index_range.start, adjusted_idx_end)
