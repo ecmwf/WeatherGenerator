@@ -32,6 +32,7 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJSONReader,
     WeatherGenReader,
     WeatherGenZarrReader,
+    WeatherGenMergeReader,
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.utils import (
@@ -170,6 +171,8 @@ def get_reader(
         reader = CsvReader(run, run_id, private_paths)
     elif reader_type == "json":
         reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
+     elif reader_type == "merge":
+        reader = WeatherGenMergeReader(run, run_id, private_paths)
     else:
         raise ValueError(f"Unknown reader type: {reader_type}")
     return reader
