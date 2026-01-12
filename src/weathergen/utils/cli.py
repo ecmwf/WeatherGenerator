@@ -118,7 +118,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
         type=Path,
         help=(
             "Path to the base configuration file."
-            "If not provided, the default configuration is used."
+            "If not provided, ./config/default_config.yml is used."
         )
     )
 
