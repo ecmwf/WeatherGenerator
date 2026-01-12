@@ -129,6 +129,6 @@ def write_output(cf, mini_epoch, batch_idx, dn_data, batch, model_output, target
         cf.forecast_offset,
     )
 
-    with io.ZarrIO(config.get_path_output(cf, mini_epoch)) as writer:
+    with io.ZarrIO(config.get_path_results(cf, mini_epoch)) as writer:
         for subset in data.items():
             writer.write_zarr(subset)
