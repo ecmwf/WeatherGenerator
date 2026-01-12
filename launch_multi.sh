@@ -55,9 +55,27 @@
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --link-venv --options lr_max=0.00005 weight_decay=0.05 adam_beta1=0.85 adam_beta2=0.9 streams_directory="./config/streams/era5_1deg_w-aifs" embed_dropout_rate=$dropout ae_local_dropout_rate=$dropout ae_adapter_dropout_rate=$dropout ae_global_dropout_rate=$dropout fe_dropout_rate=$dropout
 # done
 
+# # Train continue dropout
+# for run_id in d2f1p4vh m8e7psdl n2nmxc7b flaucoz5 dnl5r61x aojt3c1z p1phw3g9 kacy7jbz uk0uvcfn d1fhev63 pxg7jnzt z40dbxjy fpymqrv3 pe93az4w saxqsfzb yjlzi5g7 zewh2o5n dy36qb7e ; do
+#   echo "$run_id"
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --from-run-id $run_id --run-id $run_id --link-venv
+# done
+
 
 # # NOISE LEVEL [1e-3, 5e-4, (1e-4), 5e-5, 1e-5]
 # for nl in "1e-3" "5e-4" "1e-4" "5e-5" "1e-5" ; do
 #   echo "$nl"
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --link-venv --options lr_max=0.00005 weight_decay=0.05 adam_beta1=0.85 adam_beta2=0.9 streams_directory="./config/streams/era5_1deg_w-aifs" impute_latent_noise_std=$nl
+# done
+
+# # Train continue noise level
+# for run_id in fmpesclt h6lu3sh8 tgmwaifc vavdy4zf qf24wjsq nbc3il5x vvwizau9 wyhcr51m n207tod4 cey23p7w rh49o7yj qt72d4iy vl5n39cj ocyx09uw fydmc3vg ; do
+#   echo "$run_id"
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --from-run-id $run_id --run-id $run_id --link-venv
+# done
+
+
+# for run_id in  fmpesclt vvwizau9 vl5n39cj ; do
+#   echo "$run_id"
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --from-run-id $run_id --run-id $run_id --link-venv
 # done
