@@ -189,10 +189,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     else:
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
-            pconf = _load_private_conf()
-            model_path = _get_config_attribute(
-                config=pconf, attribute_name="model_path", fallback="models"
-            )
+            model_path = get_shared_wg_path("models")
         path = Path(model_path)
         fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
         assert fname.exists(), (
@@ -325,13 +322,11 @@ def load_merge_configs(
             c = _load_streams_in_config(c)
             overwrite_configs.append(c)
 
-    private_config = set_paths(private_config)
-
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
         base_config = load_run_config(
-            from_run_id, mini_epoch, private_config.get("model_path", None)
+            from_run_id, mini_epoch, get_shared_wg_path("models")
         )
         from_run_id = base_config.run_id
     with open_dict(base_config):
@@ -581,27 +576,16 @@ def set_paths(config: Config) -> Config:
     return config
 
 
-def _get_config_attribute(config: Config, attribute_name: str, fallback: str) -> str:
-    """Get an attribute from a Config. If not available, fall back to path_shared_working_dir
-    concatenated with the desired fallback path. Raise an error if neither the attribute nor a
-    fallback is specified."""
-    attribute = OmegaConf.select(config, attribute_name)
-    fallback_root = OmegaConf.select(config, "path_shared_working_dir")
-    assert attribute is not None or fallback_root is not None, (
-        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
-    )
-    attribute = attribute if attribute else fallback_root + fallback
-    return attribute
-
-
 def get_path_run(config: Config) -> Path:
-    """Get the current runs run_path for storing run results and logs."""
-    return Path(config.run_path) / config.run_id
+    """Get the current runs results_path for storing run results and logs."""
+    results_path = get_shared_wg_path("results")
+    return results_path / config.run_id
 
 
 def get_path_model(config: Config) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
-    return Path(config.model_path) / config.run_id
+    model_path = get_shared_wg_path("models")
+    return model_path / config.run_id
 
 
 def get_path_results(config: Config, mini_epoch: int) -> Path:
