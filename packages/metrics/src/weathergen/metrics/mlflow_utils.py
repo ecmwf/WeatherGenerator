@@ -153,6 +153,13 @@ def setup_mlflow(private_config: Config | None) -> MlflowClient:
     return mlflow_client
 
 
+def get_experiment_id(private_config: Config | None) -> str:
+    client = setup_mlflow(private_config)
+    exp = client.get_experiment_by_name(MlFlowUpload.experiment_name)
+    assert exp is not None
+    return exp.experiment_id
+
+
 def get_or_create_mlflow_parent_run(mlflow_client: MlflowClient, run_id: str) -> Run:
     exp_name = MlFlowUpload.experiment_name
     _logger.info(f"Setting experiment name to {exp_name}: host: {os.environ['DATABRICKS_HOST']}")
