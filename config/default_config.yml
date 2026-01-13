@@ -87,7 +87,6 @@ freeze_modules: ""
 
 norm_type: "LayerNorm"
 
-
 #####################################
 
 # streams_directory: "./config/streams/era5_1deg/"
@@ -169,7 +168,6 @@ training_config:
       eps : 2e-08
 
   losses : {
-    # target_relationship: "independent", "subset", "disjoint", "identity"
     "physical": {
         type: LossPhysical,
         loss_fcts: { "mse": { }, },
@@ -180,7 +178,7 @@ training_config:
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
-      num_samples: 2,
+      num_samples: 1,
       },
     }
 
