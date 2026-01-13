@@ -66,17 +66,6 @@ def get_inference_parser() -> argparse.ArgumentParser:
         help="Output streams during inference.",
     )
 
-    parser.add_argument(
-        "--zarr-store",
-        help=(
-            "Specify which type of Zarr storage to use. \
-                ('zip', ZipStore or 'zarr', LocalStore)",
-            "Default uses 'zip'",
-        ),
-        choices=StoreType.extensions(),
-        type=str,
-    )
-
     return parser
 
 

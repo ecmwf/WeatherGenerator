@@ -71,16 +71,12 @@ class WeatherGenReader(Reader):
         )
 
         # for backwards compatibility assume zarr store is local i.e. .zarr format
-        zarr_store = self.inference_cfg.get("zarr_store", "local")
-        if zarr_store == "zip":
-            ext = "zip"
-        else:
-            ext = "zarr"
+        zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
         fname_zarr_new = self.results_dir.joinpath(
-            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{ext}"
+            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
         )
         fname_zarr_old = self.results_dir.joinpath(
-            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.{ext}"
+            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
         )
 
         if fname_zarr_new.exists():

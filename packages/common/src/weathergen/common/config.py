@@ -333,9 +333,10 @@ def load_merge_configs(
             from_run_id, mini_epoch, private_config.get("model_path", None)
         )
         from_run_id = base_config.run_id
-    for _ in overwrite_configs:
-        if _.get("zarr_store", "null") is None:
-            _.zarr_store = base_config.zarr_store
+
+    # TODO: temp. fix until default_configs can be updated (defaulting with "zip")
+    base_config.zarr_store = base_config.get("zarr_store", "zip")
+
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
