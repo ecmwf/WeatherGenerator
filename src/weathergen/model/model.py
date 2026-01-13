@@ -31,6 +31,7 @@ from weathergen.model.engines import (
     LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
+    TransformerPredictionHead,
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
@@ -457,10 +458,12 @@ class Model(torch.nn.Module):
                     patch_token=True,
                 )
             elif loss == "JEPA":
-                self.latent_heads[loss] = LatentPredictionHead(
+                self.latent_heads[loss] = TransformerPredictionHead(
+                    cf,
                     f"{loss}-head",
-                    cf.ae_global_dim_embed,
-                    loss_conf["out_dim"],
+                    in_dim=cf.ae_global_dim_embed,
+                    out_dim=loss_conf["out_dim"],
+                    intermediate_dim=cf.pred_intermediate_dim,
                     class_token=False,
                     patch_token=True,
                 )

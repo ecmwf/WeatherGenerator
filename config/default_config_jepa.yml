@@ -64,6 +64,12 @@ fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 
+pred_num_blocks: 12
+pred_num_heads: 12
+pred_dropout_rate: 0.1
+pred_with_qk_lnorm: True 
+pred_intermediate_dim: 384
+
 healpix_level: 5
 
 with_mixed_precision: True
@@ -97,6 +103,7 @@ ema_halflife_in_thousands: 1e-3
 # ### Example validation and training config for student-teacher with JEPA
 validation_config:
   losses:
+    LossPhysical: {weight: 0.0, loss_fcts: [['mse', 0.8], ['mae', 0.2]]}
     LossLatentSSLStudentTeacher: { 
       "weight": 1.0,
       "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }
@@ -106,6 +113,7 @@ training_config:
   training_mode: "student_teacher"  # "masking", "student_teacher", "forecast"
   target_and_aux_calc: "EMATeacher"
   losses :  
+    LossPhysical: {weight: 0.0, loss_fcts: [['mse', 0.8], ['mae', 0.2]]}
     LossLatentSSLStudentTeacher: { 
       "weight": 1.0,
       "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} }

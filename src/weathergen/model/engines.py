@@ -836,19 +836,23 @@ class LatentState:
 
 
 class TransformerPredictionHead(nn.Module):
-    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
+    def __init__(self, cf: Config, name : str, in_dim: int, out_dim: int, intermediate_dim: int, class_token: bool, patch_token: bool):
         super().__init__()
 
         self.name = name
+        self.cf = cf
         self.class_token = class_token
         self.patch_token = patch_token
 
         self.pred_blocks = nn.ModuleList()
 
+        # first map to intermediate_dim to introduce a bottleneck
+        self.pred_blocks.append(nn.Linear(in_dim, intermediate_dim, bias=False))
+
         for _ in range(self.cf.pred_num_blocks):
             self.pred_blocks.append(
                 MultiSelfAttentionHead(
-                        self.cf.ae_global_dim_embed,
+                        intermediate_dim,
                         num_heads=self.cf.pred_num_heads,
                         dropout_rate=self.cf.pred_dropout_rate,
                         with_qk_lnorm=self.cf.pred_with_qk_lnorm,
@@ -862,8 +866,8 @@ class TransformerPredictionHead(nn.Module):
             # Add MLP block
             self.pred_blocks.append(
                 MLP(
-                    self.cf.ae_global_dim_embed,
-                    self.cf.ae_global_dim_embed,
+                    intermediate_dim,
+                    intermediate_dim,
                     hidden_factor=4,
                     with_residual=True,
                     dropout_rate=self.cf.pred_dropout_rate,
@@ -873,15 +877,28 @@ class TransformerPredictionHead(nn.Module):
                 )
             )
 
+        # finally map from intermediate_dim to the out_dim
+        self.pred_blocks.append(nn.Linear(intermediate_dim, out_dim, bias=False))
+
 
     def forward(self, x: LatentState):
-        outputs = []
-        if self.class_token:
-            outputs.append(self.layer(x.class_token))
-        if self.patch_token:
-            outputs.append(self.layer(x.patch_tokens))
+        # we concatenate the patch and class tokens to process them together
         # We concatenate in the token dimension [Batch, Tokens, Dim]
-        return torch.cat(outputs, dim=1)
+        patch_class_tokens = []
+        if self.class_token:
+            patch_class_tokens.append(x.class_token)
+        if self.patch_token:
+            patch_class_tokens.append(x.patch_tokens)
+        patch_class_tokens = torch.cat(patch_class_tokens, dim=1)
+
+        for _b_idx, block in enumerate(self.pred_blocks):
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                patch_class_tokens = block(patch_class_tokens)
+            else:
+                patch_class_tokens = checkpoint(block, patch_class_tokens, use_reentrant=False)
+        return patch_class_tokens
+
+
 
 class LatentPredictionHead(nn.Module):
     def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
