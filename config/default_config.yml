@@ -89,8 +89,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-# streams_directory: "./config/streams/era5_1deg/"
-streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/era5_1deg/"
 streams: ???
 
 general:
