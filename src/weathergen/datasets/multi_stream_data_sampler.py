@@ -120,7 +120,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.forecast_steps = [0]
             self.forecast_policy = None
 
-        self.len = 100000000
+        self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
         for _, stream_info in enumerate(cf.streams):
@@ -178,12 +178,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                fsm = self.forecast_steps[0]
-                if len(ds) > 0:
-                    self.len = min(
-                        self.len, len(ds) - (self.len_timedelta * (fsm + 1)) // self.step_timedelta
-                    )
-
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
                 stream_info["target_channel_weights"] = (
@@ -196,11 +190,29 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         index_range = self.time_window_handler.get_index_range()
         self.len = int(index_range.end - index_range.start)
-        self.len = min(self.len, self.samples_per_mini_epoch)
+
+        # check the repeat data flag and adjust len accordingly
+        if not self.repeat_data:
+            if self.samples_per_mini_epoch:
+                if self.samples_per_mini_epoch <= self.len:
+                    self.len = self.samples_per_mini_epoch
+                else:
+                    msg = (
+                        f"WARNING: Adjusted length of data sampler to {self.len} "
+                        f"(<samples_per_mini_epoch={self.samples_per_mini_epoch}) "
+                        "due to insufficient number of data samples. "
+                        "Enable repeat_data_in_mini_epoch to instead duplicate samples "
+                        "to fill samples_per_mini_epoch."
+                    )
+                    logger.warning(msg)
+        else:
+            self.len = self.samples_per_mini_epoch
+
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // self.batch_size) * self.batch_size
         self.len = min(self.len, len_chunk)
 
+        fsm = self.forecast_steps[0]
         forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
         perms_len = int(index_range.end - index_range.start) - (forecast_len + self.forecast_offset)
         n_duplicates = self.len - perms_len
@@ -282,9 +294,23 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # native length of datasets, independent of mini_epoch length that has potentially been
         # specified
         forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
-        idx_end -= forecast_len + self.forecast_offset
-        assert idx_end > 0, "dataset size too small for forecast range"
-        self.perms = np.arange(index_range.start, idx_end)
+        adjusted_idx_end = idx_end - (forecast_len + self.forecast_offset)
+        msg = (
+            f"dataset size ({idx_end}) too small for forecast length plus offset "
+            f"({forecast_len + self.forecast_offset}) – dataset size must be strictly bigger. "
+            "to fix this, it usually suffices to increase the data range "
+        )
+        assert adjusted_idx_end > 0, msg
+        self.perms = np.arange(index_range.start, adjusted_idx_end)
+
+        # check repeat_data flag and fill up perms accordingly
+        if self.repeat_data and len(self.perms) < self.samples_per_mini_epoch:
+            self.perms = np.tile(self.perms, self.samples_per_mini_epoch // len(self.perms))
+            random_filler = self.rng.choice(
+                self.perms, size=self.samples_per_mini_epoch - len(self.perms), replace=False
+            )
+            self.perms = np.concatenate([self.perms, random_filler])
+
         if self.shuffle:
             self.perms = self.rng.permutation(self.perms)
 
