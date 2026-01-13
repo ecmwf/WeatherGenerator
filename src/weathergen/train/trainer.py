@@ -21,7 +21,6 @@ from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
-from weathergen.common.io import ZarrIO, writer
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -168,12 +167,7 @@ class Trainer(TrainerBase):
         logger.info(f"Starting inference with id={self.cf.run_id}.")
 
         # inference validation set
-        if is_root():
-            with writer(config.get_path_output(self.cf, mini_epoch=0)) as io_writer:
-                self.validate(mini_epoch=0, writer=io_writer)
-        else:
-            self.validate(mini_epoch=0, writer=None)
-
+        self.validate(mini_epoch=0)
         logger.info(f"Finished inference run with id: {cf.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
@@ -381,14 +375,14 @@ class Trainer(TrainerBase):
 
         # validate once at the beginning as reference
         if cf.val_initial:
-            self.validate(-1, writer=None)
+            self.validate(-1)
 
         for mini_epoch in range(mini_epoch_base, cf.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: train.")
             self.train(mini_epoch)
 
             logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: validate.")
-            self.validate(mini_epoch, writer=None)
+            self.validate(mini_epoch)
 
             logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: save_model.")
             self.save_model(mini_epoch)
@@ -490,11 +484,9 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch: int, writer: ZarrIO | None):
+    def validate(self, mini_epoch: int):
         """
         Docstring for validate
-
-        :param writer: when provided, will write the batch to disk using this writer.
         """
         cf = self.cf
         self.model.eval()
@@ -536,17 +528,15 @@ class Trainer(TrainerBase):
                     # log output
                     if bidx < cf.log_validation:
                         dn_data = self.dataset_val.denormalize_target_channels
-                        if writer is not None:
-                            write_output(
-                                self.cf,
-                                mini_epoch,
-                                bidx,
-                                dn_data,
-                                batch,
-                                preds,
-                                target_aux_output,
-                                writer,
-                            )
+                        write_output(
+                            self.cf,
+                            mini_epoch,
+                            bidx,
+                            dn_data,
+                            batch,
+                            preds,
+                            target_aux_output,
+                        )
 
                     pbar.update(self.cf.batch_size_validation_per_gpu)
 
