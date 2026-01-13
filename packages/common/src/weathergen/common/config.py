@@ -563,19 +563,6 @@ def load_streams(streams_directory: Path) -> list[Config]:
     return list(streams.values())
 
 
-def set_paths(config: Config) -> Config:
-    """Set the configs run_path model_path attributes to default values if not present."""
-    config = config.copy()
-    config.run_path = _get_config_attribute(
-        config=config, attribute_name="run_path", fallback="results"
-    )
-    config.model_path = _get_config_attribute(
-        config=config, attribute_name="model_path", fallback="models"
-    )
-
-    return config
-
-
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
     results_path = _get_shared_wg_path("results")
