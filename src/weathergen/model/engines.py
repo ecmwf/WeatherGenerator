@@ -836,7 +836,16 @@ class LatentState:
 
 
 class TransformerPredictionHead(nn.Module):
-    def __init__(self, cf: Config, name : str, in_dim: int, out_dim: int, intermediate_dim: int, class_token: bool, patch_token: bool):
+    def __init__(
+        self,
+        cf: Config,
+        name: str,
+        in_dim: int,
+        out_dim: int,
+        intermediate_dim: int,
+        class_token: bool,
+        patch_token: bool,
+    ):
         super().__init__()
 
         self.name = name
@@ -852,17 +861,17 @@ class TransformerPredictionHead(nn.Module):
         for _ in range(self.cf.pred_num_blocks):
             self.pred_blocks.append(
                 MultiSelfAttentionHead(
-                        intermediate_dim,
-                        num_heads=self.cf.pred_num_heads,
-                        dropout_rate=self.cf.pred_dropout_rate,
-                        with_qk_lnorm=self.cf.pred_with_qk_lnorm,
-                        with_flash=self.cf.with_flash_attention,
-                        norm_type=self.cf.norm_type,
-                        # dim_aux=dim_aux,
-                        norm_eps=self.cf.norm_eps,
-                        attention_dtype=get_dtype(self.cf.attention_dtype),
-                    )
+                    intermediate_dim,
+                    num_heads=self.cf.pred_num_heads,
+                    dropout_rate=self.cf.pred_dropout_rate,
+                    with_qk_lnorm=self.cf.pred_with_qk_lnorm,
+                    with_flash=self.cf.with_flash_attention,
+                    norm_type=self.cf.norm_type,
+                    # dim_aux=dim_aux,
+                    norm_eps=self.cf.norm_eps,
+                    attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
+            )
             # Add MLP block
             self.pred_blocks.append(
                 MLP(
@@ -880,7 +889,6 @@ class TransformerPredictionHead(nn.Module):
         # finally map from intermediate_dim to the out_dim
         self.pred_blocks.append(nn.Linear(intermediate_dim, out_dim, bias=False))
 
-
     def forward(self, x: LatentState):
         # we concatenate the patch and class tokens to process them together
         # We concatenate in the token dimension [Batch, Tokens, Dim]
@@ -897,7 +905,6 @@ class TransformerPredictionHead(nn.Module):
             else:
                 patch_class_tokens = checkpoint(block, patch_class_tokens, use_reentrant=False)
         return patch_class_tokens
-
 
 
 class LatentPredictionHead(nn.Module):
