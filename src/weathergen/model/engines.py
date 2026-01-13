@@ -835,6 +835,54 @@ class LatentState:
     z_pre_norm: torch.Tensor
 
 
+class TransformerPredictionHead(nn.Module):
+    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
+        super().__init__()
+
+        self.name = name
+        self.class_token = class_token
+        self.patch_token = patch_token
+
+        self.pred_blocks = nn.ModuleList()
+
+        for _ in range(self.cf.pred_num_blocks):
+            self.pred_blocks.append(
+                MultiSelfAttentionHead(
+                        self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.pred_num_heads,
+                        dropout_rate=self.cf.pred_dropout_rate,
+                        with_qk_lnorm=self.cf.pred_with_qk_lnorm,
+                        with_flash=self.cf.with_flash_attention,
+                        norm_type=self.cf.norm_type,
+                        # dim_aux=dim_aux,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
+                    )
+                )
+            # Add MLP block
+            self.pred_blocks.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    hidden_factor=4,
+                    with_residual=True,
+                    dropout_rate=self.cf.pred_dropout_rate,
+                    norm_type=self.cf.norm_type,
+                    # dim_aux=dim_aux,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
+            )
+
+
+    def forward(self, x: LatentState):
+        outputs = []
+        if self.class_token:
+            outputs.append(self.layer(x.class_token))
+        if self.patch_token:
+            outputs.append(self.layer(x.patch_tokens))
+        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        return torch.cat(outputs, dim=1)
+
 class LatentPredictionHead(nn.Module):
     def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
         super().__init__()
