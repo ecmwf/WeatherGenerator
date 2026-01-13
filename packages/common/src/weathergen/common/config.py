@@ -189,7 +189,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     else:
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
-            model_path = get_shared_wg_path("models")
+            model_path = _get_shared_wg_path("models")
         path = Path(model_path)
         fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
         assert fname.exists(), (
@@ -326,7 +326,7 @@ def load_merge_configs(
         base_config = _load_default_conf()
     else:
         base_config = load_run_config(
-            from_run_id, mini_epoch, get_shared_wg_path("models")
+            from_run_id, mini_epoch, _get_shared_wg_path("models")
         )
         from_run_id = base_config.run_id
     with open_dict(base_config):
@@ -578,13 +578,13 @@ def set_paths(config: Config) -> Config:
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
-    results_path = get_shared_wg_path("results")
+    results_path = _get_shared_wg_path("results")
     return results_path / config.run_id
 
 
 def get_path_model(config: Config) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
-    model_path = get_shared_wg_path("models")
+    model_path = _get_shared_wg_path("models")
     return model_path / config.run_id
 
 
@@ -595,7 +595,7 @@ def get_path_results(config: Config, mini_epoch: int) -> Path:
     return base_path / fname
 
 @functools.cached_property
-def get_shared_wg_path(local_path: str | Path) -> Path:
+def _get_shared_wg_path(local_path: str | Path) -> Path:
     """
     Resolves a local, relative path to an absolute path within the configured shared working
     directory.
