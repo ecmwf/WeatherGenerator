@@ -863,13 +863,12 @@ class BilinearDecoder(nn.Module):
         self.latent_dim = latent_dim
         self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
 
-    def forward(self, coords_bmd, latent_bnd, tcs_lens_bn1):
+    def forward(self, coords_md, latent_nd, tcs_lens_n1):
         """
         Using Noam Shazeer notation
-        B = Batchsize
-        N = Number of latent tokens (N1 means N+1)
+        N = Number of latent tokens*batch_size (N1 means N+1)
         M = Number of coordinates to decode
         D = Hidden dimension
         """
-        latent_bmd = torch.repeat_interleave(latent_bnd, tcs_lens_bn1[1:], 1)
-        return self.bilin(coords_bmd, latent_bmd)
+        latent_md = torch.repeat_interleave(latent_nd, tcs_lens_n1[1:], 0)
+        return self.bilin(coords_md, latent_md)
