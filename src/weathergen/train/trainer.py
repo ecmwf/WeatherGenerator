@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+import copy
 import logging
 import time
 
@@ -195,7 +196,7 @@ class Trainer(TrainerBase):
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
         # inference validation set
-        self.validate(mini_epoch=0, mode_cfg=self.test_cfg)
+        self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
@@ -326,11 +327,10 @@ class Trainer(TrainerBase):
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
-        # training loop
+        # run validation before training if requested
+        self.validate_before_training()
 
-        # validate once at the beginning as reference
-        if self.validation_cfg.get("validate_before_training", False):
-            self.validate(mini_epoch=-1, mode_cfg=self.validation_cfg)
+        # training loop
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
@@ -339,7 +339,7 @@ class Trainer(TrainerBase):
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
             )
-            self.validate(mini_epoch, mode_cfg=self.validation_cfg)
+            self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
 
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
@@ -349,7 +349,32 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
 
+    def validate_before_training(self):
+        """
+        Perform validation before training (eg. to check validation pipeline or data normalization)
+        if config parameters are set accordingly
+        """
+
+        # validate once at the beginning as reference
+        if self.validation_cfg.get("validate_before_training", None) is not None:
+            validate_before_training = self.validation_cfg.get("validate_before_training")
+            batch_size = self.batch_size_validation_per_gpu
+            if type(validate_before_training) is bool:
+                if validate_before_training:
+                    self.validate(-1, self.validation_cfg, batch_size)
+            elif type(validate_before_training) is int:
+                if validate_before_training > 0:
+                    cfg = copy.deepcopy(self.validation_cfg)
+                    cfg.samples_per_mini_epoch = validate_before_training
+                    self.validate(-1, cfg, batch_size)
+            else:
+                assert False, "validate_before_training must be integer or boolean."
+
     def train(self, mini_epoch):
+        """
+        Perform training for one epoch
+        """
+
         cf = self.cf
         self.model.train()
 
@@ -460,7 +485,11 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch, mode_cfg):
+    def validate(self, mini_epoch, mode_cfg, batch_size):
+        """
+        Perform validation / test computation as specified by mode_cfg
+        """
+
         cf = self.cf
         self.model.eval()
 
@@ -468,9 +497,7 @@ class Trainer(TrainerBase):
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
-            ) as pbar:
+            with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     batch.to_device(self.device)
 
@@ -509,15 +536,13 @@ class Trainer(TrainerBase):
                     )
 
                     # log output
-                    num_samples = (
-                        mode_cfg.get("write_num_samples", 0) * self.batch_size_validation_per_gpu
-                    )
+                    num_samples = mode_cfg.get("write_num_samples", 0) * batch_size
                     if bidx < num_samples:
                         dn_data = self.dataset_val.denormalize_target_channels
                         write_output(
                             self.cf,
                             mode_cfg,
-                            self.batch_size_validation_per_gpu,
+                            batch_size,
                             mini_epoch,
                             bidx,
                             dn_data,
@@ -526,7 +551,10 @@ class Trainer(TrainerBase):
                             targets_and_auxs,
                         )
 
-                    pbar.update(self.batch_size_validation_per_gpu)
+                    pbar.update(batch_size)
+
+                    if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
+                        break
 
                 self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)
