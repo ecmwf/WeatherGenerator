@@ -171,7 +171,7 @@ def get_reader(
         reader = CsvReader(run, run_id, private_paths)
     elif reader_type == "json":
         reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
-     elif reader_type == "merge":
+    elif reader_type == "merge":
         reader = WeatherGenMergeReader(run, run_id, private_paths)
     else:
         raise ValueError(f"Unknown reader type: {reader_type}")

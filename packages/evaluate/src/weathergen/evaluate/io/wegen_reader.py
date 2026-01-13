@@ -680,7 +680,7 @@ class WeatherGenMergeReader(Reader):
         _logger.info(f"MERGE READERS: {self.run_ids} ...")
 
         for run_id in self.run_ids:
-            reader = WeatherGenReader(self.eval_cfg, run_id, self.private_paths)
+            reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
             self.readers.append(reader)
 
     def get_data(
