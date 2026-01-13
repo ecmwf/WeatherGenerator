@@ -369,7 +369,7 @@ class ZarrIO:
 
     @property
     def _mode(self):
-        return "r" if self.read_only else "w"
+        return "r" if self.read_only else "a"
 
     def __enter__(self) -> typing.Self:
         # Capture warnings emitted during store creation/open
