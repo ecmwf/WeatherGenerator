@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+import copy
 import logging
 import time
 
@@ -20,7 +21,7 @@ from omegaconf import OmegaConf
 from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
-from weathergen.common.config import Config
+from weathergen.common.config import Config, merge_configs
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -30,10 +31,14 @@ from weathergen.model.model_interface import (
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.train.utils import extract_batch_metadata
+from weathergen.train.utils import (
+    extract_batch_metadata,
+    get_batch_size_from_config,
+    get_target_idxs_from_cfg,
+)
 from weathergen.utils.distributed import ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
-from weathergen.utils.utils import get_batch_size, get_dtype
+from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
@@ -62,12 +67,18 @@ class Trainer(TrainerBase):
         self.perf_gpu = None
         self.perf_mem = None
         self.t_start: float = 0
-        self.target_and_aux_calculator = None
+        self.target_and_aux_calculators = None
+        self.svalidate_with_ema_cfg = None
         self.validate_with_ema: bool = False
+        self.batch_size_per_gpu = -1
+        self.batch_size_validation_per_gpu = -1
+        self.batch_size_test_per_gpu = -1
 
-        self.loss_model_hist = {}
-        self.loss_unweighted_hist = {}
-        self.stdev_unweighted_hist = {}
+    def get_batch_size_total(self, batch_size_per_gpu) -> int:
+        """
+        Get total, effective batch size across all DDP ranks
+        """
+        return self.world_size_original * batch_size_per_gpu
 
     def init(self, cf: Config, devices):
         # pylint: disable=attribute-defined-outside-init
@@ -87,11 +98,19 @@ class Trainer(TrainerBase):
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
-        assert cf.samples_per_mini_epoch % cf.batch_size_per_gpu == 0
-        assert cf.samples_per_validation % cf.batch_size_validation_per_gpu == 0
-        config.validate_forecast_policy_and_steps(cf=cf)
+        self.training_cfg = cf.get("training_config")
+        # validation and test configs are training configs, updated by specified keys
+        self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
+        self.test_cfg = merge_configs(self.validation_cfg, cf.get("test_config", {}))
 
-        self.mixed_precision_dtype = get_dtype(cf.attention_dtype)
+        # batch sizes
+        self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)
+        self.batch_size_validation_per_gpu = get_batch_size_from_config(self.validation_cfg)
+        self.batch_size_test_per_gpu = get_batch_size_from_config(self.test_cfg)
+
+        # config.validate_forecast_policy_and_steps(cf=cf)
+
+        self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 
         self.devices = devices
 
@@ -100,7 +119,7 @@ class Trainer(TrainerBase):
         self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
         cf.world_size_original = self.world_size_original
 
-        self.log_grad_norms = cf.get("log_grad_norms", False)
+        self.log_grad_norms = self.training_cfg.optimizer.get("log_grad_norms", False)
 
         # create output directory
         if is_root():
@@ -109,6 +128,22 @@ class Trainer(TrainerBase):
 
         self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
+
+    def get_target_aux_calculators(self, mode_cfg):
+        """
+        Get target_aux_calculators for given mode_cfg
+        """
+
+        batch_size = get_batch_size_from_config(mode_cfg)
+
+        # get target_aux calculators for different loss terms
+        target_and_aux_calculators = {}
+        for loss_name, loss_cfg in mode_cfg.losses.items():
+            target_and_aux_calculators[loss_name] = get_target_aux_calculator(
+                self.cf, loss_cfg, self.dataset, self.model, self.device, batch_size
+            ).to_device(self.device)
+
+        return target_and_aux_calculators
 
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
@@ -123,17 +158,13 @@ class Trainer(TrainerBase):
         # only one needed since we only run the validation code path
         self.dataset = MultiStreamDataSampler(
             cf,
-            cf.start_date_val,
-            cf.end_date_val,
-            cf.batch_size_validation_per_gpu,
-            cf.samples_per_validation,
+            self.test_cfg,
             stage=VAL,
-            shuffle=cf.shuffle,
         )
         self.dataset_val = self.dataset
 
         # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(cf.samples_per_validation, cf.loader_num_workers)
+        loader_num_workers = min(self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers)
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
@@ -150,25 +181,23 @@ class Trainer(TrainerBase):
             self.dataset,
             run_id_contd,
             mini_epoch_contd,
-            cf.training_config.training_mode,
+            self.test_cfg.training_mode,
             devices[0],
         )
 
-        self.target_and_aux_calculator = get_target_aux_calculator(
-            cf, self.dataset, self.model, self.device
-        )
-        self.target_and_aux_calculator.to_device(self.device)
+        # get target_aux calculators for different loss terms
+        self.svalidate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
 
-        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.devices[0])
+        self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
         if is_root():
             config.save(self.cf, mini_epoch=0)
 
-        logger.info(f"Starting inference with id={self.cf.run_id}.")
+        logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
         # inference validation set
-        self.validate(mini_epoch=0)
-        logger.info(f"Finished inference run with id: {cf.run_id}")
+        self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
+        logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
@@ -179,30 +208,14 @@ class Trainer(TrainerBase):
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
 
         # create data loaders
-        self.dataset = MultiStreamDataSampler(
-            cf,
-            cf.start_date,
-            cf.end_date,
-            cf.batch_size_per_gpu,
-            cf.samples_per_mini_epoch,
-            stage=TRAIN,
-            shuffle=cf.shuffle,
-        )
-        self.dataset_val = MultiStreamDataSampler(
-            cf,
-            cf.start_date_val,
-            cf.end_date_val,
-            cf.batch_size_validation_per_gpu,
-            cf.samples_per_validation,
-            stage=VAL,
-            shuffle=True,
-        )
+        self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
+        self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
 
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
             "shuffle": False,
-            "num_workers": cf.loader_num_workers,
+            "num_workers": cf.data_loading.num_workers,
             "pin_memory": True,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
@@ -215,16 +228,18 @@ class Trainer(TrainerBase):
             self.dataset,
             run_id_contd,
             mini_epoch_contd,
-            cf.training_config.training_mode,
+            self.training_cfg.training_mode,
             devices[0],
         )
 
-        if cf.compile_model:
-            self.model = torch.compile(self.model, dynamic=True)
-
-        self.validate_with_ema = cf.get("validate_with_ema", False)
+        validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
+        if validate_with_ema_cfg is not None:
+            # if the config is specified and enabled not specified, then assume it is to be used
+            self.validate_with_ema = validate_with_ema_cfg.get("enabled", True)
+        else:
+            self.validate_with_ema = False
         self.ema_model = None
-        if cf.training_config["training_mode"] == "student-teacher":
+        if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
                 cf,
                 self.dataset,
@@ -237,40 +252,14 @@ class Trainer(TrainerBase):
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
-                halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
-                rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
-                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
-            )
-        elif self.validate_with_ema:
-            # validate_with_ema is incompatible with student-teacher
-            meta_ema_model, _ = init_model_and_shard(
-                cf,
-                self.dataset,
-                run_id_contd,
-                mini_epoch_contd,
-                cf.training_config.training_mode,
-                devices[0],
-                {},
-            )
-            self.ema_model = EMAModel(
-                self.model,
-                meta_ema_model,
-                halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
-                rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
+                halflife_steps=validate_with_ema_cfg.get("ema_halflife_in_thousands", 1e-3),
+                rampup_ratio=validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
 
-        self.target_and_aux_calculator = get_target_aux_calculator(
-            cf, self.dataset, self.model, self.device
-        )
-
-        self.target_and_aux_calculator.to_device(self.device)
-
-        self.target_and_aux_calculator = get_target_aux_calculator(
-            cf, self.dataset, self.model, self.device
-        )
-
-        self.target_and_aux_calculator.to_device(self.device)
+        # get target_aux calculators for different loss terms
+        self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
+        self.svalidate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
@@ -279,20 +268,19 @@ class Trainer(TrainerBase):
             self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper https://arxiv.org/pdf/2111.06377
-        kappa = (
-            cf.batch_size_per_gpu * cf.world_size
-        )  # I doubt this holds for us from some anecdotal runs
-        beta1 = max(
-            0.5, 1.0 - kappa * (1.0 - 0.975)
-        )  # aiming for beta1 = 0.9 at one node, ie kappa=B=4
-        beta2 = 1.0 - kappa * (1.0 - 0.9875)  # aiming for beta2 = 0.95 at one node, ie B=4
+        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
+        # https://arxiv.org/pdf/2111.06377
+        kappa = self.get_batch_size_total(self.batch_size_per_gpu)
+        # aiming for beta1 = 0.9 at one node, ie kappa=B=4
+        beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
+        # aiming for beta2 = 0.95 at one node, ie B=4
+        beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
         eps = 2e-08 / np.sqrt(kappa)
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
-            lr=cf.lr_start,
-            weight_decay=cf.weight_decay,
+            lr=self.training_cfg.learning_rate_scheduling.lr_start,
+            weight_decay=self.training_cfg.optimizer.weight_decay,
             betas=(beta1, beta2),
             eps=eps,
         )
@@ -302,104 +290,100 @@ class Trainer(TrainerBase):
 
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
-        cf.lr_steps = int((len(self.dataset) * cf.num_mini_epochs) / cf.batch_size_per_gpu)
-
-        steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-        if is_root():
-            logger.debug(f"steps_decay={steps_decay} lr_steps={cf.lr_steps}")
-        # ensure that steps_decay has a reasonable value
-        if steps_decay < int(0.2 * cf.lr_steps):
-            cf.lr_steps_warmup = int(0.1 * cf.lr_steps)
-            cf.lr_steps_cooldown = int(0.05 * cf.lr_steps)
-            steps_decay = cf.lr_steps - cf.lr_steps_warmup - cf.lr_steps_cooldown
-            s = (
-                "cf.lr_steps_warmup and cf.lr_steps_cooldown",
-                f" were larger than cf.lr_steps={cf.lr_steps}",
-            )
-            s += (
-                f". The value have been adjusted to cf.lr_steps_warmup={cf.lr_steps_warmup} and ",
-            )
-            s += (
-                f" cf.lr_steps_cooldown={cf.lr_steps_cooldown} so that steps_decay={steps_decay}.",
-            )
-            if is_root():
-                logger.warning(s)
+        len_ds = len(self.dataset)
+        lr_steps = int((len_ds * self.training_cfg.num_mini_epochs) / self.batch_size_per_gpu)
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
-            cf.batch_size_per_gpu,
+            self.batch_size_per_gpu,
             cf.world_size,
-            cf.lr_start,
-            cf.lr_max,
-            cf.lr_final_decay,
-            cf.lr_final,
-            cf.lr_steps_warmup,
-            steps_decay,
-            cf.lr_steps_cooldown,
-            cf.lr_policy_warmup,
-            cf.lr_policy_decay,
-            cf.lr_policy_cooldown,
-            cf.istep,
-            cf.lr_scaling_policy,
+            cf.general.istep,
+            lr_steps,
+            self.training_cfg.learning_rate_scheduling,
         )
 
-        if self.cf.istep > 0 and is_root():
+        if self.cf.general.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
             if is_root():
                 logger.info(str)
 
         # Instantiate loss calculator modules to compute losses
-        self.loss_calculator = LossCalculator(cf=cf, stage=TRAIN, device=self.device)
-        self.loss_calculator_val = LossCalculator(cf=cf, stage=VAL, device=self.device)
+        self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
+        val_cfg = self.validation_cfg
+        self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
 
         # recover mini_epoch when continuing run
         if self.world_size_original is None:
-            mini_epoch_base = int(self.cf.istep / len(self.data_loader))
+            mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                len(self.dataset) // (self.world_size_original * cf.batch_size_per_gpu)
-            ) * cf.batch_size_per_gpu
+                len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu)
+            ) * self.batch_size_per_gpu
             mini_epoch_base = int(
-                self.cf.istep
-                / (min(len_per_rank, cf.samples_per_mini_epoch) * self.world_size_original)
+                self.cf.general.istep
+                / (
+                    min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
+                    * self.world_size_original
+                )
             )
-
-        # torch.autograd.set_detect_anomaly(True)
-        if cf.forecast_policy is not None:
-            torch._dynamo.config.optimize_ddp = False
 
         if is_root():
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
+        # run validation before training if requested
+        self.validate_before_training()
+
         # training loop
 
-        # validate once at the beginning as reference
-        if cf.val_initial:
-            self.validate(-1)
-
-        for mini_epoch in range(mini_epoch_base, cf.num_mini_epochs):
-            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: train.")
+        for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
+            logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
             self.train(mini_epoch)
 
-            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: validate.")
-            self.validate(mini_epoch)
+            logger.info(
+                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
+            )
+            self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
 
-            logger.info(f"Mini_epoch {mini_epoch} of {cf.num_mini_epochs}: save_model.")
+            logger.info(
+                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
+            )
             self.save_model(mini_epoch)
 
         # log final model
-        self.save_model(cf.num_mini_epochs)
+        self.save_model(self.training_cfg.num_mini_epochs)
+
+    def validate_before_training(self):
+        """
+        Perform validation before training (eg. to check validation pipeline or data normalization)
+        if config parameters are set accordingly
+        """
+
+        # validate once at the beginning as reference
+        if self.validation_cfg.get("validate_before_training", None) is not None:
+            validate_before_training = self.validation_cfg.get("validate_before_training")
+            batch_size = self.batch_size_validation_per_gpu
+            if type(validate_before_training) is bool:
+                if validate_before_training:
+                    self.validate(-1, self.validation_cfg, batch_size)
+            elif type(validate_before_training) is int:
+                if validate_before_training > 0:
+                    cfg = copy.deepcopy(self.validation_cfg)
+                    cfg.samples_per_mini_epoch = validate_before_training
+                    self.validate(-1, cfg, batch_size)
+            else:
+                assert False, "validate_before_training must be integer or boolean."
 
     def train(self, mini_epoch):
+        """
+        Perform training for one epoch
+        """
+
         cf = self.cf
         self.model.train()
 
         dataset_iter = iter(self.data_loader)
 
         self.optimizer.zero_grad()
-
-        # Unweighted loss, real weighted loss, std for losses that need it
-        self.loss_model_hist, self.loss_unweighted_hist, self.stdev_unweighted_hist = [], [], []
 
         # training loop
         self.t_start = time.time()
@@ -411,16 +395,28 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                preds = self.model(self.model_params, batch)
-                targets_and_auxs = self.target_and_aux_calculator.compute(
-                    self.cf.istep,
-                    batch,
+                preds = self.model(
                     self.model_params,
-                    self.model,
+                    batch.get_source_samples(),
+                    self.training_cfg.window_offset_prediction,
                 )
+
+                targets_and_auxs = {}
+                for loss_name, target_aux in self.target_and_aux_calculators.items():
+                    # find targets for this target-aux calculator
+                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                    # apply target-aux calculator
+                    targets_and_auxs[loss_name] = target_aux.compute(
+                        self.cf.general.istep,
+                        batch.get_target_samples(target_idxs),
+                        self.model_params,
+                        self.model,
+                        self.training_cfg.window_offset_prediction,
+                    )
+
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
-                targets=targets_and_auxs,
+                targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
             # TODO re-enable this, need to think on how to make it compatible with
@@ -429,19 +425,23 @@ class Trainer(TrainerBase):
             #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
             #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
-            self.target_and_aux_calculator.update_state_pre_backward(
-                self.cf.istep, batch, self.model
-            )
+            [
+                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators.items()
+            ]
+            [
+                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                for _, target_aux in self.svalidate_with_ema_cfg.items()
+            ]
 
             # backward pass
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
-            # loss_values.loss.backward()
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
             total_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), max_norm=cf.grad_clip
+                self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
             )
 
             # log gradient norms
@@ -458,15 +458,19 @@ class Trainer(TrainerBase):
             # update learning rate
             self.lr_scheduler.step()
 
-            self.target_and_aux_calculator.update_state_post_opt_step(
-                self.cf.istep * get_batch_size(self.cf, self.world_size_original), batch, self.model
-            )
+            batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+            step = batch_size_total * self.cf.general.istep
+            [
+                target_aux.update_state_post_opt_step(step, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators.items()
+            ]
+            [
+                target_aux.update_state_post_opt_step(step, batch, self.model)
+                for _, target_aux in self.svalidate_with_ema_cfg.items()
+            ]
             # EMA update
             if self.validate_with_ema:
-                self.ema_model.update(
-                    self.cf.istep * get_batch_size(self.cf, self.world_size_original),
-                    get_batch_size(self.cf, self.world_size_original),
-                )
+                self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
@@ -480,11 +484,15 @@ class Trainer(TrainerBase):
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
-            self.cf.istep += 1
+            self.cf.general.istep += 1
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch):
+    def validate(self, mini_epoch, mode_cfg, batch_size):
+        """
+        Perform validation / test computation as specified by mode_cfg
+        """
+
         cf = self.cf
         self.model.eval()
 
@@ -492,9 +500,7 @@ class Trainer(TrainerBase):
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
-            ) as pbar:
+            with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     batch.to_device(self.device)
 
@@ -509,29 +515,51 @@ class Trainer(TrainerBase):
                             if self.ema_model is None
                             else self.ema_model.forward_eval
                         )
-                        preds = model_forward(self.model_params, batch)
-                        target_aux_output = self.target_and_aux_calculator.compute(
-                            self.cf.istep,
-                            batch,
+                        preds = model_forward(
                             self.model_params,
-                            self.model,
+                            batch.get_source_samples(),
+                            mode_cfg.window_offset_prediction,
                         )
+
+                        targets_and_auxs = {}
+                        for loss_name, target_aux in self.svalidate_with_ema_cfg.items():
+                            target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                            targets_and_auxs[loss_name] = target_aux.compute(
+                                self.cf.general.istep,
+                                batch.get_target_samples(target_idxs),
+                                self.model_params,
+                                self.model,
+                                mode_cfg.window_offset_prediction,
+                            )
+
                     _ = self.loss_calculator_val.compute_loss(
                         preds=preds,
-                        targets=target_aux_output,
+                        targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
                     )
 
                     # log output
-                    if bidx < cf.log_validation:
+                    num_samples = mode_cfg.get("write_num_samples", 0) * batch_size
+                    if bidx < num_samples:
                         dn_data = self.dataset_val.denormalize_target_channels
                         write_output(
-                            self.cf, mini_epoch, bidx, dn_data, batch, preds, target_aux_output
+                            self.cf,
+                            mode_cfg,
+                            batch_size,
+                            mini_epoch,
+                            bidx,
+                            dn_data,
+                            batch,
+                            preds,
+                            targets_and_auxs,
                         )
 
-                    pbar.update(self.cf.batch_size_validation_per_gpu)
+                    pbar.update(batch_size)
 
-                self._log_terminal(bidx, mini_epoch, VAL)
+                    if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
+                        break
+
+                self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
@@ -585,14 +613,14 @@ class Trainer(TrainerBase):
 
     def save_model(self, mini_epoch: int, name=None):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
-        max_mini_epoch = self.cf.num_mini_epochs
+        max_mini_epoch = self.training_cfg.num_mini_epochs
         assert mini_epoch <= max_mini_epoch, (mini_epoch, max_mini_epoch)
         model_state_dict = self._get_full_model_state_dict()
 
         if is_root():
             filename = "".join(
                 [
-                    self.cf.run_id,
+                    self.cf.general.run_id,
                     "_",
                     "latest" if mini_epoch == -1 else f"chkpt{mini_epoch:05d}",
                     ("_" + name) if name is not None else "",
@@ -630,14 +658,14 @@ class Trainer(TrainerBase):
             loss_calculator.stddev_unweighted_hist,
         )
 
-        samples = self.cf.istep * self.cf.batch_size_per_gpu * self.cf.world_size
+        samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
 
         if is_root():
             # plain logger
             if stage == VAL:
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
-            elif self.cf.istep >= 0:
+            elif self.cf.general.istep >= 0:
                 self.train_logger.add_logs(
                     stage,
                     samples,
@@ -687,22 +715,22 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation ({self.cf.run_id}) : {mini_epoch:03d} : 
+                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
                         {np.nanmean(avg_loss)}"""
                     )
 
                 elif stage == TRAIN:
                     # samples per sec
                     dt = time.time() - self.t_start
-                    len_dataset = len(self.data_loader) // self.cf.batch_size_per_gpu
+                    len_dataset = len(self.data_loader) // self.batch_size_per_gpu
                     pstr = (
                         f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
-                        + f"{self.cf.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
+                        + f"{self.cf.general.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
                     if self.log_grad_norms:
                         pstr += f"gradient norm={self.last_grad_norm:.3f}, "
-                    pstr += f"s/sec={(print_freq * self.cf.batch_size_per_gpu) / dt:.3f})"
+                    pstr += f"s/sec={(print_freq * self.batch_size_per_gpu) / dt:.3f})"
                     logger.info(pstr)
                     logger.info("\t")
 

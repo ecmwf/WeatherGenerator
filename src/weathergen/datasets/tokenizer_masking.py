@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
@@ -71,6 +72,14 @@ class TokenizerMasking(Tokenizer):
             tokens += [(idxs_cells, idxs_cells_lens)]
 
         return tokens
+
+    def build_samples_for_stream(
+        self, training_mode: str, num_cells: int, training_cfg: dict
+    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
+        """
+        Create masks for samples
+        """
+        return self.masker.build_samples_for_stream(training_mode, num_cells, training_cfg)
 
     def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
         """ """
@@ -194,9 +203,6 @@ class TokenizerMasking(Tokenizer):
             self.hpy_nctrs_target,
             encode_times_target,
         )
-
-        # TODO, TODO, TODO: max_num_targets
-        # max_num_targets = stream_info.get("max_num_targets", -1)
 
         return (data, datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
 
