@@ -84,6 +84,9 @@ latent_noise_deterministic_latents: True
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
+# It’s possible that enabling memory_pinning with FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
+# If this happens, you can disable the flag, but performance will drop on GH200.
+memory_pinning: True
 # a regex that needs to fully match the name of the modules you want to freeze
 # e.g. ".*ERA5" will match any module whose name ends in ERA5\
 # encoders and decoders that exist per stream have the stream name attached at the end

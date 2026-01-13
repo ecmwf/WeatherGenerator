@@ -402,8 +402,9 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            # pin memory for faster CPU-GPU transfer
-            batch = batch.pin_memory()
+            if cf.memory_pinning:
+                # pin memory for faster CPU-GPU transfer
+                batch = batch.pin_memory()
 
             batch.to_device(self.device)
 
@@ -497,8 +498,9 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    # pin memory for faster CPU-GPU transfer
-                    batch = batch.pin_memory()
+                    if cf.memory_pinning:
+                        # pin memory for faster CPU-GPU transfer
+                        batch = batch.pin_memory()
 
                     batch.to_device(self.device)
 
