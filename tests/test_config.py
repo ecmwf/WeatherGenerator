@@ -63,7 +63,7 @@ EXCLUDED_STREAMS = [
 ]
 
 DUMMY_BASE_CONF = {
-    # TODO add base configuration
+    "foo": "bar"
 }
 
 
@@ -202,14 +202,14 @@ def test_load_with_overwrite_file(private_config_file, overwrite_file):
     assert contains(cf, sub_cf)
 
 
-def test_load_with_base_config(base_config, private_config_file):
-    cf = config.load_merge_configs(private_config_file, None, None, base_config)
+def test_load_with_base_config(base_config_file, private_config_file):
+    cf = config.load_merge_configs(private_config_file, None, None, base_config_file)
 
     assert contains(cf, base_config)
 
 
 def test_load_with_base_file(base_config_file, private_config_file):
-    sub_cf = OmegaConf.load(overwrite_file)
+    sub_cf = OmegaConf.load(base_config_file)
     cf = config.load_merge_configs(private_config_file, None, None, base_config_file)
 
     assert contains(cf, sub_cf)
