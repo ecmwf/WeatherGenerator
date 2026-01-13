@@ -290,7 +290,7 @@ def get_target_aux_calculator(
             None,
             "student",
             device,
-            overrides=target_and_aux_calc_params.model_param_overrides,
+            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
         ema_model = EMAModel(
             model,
