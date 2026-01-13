@@ -369,6 +369,7 @@ class ZarrIO:
             self._store = LocalStore(self._store_path)
             self.data_root = zarr.group(store=self._store)
         # Warns user of future deprecation only if a ZarrUserWarning was raised
+        # Support for existing Zarr2 stores will be removed in future versions
         if any(issubclass(w.category, zarr.errors.ZarrUserWarning) for w in caught):
             last_msg = next(
                 (
