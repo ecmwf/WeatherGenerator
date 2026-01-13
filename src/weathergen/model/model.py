@@ -697,11 +697,11 @@ class Model(torch.nn.Module):
                 if self.cf.decoder_type == "Linear":
                     pred = checkpoint(
                         self.target_token_engines[stream_name],
-                        tc_tokens.unsqueeze(0),  # adding the batch dimension
-                        tokens,
+                        tc_tokens,  
+                        tokens.reshape(-1, s[-1]), # collapse the batch and token dimensions
                         tcs_lens,
                         use_reentrant=False,
-                    )
+                    ).unsqueeze(0) # because the expected shape is [1, preds_per_coord, channels]
                 else:
                     tc_tokens = self.target_token_engines[stream_name](
                         latent=tokens_nbors,
@@ -716,7 +716,6 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-
             output.add_physical_prediction(fstep, stream_name, pred)
 
         return output
