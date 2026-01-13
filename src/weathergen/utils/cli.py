@@ -113,6 +113,14 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
             " Individual items should be of the form: parent_obj.nested_obj=value"
         ),
     )
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        help=(
+            "Path to the base configuration file."
+            "If not provided, ./config/default_config.yml is used."
+        )
+    )
 
 
 def _add_model_loading_params(parser: argparse.ArgumentParser):

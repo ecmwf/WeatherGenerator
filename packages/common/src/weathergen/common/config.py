@@ -287,6 +287,7 @@ def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
     mini_epoch: int | None = None,
+    base: Path | Config | None = None,
     *overwrites: Path | dict | Config,
 ) -> Config:
     """
@@ -298,6 +299,7 @@ def load_merge_configs(
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
         mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        base: Path to the base configuration file. Uses default configuration if None.
         *overwrites: Additional overwrites from different sources
 
     Note: The order of precedence for merging the final config is in ascending order:
@@ -328,7 +330,7 @@ def load_merge_configs(
     private_config = set_paths(private_config)
 
     if from_run_id is None:
-        base_config = _load_default_conf()
+        base_config = _load_base_conf(base)
     else:
         base_config = load_run_config(
             from_run_id, mini_epoch, private_config.get("model_path", None)
@@ -496,11 +498,20 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     return private_cf
 
 
-def _load_default_conf() -> Config:
-    """Deserialize default configuration."""
-    c = OmegaConf.load(_DEFAULT_CONFIG_PTH)
-    assert isinstance(c, Config)
-    return c
+def _load_base_conf(base: Path | Config | None) -> Config:
+    """Return the base configuration"""
+    match base :
+        case Path():
+            _logger.info(f"Loading specified base config from file: {base}.")
+            conf = OmegaConf.load(base)
+        case Config():
+            _logger.info(f"Using existing config as base: {base}.")
+            conf = base
+        case _:
+            _logger.info("Deserialize default configuration.")
+            conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
+    assert isinstance(conf, Config)
+    return conf
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
