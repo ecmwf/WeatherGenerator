@@ -10,8 +10,6 @@
 
 import torch
 
-from weathergen.common.config import Config
-
 
 def get_dtype(value: str) -> torch.dtype:
     """
