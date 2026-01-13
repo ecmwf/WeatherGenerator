@@ -107,9 +107,9 @@ def train_continue_from_args(argl: list[str]):
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
-        {},
         args.base_config,
         *args.config,
+        {},
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
