@@ -157,13 +157,13 @@ def config_fresh(private_config_file):
     return cf
 
 @pytest.fixture
-def base_conf():
+def base_config():
     return OmegaConf.create(DUMMY_BASE_CONF)
 
 @pytest.fixure
-def base_file(base_conf):
+def base_file(base_config):
     with tempfile.NamedTemporaryFile("w+") as temp:
-        temp.write(OmegaConf.to_yaml(base_conf))
+        temp.write(OmegaConf.to_yaml(base_config))
         temp.flush()
         yield pathlib.Path(temp.name)
 
@@ -202,15 +202,15 @@ def test_load_with_overwrite_file(private_config_file, overwrite_file):
     assert contains(cf, sub_cf)
 
 
-def test_load_with_base_config(base_config_file, private_config_file):
-    cf = config.load_merge_configs(private_config_file, None, None, base_config_file)
+def test_load_with_base_config(private_config_file, base_config):
+    cf = config.load_merge_configs(private_config_file, None, None, base_config)
 
     assert contains(cf, base_config)
 
 
-def test_load_with_base_file(base_config_file, private_config_file):
-    sub_cf = OmegaConf.load(base_config_file)
-    cf = config.load_merge_configs(private_config_file, None, None, base_config_file)
+def test_load_with_base_file(private_config_file, base_file):
+    sub_cf = OmegaConf.load(base_file)
+    cf = config.load_merge_configs(private_config_file, None, None, base_file)
 
     assert contains(cf, sub_cf)
 
