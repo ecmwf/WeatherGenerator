@@ -159,23 +159,11 @@ class Masker:
 
         return target_relationship_mask, target_idx
 
-    def build_samples_for_stream(
-        self, training_mode: str, num_cells: int, training_cfg: dict
-    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
+    def parse_src_target_correspondence(self, losses, target_cfgs, source_cfgs) -> dict:
         """
-        Construct teacher/student keep masks for a stream.
-        SampleMetaData is currently just a dict with the masking params used.
+        Parses losses and obtain consolidated source -> target correspondence dict
         """
 
-        # target and source configs
-        target_cfgs = training_cfg.get("target_input", [])
-        source_cfgs = training_cfg.get("model_input", [])
-
-        # target and source are assumed identical when target is not specified
-        if len(target_cfgs) == 0:
-            target_cfgs = copy.deepcopy(source_cfgs)
-
-        losses = training_cfg.get("losses", [])
         # collect target-source correspondence for all loss terms
         corrs = []
         for _, loss_term in losses.items():
@@ -245,6 +233,27 @@ class Masker:
                 corr_dict[k_source] = (k_target, (rel_loss[0][0], losses))
 
         # TODO: check validity of target_source_correspondence with target and source cfgs
+
+        return corr_dict
+
+    def build_samples_for_stream(
+        self, training_mode: str, num_cells: int, training_cfg: dict
+    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
+        """
+        Construct teacher/student keep masks for a stream.
+        SampleMetaData is currently just a dict with the masking params used.
+        """
+
+        # target and source configs
+        target_cfgs = training_cfg.get("target_input", [])
+        source_cfgs = training_cfg.get("model_input", [])
+
+        # target and source are assumed identical when target is not specified
+        if len(target_cfgs) == 0:
+            target_cfgs = copy.deepcopy(source_cfgs)
+
+        losses = training_cfg.losses
+        corr_dict = self.parse_src_target_correspondence(losses, target_cfgs, source_cfgs)
 
         target_masks = MaskData()
 
