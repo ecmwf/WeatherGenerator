@@ -15,6 +15,8 @@ import random
 import string
 import subprocess
 from pathlib import Path
+import functools
+
 
 import numpy as np
 import pandas as pd
@@ -158,12 +160,13 @@ def format_cf(config: Config) -> str:
 
 def save(config: Config, mini_epoch: int | None):
     """Save current config into the current runs model directory."""
-    path_models = Path(config.model_path)
+    # path_models = get_path_model
     # save in directory with model files
-    dirname = path_models / config.run_id
+    dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_write_name(path_models, config.run_id, mini_epoch)
+    path_models_parent = dirname.parent
+    fname = _get_model_config_file_write_name(path_models_parent, config.run_id, mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with fname.open("w") as f:
@@ -581,7 +584,7 @@ def get_path_results(config: Config, mini_epoch: int) -> Path:
 
     return base_path / fname
 
-@functools.cached_property
+@functools.lru_cache(maxsize=None)
 def _get_shared_wg_path(local_path: str | Path) -> Path:
     """
     Resolves a local, relative path to an absolute path within the configured shared working
