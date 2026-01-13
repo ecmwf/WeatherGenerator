@@ -18,7 +18,7 @@ def get_continue_parser() -> argparse.ArgumentParser:
     _add_model_loading_params(parser)
 
     parser.add_argument(
-        "--finetune_forecast",
+        "--finetune-forecast",
         action="store_true",
         help=(
             "Fine tune for forecasting. It overwrites some of the Config settings. "
@@ -36,14 +36,14 @@ def get_inference_parser() -> argparse.ArgumentParser:
     _add_general_arguments(parser)
 
     parser.add_argument(
-        "--start_date",
+        "--start-date",
         "-start",
         type=_format_date,
         default="2022-10-01",
         help="Start date for inference. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
-        "--end_date",
+        "--end-date",
         "-end",
         type=_format_date,
         default="2022-12-01",
@@ -53,13 +53,13 @@ def get_inference_parser() -> argparse.ArgumentParser:
         "--samples", type=int, default=10000000, help="Number of inference samples."
     )
     parser.add_argument(  # behaviour changed => implies default=False
-        "--save_samples",
+        "--save-samples",
         type=bool,
         default=True,
         help="Toggle saving of samples from inference. Default True",
     )
     parser.add_argument(
-        "--streams_output",
+        "--streams-output",
         nargs="+",
         help="Output streams during inference.",
     )
@@ -79,7 +79,7 @@ def _format_date(date: str) -> str:
 
 def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
-        "--private_config",
+        "--private-config",
         type=Path,
         default=None,
         help=(
@@ -95,7 +95,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
         help="Optional experiment specfic configuration files in ascending order of precedence.",
     )
     parser.add_argument(
-        "--run_id",
+        "--run-id",
         type=str,
         help=(
             "The run id for this run."
@@ -126,7 +126,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
 def _add_model_loading_params(parser: argparse.ArgumentParser):
     parser.add_argument(
         "-id",
-        "--from_run_id",
+        "--from-run-id",
         required=True,
         help=(
             "Start inference or continue training from the WeatherGenerator"
@@ -135,18 +135,18 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
     )
     parser.add_argument(
         "-e",
-        "--mini_epoch",
+        "--mini-epoch",
         type=int,
         default=-1,
         help=(
-            "Mini_epoch of pretrained WeatherGenerator model used"
+            "Mini-epoch of pretrained WeatherGenerator model used"
             " (Default -1 corresponds to the last checkpoint)."
         ),
     )
     parser.add_argument(
-        "--reuse_run_id",
+        "--reuse-run-id",
         action="store_true",
-        help="Use the id given via --from_run_id also for the current run. "
+        help="Use the id given via --from-run-id also for the current run. "
         "The storage location for artifacts will be reused as well. "
         "This might overwrite artifacts from previous runs.",
     )
