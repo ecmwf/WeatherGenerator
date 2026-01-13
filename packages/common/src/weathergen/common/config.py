@@ -15,8 +15,6 @@ import random
 import string
 import subprocess
 from pathlib import Path
-import functools
-
 
 import numpy as np
 import pandas as pd
@@ -328,9 +326,7 @@ def load_merge_configs(
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_run_config(
-            from_run_id, mini_epoch, _get_shared_wg_path("models")
-        )
+        base_config = load_run_config(from_run_id, mini_epoch, _get_shared_wg_path("models"))
         from_run_id = base_config.run_id
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
@@ -584,7 +580,20 @@ def get_path_results(config: Config, mini_epoch: int) -> Path:
 
     return base_path / fname
 
-@functools.lru_cache(maxsize=None)
+
+# Cache the expensive private config loading operation
+_shared_wg_base_path = None
+
+
+def _get_shared_wg_base_path() -> Path:
+    """Get the shared working directory base path, cached after first call."""
+    global _shared_wg_base_path
+    if _shared_wg_base_path is None:
+        pcfg = _load_private_conf()
+        _shared_wg_base_path = Path(pcfg.get("path_shared_working_dir"))
+    return _shared_wg_base_path
+
+
 def _get_shared_wg_path(local_path: str | Path) -> Path:
     """
     Resolves a local, relative path to an absolute path within the configured shared working
@@ -610,8 +619,7 @@ def _get_shared_wg_path(local_path: str | Path) -> Path:
     The shared working directory base is retrieved from the 'path_shared_working_dir'
     key found in the private configuration loaded by `_load_private_conf()`.
     """
-    pcfg = _load_private_conf()
-    return Path(pcfg.get("path_shared_working_dir")) / local_path
+    return _get_shared_wg_base_path() / local_path
 
 
 def validate_forecast_policy_and_steps(cf: OmegaConf):

@@ -144,7 +144,7 @@ class TrainLogger:
             )
         run_id = cf.run_id
 
-        result_dir_base =  config._get_shared_wg_path("results")
+        result_dir_base = config._get_shared_wg_path("results")
         result_dir = result_dir_base / run_id
         fname_log_train = result_dir / f"{run_id}_train_log.txt"
         fname_log_val = result_dir / f"{run_id}_val_log.txt"
