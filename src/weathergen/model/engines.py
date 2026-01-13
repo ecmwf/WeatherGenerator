@@ -11,6 +11,7 @@ import dataclasses
 
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
@@ -83,40 +84,48 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, batch, pe_embed):
-        num_steps_input = batch.get_num_source_steps()
+        num_steps_input = batch.get_num_steps()
 
-        num_tokens = torch.sum(batch.source_tokens_lens, 2).flatten().sum().item()
+        num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
         # iterate over all streams
+        x_embeds = []
         for stream_name in self.stream_names:
             # collect all source tokens from all input_steps and all samples in the batch
-            sdata, scatter_idxs, pe_idxs = [], [], []
+            sdata = []
             for istep in range(num_steps_input):
-                for sample in batch.source_samples:
-                    # token data
+                for sample in batch.get_samples():
                     sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
-                    # indices for positional encoding
-                    pe_idxs += [sample.streams_data[stream_name].source_idxs_embed_pe[istep]]
-                    # scatter idxs for switching from stream to cell-based ordering
-                    scatter_idxs += [sample.streams_data[stream_name].source_idxs_embed[istep]]
 
             sdata = torch.cat(sdata)
             # skip empty stream
             if len(sdata) == 0:
                 continue
 
-            scatter_idxs = torch.cat(scatter_idxs)
-            scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-            pe_idxs = torch.cat(pe_idxs)
-
             # embedding from physical space to per patch latent representation
-            x_embed = self.embeds[stream_name](sdata).flatten(0, 1)
+            x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 
-            # switch from stream to cell-based ordering
-            tokens_all.scatter_(0, scatter_idxs, x_embed + pe_embed[pe_idxs])
+        # switch from stream to cell-based ordering and apply per cell positional encoding
+
+        # computer scatter index across batch items and input steps
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten()
+        repeat = torch.repeat_interleave
+        scatter_idxs = repeat(
+            torch.ones(len(tok_counts), dtype=torch.int64, device=tok_counts.device), tok_counts
+        )
+        scatter_idxs = scatter_idxs.cumsum(0) - 1
+        # scatter index must exist for each element and not just per row
+        scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+
+        # per cell indices into positional encoding
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        pe_idxs = torch.cat([torch.arange(c) for c in tok_counts])
+
+        # actual scatter operation
+        tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
 
         return tokens_all
 
@@ -382,7 +391,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
-    def __init__(self, cf: Config, num_healpix_cells: int, dim_aux: int = None) -> None:
+    def __init__(self, cf: Config, mode_cfg, num_healpix_cells: int, dim_aux: int = None) -> None:
         """
         Initialize the ForecastingEngine with the configuration.
 
@@ -395,7 +404,7 @@ class ForecastingEngine(torch.nn.Module):
         self.fe_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
-        if self.cf.forecast_policy is not None:
+        if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
                 if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
@@ -673,7 +682,6 @@ class TargetPredictionEngine(nn.Module):
         self.tro_type = tro_type
 
         # For backwards compatibility
-        from omegaconf import OmegaConf
 
         self.cf = OmegaConf.merge(
             OmegaConf.create({"decoder_type": "PerceiverIOCoordConditioning"}), self.cf
@@ -855,13 +863,12 @@ class BilinearDecoder(nn.Module):
         self.latent_dim = latent_dim
         self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
 
-    def forward(self, coords_bmd, latent_bnd, tcs_lens_bn1):
+    def forward(self, coords_md, latent_nd, tcs_lens_n1):
         """
         Using Noam Shazeer notation
-        B = Batchsize
-        N = Number of latent tokens (N1 means N+1)
+        N = Number of latent tokens*batch_size (N1 means N+1)
         M = Number of coordinates to decode
         D = Hidden dimension
         """
-        latent_bmd = torch.repeat_interleave(latent_bnd, tcs_lens_bn1[1:], 1)
-        return self.bilin(coords_bmd, latent_bmd)
+        latent_md = torch.repeat_interleave(latent_nd, tcs_lens_n1[1:], 0)
+        return self.bilin(coords_md, latent_md)

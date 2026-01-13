@@ -6,6 +6,7 @@ Provides clean separation between:
   - View metadata (spatial masks, strategies, relationships)
 """
 
+import copy
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,10 +14,6 @@ import torch
 
 from weathergen.common.config import Config
 from weathergen.datasets.stream_data import StreamData
-
-# TODO: Add a store for a random number for diffusion
-# TODO: GetTimestep to get the timestep
-# TODO: GetMetaData: then this gets the right rn for the timestep!
 
 
 @dataclass
@@ -38,7 +35,6 @@ class Sample:
     streams_data: dict[str, StreamData | None]
 
     def __init__(self, streams: dict) -> None:
-        # TODO: can we pass this right away?
         self.meta_info = {}
 
         self.streams_data = {}
@@ -91,47 +87,112 @@ class Sample:
         return forecast_dt
 
 
+class BatchSamples:
+    """
+    Container for source or target samples
+    """
+
+    samples: list[Sample]
+    tokens_lens: torch.Tensor | None
+    device: str | None
+
+    def __init__(self, streams: dict, num_samples: int) -> None:
+        self.samples = [Sample(streams) for _ in range(num_samples)]
+        self.tokens_lens = None
+        self.device = None
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def to_device(self, device):
+        for sample in self.samples:
+            sample.to_device(device)
+
+        self.tokens_lens = (
+            self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
+        )
+
+        self.device = device
+
+        return self
+
+    def get_samples(self) -> list[Sample]:
+        return self.samples
+
+    def get_subset(self, subset: list | None = None):
+        if subset is None:
+            return self
+        else:
+            assert len(list(set(subset))) == len(subset), "subset contains duplicates"
+            # create copy and then select subset for samples and tokens_lens
+            bs = copy.deepcopy(self)
+            bs.samples = [bs.samples[i] for i in subset]
+            torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
+            bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
+            return bs
+
+    def get_num_steps(self) -> int:
+        """
+        Get number of input/source steps from smallest of all available streams
+        """
+        # TODO: define explicitly
+        lens = [
+            len(stream.source_tokens_cells) for _, stream in self.samples[0].streams_data.items()
+        ]
+
+        return min(lens)
+
+    def get_forecast_steps(self) -> int:
+        """
+        Get forecast steps
+        """
+        # use sample 0 since the number of forecast steps is constant across batch
+        # TODO: fix use of sample 0
+        return self.samples[0].get_forecast_steps()
+
+    def get_device(self) -> str | torch.device:
+        """
+        Get device of tensors in the batch
+        """
+        return self.device
+
+
 class ModelBatch:
     """
     Container for all data and metadata for one training batch.
     """
 
     # source samples (for model)
-    source_samples: list[Sample]
+    source_samples: BatchSamples
 
     # target samples (for TargetAuxCalculator)
-    target_samples: list[Sample]
+    target_samples: BatchSamples
 
     # index of corresponding target (for source samples) or source (for target samples)
-    # these are in 1-to-1 corresponding for classical training modes (MTM, forecasting) but
+    # these are in 1-to-1 corresponding for classical training modes (e.g. MTM, forecasting) but
     # can be more complex for strategies like student-teacher training
-    # TODO @CL and @SHickman can we make these tensors?
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
     # device of the tensors in the batch
     device: str | torch.device
 
-    # number of tokens per cell per forecast step and stream
-    source_tokens_lens: torch.Tensor
-
-    def __init__(self, streams, num_source_samples: int, num_target_samples: int) -> None:
+    def __init__(self, streams: dict, num_source_samples: int, num_target_samples: int) -> None:
         """ """
 
-        self.source_samples = [Sample(streams) for _ in range(num_source_samples)]
-        self.target_samples = [Sample(streams) for _ in range(num_target_samples)]
+        self.source_samples = BatchSamples(streams, num_source_samples)
+        self.target_samples = BatchSamples(streams, num_target_samples)
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
 
     def to_device(self, device):  # -> ModelBatch
-        for sample in self.source_samples:
-            sample.to_device(device)
+        """
+        Move batch to device
+        """
 
-        for sample in self.target_samples:
-            sample.to_device(device)
-
-        self.source_tokens_lens = self.source_tokens_lens.to(device, non_blocking=True)
+        self.source_samples.to_device(device)
+        self.target_samples.to_device(device)
 
         self.device = device
 
@@ -148,10 +209,10 @@ class ModelBatch:
         """
         Add data for one stream to sample @source_sample_idx
         """
-        self.source_samples[source_sample_idx].add_stream_data(stream_name, stream_data)
+        self.source_samples.samples[source_sample_idx].add_stream_data(stream_name, stream_data)
 
         # add the meta_info
-        self.source_samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
+        self.source_samples.samples[source_sample_idx].add_meta_info(stream_name, source_meta_info)
 
         assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
         self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
@@ -167,10 +228,10 @@ class ModelBatch:
         """
         Add data for one stream to sample @target_sample_idx
         """
-        self.target_samples[target_sample_idx].add_stream_data(stream_name, stream_data)
+        self.target_samples.samples[target_sample_idx].add_stream_data(stream_name, stream_data)
 
         # add the meta_info -- for target we have different
-        self.target_samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
+        self.target_samples.samples[target_sample_idx].add_meta_info(stream_name, target_meta_info)
 
         if isinstance(source_sample_idx, int):
             assert source_sample_idx < len(self.source_samples), (
@@ -187,10 +248,10 @@ class ModelBatch:
         Check if batch is empty
         """
         source_empty = np.all(
-            np.array([s.is_empty() if s is not None else True for s in self.source_samples])
+            np.array([s.is_empty() if s is not None else True for s in self.source_samples.samples])
         )
         target_empty = np.all(
-            np.array([s.is_empty() if s is not None else True for s in self.target_samples])
+            np.array([s.is_empty() if s is not None else True for s in self.target_samples.samples])
         )
         return source_empty or target_empty
 
@@ -210,13 +271,25 @@ class ModelBatch:
         """
         Get a source sample
         """
-        return self.source_samples[idx]
+        return self.source_samples.samples[idx]
+
+    def get_source_samples(self, subset: list | None = None) -> BatchSamples:
+        """
+        Get source samples
+        """
+        return self.source_samples.get_subset(subset)
 
     def get_target_sample(self, idx: int) -> Sample:
         """
         Get a target sample
         """
-        return self.target_samples[idx]
+        return self.target_samples.samples[idx]
+
+    def get_target_samples(self, subset: list | None = None) -> BatchSamples:
+        """
+        Get target samples
+        """
+        return self.target_samples.get_subset(subset)
 
     def get_source_idx_for_target(self, target_idx: int) -> int:
         """
@@ -235,7 +308,8 @@ class ModelBatch:
         Get forecast steps
         """
         # use sample 0 since the number of forecast steps is constant across batch
-        return self.source_samples[0].get_forecast_steps()
+        # TODO: fix use of sample 0
+        return self.source_samples.get_forecast_steps()
 
     def get_device(self) -> str | torch.device:
         """
@@ -250,7 +324,7 @@ class ModelBatch:
         # TODO: define explicitly
         lens = [
             len(stream.source_tokens_cells)
-            for _, stream in self.target_samples[0].streams_data.items()
+            for _, stream in self.target_samples.samples[0].streams_data.items()
         ]
 
         return min(lens)
@@ -262,7 +336,8 @@ class ModelBatch:
         # TODO: define explicitly
         # TODO: ensure that num_input_steps is constant across batch with different strategies
         lens = [
-            len(stream.target_tokens) for _, stream in self.target_samples[0].streams_data.items()
+            len(stream.target_tokens)
+            for _, stream in self.target_samples.samples[0].streams_data.items()
         ]
 
         return min(lens)

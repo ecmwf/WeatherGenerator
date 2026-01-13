@@ -19,7 +19,7 @@ import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import Stage
 
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class LossLatentSSLStudentTeacher(LossModuleBase):
@@ -33,7 +33,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
     valid_loss_names = set(["DINO", "iBOT", "JEPA"])
 
-    def __init__(self, cf: DictConfig, stage: Stage, device: str, **losses):
+    def __init__(self, cf: DictConfig, mode_cfg: DictConfig, stage: Stage, device: str, **losses):
         LossModuleBase.__init__(self)
         self.cf = cf
         self.stage = stage
@@ -55,11 +55,12 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         # create tensor for each stream
         losses_all: dict[str, float] = {loss: 0.0 for loss in self.losses}
 
-        source2target_matching_idxs, output_info, target2source_matching_idxs, target_info = (
-            metadata
-        )
-        preds = preds.latent[0]  # [0]  because we always want the first fstep
-        targets = targets.latent  # [0]  because we always want the first fstep
+        source2target_matching_idxs, output_info, target2source_matching_idxs, _ = metadata
+
+        preds = preds.latent[0]  # [0] because we always want the first fstep
+        target_info = targets.aux_outputs
+        targets = targets.latent
+
         for name, (weight, loss_fn, extra_args) in self.losses.items():
             preds_for_loss = self.gather_preds_for_loss(
                 name, preds[name], output_info, target2source_matching_idxs
@@ -67,6 +68,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             targets_for_loss = self.gather_targets_for_loss(
                 name, targets[name], target_info, target2source_matching_idxs
             )
+
             loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
             loss = loss + (weight * loss_value)
             losses_all[name] = loss_value.item()
@@ -84,12 +86,12 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "jepa"
+                        if "JEPA" in info.global_params["loss"]
                     ],
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask.to("cuda") for info in metadata if info.params["loss"] == "jepa"],
+                    [info.mask for info in metadata if "JEPA" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -105,19 +107,19 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p[self.num_class_tokens :]
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "ibot"
+                        if "iBOT" in info.global_params["loss"]
                     ],
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask.to("cuda") for info in metadata if info.params["loss"] == "ibot"],
+                    [info.mask for info in metadata if "iBOT" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
                 "student_class_masked": torch.stack(
                     [
                         p[: self.num_class_tokens]
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "ibot"
+                        if "iBOT" in info.global_params["loss"]
                     ],
                     dim=0,
                 ),
@@ -128,7 +130,8 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                 local_preds = [
                     preds[sidx]
                     for sidx in student_indices
-                    if metadata[sidx].params["loss"] == "dino"
+                    if "DINO" in metadata[sidx].global_params["loss"]
+                    and metadata[sidx].global_params["relationship"] != "identity"
                 ]
                 local2global_dino_student.append(local_preds)
             local2global_dino_student = [
@@ -141,8 +144,8 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     [
                         p
                         for p, info in zip(preds, metadata, strict=False)
-                        if info.params["loss"] == "dino"
-                        and info.params["relationship"] == "identity"
+                        if "DINO" in info.global_params["loss"]
+                        and info.global_params["relationship"] == "identity"
                     ],
                     dim=0,
                 ),
@@ -160,11 +163,15 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             """
             return {
                 "teacher_patches_masked": torch.stack(
-                    [p for p, info in zip(targets, metadata, strict=False)],
+                    [
+                        p
+                        for p, info in zip(targets, metadata, strict=True)
+                        if "JEPA" in info.global_params["loss"]
+                    ],
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
-                    [info.mask.to("cuda") for info in metadata],
+                    [info.mask for info in metadata if "JEPA" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -184,7 +191,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
-                    [info.mask.to("cuda") for info in metadata],
+                    [info.mask for info in metadata if "iBOT" in info.global_params["loss"]],
                     dim=0,
                 ).unsqueeze(1),
                 "teacher_class_masked": torch.stack(
@@ -221,9 +228,14 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
         .unsqueeze(-1)
         .expand_as(student_masks)  # [student_masks_flat]
     )
+
     mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+    if mask.sum() == 0:
+        logger.warning("jepa_loss mask is all true, likely incorrect masking config.")
+
     loss = F.l1_loss(student_patches_masked[mask], teacher_patches_masked[mask])
     loss = loss * masks_weight[mask]
+
     return loss.sum()  # / student_masks.shape[0]
 
 
@@ -240,7 +252,10 @@ def ibot_loss(
     teacher_masks = teacher_masks.squeeze(dim=1)
     loss = loss_fns.masked_student_teacher_patch_softmax(
         student_patches_masked, teacher_patches_masked, student_masks, teacher_masks, student_temp
-    ) + loss_fns.student_teacher_softmax(student_class_masked, teacher_class_masked, student_temp)
+    )
+    loss = loss + loss_fns.student_teacher_softmax(
+        student_class_masked, teacher_class_masked, student_temp
+    )
     return loss / 2
 
 

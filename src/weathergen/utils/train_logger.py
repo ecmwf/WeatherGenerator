@@ -70,11 +70,11 @@ class TrainLogger:
         self.path_run = path_run
 
         # Fallback for older runs where samples was not persisted
-        if "samples" not in self.cf or self.cf.samples == 0:
-            if self.cf.istep > 0:
+        if "samples" not in self.cf.general or self.cf.general.samples == 0:
+            if self.cf.general.istep > 0:
                 _logger.warning("Samples not found or wrong in config. Using istep as fallback, which might be inaccurate.")
-                self.cf.samples = (
-                    self.cf.istep * self.cf.batch_size_per_gpu * self.cf.get("world_size", 1)
+                self.cf.general.samples = (
+                    self.cf.general.istep * self.cf.get("batch_size_per_gpu", 1) * self.cf.general.get("world_size", 1)
                 )
 
     def log_metrics(self, stage: Stage, metrics: dict[str, float]) -> None:
@@ -99,7 +99,7 @@ class TrainLogger:
         # but we can probably do better and rely for example on the logging module.
 
         metrics_path = get_train_metrics_path(
-            base_path=Path(self.cf.run_path), run_id=self.cf.run_id
+            base_path=Path(self.cf.run_path), run_id=self.cf.general.run_id
         )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
@@ -150,7 +150,7 @@ class TrainLogger:
             cf = config.load_merge_configs(
                 private_home=None, from_run_id=run_id, mini_epoch=mini_epoch
             )
-        run_id = cf.run_id
+        run_id = cf.general.run_id
 
         result_dir_base = Path(cf.run_path)
         result_dir = result_dir_base / run_id
@@ -341,7 +341,7 @@ def read_metrics(
 
     assert cols is None or cols, "cols must be non empty or None"
     if run_id is None:
-        run_id = cf.run_id
+        run_id = cf.general.run_id
     assert run_id, "run_id must be provided"
 
     metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)

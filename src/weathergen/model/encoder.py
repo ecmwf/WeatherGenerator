@@ -137,12 +137,12 @@ class EncoderModule(torch.nn.Module):
             Tokens for global assimilation
         """
 
-        num_steps_input = batch.get_num_source_steps()
+        num_steps_input = batch.get_num_steps()
 
         # combined cell lens for all tokens in batch across all input steps
-        cell_lens = torch.sum(batch.source_tokens_lens, 2).flatten()
+        cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
 
-        rs = num_steps_input * batch.len_sources()
+        rs = num_steps_input * len(batch)
 
         s = self.q_cells.shape
         # TODO: re-enable or remove ae_local_queries_per_cell
@@ -155,7 +155,7 @@ class EncoderModule(torch.nn.Module):
         # lens for varlen attention
         q_cells_lens = torch.cat(
             [model_params.q_cells_lens[0].unsqueeze(0)]
-            + [model_params.q_cells_lens[1:] for _ in range(batch.len_sources())]
+            + [model_params.q_cells_lens[1:] for _ in range(len(batch))]
         )
 
         # the computation below conceptually apply the local assimilation engine and then the
