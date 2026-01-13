@@ -3,8 +3,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from weathergen.common.io import StoreType
-
 
 def get_train_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)

@@ -272,13 +272,13 @@ class OutputDataset:
             "coords": self.coords,
             "geoinfo": self.geoinfo,
         }
-    
+
     @property
     def metadata(self) -> dict[str, typing.Any]:
         return {
-            "channels": dataset.channels,
-            "geoinfo_channels": dataset.geoinfo_channels,
-            "source_interval": dataset.source_interval.as_dict()
+            "channels": self.channels,
+            "geoinfo_channels": self.geoinfo_channels,
+            "source_interval": self.source_interval.as_dict(),
         }
 
     @functools.cached_property
@@ -444,8 +444,8 @@ class ZarrIO:
         return group
 
     def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
-        assert dataset.name not in list(item_group.keys), "No duplication allowed"
-        dataset_group = item_group.create_group(dataset.name, attrs=dataset.metadata)
+        assert dataset.name not in list(item_group.keys()), "No duplication allowed"
+        dataset_group = item_group.create_group(dataset.name, attributes=dataset.metadata)
         self._write_arrays(dataset_group, dataset)
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
