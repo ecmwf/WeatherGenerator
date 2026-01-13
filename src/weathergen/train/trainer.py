@@ -243,11 +243,14 @@ class Trainer(TrainerBase):
             devices[0],
         )
 
-        self.validate_with_ema = self.validation_cfg.get("validate_with_ema", {}).get(
-            "enabled", False
-        )
+        self.validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
+        if self.validate_with_ema_cfg is not None:
+            # if the config is specified and enabled not specified, then assume it is to be used
+            self.validate_with_ema = self.validate_with_ema_cfg.get("enabled", True)
+        else:
+            self.validate_with_ema = False
         self.ema_model = None
-        if self.validate_with_ema or cf.training_config["training_mode"] == "student-teacher":
+        if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
                 cf,
                 self.dataset,
@@ -260,8 +263,8 @@ class Trainer(TrainerBase):
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
-                halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
-                rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
+                halflife_steps=self.validate_with_ema_cfg.get("ema_halflife_in_thousands", 1e-3),
+                rampup_ratio=self.validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
                 is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             )
 

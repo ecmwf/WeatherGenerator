@@ -80,9 +80,6 @@ freeze_modules: ""
 
 norm_type: "LayerNorm"
 
-ema_teacher_overrides:
-  ae_global_num_blocks: 2
-
 #####################################
 
 general:
@@ -161,7 +158,12 @@ training_config:
         loss_fcts : {
           "JEPA": {'weight': 5, "loss_extra_args": {}, "out_dim": 2048} 
           },
-        target_and_aux_calc: "EMATeacher",
+        target_and_aux_calc: { "EMATeacher" : 
+          { ema_ramp_up_ratio : 0.09,
+            ema_halflife_in_thousands: 1e-3,
+            model_param_overrides : { ae_global_num_blocks : 10 },
+          }
+        }
         }
   
   model_input:
@@ -202,7 +204,7 @@ validation_config:
   output_streams: null
 
   # run validation before training starts (mainly for model development)
-  before_training: True #False
+  before_training: False
   
   losses: 
     - "physical": {

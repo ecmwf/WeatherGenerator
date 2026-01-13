@@ -65,7 +65,7 @@ class EMAModel:
             p_src = self.src_params.get(name, None)
             if p_src is None:
                 # EMA-only param or intentionally excluded
-                assert False, "For now all parameters in the EMA model must also be in the student" 
+                assert False, "All parameters of the EMA model must be in the base model."
 
             p_ema.lerp_(p_src, 1.0 - beta)
 
