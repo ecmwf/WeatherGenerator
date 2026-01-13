@@ -214,14 +214,15 @@ def calc_scores_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
                 )
 
-        lead_time_values = np.array(
-            [lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values]
-        ).squeeze()
+        if all(lead_time_map[f] is not None for f in lead_time_map):
+            lead_time_values = np.array(
+                [lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values]
+            ).squeeze()
 
-        if lead_time_values.shape == metric_stream.forecast_step.shape:
-            metric_stream = metric_stream.assign_coords(
-                lead_time=("forecast_step", lead_time_values)
-            )
+            if lead_time_values.shape == metric_stream.forecast_step.shape:
+                metric_stream = metric_stream.assign_coords(
+                    lead_time=("forecast_step", lead_time_values)
+                )
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 

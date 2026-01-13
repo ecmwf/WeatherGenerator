@@ -24,6 +24,7 @@ from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
+    BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
     LatentPredictionHead,
@@ -394,22 +395,30 @@ class Model(torch.nn.Module):
                     else:
                         assert False
 
-                    # target prediction engines
-                    tte_version = (
-                        TargetPredictionEngine
-                        if cf.decoder_type != "PerceiverIOCoordConditioning"
-                        else TargetPredictionEngineClassic
-                    )
-                    tte = tte_version(
-                        cf,
-                        dims_embed,
-                        dim_coord_in,
-                        tr_dim_head_proj,
-                        tr_mlp_hidden_factor,
-                        softcap,
-                        tro_type,
-                        stream_name=stream_name,
-                    )
+                    if cf.decoder_type == "Linear":
+                        tte = BilinearDecoder(
+                            stream_name,
+                            dims_embed[0],
+                            cf.ae_global_dim_embed,
+                            self.targets_num_channels[i_stream],
+                        )
+                    else:
+                        # target prediction engines
+                        tte_version = (
+                            TargetPredictionEngine
+                            if cf.decoder_type != "PerceiverIOCoordConditioning"
+                            else TargetPredictionEngineClassic
+                        )
+                        tte = tte_version(
+                            cf,
+                            dims_embed,
+                            dim_coord_in,
+                            tr_dim_head_proj,
+                            tr_mlp_hidden_factor,
+                            softcap,
+                            tro_type,
+                            stream_name=stream_name,
+                        )
 
                     self.target_token_engines[stream_name] = tte
 
@@ -696,16 +705,25 @@ class Model(torch.nn.Module):
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
-                tc_tokens = self.target_token_engines[stream_name](
-                    latent=tokens_nbors,
-                    output=tc_tokens,
-                    latent_lens=tokens_nbors_lens,
-                    output_lens=tcs_lens,
-                    coordinates=t_coords,
-                )
+                if self.cf.decoder_type == "Linear":
+                    pred = checkpoint(
+                        self.target_token_engines[stream_name],
+                        tc_tokens.unsqueeze(0),  # adding the batch dimension
+                        tokens,
+                        tcs_lens,
+                        use_reentrant=False,
+                    )
+                else:
+                    tc_tokens = self.target_token_engines[stream_name](
+                        latent=tokens_nbors,
+                        output=tc_tokens,
+                        latent_lens=tokens_nbors_lens,
+                        output_lens=tcs_lens,
+                        coordinates=t_coords,
+                    )
 
-                # final prediction head to map back to physical space
-                pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+                    # final prediction head to map back to physical space
+                    pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
 
             output.add_physical_prediction(fstep, stream_name, pred)
 
