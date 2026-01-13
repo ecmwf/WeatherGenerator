@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+import copy
 import logging
 import time
 
@@ -30,7 +31,11 @@ from weathergen.model.model_interface import (
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
-from weathergen.train.utils import extract_batch_metadata, get_batch_size_from_config
+from weathergen.train.utils import (
+    extract_batch_metadata,
+    get_batch_size_from_config,
+    get_target_idxs_from_cfg,
+)
 from weathergen.utils.distributed import ddp_average, is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
@@ -94,7 +99,7 @@ class Trainer(TrainerBase):
         self.freeze_modules = cf.get("freeze_modules", "")
 
         self.training_cfg = cf.get("training_config")
-        # validation and test configs are training config, updated by specified keys
+        # validation and test configs are training configs, updated by specified keys
         self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
         self.test_cfg = merge_configs(self.validation_cfg, cf.get("test_config", {}))
 
@@ -114,7 +119,7 @@ class Trainer(TrainerBase):
         self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
         cf.world_size_original = self.world_size_original
 
-        self.log_grad_norms = cf.get("log_grad_norms", False)
+        self.log_grad_norms = self.training_cfg.optimizer.get("log_grad_norms", False)
 
         # create output directory
         if is_root():
@@ -132,14 +137,11 @@ class Trainer(TrainerBase):
         batch_size = get_batch_size_from_config(mode_cfg)
 
         # get target_aux calculators for different loss terms
-        target_and_aux_calculators = []
-        for loss_term in mode_cfg.losses:
-            for _, loss_cfg in loss_term.items():
-                target_and_aux_calculators += [
-                    get_target_aux_calculator(
-                        self.cf, loss_cfg, self.dataset, self.model, self.device, batch_size
-                    ).to_device(self.device)
-                ]
+        target_and_aux_calculators = {}
+        for loss_name, loss_cfg in mode_cfg.losses.items():
+            target_and_aux_calculators[loss_name] = get_target_aux_calculator(
+                self.cf, loss_cfg, self.dataset, self.model, self.device, batch_size
+            ).to_device(self.device)
 
         return target_and_aux_calculators
 
@@ -156,18 +158,13 @@ class Trainer(TrainerBase):
         # only one needed since we only run the validation code path
         self.dataset = MultiStreamDataSampler(
             cf,
-            cf.start_date_val,
-            cf.end_date_val,
-            self.test_config,
-            cf.batch_size_validation_per_gpu,
-            cf.samples_per_validation,
+            self.test_cfg,
             stage=VAL,
-            shuffle=cf.shuffle,
         )
         self.dataset_val = self.dataset
 
         # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(cf.samples_per_validation, cf.data_loading.num_workers)
+        loader_num_workers = min(self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers)
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
@@ -199,7 +196,7 @@ class Trainer(TrainerBase):
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
         # inference validation set
-        self.validate(mini_epoch=0)
+        self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
@@ -211,16 +208,8 @@ class Trainer(TrainerBase):
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
 
         # create data loaders
-        self.dataset = MultiStreamDataSampler(
-            cf,
-            self.training_cfg,
-            stage=TRAIN,
-        )
-        self.dataset_val = MultiStreamDataSampler(
-            cf,
-            self.validation_cfg,
-            stage=VAL,
-        )
+        self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
+        self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
 
         loader_params = {
             "batch_size": None,
@@ -281,7 +270,7 @@ class Trainer(TrainerBase):
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
         # https://arxiv.org/pdf/2111.06377
-        kappa = self.batch_size_per_gpu * cf.world_size
+        kappa = self.get_batch_size_total(self.batch_size_per_gpu)
         # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
         # aiming for beta2 = 0.95 at one node, ie B=4
@@ -337,19 +326,14 @@ class Trainer(TrainerBase):
                 )
             )
 
-        # # torch.autograd.set_detect_anomaly(True)
-        # if cf.forecast_policy is not None:
-        #     torch._dynamo.config.optimize_ddp = False
-
         if is_root():
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
-        # training loop
+        # run validation before training if requested
+        self.validate_before_training()
 
-        # validate once at the beginning as reference
-        if self.validation_cfg.get("before_training", False):
-            self.validate(-1)
+        # training loop
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
@@ -358,7 +342,7 @@ class Trainer(TrainerBase):
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
             )
-            self.validate(mini_epoch)
+            self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
 
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
@@ -368,7 +352,32 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
 
+    def validate_before_training(self):
+        """
+        Perform validation before training (eg. to check validation pipeline or data normalization)
+        if config parameters are set accordingly
+        """
+
+        # validate once at the beginning as reference
+        if self.validation_cfg.get("validate_before_training", None) is not None:
+            validate_before_training = self.validation_cfg.get("validate_before_training")
+            batch_size = self.batch_size_validation_per_gpu
+            if type(validate_before_training) is bool:
+                if validate_before_training:
+                    self.validate(-1, self.validation_cfg, batch_size)
+            elif type(validate_before_training) is int:
+                if validate_before_training > 0:
+                    cfg = copy.deepcopy(self.validation_cfg)
+                    cfg.samples_per_mini_epoch = validate_before_training
+                    self.validate(-1, cfg, batch_size)
+            else:
+                assert False, "validate_before_training must be integer or boolean."
+
     def train(self, mini_epoch):
+        """
+        Perform training for one epoch
+        """
+
         cf = self.cf
         self.model.train()
 
@@ -387,21 +396,27 @@ class Trainer(TrainerBase):
                 enabled=cf.with_mixed_precision,
             ):
                 preds = self.model(
-                    self.model_params, batch, self.training_cfg.window_offset_prediction
+                    self.model_params,
+                    batch.get_source_samples(),
+                    self.training_cfg.window_offset_prediction,
                 )
-                targets_and_auxs = [
-                    target_aux.compute(
+
+                targets_and_auxs = {}
+                for loss_name, target_aux in self.target_and_aux_calculators.items():
+                    # find targets for this target-aux calculator
+                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                    # apply target-aux calculator
+                    targets_and_auxs[loss_name] = target_aux.compute(
                         self.cf.general.istep,
-                        batch,
+                        batch.get_target_samples(target_idxs),
                         self.model_params,
                         self.model,
-                        self.validation_cfg.window_offset_prediction,
+                        self.training_cfg.window_offset_prediction,
                     )
-                    for target_aux in self.target_and_aux_calculators
-                ]
+
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
-                targets=targets_and_auxs,
+                targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
             # TODO re-enable this, need to think on how to make it compatible with
@@ -412,11 +427,11 @@ class Trainer(TrainerBase):
 
             [
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for target_aux in self.target_and_aux_calculators
+                for _, target_aux in self.target_and_aux_calculators.items()
             ]
             [
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for target_aux in self.target_and_aux_calculators_val
+                for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
 
             # backward pass
@@ -447,11 +462,11 @@ class Trainer(TrainerBase):
             step = batch_size_total * self.cf.general.istep
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
-                for target_aux in self.target_and_aux_calculators
+                for _, target_aux in self.target_and_aux_calculators.items()
             ]
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
-                for target_aux in self.target_and_aux_calculators_val
+                for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
             # EMA update
             if self.validate_with_ema:
@@ -473,7 +488,11 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch):
+    def validate(self, mini_epoch, mode_cfg, batch_size):
+        """
+        Perform validation / test computation as specified by mode_cfg
+        """
+
         cf = self.cf
         self.model.eval()
 
@@ -481,9 +500,7 @@ class Trainer(TrainerBase):
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
-            ) as pbar:
+            with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     batch.to_device(self.device)
 
@@ -499,46 +516,50 @@ class Trainer(TrainerBase):
                             else self.ema_model.forward_eval
                         )
                         preds = model_forward(
-                            self.model_params, batch, self.validation_cfg.window_offset_prediction
+                            self.model_params,
+                            batch.get_source_samples(),
+                            mode_cfg.window_offset_prediction,
                         )
-                        target_aux_output = [
-                            target_aux.compute(
+
+                        targets_and_auxs = {}
+                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                            target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                            targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
-                                batch,
+                                batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
-                                self.validation_cfg.window_offset_prediction,
+                                mode_cfg.window_offset_prediction,
                             )
-                            for target_aux in self.target_and_aux_calculators_val
-                        ]
+
                     _ = self.loss_calculator_val.compute_loss(
                         preds=preds,
-                        targets=target_aux_output,
+                        targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
                     )
 
                     # log output
-                    num_samples = (
-                        self.validation_cfg.get("write_num_samples", 0)
-                        * self.batch_size_validation_per_gpu
-                    )
+                    num_samples = mode_cfg.get("write_num_samples", 0) * batch_size
                     if bidx < num_samples:
                         dn_data = self.dataset_val.denormalize_target_channels
                         write_output(
                             self.cf,
-                            self.validation_cfg,
-                            self.batch_size_validation_per_gpu,
+                            mode_cfg,
+                            batch_size,
                             mini_epoch,
                             bidx,
                             dn_data,
                             batch,
                             preds,
-                            target_aux_output,
+                            targets_and_auxs,
                         )
 
-                    pbar.update(self.batch_size_validation_per_gpu)
+                    pbar.update(batch_size)
 
-                self._log_terminal(bidx, mini_epoch, VAL)
+                    if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
+                        break
+
+                self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
@@ -637,7 +658,7 @@ class Trainer(TrainerBase):
             loss_calculator.stddev_unweighted_hist,
         )
 
-        samples = self.cf.general.istep * self.batch_size_per_gpu * self.cf.world_size
+        samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
 
         if is_root():
             # plain logger

@@ -258,13 +258,13 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
 
 
 def get_target_aux_calculator(
-    cf: Config, cfg: omegaconf.OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
+    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
 ):
     """
     Create target aux calculator
     """
 
-    target_and_aux_calc_cfg = cfg.get("target_and_aux_calc", "Physical")
+    target_and_aux_calc_cfg = loss_cfg.get("target_and_aux_calc", "Physical")
 
     # parse target_and_aux_calc_cfg specification which can either be a string or config dict
     if type(target_and_aux_calc_cfg) is str:
@@ -280,7 +280,7 @@ def get_target_aux_calculator(
 
     # create target_and_aux_calc
     if target_and_aux_calc == "Physical":
-        target_aux = PhysicalTargetAndAux(cfg, model)
+        target_aux = PhysicalTargetAndAux(loss_cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
         meta_ema_model, _ = init_model_and_shard(

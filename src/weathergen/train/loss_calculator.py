@@ -60,37 +60,43 @@ class LossCalculator:
 
         loss_term_configs = deepcopy(mode_cfg.losses)
 
-        self.loss_calculators = [
+        self.loss_calculators = dict(
             [
                 (
-                    params.get("weight", 1.0),
-                    getattr(LossModules, params.type)(
-                        cf, mode_cfg, stage, self.device, **params.loss_fcts
-                    ),
+                    loss_term_name,
+                    [
+                        (
+                            params.get("weight", 1.0),
+                            getattr(LossModules, params.type)(
+                                cf, mode_cfg, stage, self.device, **params.loss_fcts
+                            ),
+                        )
+                    ],
                 )
-                for _, params in loss_term.items()
+                for loss_term_name, params in loss_term_configs.items()
             ]
-            for loss_term in loss_term_configs
-        ]
+        )
 
     def compute_loss(
         self,
         preds: ModelOutput,
-        targets: TargetAuxOutput,
+        targets_and_aux: TargetAuxOutput,
         metadata: dict,
     ):
         losses_all = defaultdict(dict)
         stddev_all = defaultdict(dict)
         loss = torch.tensor(0.0, requires_grad=True)
-        for calc_term, target in zip(self.loss_calculators, targets, strict=False):
+        for loss_term_name, calc_term in self.loss_calculators.items():
+            target = targets_and_aux[loss_term_name]
             for weight, calculator in calc_term:
-                loss_values = calculator.compute_loss(
-                    preds=preds, targets=target, metadata=metadata
-                )
-                loss = loss + weight * loss_values.loss
-                losses_all[calculator.name] = loss_values.losses_all
-                losses_all[calculator.name]["loss_avg"] = loss_values.loss
-                stddev_all[calculator.name] = loss_values.stddev_all
+                if weight > 0.0:
+                    loss_values = calculator.compute_loss(
+                        preds=preds, targets=target, metadata=metadata
+                    )
+                    loss = loss + weight * loss_values.loss
+                    losses_all[calculator.name] = loss_values.losses_all
+                    losses_all[calculator.name]["loss_avg"] = loss_values.loss
+                    stddev_all[calculator.name] = loss_values.stddev_all
 
         # Keep histories for logging
         self.loss_hist += [loss.detach()]

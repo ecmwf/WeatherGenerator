@@ -573,10 +573,10 @@ class OutputBatchData:
             target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
         else:
-            target_data = self.targets[offset_key.forecast_step][stream_idx][0][datapoints]
-            preds_data = self.predictions[offset_key.forecast_step][stream_idx][0].transpose(
-                1, 2, 0
-            )[datapoints]
+            target_data = self.targets[offset_key.forecast_step][stream_idx][datapoints]
+            preds_data = self.predictions[offset_key.forecast_step][stream_idx].transpose(1, 2, 0)[
+                datapoints
+            ]
 
         assert len(data_coords.channels) == target_data.shape[1], (
             "Number of channel names does not align with target data."
