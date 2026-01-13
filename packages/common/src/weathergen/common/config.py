@@ -190,7 +190,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     else:
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
-            model_path = _get_shared_wg_path("models")
+            model_path = str(_get_shared_wg_path("models"))
         path = Path(model_path)
         fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
         assert fname.exists(), (
