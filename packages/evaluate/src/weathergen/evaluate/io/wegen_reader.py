@@ -10,6 +10,7 @@
 # Standard library
 import json
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 # Third-party
@@ -35,8 +36,6 @@ _logger.setLevel(logging.INFO)
 
 class WeatherGenReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
-        """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
-
         super().__init__(eval_cfg, run_id, private_paths)
 
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
@@ -71,24 +70,6 @@ class WeatherGenReader(Reader):
             self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
         )
 
-        fname_zarr_new = self.results_dir.joinpath(
-            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
-        )
-        fname_zarr_old = self.results_dir.joinpath(
-            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
-        )
-
-        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
-            self.fname_zarr = fname_zarr_new
-        else:
-            self.fname_zarr = fname_zarr_old
-
-        if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(
-                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            )
-
     def get_inference_config(self):
         """
         load the config associated to the inference run (different from the eval_cfg which
@@ -115,6 +96,231 @@ class WeatherGenReader(Reader):
             config = {}
 
         return config
+
+    def get_climatology_filename(self, stream: str) -> str | None:
+        """
+        Get the climatology filename for a given stream from the inference configuration.
+        Parameters
+        ----------
+        stream :
+            Name of the data stream.
+        Returns
+        -------
+            Climatology filename if specified, otherwise None.
+        """
+
+        stream_dict = self.get_stream(stream)
+
+        clim_data_path = stream_dict.get("climatology_path", None)
+        if not clim_data_path:
+            clim_base_dir = self.inference_cfg.get("data_path_aux", None)
+
+            clim_fn = next(
+                (
+                    item.get("climatology_filename")
+                    for item in self.inference_cfg["streams"]
+                    if item.get("name") == stream
+                ),
+                None,
+            )
+
+            if clim_base_dir and clim_fn:
+                clim_data_path = Path(clim_base_dir).join(clim_fn)
+            else:
+                _logger.warning(
+                    f"No climatology path specified for stream {stream}. Setting climatology to "
+                    "NaN. Add 'climatology_path' to evaluation config to use metrics like ACC."
+                )
+
+        return clim_data_path
+
+    def get_channels(self, stream: str) -> list[str]:
+        """
+        Get the list of channels for a given stream from the config.
+
+        Parameters
+        ----------
+        stream :
+            The name of the stream to get channels for.
+
+        Returns
+        -------
+            A list of channel names.
+        """
+        _logger.debug(f"Getting channels for stream {stream}...")
+        all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
+        _logger.debug(f"Channels found in config: {all_channels}")
+        return all_channels
+
+    def load_scores(
+        self, stream: str, regions: list[str], metrics: list[str]
+    ) -> xr.DataArray | None:
+        """
+        Load multiple pre-computed scores for a given run, stream and metric and epoch.
+
+        Parameters
+        ----------
+        reader :
+            Reader object containing all info for a specific run_id
+        stream :
+            Stream name.
+        regions :
+            Region names.
+        metrics :
+            Metric names.
+
+        Returns
+        -------
+        xr.DataArray
+            The metric DataArray.
+        missing_metrics:
+            dictionary of missing regions and metrics that need to be recomputed.
+        """
+
+        local_scores = {}
+        missing_metrics = {}
+        for region in regions:
+            for metric in metrics:
+                score = self.load_single_score(stream, region, metric)
+                if score is not None:
+                    available_data = self.check_availability(stream, score, mode="evaluation")
+                    if available_data.score_availability:
+                        score = score.sel(
+                            sample=available_data.samples,
+                            channel=available_data.channels,
+                            forecast_step=available_data.fsteps,
+                        )
+                        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
+                            stream, {}
+                        )[self.run_id] = score
+                        continue
+
+                # all other cases: recompute scores
+                missing_metrics.setdefault(region, []).append(metric)
+                continue
+
+        return local_scores, missing_metrics
+
+    def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+        """
+        Load a single pre-computed score for a given run, stream and metric
+        """
+        score_path = (
+            Path(self.metrics_dir)
+            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
+        )
+        _logger.debug(f"Looking for: {score_path}")
+        if score_path.exists():
+            with open(score_path) as f:
+                data_dict = json.load(f)
+                score = xr.DataArray.from_dict(data_dict)  # not a dict though
+        else:
+            score = None
+        return score
+
+    def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
+        """
+        Get the value of a key for a specific stream from the a model config.
+
+        Parameters:
+        ------------
+            config:
+                The full configuration dictionary.
+            stream_name:
+                The name of the stream (e.g. 'ERA5').
+            key:
+                The key to look up (e.g. 'tokenize_spacetime').
+            default: Optional
+                Value to return if not found (default: None).
+
+        Returns:
+            The parameter value if found, otherwise the default.
+        """
+        for stream in self.inference_cfg.get("streams", []):
+            if stream.get("name") == stream_name:
+                return stream.get(key, default)
+        return default
+
+
+class WeatherGenJSONReader(WeatherGenReader):
+    def __init__(
+        self,
+        eval_cfg: dict,
+        run_id: str,
+        private_paths: dict | None = None,
+        regions: list[str] | None = None,
+        metrics: list[str] | None = None,
+    ):
+        super().__init__(eval_cfg, run_id, private_paths)
+        # goes looking for the coordinates available for all streams, regions, metrics
+        streams = list(self.eval_cfg.streams.keys())
+        coord_names = ["sample", "forecast_step", "ens"]
+        all_coords = {name: [] for name in coord_names}  # collect all available coordinates
+        provenance = {
+            name: defaultdict(list) for name in coord_names
+        }  # remember who had which coords, so we can warn about it later.
+        for stream in streams:
+            for region in regions:
+                for metric in metrics:
+                    score = self.load_single_score(stream, region, metric)
+                    if score is None:
+                        raise ValueError(
+                            f"JSONreader couldn't find {metric} for {run_id}, stream {stream}, "
+                            f"region {region}. Use type: zarr instead if possible."
+                        )
+                    else:
+                        for name in coord_names:
+                            vals = set(score[name].values)
+                            all_coords[name].append(vals)
+                            for val in vals:
+                                provenance[name][val].append((stream, region, metric))
+        self.common_coords = {name: set.intersection(*all_coords[name]) for name in coord_names}
+        # issue warnings for skipped coords
+        for name in coord_names:
+            skipped = set.union(*all_coords[name]) - self.common_coords[name]
+            if skipped:
+                message = [f"Some {name}(s) were not common among streams, regions and metrics:"]
+                for val in skipped:
+                    message.append(f" {val} only in {provenance[name][val]}")
+                _logger.warning("\n".join(message))
+
+    def get_samples(self) -> set[int]:
+        return self.common_coords["sample"]
+
+    def get_forecast_steps(self) -> set[int]:
+        return self.common_coords["forecast_step"]
+
+    def get_ensemble(self, stream: str | None = None) -> list[str]:
+        return self.common_coords["ens"]
+
+    def get_data(self, *args, **kwargs):
+        # TODO this should not be needed, the reader should not even be created if this is the case
+        # it can still happen when a particular score was available for a different channel
+        raise ValueError(f"Missing JSON data for run {self.run_id}.")
+
+
+class WeatherGenZarrReader(WeatherGenReader):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+        """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
+        super().__init__(eval_cfg, run_id, private_paths)
+
+        fname_zarr_new = self.results_dir.joinpath(
+            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
+        )
+        fname_zarr_old = self.results_dir.joinpath(
+            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
+        )
+
+        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
+            self.fname_zarr = fname_zarr_new
+        else:
+            self.fname_zarr = fname_zarr_old
+
+        if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
+            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
+            raise FileNotFoundError(
+                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
+            )
 
     def get_data(
         self,
@@ -335,43 +541,6 @@ class WeatherGenReader(Reader):
 
         return data_scaled
 
-    def get_climatology_filename(self, stream: str) -> str | None:
-        """
-        Get the climatology filename for a given stream from the inference configuration.
-        Parameters
-        ----------
-        stream :
-            Name of the data stream.
-        Returns
-        -------
-            Climatology filename if specified, otherwise None.
-        """
-
-        stream_dict = self.get_stream(stream)
-
-        clim_data_path = stream_dict.get("climatology_path", None)
-        if not clim_data_path:
-            clim_base_dir = self.inference_cfg.get("data_path_aux", None)
-
-            clim_fn = next(
-                (
-                    item.get("climatology_filename")
-                    for item in self.inference_cfg["streams"]
-                    if item.get("name") == stream
-                ),
-                None,
-            )
-
-            if clim_base_dir and clim_fn:
-                clim_data_path = Path(clim_base_dir).join(clim_fn)
-            else:
-                _logger.warning(
-                    f"No climatology path specified for stream {stream}. Setting climatology to "
-                    "NaN. Add 'climatology_path' to evaluation config to use metrics like ACC."
-                )
-
-        return clim_data_path
-
     def get_stream(self, stream: str):
         """
         returns the dictionary associated to a particular stream.
@@ -401,24 +570,6 @@ class WeatherGenReader(Reader):
         """Get the set of forecast steps from the Zarr file."""
         with ZarrIO(self.fname_zarr) as zio:
             return set(int(f) for f in zio.forecast_steps)
-
-    def get_channels(self, stream: str) -> list[str]:
-        """
-        Get the list of channels for a given stream from the config.
-
-        Parameters
-        ----------
-        stream :
-            The name of the stream to get channels for.
-
-        Returns
-        -------
-            A list of channel names.
-        """
-        _logger.debug(f"Getting channels for stream {stream}...")
-        all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
-        _logger.debug(f"Channels found in config: {all_channels}")
-        return all_channels
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Get the list of ensemble member names for a given stream from the config.
@@ -478,86 +629,6 @@ class WeatherGenReader(Reader):
         _logger.debug("Latitude and longitude coordinates are regularly spaced.")
         return True
 
-    def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray | None:
-        """
-        Load the pre-computed scores for a given run, stream and metric and epoch.
-
-        Parameters
-        ----------
-        reader :
-            Reader object containing all info for a specific run_id
-        stream :
-            Stream name.
-        regions :
-            Region names.
-        metrics :
-            Metric names.
-
-        Returns
-        -------
-        xr.DataArray
-            The metric DataArray.
-        missing_metrics:
-            dictionary of missing regions and metrics that need to be recomputed.
-        """
-
-        local_scores = {}
-        missing_metrics = {}
-        for region in regions:
-            for metric in metrics:
-                score_path = (
-                    Path(self.metrics_dir)
-                    / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
-                )
-                _logger.debug(f"Looking for: {score_path}")
-
-                if score_path.exists():
-                    with open(score_path) as f:
-                        data_dict = json.load(f)
-                        score_dict = xr.DataArray.from_dict(data_dict)
-
-                    available_data = self.check_availability(stream, score_dict, mode="evaluation")
-
-                    if available_data.score_availability:
-                        score_dict = score_dict.sel(
-                            sample=available_data.samples,
-                            channel=available_data.channels,
-                            forecast_step=available_data.fsteps,
-                        )
-                        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
-                            stream, {}
-                        )[self.run_id] = score_dict
-                        continue
-
-                # all other cases: recompute scores
-                missing_metrics.setdefault(region, []).append(metric)
-                continue
-
-        return local_scores, missing_metrics
-
-    def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
-        """
-        Get the value of a key for a specific stream from the a model config.
-
-        Parameters:
-        ------------
-            config:
-                The full configuration dictionary.
-            stream_name:
-                The name of the stream (e.g. 'ERA5').
-            key:
-                The key to look up (e.g. 'tokenize_spacetime').
-            default: Optional
-                Value to return if not found (default: None).
-
-        Returns:
-            The parameter value if found, otherwise the default.
-        """
-        for stream in self.inference_cfg.get("streams", []):
-            if stream.get("name") == stream_name:
-                return stream.get(key, default)
-        return default
-
 
 ################### Helper functions ########################
 
@@ -609,7 +680,7 @@ class WeatherGenMergeReader(Reader):
         _logger.info(f"MERGE READERS: {self.run_ids} ...")
 
         for run_id in self.run_ids:
-            reader = WeatherGenReader(self.eval_cfg, run_id, self.private_paths)
+            reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
             self.readers.append(reader)
 
     def get_data(
