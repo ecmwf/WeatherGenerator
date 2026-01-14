@@ -758,7 +758,7 @@ class OutputBatchData:
         return source_dataset
 
 
-def reader(store_path: pathlib.Path) -> ZarrIO:
+def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:
     """
     Get the proper io-reader for a given store.
 
@@ -769,7 +769,7 @@ def reader(store_path: pathlib.Path) -> ZarrIO:
     return _get_backend(store_path, read_only=True)
 
 
-def writer(store_path: pathlib.Path) -> ZarrIO:
+def zarrio_writer(store_path: pathlib.Path) -> ZarrIO:
     """
     Get the proper io-writer for a given store.
 
