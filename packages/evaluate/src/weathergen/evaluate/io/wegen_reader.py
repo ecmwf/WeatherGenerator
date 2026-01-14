@@ -296,31 +296,32 @@ class WeatherGenJSONReader(WeatherGenReader):
         # it can still happen when a particular score was available for a different channel
         raise ValueError(f"Missing JSON data for run {self.run_id}.")
 
+
 class WeatherGenZarrReader(WeatherGenReader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
         """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
         super().__init__(eval_cfg, run_id, private_paths)
-        
+
         zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
         # for backwards compatibility assume zarr store is local i.e. .zarr format
 
         fname_zarr_new = self.results_dir.joinpath(
-            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
+            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
         )
         fname_zarr_old = self.results_dir.joinpath(
             f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
         )
-
-        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
-            self.fname_zarr = fname_zarr_new
+        if fname_zarr_new.exists():
+            if (zarr_ext == "zarr" and fname_zarr_new.is_dir()) or (
+                zarr_ext == "zip" and fname_zarr_new.is_file()
+            ):
+                self.fname_zarr = fname_zarr_new
         else:
             self.fname_zarr = fname_zarr_old
 
-        if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
+        if not self.fname_zarr.exists():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(
-                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            )
+            raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
 
     def get_data(
         self,
@@ -512,8 +513,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         lead_time has dims (sample, ipoint) and dtype timedelta64[ns].
         """
-
-        lead_time = np.unique(da["valid_time"]) - da["source_interval_start"]
+        lead_time = da["valid_time"] - da["source_interval_start"]
         return da.assign_coords(lead_time=lead_time)
 
     def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
@@ -682,8 +682,8 @@ class WeatherGenMergeReader(Reader):
         _logger.info(f"MERGE READERS: {self.run_ids} ...")
 
         for run_id in self.run_ids:
-            reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
-            self.readers.append(reader)
+            ind_reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
+            self.readers.append(ind_reader)
 
     def get_data(
         self,
@@ -928,4 +928,4 @@ class WeatherGenMergeReader(Reader):
             True if the stream is regularly spaced. False otherwise.
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
-        return all(reader.is_regular(stream) for reader in self.readers)
+        return all(ind_reader.is_regular(stream) for ind_reader in self.readers)
