@@ -217,14 +217,8 @@ class ModelBatch:
             sample.pin_memory()
 
         # Pin source_tokens_lens
-
-        # Use getattr to access 'source_tokens_lens' to avoid pylint warning about
-        # attributes defined outside __init__. This attribute is set dynamically
-        # during batch processing, so we check for its existence before pinning.
-        
-        source_tokens_lens = getattr(self, 'source_tokens_lens', None)
-        if isinstance(source_tokens_lens, torch.Tensor):
-            setattr(self, 'source_tokens_lens', source_tokens_lens.pin_memory())
+        if isinstance(self.source_tokens_lens, torch.Tensor):
+            self.source_tokens_lens = self.source_tokens_lens.pin_memory()  # pylint: disable=attribute-defined-outside-init
 
         return self
 
