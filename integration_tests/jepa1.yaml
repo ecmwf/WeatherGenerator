@@ -11,11 +11,11 @@ lr_steps_warmup: 2
 lr_steps_cooldown: 2
 loader_num_workers: 8
 
-pred_num_blocks: 12
-pred_num_heads: 12
-pred_dropout_rate: 0.1
-pred_with_qk_lnorm: True 
-pred_intermediate_dim: 384
+sslpred_num_blocks: 12
+sslpred_num_heads: 12
+sslpred_dropout_rate: 0.1
+sslpred_with_qk_lnorm: True 
+sslpred_intermediate_dim: 384
 
 train_log:
   log_interval: 1
