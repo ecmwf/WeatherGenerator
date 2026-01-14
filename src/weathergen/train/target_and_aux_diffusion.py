@@ -22,7 +22,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         **kwargs,
     ) -> tuple[Any, Any]:
         noise_level_rn = (
-            batch.target_samples[0].meta_info["ERA5"].params["noise_level_rn"]
+            batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
         )  # TODO: adjust for multiple streams
 
         with torch.no_grad():

@@ -21,8 +21,9 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.batch import Sample, SampleMetaData
 from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.datasets.batch import ModelBatch
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -591,7 +592,7 @@ class Model(torch.nn.Module):
                 if noise_std > 0.0:
                     tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-            tokens = self.forecast(model_params, tokens, fstep, batch.source_samples[0].meta_info)
+            tokens = self.forecast(model_params, tokens, fstep, batch.samples[0].meta_info)
 
             # safe latent prediction
             latent_state = LatentState(
