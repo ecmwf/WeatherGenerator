@@ -370,8 +370,8 @@ class ZarrIO:
     @property
     def _mode(self):
         return "r" if self.read_only else "a"
-        # TODO: append is more permissive, but there is a cost in opening and closing the store. 
-        # mode = "a" required for fix that removes ZarrIO dependency in trainer.py, to revisit if needed
+        # TODO: append is more permissive, but there is a cost in opening and closing the store.
+        # mode = "a" required for fix that removes ZarrIO dependency in trainer.py
 
     def __enter__(self) -> typing.Self:
         # Capture warnings emitted during store creation/open

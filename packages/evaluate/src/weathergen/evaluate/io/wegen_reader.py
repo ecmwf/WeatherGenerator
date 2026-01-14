@@ -658,11 +658,11 @@ class WeatherGenMergeReader(Reader):
 
         points_per_sample = None
 
-        for reader in self.readers:
+        for ind_reader in self.readers:
             da_tars, da_preds, da_fsteps = [], [], []
-            _logger.info(f"MERGE READERS: Processing run_id {reader.run_id}...")
+            _logger.info(f"MERGE READERS: Processing run_id {ind_reader.run_id}...")
 
-            out = reader.get_data(
+            out = ind_reader.get_data(
                 stream,
                 samples,
                 fsteps,
@@ -763,8 +763,8 @@ class WeatherGenMergeReader(Reader):
         -------
             Climatology filename if specified, otherwise None.
         """
-        for reader in self.readers:
-            clim_data_path = reader.get_climatology_filename(stream)
+        for ind_reader in self.readers:
+            clim_data_path = ind_reader.get_climatology_filename(stream)
             if clim_data_path:
                 return clim_data_path
         return None
@@ -789,15 +789,15 @@ class WeatherGenMergeReader(Reader):
     def get_samples(self) -> set[int]:
         """Get the set of sample indices from the Zarr file."""
         samples = []
-        for reader in self.readers:
-            samples.append(reader.get_samples())
+        for ind_reader in self.readers:
+            samples.append(ind_reader.get_samples())
         return set.intersection(*map(set, samples))
 
     def get_forecast_steps(self) -> set[int]:
         """Get the set of forecast steps from the Zarr file."""
         forecast_steps = []
-        for reader in self.readers:
-            forecast_steps.append(reader.get_forecast_steps())
+        for ind_reader in self.readers:
+            forecast_steps.append(ind_reader.get_forecast_steps())
         return set.intersection(*map(set, forecast_steps))
 
     def get_channels(self, stream: str) -> list[str]:
@@ -815,8 +815,8 @@ class WeatherGenMergeReader(Reader):
         """
         all_channels = []
 
-        for reader in self.readers:
-            all_channels.append(reader.get_channels(stream))
+        for ind_reader in self.readers:
+            all_channels.append(ind_reader.get_channels(stream))
 
         return set.intersection(*map(set, all_channels))
 
@@ -833,8 +833,8 @@ class WeatherGenMergeReader(Reader):
         """
         _logger.debug(f"Getting ensembles for stream {stream}...")
         all_ensembles = []
-        for reader in self.readers:
-            all_ensembles.append(reader.get_ensemble(stream))
+        for ind_reader in self.readers:
+            all_ensembles.append(ind_reader.get_ensemble(stream))
 
         if all(e == ["0"] or e == [0] for e in all_ensembles):
             return set(range(len(self.readers)))
