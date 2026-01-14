@@ -447,14 +447,14 @@ class Model(torch.nn.Module):
                     )
                 elif loss == "JEPA":
                     self.latent_heads[loss] = TransformerPredictionHead(
-                    cf,
-                    f"{loss}-head",
-                    in_dim=cf.ae_global_dim_embed,
-                    out_dim=loss_conf["out_dim"],
-                    intermediate_dim=cf.pred_intermediate_dim,
-                    class_token=False,
-                    patch_token=True,
-                )
+                        cf,
+                        f"{loss}-head",
+                        in_dim=cf.ae_global_dim_embed,
+                        out_dim=loss_conf["out_dim"],
+                        intermediate_dim=cf.pred_intermediate_dim,
+                        class_token=False,
+                        patch_token=True,
+                    )
                 elif loss == "DINO":
                     self.latent_heads[loss] = LatentPredictionHead(
                         f"{loss}-head",
