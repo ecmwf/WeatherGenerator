@@ -224,7 +224,7 @@ class ModelBatch:
         
         source_tokens_lens = getattr(self, 'source_tokens_lens', None)
         if isinstance(source_tokens_lens, torch.Tensor):
-            self.source_tokens_lens = source_tokens_lens.pin_memory()
+            setattr(self, 'source_tokens_lens', source_tokens_lens.pin_memory())
 
         return self
 
