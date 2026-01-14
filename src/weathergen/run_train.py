@@ -156,7 +156,9 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
-    cf = config.load_merge_configs(args.private_config, None, None, args.base_config, *args.config, cli_overwrite)
+    cf = config.load_merge_configs(
+        args.private_config, None, None, args.base_config, *args.config, cli_overwrite
+    )
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.data_loader_rng_seed = int(time.time())

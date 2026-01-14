@@ -52,7 +52,7 @@ def test_train(setup, test_run_id):
     train_with_args(
         f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml".split()
         + [
-            "--run_id",
+            "--run-id",
             test_run_id,
         ],
         f"{WEATHERGEN_HOME}/config/streams/streams_test/",
@@ -69,11 +69,11 @@ def test_train(setup, test_run_id):
 def infer(run_id):
     logger.info("run inference")
     inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
+        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini-epoch", "0"]
         + [
-            "--from_run_id",
+            "--from-run-id",
             run_id,
-            "--run_id",
+            "--run-id",
             run_id,
             "--config",
             f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
@@ -84,11 +84,11 @@ def infer(run_id):
 def infer_with_missing(run_id):
     logger.info("run inference")
     inference_from_args(
-        ["-start", "2021-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
+        ["-start", "2021-10-10", "-end", "2022-10-11", "--samples", "10", "--mini-epoch", "0"]
         + [
-            "--from_run_id",
+            "--from-run-id",
             run_id,
-            "--run_id",
+            "--run-id",
             run_id,
             "--config",
             f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
