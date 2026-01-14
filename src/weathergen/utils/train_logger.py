@@ -156,20 +156,21 @@ class TrainLogger:
         cols_train = ["dtime", "samples", "mse", "lr"]
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
         for si in cf.streams:
-            for lf in cf.loss_fcts:
+            for lf, _ in cf.training_config.losses.items():
                 cols1 += [_key_loss(si["name"], lf[0])]
                 cols_train += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf
                 ]
-        with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
-        if with_stddev:
-            for si in cf.streams:
-                cols1 += [_key_stddev(si["name"])]
-                cols_train += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-                    + ", "
-                    + "stddev"
-                ]
+        # with_stddev = [("stats" in lf) for lf, _ in cf.training_config.losses.items()]
+        # if with_stddev:
+        #     for si in cf.streams:
+        #         cols1 += [_key_stddev(si["name"])]
+        #         cols_train += [
+        #             si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
+        #             + ", "
+        #             + "stddev"
+        #         ]
+
         # read training log data
         try:
             with open(fname_log_train, "rb") as f:
@@ -214,20 +215,25 @@ class TrainLogger:
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
         for si in cf.streams:
-            for lf in cf.loss_fcts_val:
+            cfg = (
+                cf.validation_config
+                if cf.validation_config.get("losses") is not None
+                else cf.training_config
+            )
+            for lf, _ in cfg.losses.items():
                 cols_val += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
+                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf
                 ]
                 cols2 += [_key_loss(si["name"], lf[0])]
-        with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
-        if with_stddev:
-            for si in cf.streams:
-                cols2 += [_key_stddev(si["name"])]
-                cols_val += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-                    + ", "
-                    + "stddev"
-                ]
+        # with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
+        # if with_stddev:
+        #     for si in cf.streams:
+        #         cols2 += [_key_stddev(si["name"])]
+        #         cols_val += [
+        #             si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
+        #             + ", "
+        #             + "stddev"
+        #         ]
         # read validation log data
         try:
             with open(fname_log_val, "rb") as f:
@@ -370,6 +376,8 @@ def clean_df(df, columns: list[str] | None):
             idcs = [i for i in range(len(columns)) if columns[i] == "loss_avg_mean"]
             if len(idcs) > 0:
                 columns[idcs[0]] = "loss_avg_0_mean"
+        # TODO, TODO, TODO
+        columns = ["LossPhysical.loss_avg"]
         df = df.select(columns)
         # Remove all rows where all columns are null
         df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))

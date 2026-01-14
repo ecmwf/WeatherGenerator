@@ -206,12 +206,13 @@ def plot_lr(
         if run_data.train.is_empty():
             continue
         run_id = run_data.run_id
-        x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
-        data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
+        # x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
+        # data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
         plt.plot(
-            run_data.train[x_col],
-            run_data.train[data_cols],
+            # run_data.train[x_col],
+            # run_data.train[data_cols],
+            run_data.train,
             linestyle,
             color=colors[j % len(colors)],
         )
@@ -384,7 +385,7 @@ def plot_loss_per_stream(
                     if run_data_mode.is_empty():
                         continue
                     # find the col of the request x-axis (e.g. samples)
-                    x_col = next(filter(lambda c: x_axis in c, run_data_mode.columns))
+                    # x_col = next(filter(lambda c: x_axis in c, run_data_mode.columns))
                     # find the cols of the requested metric (e.g. mse) for all streams
                     # TODO: fix captialization
                     data_cols = filter(
@@ -393,11 +394,11 @@ def plot_loss_per_stream(
                     )
 
                     for col in data_cols:
-                        x_vals = np.array(run_data_mode[x_col])
+                        # x_vals = np.array(run_data_mode[x_col])
                         y_data = np.array(run_data_mode[col])
 
                         plt.plot(
-                            x_vals,
+                            # x_vals,
                             y_data,
                             linestyle,
                             color=colors[j % len(colors)],
@@ -512,7 +513,7 @@ def plot_loss_per_run(
                 alpha = 0.35 if "train" in mode else alpha
             run_data_mode = run_data.by_mode(mode)
 
-            x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
+            # x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
             # find the cols of the requested metric (e.g. mse) for all streams
             data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
 
@@ -525,11 +526,11 @@ def plot_loss_per_run(
                         if run_data_mode[col].shape[0] == 0:
                             continue
 
-                        x_vals = np.array(run_data_mode[x_col])
+                        # x_vals = np.array(run_data_mode[x_col])
                         y_data = np.array(run_data_mode[col])
 
                         plt.plot(
-                            x_vals,
+                            # x_vals,
                             y_data,
                             linestyle,
                             color=colors[j % len(colors)],
