@@ -363,6 +363,7 @@ class ZarrIO:
     """Manage zarr storage hierarchy."""
 
     def __init__(self, store_path: pathlib.Path, read_only: bool):
+        self._store: zarr.storage.LocalStore | zarr.storage.ZipStore | None = None
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
         self.read_only = read_only
