@@ -143,6 +143,21 @@ def get_target_idxs_from_cfg(cfg, loss_name) -> list[int] | None:
 
     tc = [v.get("target_source_correspondence") for _, v in cfg.losses[loss_name].loss_fcts.items()]
     tc = [list(t.keys()) for t in tc if t is not None]
-    target_idxs = list(set([i for t in tc for i in t])) if len(tc) > 0 else None
+    target_idxs = list(set([int(i) for t in tc for i in t])) if len(tc) > 0 else None
 
     return target_idxs
+
+
+def filter_config_by_enabled(cfg, keys):
+    """
+    Filtered disabled entries from config
+    """
+
+    for key in keys:
+        filtered = {}
+        for k, v in cfg.get(key, {}).items():
+            if v.get("enabled", True):
+                filtered[k] = v
+        cfg[key] = filtered
+
+    return cfg
