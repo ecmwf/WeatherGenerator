@@ -62,6 +62,7 @@ class EncoderModule(torch.nn.Module):
 
         assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
+        self.num_class_tokens = cf.num_class_tokens
 
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
@@ -136,12 +137,12 @@ class EncoderModule(torch.nn.Module):
             Tokens for global assimilation
         """
 
-        num_steps_input = batch.get_num_source_steps()
+        num_steps_input = batch.get_num_steps()
 
         # combined cell lens for all tokens in batch across all input steps
-        cell_lens = torch.sum(batch.source_tokens_lens, 2).flatten()
+        cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
 
-        rs = num_steps_input * batch.len_sources()
+        rs = num_steps_input * len(batch)
 
         s = self.q_cells.shape
         # TODO: re-enable or remove ae_local_queries_per_cell
@@ -154,7 +155,7 @@ class EncoderModule(torch.nn.Module):
         # lens for varlen attention
         q_cells_lens = torch.cat(
             [model_params.q_cells_lens[0].unsqueeze(0)]
-            + [model_params.q_cells_lens[1:] for _ in range(batch.len_sources())]
+            + [model_params.q_cells_lens[1:] for _ in range(len(batch))]
         )
 
         # the computation below conceptually apply the local assimilation engine and then the
@@ -240,11 +241,11 @@ class EncoderModule(torch.nn.Module):
             + model_params.pe_global
         ).flatten(1, 2)
 
-        # create register tokens and prepend to latent spatial tokens
-        tokens_global_register = positional_encoding_harmonic(
-            self.q_cells.repeat(rs, self.num_register_tokens, 1)
+        # create register and latent tokens and prepend to latent spatial tokens
+        tokens_global_register_class = positional_encoding_harmonic(
+            self.q_cells.repeat(rs, self.num_register_tokens + self.num_class_tokens, 1)
         )
-        tokens_global = torch.cat([tokens_global_register, tokens_global], dim=1)
+        tokens_global = torch.cat([tokens_global_register_class, tokens_global], dim=1)
 
         # TODO: clean up above code and move to multiple functions
 

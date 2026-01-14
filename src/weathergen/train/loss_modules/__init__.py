@@ -9,5 +9,6 @@
 
 from .loss_module_latent_diffusion import LossLatentDiffusion
 from .loss_module_physical import LossPhysical
+from .loss_module_ssl import LossLatentSSLStudentTeacher
 
-__all__ = [LossLatentDiffusion, LossPhysical]
+__all__ = [LossPhysical, LossLatentSSLStudentTeacher, LossLatentDiffusion]

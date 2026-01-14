@@ -75,6 +75,7 @@ run_ids :
     rank: 0
     streams:
       ERA5:
+        #climatology_path: "<path>/aifs-ea-an-oper-0001-mars-o96-1980-2020-6h-v6_climatology.zarr"
         channels: ["2t", "10u", "10v"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
         evaluation:
           forecast_step: "all"
@@ -88,3 +89,62 @@ run_ids :
           plot_target: false
           plot_histograms: true
           plot_animations: true
+
+  #Example of syntax to stack multiple runs over the ensemble dimension  
+  merge_test: <------ This is the new run_id name of the merged dataset. NB. you always need to specify one
+    type: "merge" <------- VERY IMPORTANT
+    merge_run_ids:
+      - so67dku4
+      - c9cg8ql3
+    metrics_dir: "./merge_test/metrics/" <------- VERY IMPORTANT
+    label: "Merged Results"
+    results_base_dir : "./results/"
+    epoch: 0
+    rank: 0
+    streams:
+      ERA5:
+        channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
+        evaluation:
+          forecast_step: [2,4,6] 
+          sample: [0, 1, 2, 3]
+          ensemble: "all" 
+
+  #Example of syntax to run over pre-computed scores when the .zarr output is not available anymore
+  so67dku1:
+    type: "json"
+    label: "WeatherGenerator"
+    results_base_dir : "./results/"
+    epoch: 0
+    rank: 0
+    streams:
+      ERA5:
+        channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
+        evaluation:
+          forecast_step: [2,4,6] 
+          sample: [0, 1, 2, 3]
+          ensemble: "all" #supported
+
+  #ADVANCED (please handle with care): example of how to use the csv reader to Plot PanguWeather scores computed with quaver
+  pangu:
+    type: "csv"
+    label: "Pangu-Weather"
+    metrics_dir: "<path to folder>"
+    streams: 
+      ERA5: 
+        channels: ["2t", "q_850", "t_850", "z_500"]
+        evaluation: 
+          forecast_step: "all"
+          sample: "all"
+  
+  graphcast:
+    type: "csv"
+    label: "GraphCast"
+    metrics_dir: "<path to folder>"
+    streams: 
+      ERA5: 
+        channels: ["2t", "q_850", "t_850", "z_500"]
+        evaluation: 
+          forecast_step: "all"
+          sample: "all"
+  
+          

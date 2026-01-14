@@ -7,16 +7,22 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-ICON :
-  type : icon
-  filenames : ['icon-art-NWP_OH_CHEMISTRY-chem_DOM01_ML_daily_repeat_reduced_levels.zarr']
-  source : ['u_00', 'v_00', 'w_80', 'temp_00']
-  target : ['u_00', 'v_00', 'w_80', 'temp_00']
+ICONESMday :
+  type : iconesm
+  filenames : ['historical_r1i1p1f1_day.json']
+  source_exclude: [] # ['mrso', 'snc', 'mrro', 'mrsos', 'snw']
+  target_exclude: [] # ['mrso', 'snc', 'mrro', 'mrsos', 'snw']
+  channels: ['clt', 'hfls', 'hfss', 'mrro', 'mrso', 'mrsos', 'pr', 'psl', 'rlds', 
+    'rlus', 'rlut', 'rsds', 'rsus', 'sfcWind', 'snc', 'snw', 'tas', 
+    'uas', 'vas']
+  plev : []
+  depth: []
+  lev : [] 
   loss_weight : 1.
   diagnostic : False
   masking_rate : 0.6
   masking_rate_none : 0.05
-  token_size : 32
+  token_size : 8
   embed : 
     net : transformer
     num_tokens : 1

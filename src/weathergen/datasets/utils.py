@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from astropy_healpix.healpy import ang2pix
 
-from weathergen.datasets.batch import Sample
+from weathergen.datasets.batch import BatchSamples
 
 
 ####################################################################################################
@@ -266,7 +266,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-def get_tokens_lens(streams: dict, batch_data: list[Sample], input_steps: int) -> torch.Tensor:
+def get_tokens_lens(streams: dict, batch_data: BatchSamples, input_steps: int) -> torch.Tensor:
     """
     TODO
     """
@@ -281,7 +281,7 @@ def get_tokens_lens(streams: dict, batch_data: list[Sample], input_steps: int) -
                             for stream_info in streams
                         ]
                     )
-                    for sample in batch_data
+                    for sample in batch_data.samples
                 ]
             )
             for i in range(input_steps)
@@ -289,62 +289,3 @@ def get_tokens_lens(streams: dict, batch_data: list[Sample], input_steps: int) -
     )
 
     return source_tokens_lens
-
-
-def compute_offsets_scatter_embed(
-    streams, batch_data: list[Sample], source_tokens_lens, input_steps: int
-) -> None:
-    """
-    TODO: update
-    Compute auxiliary information for scatter operation that changes from stream-centric to
-    cell-centric computations
-
-    Parameters
-    ----------
-    batch : str
-        batch of stream data information for which offsets have to be computed
-
-    Returns
-    -------
-    StreamData
-        stream data with offsets added as members
-    """
-
-    if source_tokens_lens.sum() == 0:
-        return
-
-    # precompute index sets for scatter operation after embed
-    offsets_base = [s.sum(1).sum(0).cumsum(0) for s in source_tokens_lens]
-    offsets = [torch.cat([torch.zeros(1, dtype=torch.int32), o[:-1]]) for o in offsets_base]
-    offsets_pe = [torch.zeros_like(o) for o in offsets]
-
-    if torch.cat(offsets_base).shape[0] == 0:
-        return
-
-    for itype, stream_info in enumerate(streams):
-        for i_s in range(input_steps):
-            for ib, sb in enumerate(batch_data):  # batch items
-                stream_data = sb.streams_data[stream_info["name"]]
-                if not stream_data.source_empty():
-                    stream_data.source_idxs_embed[i_s] = torch.cat(
-                        [
-                            torch.arange(offset, offset + token_len, dtype=torch.int64)
-                            for offset, token_len in zip(
-                                offsets[i_s], source_tokens_lens[i_s][ib, itype], strict=False
-                            )
-                        ]
-                    )
-                    stream_data.source_idxs_embed_pe[i_s] = torch.cat(
-                        [
-                            torch.arange(offset, offset + token_len, dtype=torch.int32)
-                            for offset, token_len in zip(
-                                offsets_pe[i_s],
-                                source_tokens_lens[i_s][ib][itype],
-                                strict=False,
-                            )
-                        ]
-                    )
-
-                # advance offsets
-                offsets[i_s] += source_tokens_lens[i_s][ib][itype]
-                offsets_pe[i_s] += source_tokens_lens[i_s][ib][itype]

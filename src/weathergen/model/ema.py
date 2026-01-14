@@ -30,6 +30,8 @@ class EMAModel:
         self.rampup_ratio = rampup_ratio
         self.ema_model = empty_model
         self.is_model_sharded = is_model_sharded
+        # Build a name → param map once
+        self.src_params = dict(self.original_model.named_parameters())
 
         self.reset()
 
@@ -42,26 +44,35 @@ class EMAModel:
         FSDP2 is used.
         """
         self.ema_model.to_empty(device="cuda")
+        for p in self.ema_model.parameters():
+            p.requires_grad = False
         maybe_sharded_sd = self.original_model.state_dict()
         # this copies correctly tested in pdb
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
 
     @torch.no_grad()
     def update(self, cur_step, batch_size):
+        # ensure model remains sharded
+        if self.is_model_sharded:
+            self.ema_model.reshard()
+        # determine correct interpolation params
         halflife_steps = self.halflife_steps
         if self.rampup_ratio is not None:
             halflife_steps = min(halflife_steps, cur_step / 1e3 * self.rampup_ratio)
         beta = 0.5 ** (batch_size / max(halflife_steps * 1e3, 1e-6))
-        for p_net, p_ema in zip(
-            self.original_model.parameters(), self.ema_model.parameters(), strict=False
-        ):
-            p_ema.lerp_(p_net, 1 - beta)
+
+        for name, p_ema in self.ema_model.named_parameters():
+            p_src = self.src_params.get(name, None)
+            if p_src is None:
+                # EMA-only param or intentionally excluded
+                assert False, "All parameters of the EMA model must be in the base model."
+
+            p_ema.lerp_(p_src, 1.0 - beta)
 
     @torch.no_grad()
     def forward_eval(self, *args, **kwargs):
         self.ema_model.eval()
         out = self.ema_model(*args, **kwargs)
-        self.ema_model.train()
         return out
 
     def state_dict(self):

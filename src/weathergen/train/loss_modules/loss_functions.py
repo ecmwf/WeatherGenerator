@@ -10,6 +10,7 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 stat_loss_fcts = ["stats", "kernel_crps"]  # Names of loss functions that need std computed
 
@@ -59,10 +60,6 @@ def stats_normalized_erf(target, ens, mu, stddev):
     delta = -torch.abs(target - mu)
     d = 0.5 + torch.special.erf(delta / (np.sqrt(2.0) * stddev))
     return torch.mean(d * d)  # + torch.mean( torch.sqrt( stddev) )
-
-
-def mse(target, mu, *kwargs):
-    return torch.nn.functional.mse_loss(target, mu)
 
 
 def mse_ens(target, ens, mu, stddev):
@@ -126,18 +123,30 @@ def kernel_crps(
     return torch.mean(kcrps_chs), kcrps_chs
 
 
-def mse_channel_location_weighted(
+def lp_loss(
     target: torch.Tensor,
     pred: torch.Tensor,
-    weights_channels: torch.Tensor | None,
-    weights_points: torch.Tensor | None,
+    p_norm: int,
+    with_p_root: bool = False,
+    with_mean: bool = True,
+    weights_channels: torch.Tensor | None = None,
+    weights_points: torch.Tensor | None = None,
 ):
     """
-    Compute weighted MSE loss for one window or step
+    This function computes the Lp-norm for any arbitrary integer p < inf.
+    By default, the Lp-norm is normalized by the number of samples (i.e. with_mean=True).
+    * For example: p=1 corresponds to MAE; p=2 corresponds to MSE.
+    The samples are weighted by location if weights_points is not None.
+    The norm can optionally be normalised by the pth root.
+    * For example: p=2 and with_p_root=True corresponds to RMSE.
+    The mean across all channels can optionally be weighted by channel weights.
 
     The function implements:
 
-    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_points ))
+    loss = Mean_{channels}  ( weight_channels *
+                                ( Mean_{data_pts}(|(target - pred)|**p * weights_points)
+                                ) ** (1/p)
+                            )
 
     Geometrically,
 
@@ -158,32 +167,103 @@ def mse_channel_location_weighted(
     where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
 
     The computations are:
-    1. weight the rows of (target - pred) by wp = weights_points
+    1. weight the rows of |(target - pred)|**p by wp = weights_points (if given)
     2. take the mean over the row
-    3. weight the collapsed cols by wc = weights_channels
+    3. weight the collapsed cols by wc = weights_channels (if given)
     4. take the mean over the channel-weighted cols
 
     Params:
-        target : shape ( num_data_points , num_channels )
-        target : shape ( ens_dim , num_data_points , num_channels)
-        weights_channels : shape = (num_channels,)
-        weights_points : shape = (num_data_points)
+        target : tensor of shape ( num_data_points , num_channels )
+        pred : tensor of shape ( ens_dim , num_data_points , num_channels)
+        p_norm : integer defining the p the type of the norm
+        with_mean : boolean defining whether the norm is summed or averaged
+        with_p_root : boolean defining whether the p-th root of the norm is returned
+        weights_channels (optional): tensor of shape = (num_channels,)
+        weights_points (optional): tensor of shape = (num_data_points)
 
     Return:
-        loss : weight loss for gradient computation
-        loss_chs : losses per channel with location weighting but no channel weighting
+        loss : (weighted) scalar loss (e.g. for gradient computation)
+        loss_chs : losses per channel (if given with location weighting but no channel weighting)
     """
+
+    assert type(p_norm) is int, "Only integer p supported for p-norm loss"
 
     mask_nan = ~torch.isnan(target)
     pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
 
-    diff2 = torch.square(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
+    diff_p = torch.pow(
+        torch.abs(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0)), p_norm
+    )
     if weights_points is not None:
-        diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
-    loss_chs = diff2.mean(0)
+        diff_p = (diff_p.transpose(1, 0) * weights_points).transpose(1, 0)
+    loss_chs = diff_p.mean(0) if with_mean else diff_p.sum(0)
+    loss_chs = torch.pow(loss_chs, 1.0 / p_norm) if with_p_root else loss_chs
     loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
 
     return loss, loss_chs
+
+
+def mse(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Computes the mean squared error (mse).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
+    return lp_loss(
+        target=target,
+        pred=pred,
+        p_norm=2,
+        with_p_root=False,
+        with_mean=True,
+        weights_channels=weights_channels,
+        weights_points=weights_points,
+    )
+
+
+def rss(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Computes the residual sum of squares (rss).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
+    return lp_loss(
+        target=target,
+        pred=pred,
+        p_norm=2,
+        with_p_root=False,
+        with_mean=False,
+        weights_channels=weights_channels,
+        weights_points=weights_points,
+    )
+
+
+def rmse(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+):
+    """
+    Computes the root mean squared error (rmse).
+    See lp_loss function above for a detailed explanation of arguments.
+    """
+    return lp_loss(
+        target=target,
+        pred=pred,
+        p_norm=2,
+        with_p_root=True,
+        with_mean=True,
+        weights_channels=weights_channels,
+        weights_points=weights_points,
+    )
 
 
 def mae(
@@ -193,61 +273,22 @@ def mae(
     weights_points: torch.Tensor | None,
 ):
     """
-    Compute weighted MAE loss for one window or step
-
-    The function implements:
-
-    loss = Mean_{channels}( weight_channels * Mean_{data_pts}( (target - pred) * weights_points ))
-
-    Geometrically,
-
-        ------------------------     -
-        |                      |    |  |
-        |                      |    |  |
-        |                      |    |  |
-        |     target - pred    | x  |wp|
-        |                      |    |  |
-        |                      |    |  |
-        |                      |    |  |
-        ------------------------     -
-                    x
-        ------------------------
-        |          wc          |
-        ------------------------
-
-    where wp = weights_points and wc = weights_channels and "x" denotes row/col-wise multiplication.
-
-    The computations are:
-    1. weight the rows of (target - pred) by wp = weights_points
-    2. take the mean over the row
-    3. weight the collapsed cols by wc = weights_channels
-    4. take the mean over the channel-weighted cols
-
-    Params:
-        target : shape ( num_data_points , num_channels )
-        target : shape ( ens_dim , num_data_points , num_channels)
-        weights_channels : shape = (num_channels,)
-        weights_points : shape = (num_data_points)
-
-    Return:
-        loss : weight loss for gradient computation
-        loss_chs : losses per channel with location weighting but no channel weighting
+    Computes the mean absolute error (mae).
+    See lp_loss function above for a detailed explanation of arguments.
     """
-
-    mask_nan = ~torch.isnan(target)
-    pred = pred[0] if pred.shape[0] == 0 else pred.mean(0)
-
-    diff2 = torch.abs(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0))
-    if weights_points is not None:
-        diff2 = (diff2.transpose(1, 0) * weights_points).transpose(1, 0)
-    loss_chs = diff2.mean(0)
-    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
-
-    return loss, loss_chs
+    return lp_loss(
+        target=target,
+        pred=pred,
+        p_norm=1,
+        with_p_root=False,
+        with_mean=True,
+        weights_channels=weights_channels,
+        weights_points=weights_points,
+    )
 
 
-def cosine_latitude(stream_data, forecast_offset, fstep, min_value=1e-3, max_value=1.0):
-    latitudes_radian = stream_data.target_coords_raw[forecast_offset + fstep][:, 0] * np.pi / 180
+def cosine_latitude(target_coords, min_value=1e-3, max_value=1.0):
+    latitudes_radian = target_coords[:, 0] * np.pi / 180
     return (max_value - min_value) * np.cos(latitudes_radian) + min_value
 
 
@@ -255,3 +296,68 @@ def gamma_decay(forecast_steps, gamma):
     fsteps = np.arange(forecast_steps)
     weights = gamma**fsteps
     return weights * (len(fsteps) / np.sum(weights))
+
+
+def student_teacher_softmax(student_patches, teacher_patches, student_temp):
+    """
+    Cross-entropy between softmax outputs of the teacher and student networks.
+    student_patches: (B, N, D) tensor
+    teacher_patches: (B, N, D) tensor
+    student_temp: float
+    """
+    loss = torch.sum(
+        teacher_patches * F.log_softmax(student_patches / student_temp, dim=-1), dim=-1
+    )
+    loss = torch.mean(loss, dim=-1)
+    return -loss.mean()
+
+
+def softmax(t, s, temp):
+    return torch.sum(t * F.log_softmax(s / temp, dim=-1), dim=-1)
+
+
+def masked_student_teacher_patch_softmax(
+    student_patches_masked,
+    teacher_patches_masked,
+    student_masks,
+    teacher_masks,
+    student_temp,
+    n_masked_patches=None,
+    masks_weight=None,
+):
+    """
+    Cross-entropy between softmax outputs of the teacher and student networks.
+    student_patches_masked,
+    teacher_patches_masked,
+    student_masks_flat,
+    student_temp,
+    n_masked_patches=None,
+    masks_weight=None,
+    """
+    mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+    loss = softmax(teacher_patches_masked[mask], student_patches_masked[mask], student_temp)
+    if masks_weight is None:
+        masks_weight = (
+            (1 / student_masks.sum(-1).clamp(min=1.0))
+            .unsqueeze(-1)
+            .expand_as(student_masks)  # [student_masks_flat]
+        )
+    loss = loss * masks_weight[mask]
+    return -loss.sum() / student_masks.shape[0]
+
+
+def student_teacher_global_softmax(student_outputs, teacher_output, student_temp):
+    """
+    This comment is outdated TODO fix. Leaving it for now so we remember the context
+
+    This assumes that student_outputs : list[Tensor[2*batch_size, num_class_tokens, channel_size])
+                 and  teacher_outputs : Tensor[2*batch_size, num_class_tokens, channel_size]
+    The 2* is because there is two global views and they are concatenated in the batch dim
+    in DINOv2 as far as I can tell.
+    """
+    total_loss = 0
+    for s in student_outputs:
+        lsm = F.log_softmax(s / student_temp, dim=-1)
+        loss = torch.sum(teacher_output * lsm, dim=-1)
+        total_loss -= loss.mean()
+    return total_loss
