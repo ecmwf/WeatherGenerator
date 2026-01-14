@@ -15,7 +15,7 @@ import torch
 from omegaconf import DictConfig
 from torch import Tensor
 
-import weathergen.train.loss_modules.loss_functions as losses
+import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import Stage
 
@@ -30,9 +30,10 @@ class LossLatentDiffusion(LossModuleBase):
     def __init__(
         self,
         cf: DictConfig,
-        loss_fcts: list,
+        mode_cfg: DictConfig,
         stage: Stage,
         device: str,
+        **loss_fcts: dict,
     ):
         LossModuleBase.__init__(self)
         self.cf = cf
@@ -46,7 +47,14 @@ class LossLatentDiffusion(LossModuleBase):
         self.p_std = self.cf.p_std
 
         # Dynamically load loss functions based on configuration and stage
-        self.loss_fcts = [[getattr(losses, name), w, name] for name, w in loss_fcts]
+        self.loss_fcts = [
+            [
+                getattr(loss_fns, name),
+                params.get("weight", 1.0),
+                name,
+            ]
+            for name, params in loss_fcts.items()
+        ]
 
     def _get_noise_weight(self, eta):
         sigma = (eta * self.p_std + self.p_mean).exp()
@@ -56,7 +64,7 @@ class LossLatentDiffusion(LossModuleBase):
         timestep_weight_config = self.cf.get("timestep_weight")
         if timestep_weight_config is None:
             return [1.0 for _ in range(forecast_steps)]
-        weights_timestep_fct = getattr(losses, timestep_weight_config[0])
+        weights_timestep_fct = getattr(loss_fns, timestep_weight_config[0])
         return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
 
     def _loss_per_loss_function(
@@ -70,16 +78,11 @@ class LossLatentDiffusion(LossModuleBase):
         Compute loss for given loss function
         """
 
-        loss_val = noise_weight * loss_fct(target=target, mu=pred)
+        loss_val = noise_weight * loss_fct(target=target, pred=pred)
 
         return loss_val
 
-    def compute_loss(
-        self,
-        preds: dict,
-        targets: dict,
-        **kwargs
-    ) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, **kwargs) -> LossValues:
         losses_all: dict[str, Tensor] = {
             f"{self.name}.{loss_fct_name}": torch.zeros(
                 1,

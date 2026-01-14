@@ -21,9 +21,8 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import Sample, SampleMetaData
-from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.datasets.batch import ModelBatch
+from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -270,7 +269,6 @@ class Model(torch.nn.Module):
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
-        self.forecast_offset = cf.forecast_offset
 
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
@@ -610,7 +608,9 @@ class Model(torch.nn.Module):
         return output
 
     #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int, meta_info = None) -> torch.Tensor:
+    def forecast(
+        self, model_params: ModelParams, tokens: torch.Tensor, fstep: int, meta_info=None
+    ) -> torch.Tensor:
         """Advances latent space representation in time
 
         Args:

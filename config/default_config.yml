@@ -179,8 +179,9 @@ training_config:
       eps : 2e-08
 
   losses : {
-    "physical": {
-        type: LossPhysical,
+    "latent_diff": {
+        type: LossLatentDiffusion,
+        target_and_aux_calc: DiffusionLatentTargetEncoder,
         loss_fcts: { "mse": { }, },
         },
     }
