@@ -160,8 +160,8 @@ Located under `training_config:` in YAML files.
 | `shuffle` | bool | `True` | Shuffle training data |
 | `start_date` | datetime | `1979-01-01T00:00` | Training data start date |
 | `end_date` | datetime | `2022-12-31T00:00` | Training data end date |
-| `time_window_step` | duration | `06:00:00` | Time step between windows |
-| `time_window_len` | duration | `06:00:00` | Length of each time window |
+| `time_window_step` | timedelta | `06:00:00` | Time step between windows |
+| `time_window_len` | timedelta | `06:00:00` | Length of each time window |
 | `window_offset_prediction` | int | `1` | Steps offset for prediction target |
 
 **Available `training_mode` options:**
@@ -213,7 +213,7 @@ Located under `training_config.forecast:`:
 
 | Parameter | Type | Default | Options | Description |
 |-----------|------|---------|---------|-------------|
-| `time_step` | duration | `06:00:00` | | Time step between forecast steps |
+| `time_step` | timedelta | `06:00:00` | | Time step between forecast steps |
 | `num_steps` | int | `2` | | Number of autoregressive forecast steps |
 | `policy` | string | `"fixed"` | `fixed`, `null` | Forecast policy |
 
