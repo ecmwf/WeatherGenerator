@@ -25,6 +25,7 @@ from numpy import datetime64
 from numpy.typing import NDArray
 from tqdm import tqdm
 from zarr.storage import LocalStore, ZipStore
+from zarr.errors import ZarrUserWarning
 
 # experimental value, should be inferred more intelligently
 SHARDING_ENABLED = True
@@ -43,13 +44,13 @@ def is_ndarray(obj: typing.Any) -> bool:
     return isinstance(obj, (np.ndarray))  # noqa: TID251
 
 
-def _get_shards(shard_nsamples: tuple[int], chunks: tuple[int]) -> tuple[int] | None:
+def _get_shards(shard_nsamples: tuple[int], chunks: tuple[int]) ->  tuple[tuple[int,...], *tuple[int, ...]]:
     """Helper function to find number of shards from chunks and predefined size of shards"""
     shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
     return shards
 
 
-def _get_chunks(chunk_nsamples: tuple[int], data_shape: tuple[int]) -> tuple[int] | None:
+def _get_chunks(chunk_nsamples: tuple[int], data_shape: tuple[int]) ->  tuple[tuple[int,...], *tuple[int, ...]]:
     """Helper function to find chunks from shape of data and predefined size of chunks"""
     chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in data_shape[1:]))
     return chunks
@@ -363,7 +364,7 @@ class ZarrIO:
     """Manage zarr storage hierarchy."""
 
     def __init__(self, store_path: pathlib.Path, read_only: bool):
-        self._store: zarr.storage.LocalStore | zarr.storage.ZipStore | None = None
+        self._store: LocalStore | ZipStore | None = None
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
         self.read_only = read_only
@@ -381,12 +382,12 @@ class ZarrIO:
             self.data_root = zarr.group(store=self._store)
         # Warns user of future deprecation only if a ZarrUserWarning was raised
         # Support for existing Zarr2 stores will be removed in future versions
-        if any(issubclass(w.category, zarr.errors.ZarrUserWarning) for w in caught):
+        if any(issubclass(w.category, ZarrUserWarning) for w in caught):
             last_msg = next(
                 (
                     str(w.message)
                     for w in reversed(caught)
-                    if issubclass(w.category, zarr.errors.ZarrUserWarning)
+                    if issubclass(w.category, ZarrUserWarning)
                 ),
                 "",
             )
