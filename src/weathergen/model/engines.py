@@ -850,13 +850,13 @@ class TransformerPredictionHead(nn.Module):
         # first map to intermediate_dim to introduce a bottleneck
         self.pred_blocks.append(nn.Linear(in_dim, intermediate_dim, bias=False))
 
-        for _ in range(self.cf.pred_num_blocks):
+        for _ in range(self.cf.sslpred_num_blocks):
             self.pred_blocks.append(
                 MultiSelfAttentionHead(
                     intermediate_dim,
-                    num_heads=self.cf.pred_num_heads,
-                    dropout_rate=self.cf.pred_dropout_rate,
-                    with_qk_lnorm=self.cf.pred_with_qk_lnorm,
+                    num_heads=self.cf.sslpred_num_heads,
+                    dropout_rate=self.cf.sslpred_dropout_rate,
+                    with_qk_lnorm=self.cf.sslpred_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     # dim_aux=dim_aux,
@@ -871,7 +871,7 @@ class TransformerPredictionHead(nn.Module):
                     intermediate_dim,
                     hidden_factor=4,
                     with_residual=True,
-                    dropout_rate=self.cf.pred_dropout_rate,
+                    dropout_rate=self.cf.sslpred_dropout_rate,
                     norm_type=self.cf.norm_type,
                     # dim_aux=dim_aux,
                     norm_eps=self.cf.mlp_norm_eps,
