@@ -119,15 +119,15 @@ class TrainerBase:
 
             dist.barrier()
             # communicate run id to all nodes
-            len_run_id = len(cf.run_id)
+            len_run_id = len(cf.general.run_id)
             run_id_int = torch.zeros(len_run_id, dtype=torch.int32).to(device)
             if is_root():
-                print(f"Communicating run_id to all nodes: {cf.run_id}")
-                run_id_int = str_to_tensor(cf.run_id).to(device)
+                print(f"Communicating run_id to all nodes: {cf.general.run_id}")
+                run_id_int = str_to_tensor(cf.general.run_id).to(device)
             dist.all_reduce(run_id_int, op=torch.distributed.ReduceOp.SUM)
             if not is_root():
-                cf.run_id = tensor_to_str(run_id_int)
-            print(f"rank: {rank} has run_id: {cf.run_id}")
+                cf.general.run_id = tensor_to_str(run_id_int)
+            print(f"rank: {rank} has run_id: {cf.general.run_id}")
 
             # communicate data_loader_rng_seed
             if hasattr(cf, "data_loader_rng_seed"):

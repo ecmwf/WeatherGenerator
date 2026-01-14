@@ -1,4 +1,5 @@
 # ruff: noqa: N801, N806
+# pylint: disable=W0201
 
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
@@ -52,7 +53,7 @@ class iBOTPatchTargetProcessing(nn.Module):
         self.len_teacher_patch_tokens = None
         self.async_batch_center = None
         self.teacher_style = teacher_style
-        self.center = None
+        # self.center cannot be initialised with None then the code breaks hence the disabled pylint
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
@@ -73,16 +74,16 @@ class iBOTPatchTargetProcessing(nn.Module):
         # return F.softmax((teacher_patch_tokens.sub_(self.center)) / teacher_temp, dim=-1)
 
     @torch.no_grad()
-    def sinkhorn_knopp_teacher(
-        self, teacher_output, teacher_temp, n_masked_patches_tensor, n_iterations=3
-    ):
+    def sinkhorn_knopp_teacher(self, teacher_output, teacher_temp, n_iterations=3):
         teacher_output = teacher_output.float()
-        # world_size = dist.get_world_size() if dist.is_initialized() else 1
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        batch_size, C, K = teacher_output.shape  # C = num of tokens
+        teacher_output = teacher_output.view(batch_size * C, K)
         Q = torch.exp(
             teacher_output / teacher_temp
         ).t()  # Q is K-by-B for consistency with notations from our paper
-        # B = Q.shape[1] * world_size # number of samples to assign
-        B = n_masked_patches_tensor
+        B = Q.shape[1] * world_size  # number of samples to assign
+        # B = n_masked_patches_tensor
         dist.all_reduce(B)
         K = Q.shape[0]  # how many prototypes
 
@@ -105,7 +106,7 @@ class iBOTPatchTargetProcessing(nn.Module):
             Q /= B
 
         Q *= B  # the columns must sum to 1 so that Q is an assignment
-        return Q.t()
+        return Q.t().view(batch_size, C, K)
 
     def forward(self, teacher_output):
         if self.teacher_style == "softmax_center":
@@ -174,7 +175,7 @@ class DINOTargetProcessing(nn.Module):
         self.len_teacher_output = None
         self.async_batch_center = None
         self.teacher_style = teacher_style
-        self.center = None
+        # self.center cannot be initialised with None then the code breaks hence the disabled pylint
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
@@ -187,6 +188,9 @@ class DINOTargetProcessing(nn.Module):
     def sinkhorn_knopp_teacher(self, teacher_output, teacher_temp, n_iterations=3):
         teacher_output = teacher_output.float()
         world_size = dist.get_world_size() if dist.is_initialized() else 1
+        B, C, K = teacher_output.shape
+        batch_size, C, K = teacher_output.shape  # C = num of tokens
+        teacher_output = teacher_output.view(batch_size * C, K)
         Q = torch.exp(
             teacher_output / teacher_temp
         ).t()  # Q is K-by-B for consistency with notations from our paper
@@ -212,7 +216,7 @@ class DINOTargetProcessing(nn.Module):
             Q /= B
 
         Q *= B  # the columns must sum to 1 so that Q is an assignment
-        return Q.t()
+        return Q.t().view(batch_size, C, K)
 
     def forward(self, teacher_output):
         if self.teacher_style == "softmax_center":
