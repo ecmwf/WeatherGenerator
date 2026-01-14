@@ -81,24 +81,52 @@ OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
 OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
-def _add_interpolation(conf: Config) -> Config:
-    conf = conf.copy()
-    delta_keys = ["time_window_step", "time_window_len", "forecast_delta"]
-    time_keys = ["start_date", "end_date", "start_date_val", "end_date_val"]
-
-    for key in delta_keys:
-        if key in conf:
-            raw_key = f"_{key}"
-            # Create an alias using interpolation syntax "${_keyname}"
-            # This stores a string instead of the resolved timedelta object.
-            conf[raw_key] = f"${{{key}}}"
-            conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{conf[key]}}}"
-
+def _sanitize_start_end_time_keys(sub_conf):
+    time_keys = ["start_date", "end_date"]
     for key in time_keys:
-        if key in conf:
+        if key in sub_conf:
             raw_key = f"_{key}"
-            conf[raw_key] = f"${{{key}}}"
-            conf[key] = f"${{{_DATETIME_TYPE_NAME}:{conf[key]}}}"
+            sub_conf[raw_key] = f"${{{key}}}"
+            sub_conf[key] = f"${{{_DATETIME_TYPE_NAME}:{sub_conf[key]}}}"
+
+
+def _sanitize_delta_time_keys(sub_conf):
+    delta_keys = ["time_window_step", "time_window_len"]
+    for key in delta_keys:
+        if key in sub_conf:
+            raw_key = f"_{key}"
+            sub_conf[raw_key] = f"${{{key}}}"
+            sub_conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf[key]}}}"
+
+    if sub_conf.get("forecast") is not None:
+        key = "time_step"
+        if key in sub_conf.forecast:
+            raw_key = f"_{key}"
+            sub_conf.forecast[raw_key] = f"${{{key}}}"
+            sub_conf.forecast[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf.forecast[key]}}}"
+
+
+def _sanitize_time_keys(conf: Config) -> Config:
+    """
+    Convert time keys into a time format supported by OmegaConf
+
+    Create an alias using interpolation syntax "${_keyname}"
+    This stores a string instead of the resolved timedelta object.
+    """
+
+    conf = conf.copy()
+
+    if conf.get("training_config") is not None:
+        _sanitize_delta_time_keys(conf.training_config)
+        _sanitize_start_end_time_keys(conf.training_config)
+
+    if conf.get("validation_config") is not None:
+        _sanitize_delta_time_keys(conf.validation_config)
+        _sanitize_start_end_time_keys(conf.validation_config)
+
+    if conf.get("test_config") is not None:
+        _sanitize_delta_time_keys(conf.test_config)
+        _sanitize_start_end_time_keys(conf.test_config)
 
     return conf
 
@@ -160,10 +188,10 @@ def save(config: Config, mini_epoch: int | None):
     """Save current config into the current runs model directory."""
     path_models = Path(config.model_path)
     # save in directory with model files
-    dirname = path_models / config.run_id
+    dirname = path_models / config.general.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_write_name(path_models, config.run_id, mini_epoch)
+    fname = _get_model_config_file_write_name(path_models, config.general.run_id, mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with fname.open("w") as f:
@@ -206,7 +234,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
-    config = _add_interpolation(config)
+    config = _sanitize_time_keys(config)
 
     return _apply_fixes(config)
 
@@ -283,6 +311,13 @@ def _check_logging(config: Config) -> Config:
     return config
 
 
+def merge_configs(base_config: Config, update_config: Config):
+    """
+    Merge two configs using OmegaConf's default strategy
+    """
+    return OmegaConf.merge(base_config, update_config)
+
+
 def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
@@ -335,13 +370,13 @@ def load_merge_configs(
         base_config = load_run_config(
             from_run_id, mini_epoch, private_config.get("model_path", None)
         )
-        from_run_id = base_config.run_id
+        from_run_id = base_config.general.run_id
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
-    c = _add_interpolation(c)
+    c = _sanitize_time_keys(c)
 
     # Ensure the config has mini-epoch notation
     if hasattr(c, "samples_per_epoch"):
@@ -389,17 +424,17 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
     """
     config = config.copy()
     if reuse_run_id:
-        assert config.run_id is not None, "run_id loaded from previous run should not be None."
-        _logger.info(f"reusing run_id from previous run: {config.run_id}")
+        assert config.general.run_id is not None, "Loaded run_id should not be None."
+        _logger.info(f"reusing run_id from previous run: {config.general.run_id}")
     else:
         if run_id is None:
             # generate new id if run_id is None
-            config.run_id = run_id or get_run_id()
-            _logger.info(f"using generated run_id: {config.run_id}")
+            config.general.run_id = run_id or get_run_id()
+            _logger.info(f"Using generated run_id: {config.general.run_id}")
         else:
-            config.run_id = run_id
+            config.general.run_id = run_id
             _logger.info(
-                f"using assigned run_id: {config.run_id}."
+                f"Using assigned run_id: {config.general.run_id}."
                 f" If you manually selected this run_id, this is an error."
             )
 
@@ -607,12 +642,12 @@ def _get_config_attribute(config: Config, attribute_name: str, fallback: str) ->
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs run_path for storing run results and logs."""
-    return Path(config.run_path) / config.run_id
+    return Path(config.run_path) / config.general.run_id
 
 
 def get_path_model(config: Config) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
-    return Path(config.model_path) / config.run_id
+    return Path(config.model_path) / config.general.run_id
 
 
 def get_path_output(config: Config, mini_epoch: int) -> Path:
