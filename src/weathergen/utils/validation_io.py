@@ -158,7 +158,7 @@ def write_output(
         sample_start,
         val_cfg.get("window_offset_prediction", 0),
     )
-
-    with writer(config.get_path_output(cf, mini_epoch)) as zio:
+    print(cf)
+    with writer(config.get_path_output(cf.zarr_store, mini_epoch)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)

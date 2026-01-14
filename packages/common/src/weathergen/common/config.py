@@ -348,18 +348,22 @@ def load_merge_configs(
     private_config = _load_private_conf(private_home)
     overwrite_configs: list[Config] = []
     for overwrite in overwrites:
+        print("overwrite:", overwrite)
         if isinstance(overwrite, (str | Path)):
             # Because of the way we pass extra configs through slurm,
             # all the paths may be concatenated with ":"
             p = str(overwrite).split(":")
+            print("paths:", p)
             for path in p:
                 c = _load_overwrite_conf(Path(path))
                 c = _load_streams_in_config(c)
                 overwrite_configs.append(c)
         else:
+            print("overwrite (dict or Config):", overwrite)
             # If it is a dict or DictConfig, we can directly use it
             c = _load_overwrite_conf(overwrite)
             c = _load_streams_in_config(c)
+            print("loaded overwrite config:", c)
             overwrite_configs.append(c)
     private_config = set_paths(private_config)
 
@@ -369,14 +373,14 @@ def load_merge_configs(
         base_config = load_run_config(
             from_run_id, mini_epoch, private_config.get("model_path", None)
         )
-        from_run_id = base_config.run_id
-
-    # TODO: temp. fix until default_configs can be updated (defaulting with "zip")
-    base_config.zarr_store = base_config.get("zarr_store", "zip")
+        from_run_id = base_config.general.run_id
 
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
+    print("base_config:", base_config)
+    print("overwrite_configs:", overwrite_configs)
+    print("private_config:", private_config)
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
@@ -385,7 +389,7 @@ def load_merge_configs(
     if hasattr(c, "samples_per_epoch"):
         c.samples_per_mini_epoch = c.samples_per_epoch
         c.num_mini_epochs = c.num_epochs
-
+    print(c.zarr_store)
     return c
 
 
@@ -654,6 +658,7 @@ def get_path_model(config: Config) -> Path:
 
 
 def get_path_output(config: Config, mini_epoch: int) -> Path:
+    print(config)
     ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
