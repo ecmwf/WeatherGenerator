@@ -231,7 +231,7 @@ class Reader:
                     missing.remove("mean")
                 if missing:
                     _logger.info(
-                        f"Requested {name}(s) {missing} do(es) not exist in Zarr. "
+                        f"Requested {name}(s) {missing} is unavailable. "
                         f"Removing missing {name}(s) for {mode}."
                     )
                     requested[name] = requested[name] & reader_data[name]
