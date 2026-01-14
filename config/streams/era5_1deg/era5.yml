@@ -10,7 +10,7 @@
 ERA5 :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
-  stream_id : 0
+  # filenames : ['aifs-ea-an-oper-0001-mars-o48-1979-2024-6h-v1.zarr']
   source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
   target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
   loss_weight : 1.
@@ -24,11 +24,11 @@ ERA5 :
     net : transformer
     num_tokens : 1
     num_heads : 8
-    dim_embed : 256
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords :
     net : linear
-    dim_embed : 256
+    dim_embed : 512
   target_readout :
     type : 'obs_value'  # token or obs_value
     num_layers : 2
@@ -37,3 +37,70 @@ ERA5 :
   pred_head :
     ens_size : 1
     num_layers : 1
+  channel_weights :
+    q_50: 0.2
+    q_100: 0.23
+    q_150: 0.26
+    q_200: 0.29
+    q_250: 0.33
+    q_300: 0.36
+    q_400: 0.42
+    q_500: 0.48
+    q_600: 0.55
+    q_700: 0.61
+    q_850: 0.71
+    q_925: 0.75
+    q_1000: 0.8
+    t_50: 0.2
+    t_100: 0.23
+    t_150: 0.26
+    t_200: 0.29
+    t_250: 0.33
+    t_300: 0.36
+    t_400: 0.42
+    t_500: 0.48
+    t_600: 0.55
+    t_700: 0.61
+    t_850: 0.71
+    t_925: 0.75
+    t_1000: 0.8
+    u_50: 0.2
+    u_100: 0.23
+    u_150: 0.26
+    u_200: 0.29
+    u_250: 0.33
+    u_300: 0.36
+    u_400: 0.42
+    u_500: 0.48
+    u_600: 0.55
+    u_700: 0.61
+    u_850: 0.71
+    u_925: 0.75
+    u_1000: 0.8
+    v_50: 0.2
+    v_100: 0.23
+    v_150: 0.26
+    v_200: 0.29
+    v_250: 0.33
+    v_300: 0.36
+    v_400: 0.42
+    v_500: 0.48
+    v_600: 0.55
+    v_700: 0.61
+    v_850: 0.71
+    v_925: 0.75
+    v_1000: 0.8
+    z_50: 0.2
+    z_100: 0.23
+    z_150: 0.26
+    z_200: 0.29
+    z_250: 0.33
+    z_300: 0.36
+    z_400: 0.42
+    z_500: 0.48
+    z_600: 0.55
+    z_700: 0.61
+    z_850: 0.71
+    z_925: 0.75
+    z_1000: 0.8
+
