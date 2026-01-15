@@ -513,7 +513,8 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         lead_time has dims (sample, ipoint) and dtype timedelta64[ns].
         """
-        lead_time = da["valid_time"] - da["source_interval_start"]
+
+        lead_time = np.unique(da["valid_time"]) - da["source_interval_start"]
         return da.assign_coords(lead_time=lead_time)
 
     def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
