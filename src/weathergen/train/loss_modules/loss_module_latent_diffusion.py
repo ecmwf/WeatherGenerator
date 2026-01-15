@@ -78,9 +78,10 @@ class LossLatentDiffusion(LossModuleBase):
         Compute loss for given loss function
         """
 
-        loss_val = noise_weight * loss_fct(target=target, pred=pred)
+        loss, loss_chs = loss_fct(target=target, pred=pred)
+        loss = noise_weight * loss
 
-        return loss_val
+        return loss
 
     def compute_loss(self, preds: dict, targets: dict, **kwargs) -> LossValues:
         losses_all: dict[str, Tensor] = {
@@ -91,8 +92,7 @@ class LossLatentDiffusion(LossModuleBase):
             for _, _, loss_fct_name in self.loss_fcts
         }
 
-
-        pred_tokens_all = [pl["latent_state"].z_pre_norm for pl in preds.latent if pl]
+        pred_tokens_all = [pl["latent_state"].patch_tokens for pl in preds.latent if pl]
         target_tokens_all = targets.latent
 
         eta = torch.tensor([targets.aux_outputs["noise_level_rn"]], device=self.device)

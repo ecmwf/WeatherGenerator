@@ -206,8 +206,8 @@ def lp_loss(
 def mse(
     target: torch.Tensor,
     pred: torch.Tensor,
-    weights_channels: torch.Tensor | None,
-    weights_points: torch.Tensor | None,
+    weights_channels: torch.Tensor | None = None,
+    weights_points: torch.Tensor | None = None,
 ):
     """
     Computes the mean squared error (mse).

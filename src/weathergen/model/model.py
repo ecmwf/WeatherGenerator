@@ -21,9 +21,8 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import Sample, SampleMetaData
-from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.datasets.batch import ModelBatch
+from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
