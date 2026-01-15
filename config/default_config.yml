@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1024
+ae_local_dim_embed: 2048
 ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -26,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 2
+ae_aggregation_num_blocks: 0
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -55,12 +55,12 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 6
+fe_num_blocks: 16
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: False
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
@@ -75,7 +75,7 @@ rho: 7
 p_mean: -1.2
 p_std: 1.2
 # Encoder weights (set to null to not load a pretrained encoder)
-chkpt_encoder_weights: "./models/whkujigw/whkujigw_latest.chkpt"
+chkpt_encoder_weights: "./models/dhb9q2yo/dhb9q2yo_chkpt00126.chkpt"
 
 healpix_level: 5
 
