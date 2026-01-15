@@ -182,14 +182,17 @@ class Masker:
                 corr_dict = {}
                 for target_idx, source_spec in corr.items():
                     # process into common long format
+                    target_idx = int(target_idx)
                     if type(source_spec) is omegaconf.dictconfig.DictConfig:
                         # TODO: check format of dict
                         # append loss_name
                         corr_dict[target_idx] = dict(
-                            [(k, (v, loss_name)) for k, v in source_spec.items()]
+                            [(int(k), (v, loss_name)) for k, v in source_spec.items()]
                         )
                     elif type(source_spec) is omegaconf.listconfig.ListConfig:
-                        corr_dict[target_idx] = dict([(v, (None, loss_name)) for v in source_spec])
+                        corr_dict[target_idx] = dict(
+                            [(int(v), (None, loss_name)) for v in source_spec]
+                        )
                     elif type(source_spec) is int:
                         corr_dict[target_idx] = {source_spec: (None, loss_name)}
                     else:
@@ -200,6 +203,16 @@ class Masker:
                         )
 
                 corrs += [corr_dict]
+
+        # check that all target/sources indices are ints; conf can have type mismatches due to
+        # conf merging
+        are_ints = np.array(
+            [
+                [type(k) is int and type(next(iter(v.keys()))) is int for k, v in corr.items()]
+                for corr in corrs
+            ]
+        ).all()
+        assert are_ints, "error parsing correspondence, all indices must be int"
 
         # merge correspondences
         corr_dict = {}
@@ -237,7 +250,7 @@ class Masker:
         return corr_dict
 
     def build_samples_for_stream(
-        self, training_mode: str, num_cells: int, training_cfg: dict
+        self, training_mode: str, num_cells: int, stage_cfg: dict
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
@@ -245,14 +258,14 @@ class Masker:
         """
 
         # target and source configs
-        target_cfgs = training_cfg.get("target_input", [])
-        source_cfgs = training_cfg.get("model_input", [])
+        target_cfgs = stage_cfg.get("target_input", [])
+        source_cfgs = stage_cfg.get("model_input", [])
 
         # target and source are assumed identical when target is not specified
         if len(target_cfgs) == 0:
             target_cfgs = copy.deepcopy(source_cfgs)
 
-        losses = training_cfg.losses
+        losses = stage_cfg.losses
         corr_dict = self.parse_src_target_correspondence(losses, target_cfgs, source_cfgs)
 
         target_masks = MaskData()

@@ -283,6 +283,7 @@ def get_tokens_lens(streams: dict, batch_data: BatchSamples, input_steps: int) -
                     )
                     for sample in batch_data.samples
                 ]
+                if len(batch_data.samples) else [torch.zeros( (0,0))]
             )
             for i in range(input_steps)
         ]
