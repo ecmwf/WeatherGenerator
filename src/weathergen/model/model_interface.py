@@ -238,25 +238,25 @@ def load_encoder(cf, model, encoder_modules, device, run_id: str, mini_epoch=-1)
             if len(ukeys) > 0:
                 logger.warning(f"Unused keys when loading model: {mkeys}")
 
-        # new network parts (e.g. for fine-tuning)
-        if mkeys:
-            # Get the unique parent modules for the missing parameters
-            new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
+        # # new network parts (e.g. for fine-tuning)
+        # if mkeys:
+        #     # Get the unique parent modules for the missing parameters
+        #     new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
 
-            # Find the highest-level "root" new modules to avoid redundant initializations
-            root_new_modules = set()
-            for path in sorted(list(new_modules_to_init)):
-                if not any(path.startswith(root + ".") for root in root_new_modules):
-                    root_new_modules.add(path)
+        #     # Find the highest-level "root" new modules to avoid redundant initializations
+        #     root_new_modules = set()
+        #     for path in sorted(list(new_modules_to_init)):
+        #         if not any(path.startswith(root + ".") for root in root_new_modules):
+        #             root_new_modules.add(path)
 
-            # Get all modules for quick lookup and initialize the new ones
-            all_modules = dict(model.named_modules())
-            for path in root_new_modules:
-                if is_root():
-                    logger.info(f"Initializing new module not found in checkpoint: {path}")
-                module_to_init = all_modules[path]
-                module_to_init.to_empty(device="cuda")
-                module_to_init.reset_parameters()
+        #     # Get all modules for quick lookup and initialize the new ones
+        #     all_modules = dict(model.named_modules())
+        #     for path in root_new_modules:
+        #         if is_root():
+        #             logger.info(f"Initializing new module not found in checkpoint: {path}")
+        #         module_to_init = all_modules[path]
+        #         module_to_init.to_empty(device="cuda")
+        #         module_to_init.reset_parameters()
 
     else:
         if not cf.with_ddp:
