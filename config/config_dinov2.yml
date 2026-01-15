@@ -78,7 +78,8 @@ freeze_modules: ""
 
 norm_type: "LayerNorm"
 
-
+# type of zarr_store
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 #####################################
 
 # streams_directory: "./config/streams/era5_1deg/"

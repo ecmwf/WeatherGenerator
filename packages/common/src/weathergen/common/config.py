@@ -24,6 +24,8 @@ import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
+from weathergen.common.io import StoreType
+
 _REPO_ROOT = Path(
     __file__
 ).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
@@ -268,15 +270,16 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     Get the path to the model results zarr store from a given run_id and mini_epoch.
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
-    zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
 
-    if not (zarr_path.exists() or zarr_path.is_dir()):
-        raise FileNotFoundError(
-            f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
-            f"exist or is not a directory."
-        )
+    for ext in StoreType.extensions():
+        zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
-    return zarr_path
+        if zarr_path.exists() or zarr_path.is_dir():
+            return zarr_path
+    raise FileNotFoundError(
+        f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+        f"exist or is not a directory."
+    )
 
 
 def _apply_fixes(config: Config) -> Config:
@@ -355,7 +358,6 @@ def load_merge_configs(
             c = _load_overwrite_conf(overwrite)
             c = _load_streams_in_config(c)
             overwrite_configs.append(c)
-
     private_config = set_paths(private_config)
 
     if from_run_id is None:
@@ -365,6 +367,7 @@ def load_merge_configs(
             from_run_id, mini_epoch, private_config.get("model_path", None)
         )
         from_run_id = base_config.general.run_id
+
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
@@ -640,8 +643,9 @@ def get_path_model(config: Config) -> Path:
 
 
 def get_path_output(config: Config, mini_epoch: int) -> Path:
+    ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zarr"
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 
     return base_path / fname
 
