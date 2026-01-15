@@ -409,7 +409,7 @@ class ZarrIO:
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
-        for dataset in tqdm(item.datasets): #pyrefly: ignore[not-iterable]
+        for dataset in tqdm(item.datasets):  # pyrefly: ignore[not-iterable]
             # pyrefly doesn't recognize that tqdm makes item.datasets iterable
             # until fixed, ignore the warning here
             if dataset is not None:

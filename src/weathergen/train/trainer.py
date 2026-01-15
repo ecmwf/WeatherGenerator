@@ -160,7 +160,6 @@ class Trainer(TrainerBase):
         self.init(cf, devices)
 
         cf = self.cf
-        print("cf.zarr_store during inference:", cf.zarr_store)  # Debug print
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
