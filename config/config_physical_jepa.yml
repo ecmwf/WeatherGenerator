@@ -180,7 +180,7 @@ training_config:
         target_and_aux_calc: "Physical",
         },
     "student-teacher": {
-        enabled: False,
+        enabled: True,
         type: LossLatentSSLStudentTeacher,
         weight: 1.0,
         loss_fcts : {
@@ -233,7 +233,7 @@ training_config:
   forecast :
       time_step: 06:00:00
       num_steps: 0
-      policy: "fixed" #null
+      policy: null
 
 
 # validation config; full validation config is merge of training and validation config
