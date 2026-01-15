@@ -24,8 +24,8 @@ import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
 from tqdm import tqdm
-from zarr.storage import LocalStore, ZipStore
 from zarr.errors import ZarrUserWarning
+from zarr.storage import LocalStore, ZipStore
 
 # experimental value, should be inferred more intelligently
 SHARDING_ENABLED = True
@@ -44,13 +44,17 @@ def is_ndarray(obj: typing.Any) -> bool:
     return isinstance(obj, (np.ndarray))  # noqa: TID251
 
 
-def _get_shards(shard_nsamples: tuple[int], chunks: tuple[int]) ->  tuple[tuple[int,...], *tuple[int, ...]]:
+def _get_shards(
+    shard_nsamples: tuple[int], chunks: tuple[int]
+) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find number of shards from chunks and predefined size of shards"""
     shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
     return shards
 
 
-def _get_chunks(chunk_nsamples: tuple[int], data_shape: tuple[int]) ->  tuple[tuple[int,...], *tuple[int, ...]]:
+def _get_chunks(
+    chunk_nsamples: tuple[int], data_shape: tuple[int]
+) -> tuple[tuple[int, ...], *tuple[int, ...]]:
     """Helper function to find chunks from shape of data and predefined size of chunks"""
     chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in data_shape[1:]))
     return chunks
