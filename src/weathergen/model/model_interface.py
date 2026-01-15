@@ -161,12 +161,11 @@ def init_model_and_shard(
     # LOAD AND FREEZE ENCODER WEIGHTS
     # ONLY FOR EXPERIMENTATION, TO BE REMOVED
     if cf.chkpt_encoder_weights:
-        params = torch.load(
-            cf.chkpt_encoder_weights,
-            map_location=torch.device("cpu"),
-            mmap=True,
-            weights_only=True,
-        )
+        if is_root():
+            logger.info(
+                f"Loading chkpt from run_id={cf.chkpt_encoder_weights} at mini_epoch {cf.chkpt_encoder_mini_epoch}."
+            )
+
         encoder_modules = [
             "embed_engine",
             "ae_local_engine",
@@ -174,34 +173,15 @@ def init_model_and_shard(
             "ae_global_engine",
         ]
 
-        # Load encoder weights
-        params_temp = {}
-        for name in params.keys():
-            if any(e_module in name for e_module in encoder_modules):
-                if cf.with_ddp:
-                    params_temp[f"module.{name}"] = params[name]
-                else:
-                    params_temp[name] = params[name]
-        params = params_temp
-        mkeys, ukeys = model.load_state_dict(params, strict=False)
+        model = load_encoder(
+            cf,
+            model,
+            encoder_modules,
+            device,
+            cf.chkpt_encoder_weights,
+            cf.chkpt_encoder_mini_epoch,
+        )
 
-        # Freeze encoder weights
-        for name, module in model.named_modules():
-            if any(e_module in name for e_module in encoder_modules):
-                for p in module.parameters():
-                    p.requires_grad = False
-
-        model = model.to(f"cuda:{cf.local_rank}")
-
-        # warn about difference in checkpoint and model
-        if len(mkeys) == 0 and len(ukeys) == 0:
-            logger.info(
-                f"Checkpoint {cf.chkpt_encoder_weights} loaded successfully with all weights."
-            )
-        if len(mkeys) > 0:
-            logger.warning(f"Missing keys when loading model: {mkeys}")
-        if len(ukeys) > 0:
-            logger.warning(f"Unused keys when loading model: {ukeys}")
     # ------------------------------------------------------------------------------------------
 
     # model params
@@ -210,6 +190,94 @@ def init_model_and_shard(
     model_params = model_params.to(f"cuda:{cf.local_rank}")
 
     return model, model_params
+
+
+def load_encoder(cf, model, encoder_modules, device, run_id: str, mini_epoch=-1):
+    """Loads model state from checkpoint and checks for missing and unused keys.
+    Args:
+        run_id : model_id of the trained model
+        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
+    """
+
+    path_run = Path(cf.model_path) / run_id
+    mini_epoch_id = (
+        f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+    )
+    filename = f"{run_id}_{mini_epoch_id}.chkpt"
+
+    if not (path_run / filename).exists():
+        mini_epoch_id = f"epoch{mini_epoch:05d}"
+        filename = f"{run_id}_{mini_epoch_id}.chkpt"
+    if is_root():
+        logger.info(path_run / filename)
+
+    params = torch.load(
+        path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
+    )
+
+    is_model_sharded = cf.with_ddp and cf.with_fsdp
+    if is_model_sharded:
+        meta_sharded_sd = model.state_dict()
+        maybe_sharded_sd = {}
+        for param_name, full_tensor in params.items():
+            if any(e_module in param_name for e_module in encoder_modules):
+                sharded_meta_param = meta_sharded_sd.get(param_name)
+                sharded_tensor = distribute_tensor(
+                    full_tensor,
+                    sharded_meta_param.device_mesh,
+                    sharded_meta_param.placements,
+                )
+                # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
+                maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+        # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
+        mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
+
+        if is_root():
+            if len(mkeys) > 0:
+                logger.warning(f"Missing keys when loading model: {mkeys}")
+            if len(ukeys) > 0:
+                logger.warning(f"Unused keys when loading model: {mkeys}")
+
+        # new network parts (e.g. for fine-tuning)
+        if mkeys:
+            # Get the unique parent modules for the missing parameters
+            new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
+
+            # Find the highest-level "root" new modules to avoid redundant initializations
+            root_new_modules = set()
+            for path in sorted(list(new_modules_to_init)):
+                if not any(path.startswith(root + ".") for root in root_new_modules):
+                    root_new_modules.add(path)
+
+            # Get all modules for quick lookup and initialize the new ones
+            all_modules = dict(model.named_modules())
+            for path in root_new_modules:
+                if is_root():
+                    logger.info(f"Initializing new module not found in checkpoint: {path}")
+                module_to_init = all_modules[path]
+                module_to_init.to_empty(device="cuda")
+                module_to_init.reset_parameters()
+
+    else:
+        if not cf.with_ddp:
+            params_temp = {}
+            for k in params.keys():
+                if any(e_module in k for e_module in encoder_modules):
+                    params_temp[k.replace("module.", "")] = params[k]
+            params = params_temp
+
+        mkeys, ukeys = model.load_state_dict(params, strict=False)
+        model = model.to(device)
+
+    # warn about difference in checkpoint and model
+    if len(mkeys) == 0 and len(ukeys) == 0:
+        logger.info(f"Checkpoint {filename} loaded successfully with all weights matching.")
+    if len(mkeys) > 0:
+        logger.warning(f"Missing keys when loading model: {mkeys}")
+    if len(ukeys) > 0:
+        logger.warning(f"Unused keys when loading model: {mkeys}")
+
+    return model
 
 
 def load_model(cf, model, device, run_id: str, mini_epoch=-1):
