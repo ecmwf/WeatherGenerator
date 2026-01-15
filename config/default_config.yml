@@ -142,7 +142,7 @@ data_loading :
 training_config:
   
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["masking"]
+  training_mode: ["student_teacher"]
 
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
@@ -181,6 +181,7 @@ training_config:
   losses : {
     "latent_diff": {
         type: LossLatentDiffusion,
+        weight: 1.0,
         target_and_aux_calc: DiffusionLatentTargetEncoder,
         loss_fcts: { "mse": { }, },
         },
@@ -196,7 +197,7 @@ training_config:
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
+      num_steps: 1
       policy: "fixed"
 
 
