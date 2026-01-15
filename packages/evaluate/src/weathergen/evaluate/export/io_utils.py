@@ -5,7 +5,7 @@ import numpy as np
 import xarray as xr
 
 from weathergen.common.config import get_model_results
-from weathergen.common.io import ZarrIO
+from weathergen.common.io import zarrio_reader
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -61,7 +61,7 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     """
     sample, fstep, run_id, stream, dtype, epoch, rank = args
     fname_zarr = get_model_results(run_id, epoch, rank)
-    with ZarrIO(fname_zarr) as zio:
+    with zarrio_reader(fname_zarr) as zio:
         out = zio.get_data(sample, stream, fstep)
         if dtype == "target":
             data = out.target

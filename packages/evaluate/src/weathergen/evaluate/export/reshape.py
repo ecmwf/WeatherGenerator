@@ -230,7 +230,7 @@ class Regridder:
             regridded_slice = interpolate(
                 original_data_slice, {"grid": self.earthkit_input}, {"grid": self.earthkit_output}
             )
-            # sSet in regridded_values
+            # set in regridded_values
             new_index = list(item)
             new_index[pos : pos + 1] = [slice(None), slice(None)]
             regridded_values[tuple(new_index)] = regridded_slice
