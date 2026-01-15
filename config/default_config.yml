@@ -80,8 +80,7 @@ latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
 latent_noise_saturate_encodings: 5 
 latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True 
-
+latent_noise_deterministic_latents: True
 
 freeze_modules: ""
 
@@ -91,6 +90,9 @@ norm_type: "LayerNorm"
 
 streams_directory: "./config/streams/era5_1deg/"
 streams: ???
+
+# type of zarr_store
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 general:
 

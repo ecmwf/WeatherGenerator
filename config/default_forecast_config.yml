@@ -146,6 +146,9 @@ loader_num_workers: 12
 log_validation: 0
 streams_output: ["ERA5"]
 
+# type of zarr_store
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
+
 istep: 0
 run_history: []
 

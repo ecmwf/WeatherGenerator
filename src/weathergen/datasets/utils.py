@@ -268,7 +268,7 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
 
 def get_tokens_lens(streams: dict, batch_data: BatchSamples, input_steps: int) -> torch.Tensor:
     """
-    TODO
+    Extract tokens_lens for (num_steps, num_samples, num_streams)
     """
     # collect source_tokens_lens for all stream datas
     source_tokens_lens = torch.stack(
@@ -283,6 +283,8 @@ def get_tokens_lens(streams: dict, batch_data: BatchSamples, input_steps: int) -
                     )
                     for sample in batch_data.samples
                 ]
+                if len(batch_data.samples)
+                else [torch.zeros((0, 0))]
             )
             for i in range(input_steps)
         ]
