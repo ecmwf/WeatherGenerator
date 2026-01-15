@@ -141,6 +141,7 @@ class EncoderModule(torch.nn.Module):
 
         # combined cell lens for all tokens in batch across all input steps
         cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
+        cell_lens_unflattened = torch.sum(batch.tokens_lens, 2)
 
         rs = num_steps_input * len(batch)
 
@@ -151,9 +152,10 @@ class EncoderModule(torch.nn.Module):
             tokens_global = (self.q_cells + model_params.pe_global).repeat(rs, 1, 1)
         else:
             tokens_global = self.q_cells.repeat(num_tokens * rs, 1, 1)
-            tokens_global[self.num_register_tokens + self.num_class_tokens :] = tokens_global[
-                self.num_register_tokens + self.num_class_tokens :
-            ] + model_params.pe_global.repeat((rs, 1, 1))
+            # TODO re-introduce
+            # tokens_global[self.num_register_tokens + self.num_class_tokens :] = tokens_global[
+            #     self.num_register_tokens + self.num_class_tokens :
+            # ] + model_params.pe_global.repeat((rs, 1, 1))
         # lens for varlen attention
         q_cells_lens = torch.cat(
             [model_params.q_cells_lens[0].unsqueeze(0)]
@@ -230,20 +232,37 @@ class EncoderModule(torch.nn.Module):
         tokens_global_register_class = positional_encoding_harmonic(
             self.q_cells.repeat(rs, self.num_register_tokens + self.num_class_tokens, 1)
         )
+        batch_lens = cell_lens_unflattened.to(torch.bool).sum(dim=-1).flatten()
+        tokens_global_unmasked_per_batch = torch.split(
+            tokens_global_unmasked.squeeze(0), batch_lens[1:], dim=0
+        )
         tokens_global_unmasked = torch.cat(
-            [tokens_global_register_class, tokens_global_unmasked], dim=1
+            [
+                t
+                for tup in zip(tokens_global_register_class, tokens_global_unmasked_per_batch)
+                for t in tup
+            ],
+            dim=0,
         )
-
+        batch_lens = (batch_lens + self.num_class_tokens + self.num_register_tokens).cumsum(dim=0)
+        batch_lens = torch.cat([zero_pad, batch_lens], dim=0)
         tokens_global_unmasked = self.ae_aggregation_engine(
-            tokens_global_unmasked, use_reentrant=False
+            tokens_global_unmasked, batch_lens, use_reentrant=False
         )
-        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+        tokens_global = torch.permute(tokens_global, [1, 0, 2]).squeeze().reshape(rs, num_tokens, -1)
 
         # create mask from cell lens
-        mask_reg_class_tokens = torch.ones(
-            self.num_register_tokens + self.num_class_tokens, device=tokens_global_unmasked.device
-        ).to(torch.bool)
-        mask = torch.cat([mask_reg_class_tokens, cell_lens.to(torch.bool)], dim=0)
+        mask_reg_class_tokens = (
+            torch.ones(
+                self.num_register_tokens + self.num_class_tokens,
+                device=tokens_global_unmasked.device,
+            )
+            .to(torch.bool)
+            .unsqueeze(0)
+            .repeat(rs, 1)
+        )
+        cell_lens = cell_lens.unsqueeze(0).reshape(rs, self.num_healpix_cells)
+        mask = torch.cat([mask_reg_class_tokens, cell_lens.to(torch.bool)], dim=1)
 
         # fill empty tensor using mask for positions of unmasked tokens
         tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)

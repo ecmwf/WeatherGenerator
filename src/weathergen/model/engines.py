@@ -271,7 +271,7 @@ class QueryAggregationEngine(torch.nn.Module):
             # Last block is always global attention
             if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
                 self.ae_aggregation_blocks.append(
-                    MultiSelfAttentionHead(
+                    MultiSelfAttentionHeadVarlen(
                         self.cf.ae_global_dim_embed,
                         num_heads=self.cf.ae_aggregation_num_heads,
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
@@ -283,6 +283,7 @@ class QueryAggregationEngine(torch.nn.Module):
                     )
                 )
             else:
+                assert False, "Incompatible with batchsize > 1 here"
                 self.ae_aggregation_blocks.append(
                     MultiSelfAttentionHeadLocal(
                         self.cf.ae_global_dim_embed,
@@ -310,9 +311,12 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens, batch_lens, use_reentrant):
         for block in self.ae_aggregation_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            if isinstance(block, MultiSelfAttentionHeadVarlen):
+                tokens = checkpoint(block, tokens, x_lens=batch_lens, use_reentrant=use_reentrant)
+            else:
+                tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
         return tokens
 
 
