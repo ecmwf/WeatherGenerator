@@ -176,13 +176,15 @@ training_config:
   model_input: {
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
-      masking_strategy: "forecast",
+      masking_strategy: "random",
+      num_samples: 2,
+      masking_strategy_config: { rate: 0.5, rate_sampling: False }
       },
     }
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
+      num_steps: 1
       policy: "fixed"
 
 

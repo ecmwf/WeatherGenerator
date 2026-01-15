@@ -232,7 +232,7 @@ training_config:
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
+      num_steps: 0
       policy: "fixed" #null
 
 
@@ -257,7 +257,7 @@ validation_config:
   output_streams: null
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: 8
+  validate_before_training: 0
   
   losses: {
     "physical": {
