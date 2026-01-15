@@ -151,11 +151,11 @@ class EncoderModule(torch.nn.Module):
         if self.cf.ae_local_queries_per_cell:
             tokens_global = (self.q_cells + model_params.pe_global).repeat(rs, 1, 1)
         else:
-            tokens_global = self.q_cells.repeat(num_tokens * rs, 1, 1)
-            # TODO re-introduce
-            # tokens_global[self.num_register_tokens + self.num_class_tokens :] = tokens_global[
-            #     self.num_register_tokens + self.num_class_tokens :
-            # ] + model_params.pe_global.repeat((rs, 1, 1))
+            tokens_global = self.q_cells.repeat(rs, num_tokens, 1, 1)
+            tokens_global[:, self.num_register_tokens + self.num_class_tokens:] = tokens_global[
+                    :, self.num_register_tokens + self.num_class_tokens:
+            ] + model_params.pe_global.unsqueeze(0).repeat((rs,1, 1, 1))
+            tokens_global = tokens_global.view(rs*num_tokens,1,-1)
         # lens for varlen attention
         q_cells_lens = torch.cat(
             [model_params.q_cells_lens[0].unsqueeze(0)]
