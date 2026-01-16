@@ -54,7 +54,6 @@ fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 forecast_att_dense_rate: 1.0
-with_step_conditioning: True # False
 
 healpix_level: 5
 
