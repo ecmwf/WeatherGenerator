@@ -63,7 +63,6 @@ fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm 
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
-with_step_conditioning: True # False
 
 healpix_level: 5
 
