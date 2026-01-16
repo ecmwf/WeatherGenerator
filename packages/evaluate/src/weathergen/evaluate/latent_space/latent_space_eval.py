@@ -217,14 +217,12 @@ def load_metrics(run_id):
 
 def load_scores(eval_cfg, run_id):
     """Helper function to load metrics"""
-
     run_cfg = eval_cfg.run_ids[run_id]
 
     metrics = list(eval_cfg.evaluation.get("metrics"))
     regions = list(eval_cfg.evaluation.get("regions"))
 
     reader = WeatherGenJSONReader(run_cfg, run_id, None, regions, metrics)
-
     scores = {}
 
     for stream_name in streams:

@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from tabnanny import verbose
 
 import cartopy
 import cartopy.crs as ccrs
@@ -622,7 +623,7 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose=True):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose = True):
         """
         Initialize the LinePlots class.
 
@@ -982,10 +983,20 @@ class LinePlots:
 
         data_list, label_list = self._check_lengths(data, labels)
 
+        baseline_name = self.baseline
+        baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
+
         if len(data_list) < 2:
             baseline = xr.full_like(data_list[0], 1.0)
             baseline_name = "ones"
             descr = "scores"
+            self._logger.warning("Ratio plot requires at least two datasets to compare. Skipping.")
+            return
+        
+        if baseline_idx is not None:
+            self._logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
+            baseline = data_list[baseline_idx]
+
         else:
             descr = "ratio_plot"
             baseline_name = self.baseline
@@ -1706,7 +1717,7 @@ def calculate_average_over_dim(
     ]
 
     if non_zero_dims:
-        logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
+        self._logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
 
     baseline_score = baseline_var.mean(
         dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
@@ -1757,7 +1768,6 @@ def channel_sort_key(name: str) -> tuple[int, str, int]:
         return (0, prefix, int(number))
     else:
         return (1, name, float("inf"))
-
 
 def setup_logger(name: str, verbose: bool) -> logging.Logger:
     """

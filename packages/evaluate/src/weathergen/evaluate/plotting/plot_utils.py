@@ -114,6 +114,12 @@ def plot_metric_region(
                 )
 
                 selected_data, time_dim = _assign_time_coord(selected_data)
+                
+                if time_dim != "lead_time":
+                    plotter._logger.warning(
+                        "lead_time coordinate not found for all plotted data; "
+                        "using forecast_step as x-axis."
+                    )
 
                 if time_dim != "lead_time":
                     plotter._logger.warning(
@@ -290,7 +296,7 @@ def heat_maps_metric_region(
                     "lead_time coordinate not found for all plotted data; "
                     "using forecast_step as x-axis."
                 )
-
+            
             plotter.heat_map(
                 selected_data,
                 labels,
