@@ -345,7 +345,7 @@ def evaluate_from_config(
         with mp.Pool(
             processes=num_processes,
             initializer=setup_worker_logger,
-            initargs=(log_queue,verbose),
+            initargs=(log_queue, verbose),
         ) as pool:
             results = pool.map(
                 _process_stream_wrapper,

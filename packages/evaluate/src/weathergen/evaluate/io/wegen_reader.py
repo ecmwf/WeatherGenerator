@@ -9,7 +9,6 @@
 
 # Standard library
 import json
-import logging
 from collections import defaultdict
 from pathlib import Path
 
@@ -35,7 +34,9 @@ from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
 
 class WeatherGenReader(Reader):
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose = True):
+    def __init__(
+        self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True
+    ):
         super().__init__(eval_cfg, run_id, private_paths, verbose)
 
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
@@ -46,7 +47,9 @@ class WeatherGenReader(Reader):
 
         if not self.results_base_dir:
             self.results_base_dir = Path(get_shared_wg_path("results"))
-            self._logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
+            self._logger.info(
+                f"Results directory obtained from private config: {self.results_base_dir}"
+            )
         else:
             self._logger.info(f"Results directory parsed: {self.results_base_dir}")
 

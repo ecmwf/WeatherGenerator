@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import logging
 from collections.abc import Iterable, Sequence
 
 import numpy as np
@@ -107,12 +106,15 @@ def plot_metric_region(
             if selected_data:
                 plotter._logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
 
-                name = create_filename(plotter, 
-                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
+                name = create_filename(
+                    plotter=plotter,
+                    prefix=[metric, region],
+                    middle=sorted(set(run_ids)),
+                    suffix=[stream, ch],
                 )
 
                 selected_data, time_dim = _assign_time_coord(selected_data)
-                
+
                 if time_dim != "lead_time":
                     plotter._logger.warning(
                         "lead_time coordinate not found for all plotted data; "
@@ -214,8 +216,10 @@ def ratio_plot_metric_region(
             plotter._logger.info(f"Creating Ratio plot for {metric} - {stream}")
 
             name = create_filename(
-                plotter,
-                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
+                plotter=plotter,
+                prefix=[metric, region],
+                middle=sorted(set(run_ids)),
+                suffix=[stream],
             )
             plotter.ratio_plot(
                 selected_data,
@@ -274,17 +278,19 @@ def heat_maps_metric_region(
         if len(selected_data) > 0:
             plotter._logger.info(f"Creating Heat maps for {metric} - {stream}")
             name = create_filename(
-                plotter,
-                prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
+                plotter=plotter,
+                prefix=[metric, region],
+                middle=sorted(set(run_ids)),
+                suffix=[stream],
             )
             selected_data, time_dim = _assign_time_coord(selected_data)
-            
+
             if time_dim != "lead_time":
                 plotter._logger.warning(
                     "lead_time coordinate not found for all plotted data; "
                     "using forecast_step as x-axis."
                 )
-            
+
             plotter.heat_map(
                 selected_data,
                 labels,

@@ -59,7 +59,9 @@ class DataAvailability:
 
 
 class Reader:
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None, verbose = True):
+    def __init__(
+        self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None, verbose=True
+    ):
         """
         Generic data reader class.
 
@@ -87,8 +89,8 @@ class Reader:
         )  # base directory where results will be stored
 
         self._logger = logging.getLogger(__name__)
-       
-        logger_level = logging.INFO if verbose else logging.WARNING       
+
+        logger_level = logging.INFO if verbose else logging.WARNING
         self._logger.setLevel(logger_level)
 
     def get_stream(self, stream: str):

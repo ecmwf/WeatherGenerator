@@ -316,7 +316,9 @@ def _plot_score_maps_per_stream(
                 plotter.scatter_plot(data, map_dir, channel, region, tag=tag, title=title)
 
 
-def plot_data(reader: Reader, stream: str, global_plotting_opts: dict, verbose: bool = True) -> None:
+def plot_data(
+    reader: Reader, stream: str, global_plotting_opts: dict, verbose: bool = True
+) -> None:
     """
     Plot the data for a given run and stream.
 
@@ -358,7 +360,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict, verbose: 
         "regions": global_plotting_opts.get("regions", ["global"]),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
-    plotter = Plotter(plotter_cfg, reader.runplot_dir, verbose = verbose)
+    plotter = Plotter(plotter_cfg, reader.runplot_dir, verbose=verbose)
 
     available_data = reader.check_availability(stream, mode="plotting")
 
@@ -537,9 +539,9 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, verbose: bool 
         "baseline": eval_opt.get("baseline", None),
     }
 
-    plotter = LinePlots(plot_cfg, summary_dir, verbose = verbose)
-    sc_plotter = ScoreCards(plot_cfg, summary_dir, verbose = verbose)
-    br_plotter = BarPlots(plot_cfg, summary_dir, verbose = verbose)
+    plotter = LinePlots(plot_cfg, summary_dir, verbose=verbose)
+    sc_plotter = ScoreCards(plot_cfg, summary_dir, verbose=verbose)
+    br_plotter = BarPlots(plot_cfg, summary_dir, verbose=verbose)
     for region in regions:
         for metric in metrics:
             if eval_opt.get("summary_plots", True):

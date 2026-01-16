@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from pathlib import Path
-from tabnanny import verbose
 
 import cartopy
 import cartopy.crs as ccrs
@@ -40,7 +39,9 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, stream: str | None = None, verbose = True):
+    def __init__(
+        self, plotter_cfg: dict, output_basedir: str | Path, stream: str | None = None, verbose=True
+    ):
         """
         Initialize the Plotter class.
 
@@ -111,7 +112,9 @@ class Plotter:
             self.stream = select["stream"]
 
         if "forecast_step" not in select:
-            self._logger.warning("No forecast_step in the selection. Might lead to unexpected results.")
+            self._logger.warning(
+                "No forecast_step in the selection. Might lead to unexpected results."
+            )
         else:
             self.fstep = select["forecast_step"]
 
@@ -619,7 +622,7 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose = True):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose=True):
         """
         Initialize the LinePlots class.
 
@@ -1336,7 +1339,9 @@ class ScoreCards:
         baseline_var = baseline.sel({"channel": var})
         data_var = data[run_index].sel({"channel": var})
 
-        baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
+        baseline_score, model_score = calculate_average_over_dim(
+            x_dim, baseline_var, data_var, self._logger
+        )
         diff = baseline_score - model_score
 
         skill = self.get_skill_score(model_score, baseline_score, metric)
@@ -1477,8 +1482,9 @@ class BarPlots:
         Base directory under which the score cards will be saved.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose: bool = False) -> None:
-       
+    def __init__(
+        self, plotter_cfg: dict, output_basedir: str | Path, verbose: bool = False
+    ) -> None:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.cmap = plotter_cfg.get("cmap", "bwr")
@@ -1612,7 +1618,9 @@ class BarPlots:
             data_var = data[run_index].sel({"channel": var})
             channels_per_comparison.append(var)
 
-            baseline_score, model_score = calculate_average_over_dim(x_dim, baseline_var, data_var)
+            baseline_score, model_score = calculate_average_over_dim(
+                x_dim, baseline_var, data_var, self._logger
+            )
 
             ratio_score.append(model_score / baseline_score)
 
@@ -1645,7 +1653,7 @@ class BarPlots:
 
 
 def calculate_average_over_dim(
-    x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
+    x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray, logger
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
     Calculate average over xarray dimensions that are larger than 1. Those might be the
@@ -1659,6 +1667,8 @@ def calculate_average_over_dim(
         xarray DataArray with the scores of the baseline model for a specific channel/variable
     data_var: xr.DataArray
         xarray DataArray with the scores of the comparison model for a specific channel/variable
+    logger: logging.Logger
+        Logger instance for logging information
 
     Returns
     -------
@@ -1672,7 +1682,7 @@ def calculate_average_over_dim(
     ]
 
     if non_zero_dims:
-        self._logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
+        logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
 
     baseline_score = baseline_var.mean(
         dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
@@ -1724,6 +1734,7 @@ def channel_sort_key(name: str) -> tuple[int, str, int]:
     else:
         return (1, name, float("inf"))
 
+
 def setup_logger(name: str, verbose: bool) -> logging.Logger:
     """
     Set up a logger with the specified name and verbosity level.
@@ -1740,8 +1751,8 @@ def setup_logger(name: str, verbose: bool) -> logging.Logger:
     logging.Logger
         Configured logger instance.
     """
-    
+
     logger = logging.getLogger(name)
-    logging_level = logging.INFO if verbose else logging.CRITICAL + 1 
+    logging_level = logging.INFO if verbose else logging.CRITICAL + 1
     logger.setLevel(logging_level)
     return logger

@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 # Standard library
-import logging
 import re
 from pathlib import Path
 
@@ -29,7 +28,9 @@ class CsvReader(Reader):
     Reader class to read evaluation data from CSV files and convert to xarray DataArray.
     """
 
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose = True):
+    def __init__(
+        self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True
+    ):
         """
         Initialize the CsvReader.
 
