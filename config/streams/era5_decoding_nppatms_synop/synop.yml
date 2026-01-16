@@ -6,7 +6,8 @@
 SurfaceCombined :
   type : obs
   stream_id : 2
-  source_exclude : ['']
+  # source: []
+  is_diagnostic: True
   filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
   loss_weight : 1.0
   masking_rate : 0.6
@@ -17,12 +18,12 @@ SurfaceCombined :
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 2
-    dim_embed : 256
+    num_heads : 4
+    dim_embed : 128
     num_blocks : 2
   embed_target_coords : 
     net : linear
-    dim_embed : 256
+    dim_embed : 128
   target_readout :
     type : 'obs_value'  # token or obs_value
     num_layers : 2
