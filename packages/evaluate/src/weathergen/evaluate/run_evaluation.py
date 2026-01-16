@@ -83,11 +83,26 @@ def setup_main_logger(log_file: str | None, log_queue: mp.Queue) -> QueueListene
     return listener
 
 
-def setup_worker_logger(log_queue: mp.Queue) -> logging.Logger:
-    """"""
+def setup_worker_logger(log_queue: mp.Queue, verbose: bool) -> logging.Logger:
+    """
+    Set up worker process logger with QueueHandler.
+    Parameters
+    ----------
+    log_queue:
+        Multiprocessing queue for logging.
+    verbose:
+        Verbosity flag.
+    Returns
+    -------
+        Configured logger.
+    """
+    if verbose:
+        logging_level = logging.INFO
+    else:
+        logging_level = logging.CRITICAL
     qh = QueueHandler(log_queue)
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging_level)
     logger.handlers.clear()
     logger.addHandler(qh)
     return logger
@@ -279,6 +294,8 @@ def evaluate_from_config(
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     use_parallel = cfg.evaluation.get("num_processes", 0)
+    verbose = cfg.evaluation.get("verbose", True)
+
     if use_parallel == "auto":
         num_processes = mp.cpu_count()
     elif isinstance(use_parallel, int):
@@ -328,7 +345,7 @@ def evaluate_from_config(
         with mp.Pool(
             processes=num_processes,
             initializer=setup_worker_logger,
-            initargs=(log_queue,),
+            initargs=(log_queue,verbose),
         ) as pool:
             results = pool.map(
                 _process_stream_wrapper,
@@ -375,7 +392,7 @@ def evaluate_from_config(
     # summary plots
     if scores_dict:
         _logger.info("Started creating summary plots...")
-        plot_summary(cfg, scores_dict, summary_dir)
+        plot_summary(cfg, scores_dict, summary_dir, verbose=verbose)
 
 
 if __name__ == "__main__":

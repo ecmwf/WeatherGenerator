@@ -13,7 +13,7 @@ from collections.abc import Iterable, Sequence
 import numpy as np
 import xarray as xr
 
-_logger = logging.getLogger(__name__)
+# _logger = logging.getLogger(__name__)
 
 
 def collect_streams(runs: dict):
@@ -105,13 +105,19 @@ def plot_metric_region(
                 run_ids.append(run_id)
 
             if selected_data:
-                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
+                plotter._logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
 
-                name = create_filename(
+                name = create_filename(plotter, 
                     prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
                 )
 
                 selected_data, time_dim = _assign_time_coord(selected_data)
+                
+                if time_dim != "lead_time":
+                    plotter._logger.warning(
+                        "lead_time coordinate not found for all plotted data; "
+                        "using forecast_step as x-axis."
+                    )
 
                 plotter.plot(
                     selected_data,
@@ -149,10 +155,6 @@ def _assign_time_coord(selected_data: list[xr.DataArray]) -> tuple[xr.DataArray,
             )
 
         if "lead_time" not in data.coords and "lead_time" not in data.dims:
-            _logger.warning(
-                "lead_time coordinate not found for all plotted data; "
-                "using forecast_step as x-axis."
-            )
             return selected_data, time_dim
 
     # Swap forecast_step with lead_time if all available run_ids have lead_time coord
@@ -209,9 +211,10 @@ def ratio_plot_metric_region(
             run_ids.append(run_id)
 
         if len(selected_data) > 0:
-            _logger.info(f"Creating Ratio plot for {metric} - {stream}")
+            plotter._logger.info(f"Creating Ratio plot for {metric} - {stream}")
 
             name = create_filename(
+                plotter,
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
             plotter.ratio_plot(
@@ -269,12 +272,19 @@ def heat_maps_metric_region(
             run_ids.append(run_id)
 
         if len(selected_data) > 0:
-            _logger.info(f"Creating Heat maps for {metric} - {stream}")
+            plotter._logger.info(f"Creating Heat maps for {metric} - {stream}")
             name = create_filename(
+                plotter,
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
             selected_data, time_dim = _assign_time_coord(selected_data)
-
+            
+            if time_dim != "lead_time":
+                plotter._logger.warning(
+                    "lead_time coordinate not found for all plotted data; "
+                    "using forecast_step as x-axis."
+                )
+            
             plotter.heat_map(
                 selected_data,
                 labels,
@@ -319,11 +329,11 @@ def score_card_metric_region(
             run_ids.append(run_id)
 
         if selected_data and len(selected_data) > 1.0:
-            _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
+            sc_plotter._logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
         else:
-            _logger.info(
+            sc_plotter._logger.info(
                 f"Only one run_id for ({region}) region under stream : {stream}. "
                 "Creating bar plot is skipped..."
             )
@@ -365,11 +375,11 @@ def bar_plot_metric_region(
             run_ids.append(run_id)
 
         if selected_data and len(selected_data) > 1.0:
-            _logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
+            br_plotter._logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
         else:
-            _logger.info(
+            br_plotter._logger.info(
                 f"Only one run_id for ({region}) region under stream : {stream}. "
                 "Creating bar plot is skipped..."
             )
@@ -421,6 +431,7 @@ class DefaultMarkerSize:
 
 def create_filename(
     *,
+    plotter,
     prefix: Sequence[str] = (),
     middle: Iterable[str] = (),
     suffix: Sequence[str] = (),
@@ -433,6 +444,8 @@ def create_filename(
 
     Parameters
     ----------
+    plotter:
+        Plotter object to handle the plotting part
     prefix : Sequence[str]
         Parts that must appear before the truncated section.
     middle : Iterable[str]
@@ -469,7 +482,7 @@ def create_filename(
         used += d
 
     if len(truncated_middle) < len(mid):
-        _logger.warning(
+        plotter._logger.warning(
             f"Filename truncated: only {len(truncated_middle)} of {len(mid)} middle parts used "
             f"to keep length <= {max_len}."
         )

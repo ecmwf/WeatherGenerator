@@ -15,9 +15,6 @@ from dataclasses import dataclass
 # Third-party
 import xarray as xr
 
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
-
 
 @dataclass
 class ReaderOutput:
@@ -62,7 +59,7 @@ class DataAvailability:
 
 
 class Reader:
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None, verbose = True):
         """
         Generic data reader class.
 
@@ -88,6 +85,11 @@ class Reader:
         self.results_base_dir = self.eval_cfg.get(
             "results_base_dir", None
         )  # base directory where results will be stored
+
+        self._logger = logging.getLogger(__name__)
+       
+        logger_level = logging.INFO if verbose else logging.WARNING       
+        self._logger.setLevel(logger_level)
 
     def get_stream(self, stream: str):
         """
@@ -217,7 +219,7 @@ class Reader:
                 requested[name] = reader_data[name]
                 # If file with metrics exists, must exactly match
                 if available_data is not None and reader_data[name] != available[name]:
-                    _logger.info(
+                    self._logger.info(
                         f"Requested all {name}s for {mode}, but previous config was a "
                         "strict subset. Recomputing."
                     )
@@ -230,7 +232,7 @@ class Reader:
                 if name == "ensemble" and "mean" in missing:
                     missing.remove("mean")
                 if missing:
-                    _logger.info(
+                    self._logger.info(
                         f"Requested {name}(s) {missing} is unavailable. "
                         f"Removing missing {name}(s) for {mode}."
                     )
@@ -240,14 +242,14 @@ class Reader:
             # Must be a subset of available_data (if provided)
             if available_data is not None and not requested[name] <= available[name]:
                 missing = requested[name] - available[name]
-                _logger.info(
+                self._logger.info(
                     f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
                 )
                 check_score = False
 
         if check_score and not corrected:
             scope = "metric file" if available_data is not None else "Zarr file"
-            _logger.info(
+            self._logger.info(
                 f"All checks passed – All channels, samples, fsteps requested for {mode} are "
                 f"present in {scope}..."
             )

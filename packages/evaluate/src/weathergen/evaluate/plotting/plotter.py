@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from tabnanny import verbose
 
 import cartopy
 import cartopy.crs as ccrs
@@ -33,18 +34,13 @@ np.seterr(divide="ignore", invalid="ignore")
 
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
-
-_logger.debug(f"Taking cartopy paths from {work_dir}")
-
 
 class Plotter:
     """
     Contains all basic plotting functions.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, stream: str | None = None):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, stream: str | None = None, verbose = True):
         """
         Initialize the Plotter class.
 
@@ -64,8 +60,8 @@ class Plotter:
             Stream identifier for which the plots will be created.
             It can also be set later via update_data_selection.
         """
-
-        _logger.info(f"Taking cartopy paths from {work_dir}")
+        self._logger = setup_logger(__name__, verbose)
+        self._logger.info(f"Taking cartopy paths from {work_dir}")
 
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
@@ -79,8 +75,10 @@ class Plotter:
 
         self.out_plot_basedir = Path(output_basedir) / "plots"
 
+        self._logger.debug(f"Taking cartopy paths from {work_dir}")
+
         if not os.path.exists(self.out_plot_basedir):
-            _logger.info(f"Creating dir {self.out_plot_basedir}")
+            self._logger.info(f"Creating dir {self.out_plot_basedir}")
             os.makedirs(self.out_plot_basedir, exist_ok=True)
 
         self.sample = None
@@ -103,17 +101,17 @@ class Plotter:
         self.select = select
 
         if "sample" not in select:
-            _logger.warning("No sample in the selection. Might lead to unexpected results.")
+            self._logger.warning("No sample in the selection. Might lead to unexpected results.")
         else:
             self.sample = select["sample"]
 
         if "stream" not in select:
-            _logger.warning("No stream in the selection. Might lead to unexpected results.")
+            self._logger.warning("No stream in the selection. Might lead to unexpected results.")
         else:
             self.stream = select["stream"]
 
         if "forecast_step" not in select:
-            _logger.warning("No forecast_step in the selection. Might lead to unexpected results.")
+            self._logger.warning("No forecast_step in the selection. Might lead to unexpected results.")
         else:
             self.fstep = select["forecast_step"]
 
@@ -191,7 +189,7 @@ class Plotter:
         hist_output_dir = self.out_plot_basedir / self.stream / "histograms"
 
         if not os.path.exists(hist_output_dir):
-            _logger.info(f"Creating dir {hist_output_dir}")
+            self._logger.info(f"Creating dir {hist_output_dir}")
             os.makedirs(hist_output_dir)
 
         for var in variables:
@@ -210,19 +208,19 @@ class Plotter:
 
             if self.plot_subtimesteps:
                 ntimes_unique = len(np.unique(targ.valid_time))
-                _logger.info(
+                self._logger.info(
                     f"Creating histograms for {ntimes_unique} valid times of variable {var}."
                 )
 
                 groups = zip(targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False)
             else:
-                _logger.info(f"Plotting histogram for all valid times of {var}")
+                self._logger.info(f"Plotting histogram for all valid times of {var}")
 
                 groups = [((None, targ), (None, prd))]  # wrap once with dummy valid_time
 
             for (valid_time, targ_t), (_, prd_t) in groups:
                 if valid_time is not None:
-                    _logger.debug(f"Plotting histogram for {var} at valid_time {valid_time}")
+                    self._logger.debug(f"Plotting histogram for {var} at valid_time {valid_time}")
                 name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
                 plot_names.append(name)
 
@@ -297,7 +295,7 @@ class Plotter:
         name = "_".join(filter(None, parts))
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
-        _logger.debug(f"Saving histogram to {fname}")
+        self._logger.debug(f"Saving histogram to {fname}")
         plt.savefig(fname)
         plt.close()
 
@@ -352,7 +350,7 @@ class Plotter:
         map_output_dir = self.get_map_output_dir(tag)
 
         if not os.path.exists(map_output_dir):
-            _logger.info(f"Creating dir {map_output_dir}")
+            self._logger.info(f"Creating dir {map_output_dir}")
             os.makedirs(map_output_dir)
 
         for region in self.regions:
@@ -369,22 +367,22 @@ class Plotter:
 
                 if self.plot_subtimesteps:
                     ntimes_unique = len(np.unique(da.valid_time))
-                    _logger.info(
+                    self._logger.info(
                         f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
                     )
                     if ntimes_unique == 0:
-                        _logger.warning(
+                        self._logger.warning(
                             f"No valid times found for variable {var} - {tag}. Skipping."
                         )
                         continue
                     groups = da.groupby("valid_time")
                 else:
-                    _logger.info(f"Creating maps for all valid times of {var} - {tag}")
+                    self._logger.info(f"Creating maps for all valid times of {var} - {tag}")
                     groups = [(None, da)]  # single dummy group
 
                 for valid_time, da_t in groups:
                     if valid_time is not None:
-                        _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
+                        self._logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
                     da_t = da_t.dropna(dim="ipoint")
                     assert da_t.size > 0, "Data array must not be empty or contain only NAs"
@@ -540,7 +538,7 @@ class Plotter:
         name = "_".join(filter(None, parts))
         fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
 
-        _logger.debug(f"Saving map to {fname}")
+        self._logger.debug(f"Saving map to {fname}")
         plt.savefig(fname)
         plt.close()
 
@@ -578,7 +576,7 @@ class Plotter:
         for region in self.regions:
             for _, sa in enumerate(samples):
                 for _, var in enumerate(variables):
-                    _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
+                    self._logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
                     image_paths = []
                     for _, fstep in enumerate(fsteps):
                         # TODO: refactor to avoid code duplication with scatter_plot
@@ -612,7 +610,7 @@ class Plotter:
                         )
 
                     else:
-                        _logger.warning(f"No images found for animation {var} sample {sa}")
+                        self._logger.warning(f"No images found for animation {var} sample {sa}")
 
         return image_paths
 
@@ -621,7 +619,7 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose = True):
         """
         Initialize the LinePlots class.
 
@@ -643,6 +641,7 @@ class LinePlots:
             Base directory under which the plots will be saved.
             Expected scheme `<results_base_dir>/<run_id>`.
         """
+        self._logger = setup_logger(__name__, verbose)
 
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
@@ -653,10 +652,10 @@ class LinePlots:
         self.baseline = plotter_cfg.get("baseline")
         self.out_plot_dir = Path(output_basedir) / "line_plots"
         if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
+            self._logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
-        _logger.info(f"Saving summary plots to: {self.out_plot_dir}")
+        self._logger.info(f"Saving summary plots to: {self.out_plot_dir}")
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
@@ -695,10 +694,10 @@ class LinePlots:
                 ydata = line.get_ydata()
                 xdata = line.get_xdata()
                 label = line.get_label()
-                _logger.info(f"Summary for {label} plot:")
+                self._logger.info(f"Summary for {label} plot:")
                 for xi, yi in zip(xdata, ydata, strict=False):
-                    _logger.info(f"  x: {xi:.3f}, y: {yi:.3f}")
-                _logger.info("--------------------------")
+                    self._logger.info(f"  x: {xi:.3f}, y: {yi:.3f}")
+                self._logger.info("--------------------------")
         return
 
     def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
@@ -768,7 +767,7 @@ class LinePlots:
                     alpha=0.2,
                 )
         else:
-            _logger.warning(
+            self._logger.warning(
                 f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
                 "Skipping ensemble plotting."
             )
@@ -800,7 +799,7 @@ class LinePlots:
         non_x_dims = [dim for dim in data.dims if dim not in x_dims]
 
         if any(data.sizes.get(dim, 1) > 1 for dim in non_x_dims) and verbose:
-            logging.info(f"Averaging over dimensions: {non_x_dims}")
+            self._logger.info(f"Averaging over dimensions: {non_x_dims}")
 
         out = data.mean(dim=non_x_dims, skipna=True)
 
@@ -854,7 +853,7 @@ class LinePlots:
             non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
 
             if self.plot_ensemble and "ens" in non_zero_dims:
-                _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
+                self._logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
                 self._plot_ensemble(data, x_dim, label_list[i])
             else:
                 averaged = self._preprocess_data(data, x_dim)
@@ -918,7 +917,7 @@ class LinePlots:
             plt.yscale("log")
 
         if print_summary:
-            _logger.info(f"Summary values for {name}")
+            self._logger.info(f"Summary values for {name}")
             self.print_all_points_from_graph(fig)
 
         if line:
@@ -979,13 +978,13 @@ class LinePlots:
         data_list, label_list = self._check_lengths(data, labels)
 
         if len(data_list) < 2:
-            _logger.warning("Ratio plot requires at least two datasets to compare. Skipping.")
+            self._logger.warning("Ratio plot requires at least two datasets to compare. Skipping.")
             return
 
         baseline_name = self.baseline
         baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
         if baseline_idx is not None:
-            _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
+            self._logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
             baseline = data_list[baseline_idx]
 
         else:
@@ -1084,7 +1083,7 @@ class LinePlots:
             ref = self._preprocess_data(ref, "channel", verbose=False)
 
             if ref.isnull().all():
-                _logger.warning(
+                self._logger.warning(
                     f"Heatmap:: Reference data for metric {metric} and label {label} contains "
                     "only NaNs. Skipping heatmap."
                 )
@@ -1141,14 +1140,17 @@ class ScoreCards:
         Base directory under which the score cards will be saved.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path) -> None:
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose=True) -> None:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
         self.out_plot_dir = Path(output_basedir) / "score_cards"
         self.baseline = plotter_cfg.get("baseline")
+
+        self._logger = setup_logger(__name__, verbose)
+
         if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
+            self._logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
@@ -1268,7 +1270,7 @@ class ScoreCards:
         ]
         plt.legend(handles=legend, loc="upper left", bbox_to_anchor=(1.02, 1.0))
 
-        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
+        self._logger.info(f"Saving scorecards to: {self.out_plot_dir}")
 
         parts = ["score_card", tag] + runs
         name = "_".join(filter(None, parts))
@@ -1475,15 +1477,18 @@ class BarPlots:
         Base directory under which the score cards will be saved.
     """
 
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path) -> None:
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose: bool = False) -> None:
+       
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.cmap = plotter_cfg.get("cmap", "bwr")
         self.out_plot_dir = Path(output_basedir) / "bar_plots"
         self.baseline = plotter_cfg.get("baseline")
-        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
+
+        self._logger = setup_logger(__name__, verbose)
+        self._logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
+            self._logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
@@ -1559,7 +1564,7 @@ class BarPlots:
                     transform=ax[run_index - 1].transAxes,
                 )
 
-        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
+        self._logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         parts = ["bar_plot_compare", tag] + runs
         name = "_".join(filter(None, parts))
         plt.savefig(
@@ -1667,7 +1672,7 @@ def calculate_average_over_dim(
     ]
 
     if non_zero_dims:
-        _logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
+        self._logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
 
     baseline_score = baseline_var.mean(
         dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
@@ -1718,3 +1723,25 @@ def channel_sort_key(name: str) -> tuple[int, str, int]:
         return (0, prefix, int(number))
     else:
         return (1, name, float("inf"))
+
+def setup_logger(name: str, verbose: bool) -> logging.Logger:
+    """
+    Set up a logger with the specified name and verbosity level.
+
+    Parameters
+    ----------
+    name : str
+        Name of the logger.
+    verbose : bool
+        If True, set logging level to INFO; otherwise, set to WARNING.
+
+    Returns
+    -------
+    logging.Logger
+        Configured logger instance.
+    """
+    
+    logger = logging.getLogger(name)
+    logging_level = logging.INFO if verbose else logging.CRITICAL + 1 
+    logger.setLevel(logging_level)
+    return logger

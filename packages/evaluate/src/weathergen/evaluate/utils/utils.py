@@ -156,7 +156,7 @@ def calc_scores_per_stream(
                 _logger.debug(
                     f"Applying bounding box mask for region '{region}' to targets and predictions."
                 )
-
+            # breakpoint()
             tars, preds, tars_next, preds_next = [
                 bbox.apply_mask(x) if x is not None else None
                 for x in (tars, preds, tars_next, preds_next)
@@ -316,7 +316,7 @@ def _plot_score_maps_per_stream(
                 plotter.scatter_plot(data, map_dir, channel, region, tag=tag, title=title)
 
 
-def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
+def plot_data(reader: Reader, stream: str, global_plotting_opts: dict, verbose: bool = True) -> None:
     """
     Plot the data for a given run and stream.
 
@@ -328,6 +328,8 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         Stream name to plot data for.
     global_plotting_opts: dict
         Dictionary containing all plotting options that apply globally to all run_ids
+    verbose: bool
+        Option to print verbose log messages
     """
     run_id = reader.run_id
 
@@ -356,7 +358,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "regions": global_plotting_opts.get("regions", ["global"]),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
-    plotter = Plotter(plotter_cfg, reader.runplot_dir)
+    plotter = Plotter(plotter_cfg, reader.runplot_dir, verbose = verbose)
 
     available_data = reader.check_availability(stream, mode="plotting")
 
@@ -501,7 +503,7 @@ def metric_list_to_json(
     )
 
 
-def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
+def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, verbose: bool = True) -> None:
     """
     Plot summary of the evaluation results.
     This function is a placeholder for future implementation.
@@ -512,6 +514,10 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         Configuration dictionary containing all information for the evaluation.
     scores_dict :
         Dictionary containing scores for each metric and stream.
+    summary_dir :
+        Directory where the summary plots will be saved.
+    verbose: bool
+        Option to print verbose log messages
     """
     _logger.info("Plotting summary of evaluation results...")
     runs = cfg.run_ids
@@ -531,9 +537,9 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "baseline": eval_opt.get("baseline", None),
     }
 
-    plotter = LinePlots(plot_cfg, summary_dir)
-    sc_plotter = ScoreCards(plot_cfg, summary_dir)
-    br_plotter = BarPlots(plot_cfg, summary_dir)
+    plotter = LinePlots(plot_cfg, summary_dir, verbose = verbose)
+    sc_plotter = ScoreCards(plot_cfg, summary_dir, verbose = verbose)
+    br_plotter = BarPlots(plot_cfg, summary_dir, verbose = verbose)
     for region in regions:
         for metric in metrics:
             if eval_opt.get("summary_plots", True):

@@ -20,8 +20,8 @@ import xarray as xr
 # Local application / package
 from weathergen.evaluate.io.io_reader import Reader
 
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
+# _logger = logging.getLogger(__name__)
+# _logger.setLevel(logging.INFO)
 
 
 class CsvReader(Reader):
@@ -29,7 +29,7 @@ class CsvReader(Reader):
     Reader class to read evaluation data from CSV files and convert to xarray DataArray.
     """
 
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose = True):
         """
         Initialize the CsvReader.
 
@@ -43,7 +43,7 @@ class CsvReader(Reader):
             list of private paths for the supported HPC
         """
 
-        super().__init__(eval_cfg, run_id, private_paths)
+        super().__init__(eval_cfg, run_id, private_paths, verbose)
         self.metrics_dir = Path(self.eval_cfg.get("metrics_dir"))
 
         self.metrics_base_dir = self.metrics_dir

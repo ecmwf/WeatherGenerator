@@ -30,13 +30,13 @@ from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
+# _logger = logging.getLogger(__name__)
+# _logger.setLevel(logging.INFO)
 
 
 class WeatherGenReader(Reader):
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
-        super().__init__(eval_cfg, run_id, private_paths)
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose = True):
+        super().__init__(eval_cfg, run_id, private_paths, verbose)
 
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
         self.mini_epoch = eval_cfg.get("mini_epoch", eval_cfg.get("epoch"))
@@ -46,9 +46,9 @@ class WeatherGenReader(Reader):
 
         if not self.results_base_dir:
             self.results_base_dir = Path(get_shared_wg_path("results"))
-            _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
+            self._logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
         else:
-            _logger.info(f"Results directory parsed: {self.results_base_dir}")
+            self._logger.info(f"Results directory parsed: {self.results_base_dir}")
 
         self.runplot_base_dir = Path(
             self.eval_cfg.get("runplot_base_dir", self.results_base_dir)
@@ -80,18 +80,18 @@ class WeatherGenReader(Reader):
             configuration file from the inference run
         """
         if self.private_paths:
-            _logger.info(
+            self._logger.info(
                 f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
             )
             config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
         else:
-            _logger.info(
+            self._logger.info(
                 f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
             )
             config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
 
         if type(config) not in [dict, oc.DictConfig]:
-            _logger.warning("Model config not found. inference config will be empty.")
+            self._logger.warning("Model config not found. inference config will be empty.")
             config = {}
         return config
 
@@ -125,7 +125,7 @@ class WeatherGenReader(Reader):
             if clim_base_dir and clim_fn:
                 clim_data_path = Path(clim_base_dir).join(clim_fn)
             else:
-                _logger.warning(
+                self._logger.warning(
                     f"No climatology path specified for stream {stream}. Setting climatology to "
                     "NaN. Add 'climatology_path' to evaluation config to use metrics like ACC."
                 )
@@ -145,9 +145,9 @@ class WeatherGenReader(Reader):
         -------
             A list of channel names.
         """
-        _logger.debug(f"Getting channels for stream {stream}...")
+        self._logger.debug(f"Getting channels for stream {stream}...")
         all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
-        _logger.debug(f"Channels found in config: {all_channels}")
+        self._logger.debug(f"Channels found in config: {all_channels}")
         return all_channels
 
     def load_scores(
@@ -207,7 +207,7 @@ class WeatherGenReader(Reader):
             Path(self.metrics_dir)
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
-        _logger.debug(f"Looking for: {score_path}")
+        self._logger.debug(f"Looking for: {score_path}")
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
@@ -280,7 +280,7 @@ class WeatherGenJSONReader(WeatherGenReader):
                 message = [f"Some {name}(s) were not common among streams, regions and metrics:"]
                 for val in skipped:
                     message.append(f" {val} only in {provenance[name][val]}")
-                _logger.warning("\n".join(message))
+                self.self._logger.warning("\n".join(message))
 
     def get_samples(self) -> set[int]:
         return self.common_coords["sample"]
@@ -320,7 +320,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             self.fname_zarr = fname_zarr_old
 
         if not self.fname_zarr.exists():
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
+            self._logger.error(f"Zarr file {self.fname_zarr} does not exist.")
             raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
 
     def get_data(
@@ -367,7 +367,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         with zarrio_reader(self.fname_zarr) as zio:
             stream_cfg = self.get_stream(stream)
             all_channels = self.get_channels(stream)
-            _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
+            self._logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
 
             fsteps = self.get_forecast_steps() if fsteps is None else fsteps
 
@@ -401,14 +401,14 @@ class WeatherGenZarrReader(WeatherGenReader):
             fsteps_final = []
 
             for fstep in fsteps:
-                _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
+                self._logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
                 da_tars_fs, da_preds_fs, pps = [], [], []
 
                 for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
                     out = zio.get_data(sample, stream, fstep)
 
                     if out.target is None or out.prediction is None:
-                        _logger.info(
+                        self._logger.info(
                             f"Skipping {stream} sample {sample} forecast step: {fstep}. "
                             "No data found."
                         )
@@ -420,31 +420,31 @@ class WeatherGenZarrReader(WeatherGenReader):
                     pps.append(npoints)
 
                     if npoints == 0:
-                        _logger.info(
+                        self._logger.info(
                             f"Skipping {stream} sample {sample} forecast step: {fstep}. "
                             "Dataset is empty."
                         )
                         continue
 
                     if ensemble == ["mean"]:
-                        _logger.debug("Averaging over ensemble members.")
+                        self._logger.debug("Averaging over ensemble members.")
                         pred = pred.mean("ens", keepdims=True)
                     else:
-                        _logger.debug(f"Selecting ensemble members {ensemble}.")
+                        self._logger.debug(f"Selecting ensemble members {ensemble}.")
                         pred = pred.sel(ens=ensemble)
 
                     da_tars_fs.append(target.squeeze())
                     da_preds_fs.append(pred.squeeze())
 
                 if not da_tars_fs:
-                    _logger.info(
+                    self._logger.info(
                         f"[{self.run_id} - {stream}] No valid data found for fstep {fstep}."
                     )
                     continue
 
                 fsteps_final.append(fstep)
 
-                _logger.debug(
+                self._logger.debug(
                     f"Concatenating targets and predictions for stream {stream}, "
                     f"forecast_step {fstep}..."
                 )
@@ -469,7 +469,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
 
                 if len(samples) == 1:
-                    _logger.debug("Repeating sample coordinate for single-sample case.")
+                    self._logger.debug("Repeating sample coordinate for single-sample case.")
                     for da in (da_tars_fs, da_preds_fs):
                         da.assign_coords(
                             sample=(
@@ -479,7 +479,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                         )
 
                 if set(channels) != set(all_channels):
-                    _logger.debug(
+                    self._logger.debug(
                         f"Restricting targets and predictions to channels {channels} "
                         f"for stream {stream}..."
                     )
@@ -585,7 +585,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         -------
             A list of ensemble members.
         """
-        _logger.debug(f"Getting ensembles for stream {stream}...")
+        self._logger.debug(f"Getting ensembles for stream {stream}...")
 
         # TODO: improve this to get ensemble from io class
         with zarrio_reader(self.fname_zarr) as zio:
@@ -604,7 +604,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         -------
             True if the stream is regularly spaced. False otherwise.
         """
-        _logger.debug(f"Checking regular spacing for stream {stream}...")
+        self._logger.debug(f"Checking regular spacing for stream {stream}...")
 
         with zarrio_reader(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
@@ -626,10 +626,10 @@ class WeatherGenZarrReader(WeatherGenReader):
                 and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
             )
         ):
-            _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
+            self._logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
             return False
 
-        _logger.debug("Latitude and longitude coordinates are regularly spaced.")
+        self._logger.debug("Latitude and longitude coordinates are regularly spaced.")
         return True
 
 
@@ -680,7 +680,7 @@ class WeatherGenMergeReader(Reader):
         super().__init__(eval_cfg, run_id, private_paths)
         self.readers = []
 
-        _logger.info(f"MERGE READERS: {self.run_ids} ...")
+        self._logger.info(f"MERGE READERS: {self.run_ids} ...")
 
         for run_id in self.run_ids:
             reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
@@ -732,7 +732,7 @@ class WeatherGenMergeReader(Reader):
 
         for reader in self.readers:
             da_tars, da_preds, da_fsteps = [], [], []
-            _logger.info(f"MERGE READERS: Processing run_id {reader.run_id}...")
+            self._logger.info(f"MERGE READERS: Processing run_id {reader.run_id}...")
 
             out = reader.get_data(
                 stream,
@@ -743,7 +743,7 @@ class WeatherGenMergeReader(Reader):
             )
 
             for fstep in out.target.keys():
-                _logger.debug(f"MERGE READERS: Processing fstep {fstep}...")
+                self._logger.debug(f"MERGE READERS: Processing fstep {fstep}...")
 
                 da_tars.append(out.target[fstep])
                 da_preds.append(out.prediction[fstep])
@@ -903,7 +903,7 @@ class WeatherGenMergeReader(Reader):
         -------
             A range of ensemble members equal to the number of merged readers.
         """
-        _logger.debug(f"Getting ensembles for stream {stream}...")
+        self._logger.debug(f"Getting ensembles for stream {stream}...")
         all_ensembles = []
         for reader in self.readers:
             all_ensembles.append(reader.get_ensemble(stream))
@@ -928,5 +928,5 @@ class WeatherGenMergeReader(Reader):
         -------
             True if the stream is regularly spaced. False otherwise.
         """
-        _logger.debug(f"Checking regular spacing for stream {stream}...")
+        self._logger.debug(f"Checking regular spacing for stream {stream}...")
         return all(reader.is_regular(stream) for reader in self.readers)
