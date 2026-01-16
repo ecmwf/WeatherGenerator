@@ -621,7 +621,7 @@ class TargetPredictionEngineClassic(nn.Module):
         :param output: Output tokens.
         :param latent_lens: Lengths of the latent tokens.
         :param output_lens: Lengths of the output tokens.
-        :param coordinates: Coordinates of the tokens.
+        :param coordinates: Target coordinates for auxiliary information.
 
         :returns tc_tokens: Output tokens.
         """
@@ -808,7 +808,7 @@ class TargetPredictionEngine(nn.Module):
         :param output: Output tokens.
         :param latent_lens: Lengths of the latent tokens.
         :param output_lens: Lengths of the output tokens.
-        :param coordinates: Coordinates of the tokens.
+        :param coordinates: Target coordinates for auxiliary information.
 
         :return output: Output tokens.
         """
