@@ -238,9 +238,9 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
         "mask.shape[0], batch dimension, has to match batch dimension for student_patches_masked."
     )
     # expand/repeat teacher_masks to match number of student samples
-    teacher_patches_masked = teacher_patches_masked.expand((mask.shape[0], -1, -1))[mask]
+    teacher_patches = teacher_patches_masked.expand((mask.shape[0], -1, -1))
     # compute loss
-    loss = F.l1_loss(student_patches_masked[mask], teacher_patches_masked)
+    loss = F.l1_loss(student_patches_masked[mask], teacher_patches[mask])
     loss = loss * masks_weight[mask]
 
     return loss.sum()  # / student_masks.shape[0]
