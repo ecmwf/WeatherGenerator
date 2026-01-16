@@ -520,16 +520,18 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        model_forward = (
-                            self.model.forward
-                            if self.ema_model is None
-                            else self.ema_model.forward_eval
-                        )
-                        preds = model_forward(
-                            self.model_params,
-                            batch.get_source_samples(),
-                            mode_cfg.window_offset_prediction,
-                        )
+                        if self.ema_model is None:
+                            preds = self.model(
+                                self.model_params,
+                                batch.get_source_samples(),
+                                mode_cfg.window_offset_prediction,
+                            )
+                        else:
+                            preds = self.ema_model.forward_eval(
+                                self.model_params,
+                                batch.get_source_samples(),
+                                mode_cfg.window_offset_prediction,
+                            )
 
                         targets_and_auxs = {}
                         for loss_name, target_aux in self.svalidate_with_ema_cfg.items():
