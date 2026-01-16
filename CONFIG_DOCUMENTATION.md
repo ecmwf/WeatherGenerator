@@ -109,7 +109,6 @@ base_config.yml -> private_config -> stream_configs -> CLI overrides
 | `fe_layer_norm_after_blocks` | list | `[]` | Block indices after which to add LayerNorm (0-indexed) |
 | `fe_impute_latent_noise_std` | float | `0.0` | Standard deviation for latent noise imputation |
 | `forecast_att_dense_rate` | float | `1.0` | Precentage of attention layers that are dense |
-| `with_step_conditioning` | bool | `True` | Enable step conditioning in forecast engine |
 
 ### Token Configuration
 
