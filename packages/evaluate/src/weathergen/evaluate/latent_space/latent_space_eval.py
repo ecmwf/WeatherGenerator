@@ -13,7 +13,7 @@ This test must run on a GPU machine.
 It performs training and inference with multiple data sources including gridded and obs data.
 
 Command:
-uv run pytest ./integration_tests/small_multi_stream_test.py
+uv run --offline packages/evaluate/src/weathergen/evaluate/latent_space/latent_space_eval.py --run_id j2dkivn8
 """
 
 import argparse
