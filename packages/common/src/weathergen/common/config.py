@@ -535,7 +535,7 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
 
 def _load_base_conf(base: Path | Config | None) -> Config:
     """Return the base configuration"""
-    match base :
+    match base:
         case Path():
             _logger.info(f"Loading specified base config from file: {base}.")
             conf = OmegaConf.load(base)

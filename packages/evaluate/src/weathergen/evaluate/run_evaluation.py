@@ -28,7 +28,12 @@ from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
-from weathergen.evaluate.io.wegen_reader import WeatherGenMergeReader, WeatherGenReader
+from weathergen.evaluate.io.wegen_reader import (
+    WeatherGenJSONReader,
+    WeatherGenMergeReader,
+    WeatherGenReader,
+    WeatherGenZarrReader,
+)
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
@@ -152,6 +157,27 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
     evaluate_from_config(cf, mlflow_client, log_queue)
 
 
+def get_reader(
+    reader_type: str,
+    run: dict,
+    run_id: str,
+    private_paths: dict[str, str],
+    region: str | None = None,
+    metric: str | None = None,
+):
+    if reader_type == "zarr":
+        reader = WeatherGenZarrReader(run, run_id, private_paths)
+    elif reader_type == "csv":
+        reader = CsvReader(run, run_id, private_paths)
+    elif reader_type == "json":
+        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
+    elif reader_type == "merge":
+        reader = WeatherGenMergeReader(run, run_id, private_paths)
+    else:
+        raise ValueError(f"Unknown reader type: {reader_type}")
+    return reader
+
+
 def _process_stream_wrapper(
     args: dict[str, object],
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
@@ -193,14 +219,7 @@ def _process_stream(
     """
     # try:
     type_ = run.get("type", "zarr")
-    if type_ == "zarr":
-        reader = WeatherGenReader(run, run_id, private_paths)
-    elif type_ == "csv":
-        reader = CsvReader(run, run_id, private_paths)
-    elif type_ == "merge":
-        reader = WeatherGenMergeReader(run, run_id, private_paths)
-    else:
-        raise ValueError(f"Unknown run type: {type_}")
+    reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
@@ -282,15 +301,9 @@ def evaluate_from_config(
     # Build tasks per stream
     for run_id, run in runs.items():
         type_ = run.get("type", "zarr")
-
-        if type_ == "zarr":
-            reader = WeatherGenReader(run, run_id, private_paths)
-        elif type_ == "csv":
-            reader = CsvReader(run, run_id, private_paths)
-        elif type_ == "merge":
-            reader = WeatherGenMergeReader(run, run_id, private_paths)
-        else:
-            raise ValueError(f"Unknown run type: {type_}")
+        reader = get_reader(
+            type_, run, run_id, private_paths, cfg.evaluation.regions, cfg.evaluation.metrics
+        )
 
         for stream in reader.streams:
             tasks.append(
