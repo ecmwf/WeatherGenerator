@@ -69,7 +69,7 @@ class Trainer(TrainerBase):
         self.perf_mem = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
-        self.svalidate_with_ema_cfg = None
+        self.validate_with_ema_cfg = None
         self.validate_with_ema: bool = False
         self.batch_size_per_gpu = -1
         self.batch_size_validation_per_gpu = -1
@@ -196,7 +196,7 @@ class Trainer(TrainerBase):
         )
 
         # get target_aux calculators for different loss terms
-        self.svalidate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
+        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
 
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
@@ -269,7 +269,7 @@ class Trainer(TrainerBase):
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
-        self.svalidate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
+        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
@@ -441,7 +441,7 @@ class Trainer(TrainerBase):
             ]
             [
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.svalidate_with_ema_cfg.items()
+                for _, target_aux in self.validate_with_ema_cfg.items()
             ]
 
             # backward pass
@@ -476,7 +476,7 @@ class Trainer(TrainerBase):
             ]
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.svalidate_with_ema_cfg.items()
+                for _, target_aux in self.validate_with_ema_cfg.items()
             ]
             # EMA update
             if self.validate_with_ema:
@@ -534,7 +534,7 @@ class Trainer(TrainerBase):
                             )
 
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.svalidate_with_ema_cfg.items():
+                        for loss_name, target_aux in self.validate_with_ema_cfg.items():
                             target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
