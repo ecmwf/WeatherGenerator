@@ -520,14 +520,14 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        if self.ema_model:
-                            preds = self.ema_model.forward_eval(
+                        if self.ema_model is None:
+                            preds = self.model(
                                 self.model_params,
                                 batch.get_source_samples(),
                                 mode_cfg.window_offset_prediction,
                             )
                         else:
-                            preds = self.model(
+                            preds = self.ema_model.forward_eval(
                                 self.model_params,
                                 batch.get_source_samples(),
                                 mode_cfg.window_offset_prediction,
