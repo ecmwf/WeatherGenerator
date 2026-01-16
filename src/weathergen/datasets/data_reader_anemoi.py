@@ -142,7 +142,7 @@ class DataReaderAnemoi(DataReaderTimestep):
                 if nan_count > 0:
                     _logger.warning(
                         f"{ds_name}: geoinfo channel '{ch_name}' has {nan_count} NaN values "
-                        f"({100*nan_count/len(self._cached_geoinfo):.2f}% of grid points)"
+                        f"({100 * nan_count / len(self._cached_geoinfo):.2f}% of grid points)"
                     )
                 _logger.debug(
                     f"{ds_name}: geoinfo '{ch_name}' - mean={mean_val:.4f}, stdev={stdev_val:.4f}"

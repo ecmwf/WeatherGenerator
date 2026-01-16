@@ -323,7 +323,7 @@ class DataReaderBase(metaclass=ABCMeta):
 
     # Optional cached geoinfo for readers with static geoinfo (grid-based datasets)
     # Shape: (num_gridpoints, num_geoinfo_channels) or None if not cached
-    _cached_geoinfo: np.ndarray | None = None
+    _cached_geoinfo: NDArray | None = None
 
     def __init__(
         self,
@@ -556,7 +556,7 @@ class DataReaderBase(metaclass=ABCMeta):
             stdev = self.stdev_geoinfo[i]
             # Protect against division by zero for constant fields (stdev=0)
             if stdev == 0 or np.isclose(stdev, 0):
-                # For constant fields, just center the data (result will be 0 after subtracting mean)
+                # For constant fields, just center the data (resulting in 0s after subtracting mean)
                 geoinfos[..., i] = geoinfos[..., i] - self.mean_geoinfo[i]
             else:
                 geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / stdev

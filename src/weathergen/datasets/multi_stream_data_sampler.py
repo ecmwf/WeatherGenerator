@@ -248,8 +248,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             geoinfo_channels = getattr(ds, "geoinfo_channels", [])
             if geoinfo_size > 0:
                 logger.info(
-                    f"Geoinfo enabled for {stream_name}: "
-                    f"{geoinfo_size} channels {geoinfo_channels}"
+                    f"Geoinfo enabled for {stream_name}: {geoinfo_size} channels {geoinfo_channels}"
                 )
             else:
                 logger.info(f"Geoinfo disabled for {stream_name} (no geoinfo configured)")
