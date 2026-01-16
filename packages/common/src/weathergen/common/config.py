@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import functools
 import io
 import json
 import logging
@@ -158,16 +159,14 @@ def format_cf(config: Config) -> str:
 
 def save(config: Config, mini_epoch: int | None):
     """Save current config into the current runs model directory."""
-    # path_models = get_path_model
     # save in directory with model files
     dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
 
-    path_models_parent = dirname.parent
-    fname = _get_model_config_file_write_name(path_models_parent, config.run_id, mini_epoch)
+    fname = _get_model_config_file_write_name(config.run_id, mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
-    with fname.open("w") as f:
+    with (dirname / fname).open("w") as f:
         f.write(json_str)
 
 
@@ -190,15 +189,15 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     else:
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
-            model_path = str(_get_shared_wg_path("models"))
+            model_path = get_path_model(run_id=run_id) / "models"
         path = Path(model_path)
         fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
-        assert fname.exists(), (
+        assert (path / run_id / fname).exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
-            fname,
+            (path / run_id / fname),
         )
 
-    _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
+    _logger.info(f"Loading config from specified run_id and mini_epoch: {(path / run_id / fname)}")
 
     with fname.open() as f:
         json_str = f.read()
@@ -209,7 +208,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     return _apply_fixes(config)
 
 
-def _get_model_config_file_write_name(path: Path, run_id: str, mini_epoch: int | None):
+def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
@@ -217,7 +216,7 @@ def _get_model_config_file_write_name(path: Path, run_id: str, mini_epoch: int |
     else:
         mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
-    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
+    return f"model_{run_id}{mini_epoch_str}.json"
 
 
 def _get_model_config_file_read_name(path: Path, run_id: str, mini_epoch: int | None):
@@ -230,7 +229,7 @@ def _get_model_config_file_read_name(path: Path, run_id: str, mini_epoch: int | 
     else:
         mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
-    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
+    return f"model_{run_id}{mini_epoch_str}.json"
 
 
 def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
@@ -326,7 +325,7 @@ def load_merge_configs(
     if from_run_id is None:
         base_config = _load_default_conf()
     else:
-        base_config = load_run_config(from_run_id, mini_epoch, _get_shared_wg_path("models"))
+        base_config = load_run_config(from_run_id, mini_epoch)
         from_run_id = base_config.run_id
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
@@ -564,14 +563,17 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
-    results_path = _get_shared_wg_path("results")
-    return results_path / config.run_id
+    return _get_shared_wg_path() / "results" / config.run_id
 
 
-def get_path_model(config: Config) -> Path:
+def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
-    model_path = _get_shared_wg_path("models")
-    return model_path / config.run_id
+    if config or run_id:
+        run_id = run_id if run_id else config.run_id
+    else:
+        msg = f"Missing run_id and cannot infer it from config: {config}"
+        raise ValueError(msg)
+    return _get_shared_wg_path() / "models" / run_id
 
 
 def get_path_results(config: Config, mini_epoch: int) -> Path:
@@ -581,45 +583,11 @@ def get_path_results(config: Config, mini_epoch: int) -> Path:
     return base_path / fname
 
 
-# Cache the expensive private config loading operation
-_shared_wg_base_path = None
-
-
-def _get_shared_wg_base_path() -> Path:
-    """Get the shared working directory base path, cached after first call."""
-    global _shared_wg_base_path
-    if _shared_wg_base_path is None:
-        pcfg = _load_private_conf()
-        _shared_wg_base_path = Path(pcfg.get("path_shared_working_dir"))
-    return _shared_wg_base_path
-
-
-def _get_shared_wg_path(local_path: str | Path) -> Path:
-    """
-    Resolves a local, relative path to an absolute path within the configured shared working
-    directory.
-
-    This utility function retrieves the base path defined for the shared WeatherGenerator (WG)
-    working directory from the private configuration and appends the provided local path segment.
-
-    Parameters
-    ----------
-    local_path : str or Path
-        The local or relative path segment (e.g., 'results', 'models', 'output') that needs
-        to be located within the shared working directory structure.
-
-    Returns
-    -------
-    Path
-        The absolute pathlib.Path object pointing to the specified location
-        within the shared working directory.
-
-    Notes
-    -----
-    The shared working directory base is retrieved from the 'path_shared_working_dir'
-    key found in the private configuration loaded by `_load_private_conf()`.
-    """
-    return _get_shared_wg_base_path() / local_path
+@functools.cache
+def _get_shared_wg_path() -> Path:
+    """Get the shared working directory for WeatherGenerator."""
+    private_config = _load_private_conf()
+    return Path(private_config.get("path_shared_working_dir"))
 
 
 def validate_forecast_policy_and_steps(cf: OmegaConf):
