@@ -12,6 +12,7 @@ dependencies = [
    "astropy_healpix~=1.1.2",
    "omegaconf~=2.3.0",
    "pyyaml",
+   "tqdm"
 ]
 
 [dependency-groups]
