@@ -221,6 +221,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
 def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, teacher_masks):
     # TODO remove as we deal with batch dimension
+    assert teacher_masks.shape[0] == 1 or teacher_masks.shape[0] == student_masks.shape[0]
     student_masks = student_masks.squeeze(dim=1)
     teacher_masks = teacher_masks.squeeze(dim=1)
     masks_weight = (
@@ -233,7 +234,13 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
     if mask.sum() == 0:
         logger.warning("jepa_loss mask is all true, likely incorrect masking config.")
 
-    loss = F.l1_loss(student_patches_masked[mask], teacher_patches_masked[mask])
+    assert mask.shape[0] == student_patches_masked.shape[0], (
+        "mask.shape[0], batch dimension, has to match batch dimension for student_patches_masked."
+    )
+    # expand/repeat teacher_masks to match number of student samples
+    teacher_patches = teacher_patches_masked.expand((mask.shape[0], -1, -1))
+    # compute loss
+    loss = F.l1_loss(student_patches_masked[mask], teacher_patches[mask])
     loss = loss * masks_weight[mask]
 
     return loss.sum()  # / student_masks.shape[0]
