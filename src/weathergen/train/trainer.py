@@ -33,6 +33,7 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     extract_batch_metadata,
+    filter_config_by_enabled,
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
 )
@@ -98,10 +99,19 @@ class Trainer(TrainerBase):
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
+        # keys to filter for enabled/disabled
+        keys_to_filter = ["losses", "model_input", "target_input"]
+
+        # get training config and remove disabled options (e.g. because of overrides)
         self.training_cfg = cf.get("training_config")
+        self.training_cfg = filter_config_by_enabled(self.training_cfg, keys_to_filter)
+
         # validation and test configs are training configs, updated by specified keys
         self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
+        self.validation_cfg = filter_config_by_enabled(self.validation_cfg, keys_to_filter)
+        # test cfg is derived from validation cfg with specified keys overwritten
         self.test_cfg = merge_configs(self.validation_cfg, cf.get("test_config", {}))
+        self.test_cfg = filter_config_by_enabled(self.test_cfg, keys_to_filter)
 
         # batch sizes
         self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)
@@ -273,7 +283,7 @@ class Trainer(TrainerBase):
         beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
         # aiming for beta2 = 0.95 at one node, ie B=4
         beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
-        eps = 2e-08 / np.sqrt(kappa)
+        eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
@@ -386,7 +396,7 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            if cf.memory_pinning:
+            if cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
                 batch = batch.pin_memory()
 
@@ -504,7 +514,7 @@ class Trainer(TrainerBase):
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    if cf.memory_pinning:
+                    if cf.data_loading.get("memory_pinning", False):
                         # pin memory for faster CPU-GPU transfer
                         batch = batch.pin_memory()
 

@@ -175,6 +175,19 @@ class BatchSamples:
         """
         return self.device
 
+    def pin_memory(self):
+        """Pin all tensors in this batch to CPU pinned memory"""
+
+        # pin all samples
+        for sample in self.samples:
+            sample.pin_memory()
+
+        # pin source_tokens_lens
+        if isinstance(self.tokens_lens, torch.Tensor):
+            self.tokens_lens = self.tokens_lens.pin_memory()
+
+        return self
+
 
 class ModelBatch:
     """
@@ -208,17 +221,11 @@ class ModelBatch:
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
 
-        # Pin all source samples
-        for sample in self.source_samples:
-            sample.pin_memory()
+        # pin source samples
+        self.source_samples.pin_memory()
 
-        # Pin all target samples
-        for sample in self.target_samples:
-            sample.pin_memory()
-
-        # Pin source_tokens_lens
-        if isinstance(self.source_tokens_lens, torch.Tensor):
-            self.source_tokens_lens = self.source_tokens_lens.pin_memory()  # pylint: disable=attribute-defined-outside-init
+        # pin target samples
+        self.target_samples.pin_memory()
 
         return self
 

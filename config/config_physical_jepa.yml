@@ -126,6 +126,11 @@ data_loading :
   num_workers: 12
   rng_seed: ???
 
+  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
+  # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
+  # If this happens, you can disable the flag, but performance will drop on GH200.
+  memory_pinning: True
+
 
 # config for training
 training_config:
