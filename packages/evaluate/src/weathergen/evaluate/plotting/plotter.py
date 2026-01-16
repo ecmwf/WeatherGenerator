@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from pathlib import Path
-from tabnanny import verbose
 
 import cartopy
 import cartopy.crs as ccrs
@@ -623,7 +622,7 @@ class Plotter:
 
 
 class LinePlots:
-    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose = True):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, verbose=True):
         """
         Initialize the LinePlots class.
 
@@ -1717,7 +1716,7 @@ def calculate_average_over_dim(
     ]
 
     if non_zero_dims:
-        self._logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
+        logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
 
     baseline_score = baseline_var.mean(
         dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
@@ -1768,6 +1767,7 @@ def channel_sort_key(name: str) -> tuple[int, str, int]:
         return (0, prefix, int(number))
     else:
         return (1, name, float("inf"))
+
 
 def setup_logger(name: str, verbose: bool) -> logging.Logger:
     """

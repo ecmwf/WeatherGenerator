@@ -28,13 +28,10 @@ class CsvReader(Reader):
     Reader class to read evaluation data from CSV files and convert to xarray DataArray.
     """
 
-<<<<<<< HEAD
+
     def __init__(
         self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True
     ):
-=======
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose = True):
->>>>>>> e62a22f2 (latent_space evaluation scripts + propagate verbose)
         """
         Initialize the CsvReader.
 

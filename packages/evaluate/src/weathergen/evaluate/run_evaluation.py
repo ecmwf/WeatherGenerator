@@ -353,10 +353,14 @@ def evaluate_from_config(
             processes=num_processes,
             initializer=setup_worker_logger,
 <<<<<<< HEAD
+<<<<<<< HEAD
             initargs=(log_queue, verbose),
 =======
             initargs=(log_queue,verbose),
 >>>>>>> e62a22f2 (latent_space evaluation scripts + propagate verbose)
+=======
+            initargs=(log_queue, verbose),
+>>>>>>> acd0439c (lint)
         ) as pool:
             results = pool.map(
                 _process_stream_wrapper,
