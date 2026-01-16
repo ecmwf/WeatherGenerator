@@ -33,7 +33,6 @@ from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     extract_batch_metadata,
-    filter_config_by_enabled,
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
 )
@@ -99,19 +98,10 @@ class Trainer(TrainerBase):
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
-        # keys to filter for enabled/disabled
-        keys_to_filter = ["losses", "model_input", "target_input"]
-
-        # get training config and remove disabled options (e.g. because of overrides)
         self.training_cfg = cf.get("training_config")
-        self.training_cfg = filter_config_by_enabled(self.training_cfg, keys_to_filter)
-
         # validation and test configs are training configs, updated by specified keys
         self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
-        self.validation_cfg = filter_config_by_enabled(self.validation_cfg, keys_to_filter)
-        # test cfg is derived from validation cfg with specified keys overwritten
         self.test_cfg = merge_configs(self.validation_cfg, cf.get("test_config", {}))
-        self.test_cfg = filter_config_by_enabled(self.test_cfg, keys_to_filter)
 
         # batch sizes
         self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)
@@ -249,6 +239,8 @@ class Trainer(TrainerBase):
         else:
             self.validate_with_ema = False
         self.ema_model = None
+        # validate_with_ema is incompatible with student-teacher
+        self.validate_with_ema = False  # TODO remove for testing only
         if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
                 cf,
@@ -285,7 +277,7 @@ class Trainer(TrainerBase):
         beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
         # aiming for beta2 = 0.95 at one node, ie B=4
         beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
-        eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
+        eps = 2e-08 / np.sqrt(kappa)
 
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
@@ -520,16 +512,18 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        model_forward = (
-                            self.model.forward
-                            if self.ema_model is None
-                            else self.ema_model.forward_eval
-                        )
-                        preds = model_forward(
-                            self.model_params,
-                            batch.get_source_samples(),
-                            mode_cfg.window_offset_prediction,
-                        )
+                        if self.ema_model:
+                            preds = self.ema_model.forward_eval(
+                                self.model_params,
+                                batch.get_source_samples(),
+                                mode_cfg.window_offset_prediction,
+                            )
+                        else:
+                            preds = self.model(
+                                self.model_params,
+                                batch.get_source_samples(),
+                                mode_cfg.window_offset_prediction,
+                            )
 
                         targets_and_auxs = {}
                         for loss_name, target_aux in self.svalidate_with_ema_cfg.items():
