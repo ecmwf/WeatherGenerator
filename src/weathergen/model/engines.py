@@ -854,6 +854,16 @@ class LatentPredictionHead(nn.Module):
         # We concatenate in the token dimension [Batch, Tokens, Dim]
         return torch.cat(outputs, dim=1)
 
+class EfficientBilinear(torch.nn.Module):
+    # TODO add bias flag + reset_parameters()
+    def __init__(self, in1, in2, out):
+        super().__init__()
+        self.W = torch.nn.Parameter(torch.randn(out, in1, in2))
+        self.b = torch.nn.Parameter(torch.zeros(out))
+
+    def forward(self, x1, x2):
+        # x1: (B, in1), x2: (B, in2)
+        return torch.einsum('bi,oij,bj->bo', x1, self.W, x2) + self.b
 
 class BilinearDecoder(nn.Module):
     def __init__(self, stream_name, coord_dim, latent_dim, out_dim):
@@ -861,7 +871,7 @@ class BilinearDecoder(nn.Module):
 
         self.name = f"BilinearDecoder_{stream_name}"
         self.latent_dim = latent_dim
-        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
+        self.bilin = EfficientBilinear(coord_dim, latent_dim, out_dim) # nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
 
     def forward(self, coords_md, latent_nd, tcs_lens_n1):
         """
