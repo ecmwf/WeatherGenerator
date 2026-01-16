@@ -240,6 +240,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mini_epoch = 0
 
+        # Log geoinfo configuration per stream
+        for i, stream_ds in enumerate(self.streams_datasets):
+            ds = stream_ds[0]
+            stream_name = cf.streams[i].get("name", f"stream_{i}")
+            geoinfo_size = ds.get_geoinfo_size()
+            geoinfo_channels = getattr(ds, "geoinfo_channels", [])
+            if geoinfo_size > 0:
+                logger.info(
+                    f"Geoinfo enabled for {stream_name}: "
+                    f"{geoinfo_size} channels {geoinfo_channels}"
+                )
+            else:
+                logger.info(f"Geoinfo disabled for {stream_name} (no geoinfo configured)")
+
     ###################################################
     def advance(self):
         """
