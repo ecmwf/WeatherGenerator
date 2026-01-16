@@ -151,11 +151,9 @@ class EncoderModule(torch.nn.Module):
         if self.cf.ae_local_queries_per_cell:
             tokens_global = (self.q_cells + model_params.pe_global).repeat(rs, 1, 1)
         else:
-            tokens_global = self.q_cells.repeat(rs, num_tokens, 1, 1)
-            tokens_global[:, self.num_register_tokens + self.num_class_tokens:] = tokens_global[
-                    :, self.num_register_tokens + self.num_class_tokens:
-            ] + model_params.pe_global.unsqueeze(0).repeat((rs,1, 1, 1))
-            tokens_global = tokens_global.view(rs*num_tokens,1,-1)
+            tokens_global = self.q_cells.repeat(
+                self.num_healpix_cells * rs, 1, 1
+            ) + model_params.pe_global.repeat((rs, 1, 1))
         # lens for varlen attention
         q_cells_lens = torch.cat(
             [model_params.q_cells_lens[0].unsqueeze(0)]
@@ -249,8 +247,11 @@ class EncoderModule(torch.nn.Module):
             tokens_global_unmasked, batch_lens_patched, use_reentrant=False
         )
         tokens_global = (
-            torch.permute(tokens_global, [1, 0, 2]).squeeze().reshape(rs, num_tokens, -1)
+            torch.permute(tokens_global, [1, 0, 2])
+            .squeeze()
+            .reshape(rs, self.num_healpix_cells, -1)
         )
+        tokens_global = torch.cat([tokens_global_register_class, tokens_global], dim=1)
 
         # create mask from cell lens
         mask_reg_class_tokens = (
