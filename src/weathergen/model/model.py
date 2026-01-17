@@ -314,7 +314,10 @@ class Model(torch.nn.Module):
                 stream_name = self.stream_names[i_stream]
 
                 # skip decoder if channels are empty
-                if len(si.train_target_channels) == 0 and len(si.val_target_channels) == 0:
+                if (
+                    len(si.get("train_target_channels", [])) == 0
+                    and len(si.get("val_target_channels", [])) == 0
+                ):
                     continue
 
                 # extract and setup relevant parameters
