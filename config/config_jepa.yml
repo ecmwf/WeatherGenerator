@@ -171,10 +171,12 @@ training_config:
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
-        weight: 1.0,
+        weight: 2.0,
         loss_fcts : {
           "JEPA": {
-            'weight': 5, "loss_extra_args": {}, "out_dim": 2048,
+            'weight': 5, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
+            "pred_num_blocks": 24, "pred_num_heads": 12, "pred_with_qk_lnorm": True, "pred_intermediate_dim": 768, 
+            "pred_dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "complement"} },
           }
         },
@@ -190,7 +192,7 @@ training_config:
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
-        rate : 0.8,
+        rate : 0.6,
         rate_sampling: False
       },
     },
