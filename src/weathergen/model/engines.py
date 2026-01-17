@@ -835,7 +835,7 @@ class LatentState:
     z_pre_norm: torch.Tensor
 
 
-class TransformerPredictionHead(nn.Module):
+class LatentPredictionHeadTransformer(nn.Module):
     def __init__(
         self,
         cf: Config,
@@ -858,13 +858,13 @@ class TransformerPredictionHead(nn.Module):
         # first map to intermediate_dim to introduce a bottleneck
         self.pred_blocks.append(nn.Linear(in_dim, intermediate_dim, bias=False))
 
-        for _ in range(self.cf.sslpred_num_blocks):
+        for _ in range(self.cf.pred_num_blocks):
             self.pred_blocks.append(
                 MultiSelfAttentionHead(
                     intermediate_dim,
-                    num_heads=self.cf.sslpred_num_heads,
-                    dropout_rate=self.cf.sslpred_dropout_rate,
-                    with_qk_lnorm=self.cf.sslpred_with_qk_lnorm,
+                    num_heads=self.cf.pred_num_heads,
+                    dropout_rate=self.cf.pred_dropout_rate,
+                    with_qk_lnorm=self.cf.pred_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     # dim_aux=dim_aux,
@@ -879,7 +879,7 @@ class TransformerPredictionHead(nn.Module):
                     intermediate_dim,
                     hidden_factor=4,
                     with_residual=True,
-                    dropout_rate=self.cf.sslpred_dropout_rate,
+                    dropout_rate=self.cf.pred_dropout_rate,
                     norm_type=self.cf.norm_type,
                     # dim_aux=dim_aux,
                     norm_eps=self.cf.mlp_norm_eps,
@@ -907,15 +907,15 @@ class TransformerPredictionHead(nn.Module):
         return patch_class_tokens
 
 
-class LatentPredictionHead(nn.Module):
-    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
+class LatentPredictionHeadMLP(nn.Module):
+    def __init__(self, name, in_dim, out_dim, num_layers, hidden_factor, class_token: bool, patch_token: bool):
         super().__init__()
 
         self.name = name
         self.class_token = class_token
         self.patch_token = patch_token
         # For now this is a Linear Layer TBD what this architecture should be
-        self.layer = nn.Linear(in_dim, out_dim, bias=False)
+        self.layer = MLP(in_dim, out_dim, num_layers, hidden_factor)
 
     def forward(self, x: LatentState):
         outputs = []

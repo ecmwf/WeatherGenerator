@@ -13,6 +13,8 @@ import logging
 import math
 import warnings
 
+from omegaconf import OmegaConf
+
 import astropy_healpix as hp
 import astropy_healpix.healpy
 import numpy as np
@@ -27,11 +29,11 @@ from weathergen.model.engines import (
     BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
-    LatentPredictionHead,
     LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
-    TransformerPredictionHead,
+    LatentPredictionHeadMLP,
+    LatentPredictionHeadTransformer
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
@@ -435,6 +437,32 @@ class Model(torch.nn.Module):
             for _, v in cf.training_config.losses.items()
             if v.type == "LossLatentSSLStudentTeacher"
         ]
+
+        def _create_latent_pred_head(
+            global_config, name, loss_conf, in_dim, class_token, patch_token
+        ):
+            global_config = OmegaConf.merge(global_config, loss_conf)
+            if loss_conf["head"] == "mlp":
+                return LatentPredictionHeadMLP(
+                    name,
+                    global_config.ae_global_dim_embed,
+                    loss_conf["out_dim"],
+                    loss_conf["num_layers"],
+                    loss_conf["hidden_factor"],
+                    class_token=class_token,
+                    patch_token=patch_token,
+                )
+            elif loss_conf["head"] == "transformer":
+                return LatentPredictionHeadTransformer(
+                    global_config,
+                    name,
+                    in_dim=global_config.ae_global_dim_embed,
+                    out_dim=loss_conf["out_dim"],
+                    intermediate_dim=loss_conf["pred_intermediate_dim"],
+                    class_token=class_token,
+                    patch_token=patch_token,
+                )
+
         # TODO: support multiple LossLatentSSLStudentTeacher terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
         for ssl_target_losses in ssl_losses_cfgs:
@@ -445,28 +473,29 @@ class Model(torch.nn.Module):
             self.register_token_idx = cf.num_register_tokens
             for loss, loss_conf in ssl_target_losses.loss_fcts.items():
                 if loss == "iBOT":
-                    self.latent_heads[loss] = LatentPredictionHead(
+                    self.latent_heads[loss] = _create_latent_pred_head(
+                        cf,
                         f"{loss}-head",
-                        cf.ae_global_dim_embed,
-                        loss_conf["out_dim"],
+                        loss_conf,
+                        in_dim=cf.ae_global_dim_embed,
                         class_token=True,
                         patch_token=True,
                     )
                 elif loss == "JEPA":
-                    self.latent_heads[loss] = TransformerPredictionHead(
+                    self.latent_heads[loss] = _create_latent_pred_head(
                         cf,
                         f"{loss}-head",
+                        loss_conf,
                         in_dim=cf.ae_global_dim_embed,
-                        out_dim=loss_conf["out_dim"],
-                        intermediate_dim=cf.pred_intermediate_dim,
                         class_token=False,
                         patch_token=True,
                     )
                 elif loss == "DINO":
-                    self.latent_heads[loss] = LatentPredictionHead(
+                    self.latent_heads[loss] = _create_latent_pred_head(
+                        cf,
                         f"{loss}-head",
-                        cf.ae_global_dim_embed,
-                        loss_conf["out_dim"],
+                        loss_conf,
+                        in_dim=cf.ae_global_dim_embed,
                         class_token=True,
                         patch_token=False,
                     )
