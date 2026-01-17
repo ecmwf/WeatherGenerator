@@ -25,7 +25,7 @@ from weathergen.common.config import (
     load_merge_configs,
     load_run_config,
 )
-from weathergen.common.io import ZarrIO
+from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
@@ -41,7 +41,6 @@ class WeatherGenReader(Reader):
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
         self.mini_epoch = eval_cfg.get("mini_epoch", eval_cfg.get("epoch"))
         self.rank = eval_cfg.rank
-
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
 
@@ -94,7 +93,6 @@ class WeatherGenReader(Reader):
         if type(config) not in [dict, oc.DictConfig]:
             _logger.warning("Model config not found. inference config will be empty.")
             config = {}
-
         return config
 
     def get_climatology_filename(self, stream: str) -> str | None:
@@ -304,23 +302,26 @@ class WeatherGenZarrReader(WeatherGenReader):
         """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
         super().__init__(eval_cfg, run_id, private_paths)
 
+        zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
+        # for backwards compatibility assume zarr store is local i.e. .zarr format
+
         fname_zarr_new = self.results_dir.joinpath(
-            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
+            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
         )
         fname_zarr_old = self.results_dir.joinpath(
             f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
         )
-
-        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
-            self.fname_zarr = fname_zarr_new
+        if fname_zarr_new.exists():
+            if (zarr_ext == "zarr" and fname_zarr_new.is_dir()) or (
+                zarr_ext == "zip" and fname_zarr_new.is_file()
+            ):
+                self.fname_zarr = fname_zarr_new
         else:
             self.fname_zarr = fname_zarr_old
 
-        if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
+        if not self.fname_zarr.exists():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(
-                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            )
+            raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
 
     def get_data(
         self,
@@ -361,8 +362,9 @@ class WeatherGenZarrReader(WeatherGenReader):
             - points_per_sample: xarray DataArray containing the number of points per sample,
               if `return_counts` is True.
         """
+        # get type of zarr store
 
-        with ZarrIO(self.fname_zarr) as zio:
+        with zarrio_reader(self.fname_zarr) as zio:
             stream_cfg = self.get_stream(stream)
             all_channels = self.get_channels(stream)
             _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
@@ -556,19 +558,20 @@ class WeatherGenZarrReader(WeatherGenReader):
             The config dictionary associated to that stream
         """
         stream_dict = {}
-        with ZarrIO(self.fname_zarr) as zio:
+
+        with zarrio_reader(self.fname_zarr) as zio:
             if stream in zio.streams:
                 stream_dict = self.eval_cfg.streams.get(stream, {})
         return stream_dict
 
     def get_samples(self) -> set[int]:
         """Get the set of sample indices from the Zarr file."""
-        with ZarrIO(self.fname_zarr) as zio:
+        with zarrio_reader(self.fname_zarr) as zio:
             return set(int(s) for s in zio.samples)
 
     def get_forecast_steps(self) -> set[int]:
         """Get the set of forecast steps from the Zarr file."""
-        with ZarrIO(self.fname_zarr) as zio:
+        with zarrio_reader(self.fname_zarr) as zio:
             return set(int(f) for f in zio.forecast_steps)
 
     def get_ensemble(self, stream: str | None = None) -> list[str]:
@@ -585,7 +588,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         _logger.debug(f"Getting ensembles for stream {stream}...")
 
         # TODO: improve this to get ensemble from io class
-        with ZarrIO(self.fname_zarr) as zio:
+        with zarrio_reader(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
 
@@ -603,7 +606,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
-        with ZarrIO(self.fname_zarr) as zio:
+        with zarrio_reader(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
 
             sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
