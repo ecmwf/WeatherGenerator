@@ -26,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 2
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 2
+ae_aggregation_num_blocks: 8
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -69,7 +69,7 @@ healpix_level: 5
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: True
+with_fsdp: False
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -79,7 +79,9 @@ latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
 latent_noise_saturate_encodings: 5 
 latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True 
+latent_noise_deterministic_latents: True
+
+latent_heads_allowed: True
 
 
 freeze_modules: ""
@@ -123,7 +125,7 @@ train_log_freq:
 # parameters for data loading
 data_loading :
 
-  num_workers: 12
+  num_workers: 8
   rng_seed: ???
 
 
@@ -134,7 +136,7 @@ training_config:
   training_mode: ["student_teacher"]
 
   num_mini_epochs: 32
-  samples_per_mini_epoch: 4096
+  samples_per_mini_epoch: 256
   shuffle: True
 
   start_date: 1979-01-01T00:00
@@ -171,16 +173,21 @@ training_config:
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
-        weight: 2.0,
+        weight: 1.0,
         loss_fcts : {
           "JEPA": {
-            'weight': 5, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
+            'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
             "pred_num_blocks": 24, "pred_num_heads": 12, "pred_with_qk_lnorm": True, "pred_intermediate_dim": 768, 
             "pred_dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "complement"} },
           }
         },
-        target_and_aux_calc: "EMATeacher",
+        target_and_aux_calc: { "EMATeacher" : 
+          { ema_ramp_up_ratio : 0.09,
+            ema_halflife_in_thousands: 1e-3,
+            model_param_overrides : { latent_heads_allowed: False },
+          }
+        }
         }
   }
   
@@ -223,7 +230,7 @@ validation_config:
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
-    enabled : True
+    enabled : False
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
@@ -233,7 +240,7 @@ validation_config:
   output_streams: null
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: 0
+  validate_before_training: False
   
   losses: {
     "physical": {

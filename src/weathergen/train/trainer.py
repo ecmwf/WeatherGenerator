@@ -153,6 +153,8 @@ class Trainer(TrainerBase):
         batch_size = get_batch_size_from_config(mode_cfg)
 
         # get target_aux calculators for different loss terms
+        del self.cf.losses["student-teacher"]["loss_fcts"]["JEPA"]
+        del mode_cfg.losses["student-teacher"]["loss_fcts"]["JEPA"]
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
@@ -252,6 +254,7 @@ class Trainer(TrainerBase):
             self.validate_with_ema = validate_with_ema_cfg.get("enabled", True)
         else:
             self.validate_with_ema = False
+        self.validate_with_ema = False
         self.ema_model = None
         if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
@@ -273,7 +276,7 @@ class Trainer(TrainerBase):
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
-        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
+        # self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
@@ -408,6 +411,7 @@ class Trainer(TrainerBase):
 
             batch.to_device(self.device)
 
+            print("Batch to device")
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,
@@ -419,6 +423,7 @@ class Trainer(TrainerBase):
                     self.training_cfg.window_offset_prediction,
                 )
 
+                print("Model predictions")
                 targets_and_auxs = {}
                 for loss_name, target_aux in self.target_and_aux_calculators.items():
                     # find targets for this target-aux calculator
@@ -431,12 +436,14 @@ class Trainer(TrainerBase):
                         self.model,
                         self.training_cfg.window_offset_prediction,
                     )
+                print("target predictions")
 
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
                 targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
+            print("loss calcuclation")
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:
@@ -447,11 +454,8 @@ class Trainer(TrainerBase):
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
             ]
-            [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.validate_with_ema_cfg.items()
-            ]
 
+            print("Update Teacher")
             # backward pass
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
@@ -462,6 +466,7 @@ class Trainer(TrainerBase):
                 self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
             )
 
+            print("backward step")
             # log gradient norms
             if self.log_grad_norms:
                 if bidx % self.train_log_freq.terminal == 0:
@@ -481,10 +486,6 @@ class Trainer(TrainerBase):
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.validate_with_ema_cfg.items()
             ]
             # EMA update
             if self.validate_with_ema:
