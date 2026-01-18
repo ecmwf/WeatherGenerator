@@ -8,11 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 import dataclasses
+import enum
 import functools
 import itertools
 import logging
 import pathlib
+import timeit
 import typing
+import warnings
 
 import dask.array as da
 import numpy as np
@@ -20,14 +23,18 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
-from zarr.storage import LocalStore
+from tqdm import tqdm
+from zarr.errors import ZarrUserWarning
+from zarr.storage import LocalStore, ZipStore
 
 # experimental value, should be inferred more intelligently
-CHUNK_N_SAMPLES = 16392
+SHARDING_ENABLED = True
+SHARD_N_SAMPLES = 40320
+CHUNK_N_SAMPLES = SHARD_N_SAMPLES // 60
+SCALE_FACTOR = 4  # scaling for the other dimensions
 type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
-
 
 _logger = logging.getLogger(__name__)
 
@@ -35,6 +42,31 @@ _logger = logging.getLogger(__name__)
 def is_ndarray(obj: typing.Any) -> bool:
     """Check if object is an ndarray (wraps the linter warning)."""
     return isinstance(obj, (np.ndarray))  # noqa: TID251
+
+
+def _get_shards(
+    shard_nsamples: tuple[int], chunks: tuple[int]
+) -> tuple[tuple[int, ...], *tuple[int, ...]]:
+    """Helper function to find number of shards from chunks and predefined size of shards"""
+    shards = (shard_nsamples, *((SCALE_FACTOR + 1) * x for x in chunks[1:]))
+    return shards
+
+
+def _get_chunks(
+    chunk_nsamples: tuple[int], data_shape: tuple[int]
+) -> tuple[tuple[int, ...], *tuple[int, ...]]:
+    """Helper function to find chunks from shape of data and predefined size of chunks"""
+    chunks = (chunk_nsamples, *(max(x // SCALE_FACTOR, 1) for x in data_shape[1:]))
+    return chunks
+
+
+class StoreType(enum.StrEnum):
+    ZIP = "zip"
+    LOCAL = "zarr"
+
+    @classmethod
+    def extensions(cls) -> list[str]:
+        return [store_type.value for store_type in cls]
 
 
 class TimeRange:
@@ -246,16 +278,33 @@ class OutputDataset:
             "geoinfo": self.geoinfo,
         }
 
+    @property
+    def metadata(self) -> dict[str, typing.Any]:
+        return {
+            "channels": self.channels,
+            "geoinfo_channels": self.geoinfo_channels,
+            "source_interval": self.source_interval.as_dict(),
+        }
+
     @functools.cached_property
     def datapoints(self) -> NDArray[np.int_]:
         return np.arange(self.data.shape[0])
 
-    def as_xarray(self, chunk_nsamples=CHUNK_N_SAMPLES) -> xr.DataArray:
+    def as_xarray(
+        self, chunk_nsamples=CHUNK_N_SAMPLES, shard_nsamples=SHARD_N_SAMPLES
+    ) -> xr.DataArray:
         """Convert raw dask arrays into chunked dask-aware xarray dataset."""
-        chunks = (chunk_nsamples, *self.data.shape[1:])
-
+        chunks = _get_chunks(chunk_nsamples, self.data.shape)
+        if SHARDING_ENABLED:
+            shards = _get_shards(shard_nsamples, chunks)
+            _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
+        else:
+            shards = None
+            _logger.debug(f"sharding disabled, using chunks: {chunks}")
         # maybe do dask conversion earlier? => usefull for parallel writing?
-        data = da.from_zarr(self.data, chunks=chunks)  # dont call compute to lazy load
+        data = da.from_zarr(
+            self.data, chunks=chunks, shards=shards
+        )  # dont call compute to lazy load
         # include pseudo ens dim so all data arrays have same dimensionality
         # TODO: does it make sense for target and source to have ens dim?
         additional_dims = (0, 1, 2) if len(data.shape) == 3 else (0, 1, 2, 5)
@@ -318,14 +367,38 @@ class OutputItem:
 class ZarrIO:
     """Manage zarr storage hierarchy."""
 
-    def __init__(self, store_path: pathlib.Path):
+    def __init__(self, store_path: pathlib.Path, read_only: bool):
+        self._store: LocalStore | ZipStore | None = None
         self._store_path = store_path
         self.data_root: zarr.Group | None = None
-        self._store: LocalStore | None = None
+        self.read_only = read_only
+
+    @property
+    def _mode(self):
+        return "r" if self.read_only else "a"
+        # TODO: append is more permissive, but there is a cost in opening and closing the store.
+        # mode = "a" required for fix that removes ZarrIO dependency in trainer.py
 
     def __enter__(self) -> typing.Self:
-        self._store = LocalStore(self._store_path)
-        self.data_root = zarr.group(store=self._store)
+        # Capture warnings emitted during store creation/open
+        with warnings.catch_warnings(record=True) as caught:
+            self._store = LocalStore(self._store_path)
+            self.data_root = zarr.group(store=self._store)
+        # Warns user of future deprecation only if a ZarrUserWarning was raised
+        # Support for existing Zarr2 stores will be removed in future versions
+        if any(issubclass(w.category, ZarrUserWarning) for w in caught):
+            last_msg = next(
+                (
+                    str(w.message)
+                    for w in reversed(caught)
+                    if issubclass(w.category, ZarrUserWarning)
+                ),
+                "",
+            )
+            _logger.warning(
+                f"Future Deprecation, error arises from opening older Zarr2 stores:\
+                    {last_msg}, Opened local zarr store"
+            )
 
         return self
 
@@ -336,7 +409,9 @@ class ZarrIO:
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
-        for dataset in item.datasets:
+        for dataset in tqdm(item.datasets):  # pyrefly: ignore[not-iterable]
+            # pyrefly doesn't recognize that tqdm makes item.datasets iterable
+            # until fixed, ignore the warning here
             if dataset is not None:
                 self._write_dataset(group, dataset)
 
@@ -353,7 +428,7 @@ class ZarrIO:
         return OutputItem(key=key, forecast_offset=self.forecast_offset, **datasets)
 
     def _get_datasets(self, key: ItemKey):
-        group = self._get_group(key)
+        group = self._get_group(key, create=False)
         return {
             name: OutputDataset.create(
                 name, key, dict(dataset.arrays()), dict(dataset.attrs).copy()
@@ -361,12 +436,14 @@ class ZarrIO:
             for name, dataset in group.groups()
         }
 
-    def _get_group(self, item: ItemKey, create: bool = False) -> zarr.Array | zarr.Group:
+    def _get_group(self, item: ItemKey, create: bool) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
+            assert self.data_root.get(item.path) is None, "Group already exists, stop overwriting"
             group = self.data_root.create_group(item.path)
         else:
             try:
+                #####WARNING IS APPEARING HERE TOO#####
                 group = self.data_root.get(item.path)
                 assert group is not None, f"Zarr group: {item.path} does not exist."
             except KeyError as e:
@@ -377,14 +454,9 @@ class ZarrIO:
         return group
 
     def _write_dataset(self, item_group: zarr.Group, dataset: OutputDataset):
-        dataset_group = item_group.require_group(dataset.name)
-        self._write_metadata(dataset_group, dataset)
+        assert dataset.name not in list(item_group.keys()), "No duplication allowed"
+        dataset_group = item_group.create_group(dataset.name, attributes=dataset.metadata)
         self._write_arrays(dataset_group, dataset)
-
-    def _write_metadata(self, dataset_group: zarr.Group, dataset: OutputDataset):
-        dataset_group.attrs["channels"] = dataset.channels
-        dataset_group.attrs["geoinfo_channels"] = dataset.geoinfo_channels
-        dataset_group.attrs["source_interval"] = dataset.source_interval.as_dict()
 
     def _write_arrays(self, dataset_group: zarr.Group, dataset: OutputDataset):
         for array_name, array in dataset.arrays.items():  # suffix is eg. data or coords
@@ -392,15 +464,25 @@ class ZarrIO:
 
     def _create_dataset(self, group: zarr.Group, name: str, array: NDArray):
         assert is_ndarray(array), f"Expected ndarray but got: {type(array)}"
+
         if array.size == 0:  # sometimes for geoinfo
             chunks = "auto"
         else:
-            chunks = (CHUNK_N_SAMPLES, *array.shape[1:])
+            chunks = _get_chunks(CHUNK_N_SAMPLES, array.shape)
         _logger.debug(
             f"writing array: {name} with shape: {array.shape},chunks: {chunks}"
-            + "into group: {group}."
+            + f"into group: {group}."
         )
-        group.create_array(name, data=array, chunks=chunks)
+        start_time = timeit.default_timer()
+        if SHARDING_ENABLED and chunks != "auto":
+            shards = _get_shards(SHARD_N_SAMPLES, chunks)
+            group.create_array(name, data=array, chunks=chunks, shards=shards)
+            _logger.debug(f"sharding enabled with shards: {shards} and chunks: {chunks}")
+        else:
+            group.create_array(name, data=array, chunks=chunks)
+            _logger.debug(f"sharding disabled, writing with chunks: {chunks}")
+        elapsed = timeit.default_timer() - start_time
+        _logger.debug(f"writing array: {name} took {elapsed:.2f}")
 
     @functools.cached_property
     def forecast_offset(self) -> int:
@@ -444,6 +526,18 @@ class ZarrIO:
             return all_steps[1:]  # exclude fstep with no targets/preds
         else:
             return all_steps
+
+
+class ZipZarrIO(ZarrIO):
+    def __enter__(self) -> typing.Self:
+        _logger.info(f"Opening zipstore, read-only: {self.read_only}")
+        self._store = ZipStore(self._store_path, mode=self._mode, read_only=self.read_only)
+        if self.read_only:
+            self.data_root = zarr.open_group(store=self._store, mode=self._mode)
+        else:
+            self.data_root = zarr.group(store=self._store)
+
+        return self
 
 
 @dataclasses.dataclass
@@ -670,3 +764,34 @@ class OutputBatchData:
         _logger.debug(f"source shape: {source_dataset.data.shape}")
 
         return source_dataset
+
+
+def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:
+    """
+    Get the proper io-reader for a given store.
+
+    Args:
+        store_path: Full path to the storage location.
+    """
+
+    return _get_backend(store_path, read_only=True)
+
+
+def zarrio_writer(store_path: pathlib.Path) -> ZarrIO:
+    """
+    Get the proper io-writer for a given store.
+
+    Args:
+        store_path: Full path to the storage location.
+    """
+
+    return _get_backend(store_path, read_only=False)
+
+
+_IO_CLASSES: dict[StoreType, type] = {StoreType.ZIP: ZipZarrIO, StoreType.LOCAL: ZarrIO}
+
+
+def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
+    """Get the proper io backend for a given store."""
+    ext = store_path.suffix[1:]
+    return _IO_CLASSES[StoreType(ext)](store_path, read_only)

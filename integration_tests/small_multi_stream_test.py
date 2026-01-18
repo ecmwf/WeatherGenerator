@@ -23,8 +23,8 @@ from pathlib import Path
 
 import omegaconf
 import pytest
-
 from weathergen.evaluate.run_evaluation import evaluate_from_config
+
 from weathergen.run_train import inference_from_args, train_with_args
 from weathergen.utils.metrics import get_train_metrics_path
 
@@ -105,6 +105,7 @@ def evaluate_multi_stream_results(run_id):
                 "dpi_val": 300,
             },
             "evaluation": {
+                "regions": ["global"],
                 "metrics": ["rmse", "l1", "mse"],
                 "verbose": True,
                 "summary_plots": True,
