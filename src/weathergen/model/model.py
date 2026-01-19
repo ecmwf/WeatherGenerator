@@ -377,7 +377,6 @@ class Model(torch.nn.Module):
                         tr_dim_head_proj,
                         tr_mlp_hidden_factor,
                         softcap,
-                        tro_type,
                         stream_name=stream_name,
                     )
 
