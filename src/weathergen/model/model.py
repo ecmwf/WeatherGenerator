@@ -336,29 +336,7 @@ class Model(torch.nn.Module):
                 tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
                 softcap = tr["softcap"] if "softcap" in tr else 0.0
 
-                if tro_type == "obs_value":
-                    # fixed dimension for obs_value type
-                    dims_embed = [
-                        si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
-                    ]
-                elif tro_type == "token":
-                    if cf.pred_dyadic_dims:
-                        coord_dim = self.geoinfo_sizes[i_stream] * si["token_size"]
-                        dims_embed = torch.tensor(
-                            [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
-                        )
-                        dims_embed[dims_embed < coord_dim] = dims_embed[
-                            torch.where(dims_embed >= coord_dim)[0][0]
-                        ]
-                        dims_embed = dims_embed.tolist()
-                    else:
-                        dims_embed = torch.linspace(
-                            dim_embed, dim_out, num_layers + 1, dtype=torch.int32
-                        ).tolist()
-                else:
-                    raise ValueError(
-                        f"Target type {tro_type} is unsupported. Use token or obs_value instead."
-                    )
+                dims_embed = [si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)]
 
                 if is_root():
                     logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
