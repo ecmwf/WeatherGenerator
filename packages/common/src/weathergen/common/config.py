@@ -25,6 +25,8 @@ import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
+from weathergen.common.io import StoreType
+
 _REPO_ROOT = Path(
     __file__
 ).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
@@ -82,24 +84,52 @@ OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
 OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
-def _add_interpolation(conf: Config) -> Config:
-    conf = conf.copy()
-    delta_keys = ["time_window_step", "time_window_len", "forecast_delta"]
-    time_keys = ["start_date", "end_date", "start_date_val", "end_date_val"]
-
-    for key in delta_keys:
-        if key in conf:
-            raw_key = f"_{key}"
-            # Create an alias using interpolation syntax "${_keyname}"
-            # This stores a string instead of the resolved timedelta object.
-            conf[raw_key] = f"${{{key}}}"
-            conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{conf[key]}}}"
-
+def _sanitize_start_end_time_keys(sub_conf):
+    time_keys = ["start_date", "end_date"]
     for key in time_keys:
-        if key in conf:
+        if key in sub_conf:
             raw_key = f"_{key}"
-            conf[raw_key] = f"${{{key}}}"
-            conf[key] = f"${{{_DATETIME_TYPE_NAME}:{conf[key]}}}"
+            sub_conf[raw_key] = f"${{{key}}}"
+            sub_conf[key] = f"${{{_DATETIME_TYPE_NAME}:{sub_conf[key]}}}"
+
+
+def _sanitize_delta_time_keys(sub_conf):
+    delta_keys = ["time_window_step", "time_window_len"]
+    for key in delta_keys:
+        if key in sub_conf:
+            raw_key = f"_{key}"
+            sub_conf[raw_key] = f"${{{key}}}"
+            sub_conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf[key]}}}"
+
+    if sub_conf.get("forecast") is not None:
+        key = "time_step"
+        if key in sub_conf.forecast:
+            raw_key = f"_{key}"
+            sub_conf.forecast[raw_key] = f"${{{key}}}"
+            sub_conf.forecast[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf.forecast[key]}}}"
+
+
+def _sanitize_time_keys(conf: Config) -> Config:
+    """
+    Convert time keys into a time format supported by OmegaConf
+
+    Create an alias using interpolation syntax "${_keyname}"
+    This stores a string instead of the resolved timedelta object.
+    """
+
+    conf = conf.copy()
+
+    if conf.get("training_config") is not None:
+        _sanitize_delta_time_keys(conf.training_config)
+        _sanitize_start_end_time_keys(conf.training_config)
+
+    if conf.get("validation_config") is not None:
+        _sanitize_delta_time_keys(conf.validation_config)
+        _sanitize_start_end_time_keys(conf.validation_config)
+
+    if conf.get("test_config") is not None:
+        _sanitize_delta_time_keys(conf.test_config)
+        _sanitize_start_end_time_keys(conf.test_config)
 
     return conf
 
@@ -203,7 +233,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
-    config = _add_interpolation(config)
+    config = _sanitize_time_keys(config)
 
     return _apply_fixes(config)
 
@@ -238,20 +268,18 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
-    zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
-    zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.zarr"
+    for ext in StoreType.extensions():
+        zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
+        zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
-    if zarr_path_new.exists() or zarr_path_new.is_dir():
-        zarr_path = zarr_path_new
-    elif zarr_path_old.exists() or zarr_path_old.is_dir():
-        zarr_path = zarr_path_old
-    else:
-        raise FileNotFoundError(
-            f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
-            f"exist or is not a directory."
-        )
-
-    return zarr_path
+        if zarr_path_new.exists() or zarr_path_new.is_dir():
+            return zarr_path_new
+        elif zarr_path_old.exists() or zarr_path_old.is_dir():
+            return zarr_path_old
+    raise FileNotFoundError(
+        f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+        f"exist or is not a directory."
+    )
 
 
 def _apply_fixes(config: Config) -> Config:
@@ -280,10 +308,18 @@ def _check_logging(config: Config) -> Config:
     return config
 
 
+def merge_configs(base_config: Config, update_config: Config):
+    """
+    Merge two configs using OmegaConf's default strategy
+    """
+    return OmegaConf.merge(base_config, update_config)
+
+
 def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
     mini_epoch: int | None = None,
+    base: Path | Config | None = None,
     *overwrites: Path | dict | Config,
 ) -> Config:
     """
@@ -295,6 +331,7 @@ def load_merge_configs(
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
         mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        base: Path to the base configuration file. Uses default configuration if None.
         *overwrites: Additional overwrites from different sources
 
     Note: The order of precedence for merging the final config is in ascending order:
@@ -323,7 +360,7 @@ def load_merge_configs(
             overwrite_configs.append(c)
 
     if from_run_id is None:
-        base_config = _load_default_conf()
+        base_config = _load_base_conf(base)
     else:
         base_config = load_run_config(from_run_id, mini_epoch)
         from_run_id = base_config.run_id
@@ -332,13 +369,12 @@ def load_merge_configs(
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
-    c = _add_interpolation(c)
+    c = _sanitize_time_keys(c)
 
     # Ensure the config has mini-epoch notation
     if hasattr(c, "samples_per_epoch"):
         c.samples_per_mini_epoch = c.samples_per_epoch
         c.num_mini_epochs = c.num_epochs
-
     return c
 
 
@@ -380,17 +416,17 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
     """
     config = config.copy()
     if reuse_run_id:
-        assert config.run_id is not None, "run_id loaded from previous run should not be None."
-        _logger.info(f"reusing run_id from previous run: {config.run_id}")
+        assert config.general.run_id is not None, "Loaded run_id should not be None."
+        _logger.info(f"reusing run_id from previous run: {config.general.run_id}")
     else:
         if run_id is None:
             # generate new id if run_id is None
-            config.run_id = run_id or get_run_id()
-            _logger.info(f"using generated run_id: {config.run_id}")
+            config.general.run_id = run_id or get_run_id()
+            _logger.info(f"Using generated run_id: {config.general.run_id}")
         else:
-            config.run_id = run_id
+            config.general.run_id = run_id
             _logger.info(
-                f"using assigned run_id: {config.run_id}."
+                f"Using assigned run_id: {config.general.run_id}."
                 f" If you manually selected this run_id, this is an error."
             )
 
@@ -489,11 +525,20 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     return private_cf
 
 
-def _load_default_conf() -> Config:
-    """Deserialize default configuration."""
-    c = OmegaConf.load(_DEFAULT_CONFIG_PTH)
-    assert isinstance(c, Config)
-    return c
+def _load_base_conf(base: Path | Config | None) -> Config:
+    """Return the base configuration"""
+    match base:
+        case Path():
+            _logger.info(f"Loading specified base config from file: {base}.")
+            conf = OmegaConf.load(base)
+        case Config():
+            _logger.info(f"Using existing config as base: {base}.")
+            conf = base
+        case _:
+            _logger.info("Deserialize default configuration.")
+            conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
+    assert isinstance(conf, Config)
+    return conf
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
@@ -578,7 +623,7 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
 
 def get_path_results(config: Config, mini_epoch: int) -> Path:
     base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zarr"
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 
     return base_path / fname
 

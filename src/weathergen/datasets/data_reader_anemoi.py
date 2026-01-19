@@ -17,7 +17,6 @@ from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 
-from weathergen.common.config import parse_timedelta
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     ReaderData,
@@ -65,7 +64,7 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         kwargs = {}
         if "frequency" in stream_info:
-            kwargs["frequency"] = parse_timedelta(stream_info["frequency"])
+            kwargs["frequency"] = stream_info["frequency"]
         if "subsampling_rate" in stream_info:
             name = stream_info["name"]
             _logger.warning(

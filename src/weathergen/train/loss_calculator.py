@@ -19,7 +19,7 @@ from omegaconf import DictConfig
 import weathergen.train.loss_modules as LossModules
 from weathergen.model.model import ModelOutput
 from weathergen.train.target_and_aux_module_base import TargetAuxOutput
-from weathergen.utils.train_logger import TRAIN, Stage
+from weathergen.utils.train_logger import Stage
 
 _logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ class LossCalculator:
     def __init__(
         self,
         cf: DictConfig,
+        mode_cfg: DictConfig,
         stage: Stage,
         device: str,
     ):
@@ -57,38 +58,45 @@ class LossCalculator:
         self.losses_unweighted_hist = []
         self.stddev_unweighted_hist = []
 
-        calculator_configs = (
-            deepcopy(cf.training_config.losses)
-            if stage == TRAIN
-            else deepcopy(cf.validation_config.losses)
-        )
+        loss_term_configs = deepcopy(mode_cfg.losses)
 
-        self.loss_calculators = [
-            (
-                config.pop("weight"),
-                getattr(LossModules, class_name)(cf=cf, stage=stage, device=self.device, **config),
-            )
-            for class_name, config in calculator_configs.items()
-        ]
+        self.loss_calculators = dict(
+            [
+                (
+                    loss_term_name,
+                    [
+                        (
+                            params.get("weight", 1.0),
+                            getattr(LossModules, params.type)(
+                                cf, mode_cfg, stage, self.device, **params.loss_fcts
+                            ),
+                        )
+                    ],
+                )
+                for loss_term_name, params in loss_term_configs.items()
+            ]
+        )
 
     def compute_loss(
         self,
         preds: ModelOutput,
-        targets: TargetAuxOutput,
+        targets_and_aux: TargetAuxOutput,
         metadata: dict,
     ):
         losses_all = defaultdict(dict)
         stddev_all = defaultdict(dict)
         loss = torch.tensor(0.0, requires_grad=True)
-        for weight, calculator in self.loss_calculators:
-            if weight > 0.0:
-                loss_values = calculator.compute_loss(
-                    preds=preds, targets=targets, metadata=metadata
-                )
-                loss = loss + weight * loss_values.loss
-                losses_all[calculator.name] = loss_values.losses_all
-                losses_all[calculator.name]["loss_avg"] = loss_values.loss
-                stddev_all[calculator.name] = loss_values.stddev_all
+        for loss_term_name, calc_term in self.loss_calculators.items():
+            target = targets_and_aux[loss_term_name]
+            for weight, calculator in calc_term:
+                if weight > 0.0:
+                    loss_values = calculator.compute_loss(
+                        preds=preds, targets=target, metadata=metadata
+                    )
+                    loss = loss + weight * loss_values.loss
+                    losses_all[calculator.name] = loss_values.losses_all
+                    losses_all[calculator.name]["loss_avg"] = loss_values.loss
+                    stddev_all[calculator.name] = loss_values.stddev_all
 
         # Keep histories for logging
         self.loss_hist += [loss.detach()]

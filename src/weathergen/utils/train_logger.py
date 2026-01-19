@@ -142,7 +142,7 @@ class TrainLogger:
             cf = config.load_merge_configs(
                 private_home=None, from_run_id=run_id, mini_epoch=mini_epoch
             )
-        run_id = cf.run_id
+        run_id = cf.general.run_id
 
         result_dir_base = config.get_path_run(cf)
         result_dir = result_dir_base / run_id
@@ -333,7 +333,7 @@ def read_metrics(
 
     assert cols is None or cols, "cols must be non empty or None"
     if run_id is None:
-        run_id = cf.run_id
+        run_id = cf.general.run_id
     assert run_id, "run_id must be provided"
 
     metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)
