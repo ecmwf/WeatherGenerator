@@ -79,3 +79,18 @@
 #   echo "$run_id"
 #   ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --from-run-id $run_id --run-id $run_id --link-venv
 # done
+#
+
+for run_id in fl9xrpao ;  do
+  echo "$run_id"
+  ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --from-run-id $run_id --run-id $run_id --link-venv
+done
+
+
+# Cosine learning_rate test
+#for lr_max in "5e-4" "1e-4" "5e-5" "1e-5" "5e-6" ; do
+#  echo "$lr_max"
+#  for from_run_id in dnl5r61x ; do
+#	  ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --time 24:00:00 --from-run-id $from_run_id --link-venv --options istep=0 num_epochs=32 lr_max=$lr_max lr_policy_decay="cosine" forecast_steps=8 freeze_modules=".*global.*|.*local.*|.*adapter.*|.*ERA5.*"
+#done
+#done

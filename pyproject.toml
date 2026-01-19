@@ -29,6 +29,7 @@ dependencies = [
  "weathergen-common",
  "weathergen-evaluate",
  "weathergen-readers-extra",
+ "pyyaml>=6.0.2",
 ]
 
 

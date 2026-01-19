@@ -52,19 +52,31 @@ train :
     #   description: "lr 5e-4, w-dec 0.4, v3"
     #   eval: vgbndhco
     
-    cszpe803 : 
+    h8l1yem5 : 
       slurm_id: 0
-      description: "lr 5e-4, w-dec 0.6, v1"
+      description: "lr 5e-4, v2"
       eval: vgbndhco
-    y0kauh4s : 
+    jeubm9ld : 
       slurm_id: 0
-      description: "lr 5e-4, w-dec 0.6, v2"
+      description: "lr 5e-4, v3"
       eval: vgbndhco
-    eneq4ahr : 
+    bezt6v8g : 
       slurm_id: 0
-      description: "lr 5e-4, w-dec 0.6, v3"
+      description: "lr 5e-4, v1"
       eval: vgbndhco
     
+    ya0gty48 : 
+      slurm_id: 0
+      description: "lr 1e-4, v1"
+      eval: vgbndhco
+    djiy1v3e : 
+      slurm_id: 0
+      description: "lr 1e-4, v2"
+      eval: vgbndhco
+    g96y1dq5 : 
+      slurm_id: 0
+      description: "lr 1e-4, v3"
+      eval: vgbndhco
 
 
     # mia69x1h : 

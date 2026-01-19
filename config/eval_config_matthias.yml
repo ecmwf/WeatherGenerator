@@ -2,7 +2,7 @@ global_plotting_options:
   image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
   dpi_val : 300
   ERA5:
-    marker_size: 4
+    marker_size: 5
 
 evaluation:
   metrics  : ["froct", "rmse"]
@@ -15,9 +15,8 @@ evaluation:
 
 run_ids :
 
-  # lr=5e-4
-  xs5l8zmj:
-    label: "cosine scheduler lr_max=5e-4 v1"
+  otnh7lcg:
+    label: "Control: fine-tune 1979-2022, 8x32 epochs, v1"
     epoch: 0
     rank: 0
     streams:
@@ -27,8 +26,8 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  x9zvml1k:
-    label: "cosine scheduler lr_max=5e-4 v2"
+  v8bc9sxg:
+    label: "fine-tune 2018-2022, 8x32 epochs, v1"
     epoch: 0
     rank: 0
     streams:
@@ -38,8 +37,8 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  an8rap5h:
-    label: "cosine scheduler lr_max=5e-4 v3"
+  adja05fc:
+    label: "fine-tune 2018-2022, 8x32 epochs, v2"
     epoch: 0
     rank: 0
     streams:
@@ -49,9 +48,8 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  # lr=1e-4  
-  u2qk39pi:
-    label: "cosine scheduler lr_max=1e-4 v1"
+  nub26n5i:
+    label: "fine-tune 2018-2022, seq [4, 6, 8] epochs, v1"
     epoch: 0
     rank: 0
     streams:
@@ -61,8 +59,8 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  zswipf53:
-    label: "cosine scheduler lr_max=1e-4 v2"
+  kl5g92ne:
+    label: "fine-tune 2018-2022, seq [4, 6, 8] epochs, v2"
     epoch: 0
     rank: 0
     streams:
@@ -72,8 +70,8 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  dsdvzg59:
-    label: "cosine scheduler lr_max=1e-4 v3"
+  bwzo5qfn:
+    label: "fine-tune 2018-2022, seq [4, 6, 8] epochs, v3"
     epoch: 0
     rank: 0
     streams:
@@ -83,43 +81,8 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  # lr=5e-5
-  #r812ji96:
-  #  label: "cosine scheduler lr_max=5e-5 v1"
-  #  epoch: 0
-  #  rank: 0
-  #  streams:
-  #    ERA5:
-  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-  #      evaluation:
-  #        sample: "all"
-  #        forecast_step: "all"
-
-  #gj6eq2dx:
-  #  label: "cosine scheduler lr_max=5e-5 v2"
-  #  epoch: 0
-  #  rank: 0
-  #  streams:
-  #    ERA5:
-  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-  #      evaluation:
-  #        sample: "all"
-  #        forecast_step: "all"
-
-  #ff80snum:
-  #  label: "cosine scheduler lr_max=5e-5 v3"
-  #  epoch: 0
-  #  rank: 0
-  #  streams:
-  #    ERA5:
-  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-  #      evaluation:
-  #        sample: "all"
-  #        forecast_step: "all"
-
-          ## lr=1e-5
-  v0yha29i:
-    label: "cosine scheduler lr_max=1e-5 v1"
+  jrp2kgem:
+    label: "fine-tune 2018-2022, seq [3, 4, ..., 8] epochs, v1"
     epoch: 0
     rank: 0
     streams:
@@ -129,8 +92,8 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  cbmk73y0:
-    label: "cosine scheduler lr_max=1e-5 v2"
+  ibmenr7o:
+    label: "fine-tune 2018-2022, seq [3, 4, ..., 8] epochs, v2"
     epoch: 0
     rank: 0
     streams:
@@ -140,8 +103,8 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  ngdrjcbt:
-    label: "cosine scheduler lr_max=1e-5 v3"
+  renlmg1i:
+    label: "fine-tune 2018-2022, seq [3, 4, ..., 8] epochs, v3"
     epoch: 0
     rank: 0
     streams:
@@ -150,38 +113,3 @@ run_ids :
         evaluation:
           sample: "all"
           forecast_step: "all"
-
-  # lr=5e-6
-  voulcvsi:
-    label: "cosine scheduler lr_max=5e-6 v1"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
-
-  urlp39xq:
-    label: "cosine scheduler lr_max=5e-6 v2"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
-
-  ch1n05gd:
-    label: "cosine scheduler lr_max=5e-6 v3"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
- 
