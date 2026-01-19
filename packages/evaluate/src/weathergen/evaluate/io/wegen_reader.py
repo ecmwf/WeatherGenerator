@@ -211,7 +211,7 @@ class WeatherGenReader(Reader):
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
-                score = xr.DataArray.from_dict(data_dict)  # not a dict though
+                score = xr.DataArray.from_dict(data_dict) 
         else:
             score = None
         return score
@@ -261,12 +261,7 @@ class WeatherGenJSONReader(WeatherGenReader):
             for region in regions:
                 for metric in metrics:
                     score = self.load_single_score(stream, region, metric)
-                    if score is None:
-                        raise ValueError(
-                            f"JSONreader couldn't find {metric} for {run_id}, stream {stream}, "
-                            f"region {region}. Use type: zarr instead if possible."
-                        )
-                    else:
+                    if score is not None:
                         for name in coord_names:
                             vals = set(score[name].values)
                             all_coords[name].append(vals)
@@ -302,33 +297,15 @@ class WeatherGenZarrReader(WeatherGenReader):
         """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
         super().__init__(eval_cfg, run_id, private_paths)
 
-<<<<<<< HEAD
-        fname_zarr_new = self.results_dir.joinpath(
-            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
-=======
         zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
         # for backwards compatibility assume zarr store is local i.e. .zarr format
 
         fname_zarr_new = self.results_dir.joinpath(
             f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
->>>>>>> upstream/develop
         )
         fname_zarr_old = self.results_dir.joinpath(
             f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
         )
-<<<<<<< HEAD
-
-        if fname_zarr_new.exists() or fname_zarr_new.is_dir():
-            self.fname_zarr = fname_zarr_new
-        else:
-            self.fname_zarr = fname_zarr_old
-
-        if not self.fname_zarr.exists() or not self.fname_zarr.is_dir():
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(
-                f"Zarr file {self.fname_zarr} does not exist or is not a directory."
-            )
-=======
         if fname_zarr_new.exists():
             if (zarr_ext == "zarr" and fname_zarr_new.is_dir()) or (
                 zarr_ext == "zip" and fname_zarr_new.is_file()
@@ -340,7 +317,6 @@ class WeatherGenZarrReader(WeatherGenReader):
         if not self.fname_zarr.exists():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
             raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
->>>>>>> upstream/develop
 
     def get_data(
         self,
