@@ -126,8 +126,7 @@ class Trainer(TrainerBase):
 
         # Get world_size of previous, to be continued run before
         # world_size gets overwritten by current setting during init_ddp()
-        self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
-        cf.world_size_original = self.world_size_original
+        self.world_size_original = cf.get("world_size_original", 1)
 
         self.log_grad_norms = self.training_cfg.optimizer.get("log_grad_norms", False)
 
@@ -667,7 +666,6 @@ class Trainer(TrainerBase):
             loss_calculator.losses_unweighted_hist,
             loss_calculator.stddev_unweighted_hist,
         )
-
 
         if is_root():
             # plain logger
