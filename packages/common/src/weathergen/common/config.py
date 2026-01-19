@@ -193,7 +193,7 @@ def save(config: Config, mini_epoch: int | None):
     dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_write_name(config.run_id, mini_epoch)
+    fname = _get_model_config_file_write_name(config.general.run_id, mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with (dirname / fname).open("w") as f:
@@ -363,7 +363,7 @@ def load_merge_configs(
         base_config = _load_base_conf(base)
     else:
         base_config = load_run_config(from_run_id, mini_epoch)
-        from_run_id = base_config.run_id
+        from_run_id = base_config.general.run_id
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
@@ -608,13 +608,13 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
-    return _get_shared_wg_path() / "results" / config.run_id
+    return _get_shared_wg_path() / "results" / config.general.run_id
 
 
 def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
     if config or run_id:
-        run_id = run_id if run_id else config.run_id
+        run_id = run_id if run_id else config.general.run_id
     else:
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
@@ -622,6 +622,7 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
 
 
 def get_path_results(config: Config, mini_epoch: int) -> Path:
+    ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 
