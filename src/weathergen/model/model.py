@@ -341,7 +341,7 @@ class Model(torch.nn.Module):
                     dims_embed = [
                         si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
                     ]
-                else:
+                elif tro_type == "token":
                     if cf.pred_dyadic_dims:
                         coord_dim = self.geoinfo_sizes[i_stream] * si["token_size"]
                         dims_embed = torch.tensor(
@@ -355,6 +355,10 @@ class Model(torch.nn.Module):
                         dims_embed = torch.linspace(
                             dim_embed, dim_out, num_layers + 1, dtype=torch.int32
                         ).tolist()
+                else:
+                    raise ValueError(
+                        f"Target type {tro_type} is unsupported. Use token or obs_value instead."
+                    )
 
                 if is_root():
                     logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
