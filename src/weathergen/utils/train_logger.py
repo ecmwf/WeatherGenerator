@@ -91,7 +91,7 @@ class TrainLogger:
         # but we can probably do better and rely for example on the logging module.
 
         metrics_path = get_train_metrics_path(
-            base_path=Path(self.cf.run_path), run_id=self.cf.run_id
+            base_path=Path(self.cf.run_path), run_id=self.cf.general.run_id
         )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
@@ -142,7 +142,7 @@ class TrainLogger:
             cf = config.load_merge_configs(
                 private_home=None, from_run_id=run_id, mini_epoch=mini_epoch
             )
-        run_id = cf.run_id
+        run_id = cf.general.run_id
 
         result_dir_base = Path(cf.run_path)
         result_dir = result_dir_base / run_id
@@ -333,7 +333,7 @@ def read_metrics(
 
     assert cols is None or cols, "cols must be non empty or None"
     if run_id is None:
-        run_id = cf.run_id
+        run_id = cf.general.run_id
     assert run_id, "run_id must be provided"
 
     metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)
