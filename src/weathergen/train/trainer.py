@@ -319,7 +319,7 @@ class Trainer(TrainerBase):
         val_cfg = self.validation_cfg
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
 
-        # recover mini_epoch from cumulative samples (invariant to world size change)
+        # recover mini_epoch from cumulative samples
         mini_epoch_base = int(self.cf.general.samples // self.cf.training_config.samples_per_mini_epoch)
 
         # torch.autograd.set_detect_anomaly(True)
