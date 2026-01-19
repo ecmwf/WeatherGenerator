@@ -91,7 +91,7 @@ class TrainLogger:
         # but we can probably do better and rely for example on the logging module.
 
         metrics_path = get_train_metrics_path(
-            base_path=config.get_path_run(self.cf), run_id=self.cf.run_id
+            base_path=config.get_path_run(self.cf).parent, run_id=self.cf.run_id
         )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
