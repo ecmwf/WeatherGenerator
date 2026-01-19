@@ -211,7 +211,7 @@ class WeatherGenReader(Reader):
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
-                score = xr.DataArray.from_dict(data_dict) 
+                score = xr.DataArray.from_dict(data_dict)
         else:
             score = None
         return score

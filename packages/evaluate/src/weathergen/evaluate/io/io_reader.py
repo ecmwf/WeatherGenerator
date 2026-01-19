@@ -241,8 +241,8 @@ class Reader:
             if available_data is not None and not requested[name] <= available[name]:
                 missing = requested[name] - available[name]
                 _logger.info(
-                    f"{name.capitalize()}(s) {missing} missing in previous evaluation." 
-                     "Recomputation required."
+                    f"{name.capitalize()}(s) {missing} missing in previous evaluation."
+                    "Recomputation required."
                 )
                 check_score = False
 

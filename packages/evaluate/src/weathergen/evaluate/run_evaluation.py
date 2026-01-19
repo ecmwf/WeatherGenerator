@@ -231,7 +231,7 @@ def _process_stream(
             plot_data(reader, stream, global_plotting_opts)
         else:
             _logger.info("skipped plot_data, use type: zarr for that.")
-        
+
     # Scoring per stream
     if not stream_dict.get("evaluation"):
         return run_id, stream, {}
@@ -255,11 +255,12 @@ def _process_stream(
             scores_dict = merge(stream_loaded_scores, stream_computed_scores)
         else:
             if missing_metrics:
-                _logger.info(f"The following metrics have not yet been computed:"
-                             f"{missing_metrics}. Use type: zarr for that.")
+                _logger.info(
+                    f"The following metrics have not yet been computed:"
+                    f"{missing_metrics}. Use type: zarr for that."
+                )
             if plot_score_maps:
-                _logger.info(f"score maps skipped, use type:zarr for that.")
-            
+                _logger.info("score maps skipped, use type:zarr for that.")
 
     return run_id, stream, scores_dict
 
