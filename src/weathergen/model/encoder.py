@@ -145,13 +145,15 @@ class EncoderModule(torch.nn.Module):
         rs = num_steps_input * len(batch)
 
         s = self.q_cells.shape
+        num_tokens = self.num_healpix_cells + self.num_register_tokens + self.num_class_tokens
         # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:
             tokens_global = (self.q_cells + model_params.pe_global).repeat(rs, 1, 1)
         else:
-            tokens_global = self.q_cells.repeat(
-                self.num_healpix_cells * rs, 1, 1
-            ) + model_params.pe_global.repeat((rs, 1, 1))
+            tokens_global = self.q_cells.repeat(num_tokens * rs, 1, 1)
+            tokens_global[self.num_register_tokens + self.num_class_tokens :] = tokens_global[
+                self.num_register_tokens + self.num_class_tokens :
+            ] + model_params.pe_global.repeat((rs, 1, 1))
         # lens for varlen attention
         q_cells_lens = torch.cat(
             [model_params.q_cells_lens[0].unsqueeze(0)]
@@ -224,28 +226,33 @@ class EncoderModule(torch.nn.Module):
         # permute to use ae_local_num_queries as the batchsize and no_of_tokens
         # as seq len for flash attention
         tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
+        # create register and latent tokens and prepend to latent spatial tokens
+        tokens_global_register_class = positional_encoding_harmonic(
+            self.q_cells.repeat(rs, self.num_register_tokens + self.num_class_tokens, 1)
+        )
+        tokens_global_unmasked = torch.cat(
+            [tokens_global_register_class, tokens_global_unmasked], dim=1
+        )
+
         tokens_global_unmasked = self.ae_aggregation_engine(
             tokens_global_unmasked, use_reentrant=False
         )
         tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
 
         # create mask from cell lens
-        mask = cell_lens.to(torch.bool)
+        mask_reg_class_tokens = torch.ones(
+            self.num_register_tokens + self.num_class_tokens, device=tokens_global_unmasked.device
+        ).to(torch.bool)
+        mask = torch.cat([mask_reg_class_tokens, cell_lens.to(torch.bool)], dim=0)
 
         # fill empty tensor using mask for positions of unmasked tokens
         tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
 
         # recover batch dimension and build global token list
         tokens_global = (
-            tokens_global.reshape([rs, self.num_healpix_cells, s[-2], s[-1]])
-            + model_params.pe_global
+            tokens_global.reshape([rs, num_tokens, s[-2], s[-1]])
+            #  removing this line because else they get added twice? + model_params.pe_global
         ).flatten(1, 2)
-
-        # create register and latent tokens and prepend to latent spatial tokens
-        tokens_global_register_class = positional_encoding_harmonic(
-            self.q_cells.repeat(rs, self.num_register_tokens + self.num_class_tokens, 1)
-        )
-        tokens_global = torch.cat([tokens_global_register_class, tokens_global], dim=1)
 
         # TODO: clean up above code and move to multiple functions
 
