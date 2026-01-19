@@ -219,15 +219,15 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     else:
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
-            model_path = get_path_model(run_id=run_id) / "models"
-        path = Path(model_path)
+            path = get_path_model(run_id=run_id)
+        else:
+            path = Path(model_path)
         fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
         assert (path / run_id / fname).exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
             (path / run_id / fname),
         )
-
-    _logger.info(f"Loading config from specified run_id and mini_epoch: {(path / run_id / fname)}")
+        _logger.info(f"Loading config from specified run_id and mini_epoch: {(path / run_id / fname)}")
 
     with fname.open() as f:
         json_str = f.read()
@@ -362,7 +362,7 @@ def load_merge_configs(
     if from_run_id is None:
         base_config = _load_base_conf(base)
     else:
-        base_config = load_run_config(from_run_id, mini_epoch)
+        base_config = load_run_config(from_run_id, mini_epoch, None)
         from_run_id = base_config.general.run_id
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
