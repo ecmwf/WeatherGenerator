@@ -69,7 +69,7 @@ class Trainer(TrainerBase):
         self.perf_mem = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
-        self.svalidate_with_ema_cfg = None
+        self.validate_with_ema_cfg = None
         self.validate_with_ema: bool = False
         self.batch_size_per_gpu = -1
         self.batch_size_validation_per_gpu = -1
@@ -180,7 +180,6 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": loader_num_workers,
-            "pin_memory": True,
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset, **loader_params, sampler=None
@@ -196,7 +195,7 @@ class Trainer(TrainerBase):
         )
 
         # get target_aux calculators for different loss terms
-        self.svalidate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
+        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
 
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
@@ -226,7 +225,6 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": cf.data_loading.num_workers,
-            "pin_memory": True,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         self.data_loader_validation = torch.utils.data.DataLoader(
@@ -271,7 +269,7 @@ class Trainer(TrainerBase):
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
-        self.svalidate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
+        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
@@ -400,6 +398,10 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            if cf.data_loading.get("memory_pinning", False):
+                # pin memory for faster CPU-GPU transfer
+                batch = batch.pin_memory()
+
             batch.to_device(self.device)
 
             with torch.autocast(
@@ -443,7 +445,7 @@ class Trainer(TrainerBase):
             ]
             [
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.svalidate_with_ema_cfg.items()
+                for _, target_aux in self.validate_with_ema_cfg.items()
             ]
 
             # backward pass
@@ -478,7 +480,7 @@ class Trainer(TrainerBase):
             ]
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.svalidate_with_ema_cfg.items()
+                for _, target_aux in self.validate_with_ema_cfg.items()
             ]
             # EMA update
             if self.validate_with_ema:
@@ -514,6 +516,10 @@ class Trainer(TrainerBase):
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
+                    if cf.data_loading.get("memory_pinning", False):
+                        # pin memory for faster CPU-GPU transfer
+                        batch = batch.pin_memory()
+
                     batch.to_device(self.device)
 
                     # evaluate model
@@ -522,19 +528,21 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        model_forward = (
-                            self.model.forward
-                            if self.ema_model is None
-                            else self.ema_model.forward_eval
-                        )
-                        preds = model_forward(
-                            self.model_params,
-                            batch.get_source_samples(),
-                            mode_cfg.window_offset_prediction,
-                        )
+                        if self.ema_model is None:
+                            preds = self.model(
+                                self.model_params,
+                                batch.get_source_samples(),
+                                mode_cfg.window_offset_prediction,
+                            )
+                        else:
+                            preds = self.ema_model.forward_eval(
+                                self.model_params,
+                                batch.get_source_samples(),
+                                mode_cfg.window_offset_prediction,
+                            )
 
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.svalidate_with_ema_cfg.items():
+                        for loss_name, target_aux in self.validate_with_ema_cfg.items():
                             target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,

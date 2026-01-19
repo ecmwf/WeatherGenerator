@@ -319,6 +319,13 @@ class Model(torch.nn.Module):
             for i_stream, si in enumerate(cf.streams):
                 stream_name = self.stream_names[i_stream]
 
+                # skip decoder if channels are empty
+                if (
+                    len(si.get("train_target_channels", [])) == 0
+                    and len(si.get("val_target_channels", [])) == 0
+                ):
+                    continue
+
                 # extract and setup relevant parameters
                 etc = si["embed_target_coords"]
                 tro_type = (
@@ -504,16 +511,19 @@ class Model(torch.nn.Module):
             else self.forecast_engine.fe_blocks
         )
 
+        mdict = self.embed_target_coords
         num_params_embed_tcs = [
-            get_num_parameters(self.embed_target_coords[name]) if self.embed_target_coords else 0
+            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
             for name in self.stream_names
         ]
+        mdict = self.target_token_engines
         num_params_tte = [
-            get_num_parameters(self.target_token_engines[name]) if self.target_token_engines else 0
+            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
             for name in self.stream_names
         ]
+        mdict = self.pred_heads
         num_params_preds = [
-            get_num_parameters(self.pred_heads[name]) if self.pred_heads else 0
+            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
             for name in self.stream_names
         ]
 

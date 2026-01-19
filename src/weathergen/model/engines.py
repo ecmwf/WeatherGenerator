@@ -100,7 +100,7 @@ class EmbeddingEngine(torch.nn.Module):
                 for sample in batch.get_samples():
                     sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
 
-            sdata = torch.cat(sdata)
+            sdata = torch.cat(sdata).to(tokens_all.dtype)
             # skip empty stream
             if len(sdata) == 0:
                 continue

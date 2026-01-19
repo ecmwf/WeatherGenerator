@@ -34,6 +34,25 @@ class Sample:
     # keys: stream_name, values: StreamData
     streams_data: dict[str, StreamData | None]
 
+    def pin_memory(self):
+        """Pin all tensors in this Sample to CPU pinned memory"""
+
+        # Pin StreamData objects in streams_data dict
+        if hasattr(self, "streams_data") and isinstance(self.streams_data, dict):
+            for _stream_name, stream_data in self.streams_data.items():
+                if stream_data is not None and hasattr(stream_data, "pin_memory"):
+                    stream_data.pin_memory()
+
+        # Pin tensors in meta_info
+        if hasattr(self, "meta_info") and isinstance(self.meta_info, dict):
+            for _key, meta_data in self.meta_info.items():
+                if isinstance(meta_data, SampleMetaData):
+                    # Pin mask tensor
+                    if meta_data.mask is not None and isinstance(meta_data.mask, torch.Tensor):
+                        meta_data.mask = meta_data.mask.pin_memory()
+
+        return self
+
     def __init__(self, streams: dict) -> None:
         self.meta_info = {}
 
@@ -156,6 +175,19 @@ class BatchSamples:
         """
         return self.device
 
+    def pin_memory(self):
+        """Pin all tensors in this batch to CPU pinned memory"""
+
+        # pin all samples
+        for sample in self.samples:
+            sample.pin_memory()
+
+        # pin source_tokens_lens
+        if isinstance(self.tokens_lens, torch.Tensor):
+            self.tokens_lens = self.tokens_lens.pin_memory()
+
+        return self
+
 
 class ModelBatch:
     """
@@ -185,6 +217,17 @@ class ModelBatch:
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+
+    def pin_memory(self):
+        """Pin all tensors in this batch to CPU pinned memory"""
+
+        # pin source samples
+        self.source_samples.pin_memory()
+
+        # pin target samples
+        self.target_samples.pin_memory()
+
+        return self
 
     def to_device(self, device):  # -> ModelBatch
         """
