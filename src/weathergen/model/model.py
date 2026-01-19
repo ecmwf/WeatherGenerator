@@ -322,14 +322,6 @@ class Model(torch.nn.Module):
 
                 # extract and setup relevant parameters
                 etc = si["embed_target_coords"]
-                tro_type = (
-                    si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
-                )
-                dim_embed = si["embed_target_coords"]["dim_embed"]
-                dim_out = max(
-                    dim_embed,
-                    si["token_size"] * self.targets_num_channels[i_stream],
-                )
                 tr = si["target_readout"]
                 num_layers = tr["num_layers"]
                 tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
