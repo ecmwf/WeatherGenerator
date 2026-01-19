@@ -224,7 +224,7 @@ class LossPhysical(LossModuleBase):
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
 
-            for fstep in range(self.forecast_offset, targets.num_forecast_steps):
+            for fstep in range(self.forecast_offset, self.forecast_offset + targets.num_forecast_steps):
                 fstep_weight = fstep_loss_weights[fstep]
 
                 # get current prediction and target

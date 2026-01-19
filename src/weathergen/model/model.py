@@ -545,6 +545,14 @@ class Model(torch.nn.Module):
         ]
         print("-----------------")
 
+    def get_latent_state(self, z, tokens):
+        return LatentState(
+            register_tokens=z[:, : self.register_token_idx],
+            class_token=z[:, self.register_token_idx : self.class_token_idx],
+            patch_tokens=z[:, self.class_token_idx :],
+            z_pre_norm=tokens,
+        )
+
     def forward(
         self, model_params: ModelParams, batch: ModelBatch, forecast_offset: int
     ) -> ModelOutput:
@@ -567,43 +575,31 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        # latents for output
-        z = self.latent_pre_norm(tokens)
-        latent_state = LatentState(
-            register_tokens=z[:, : self.register_token_idx],
-            class_token=z[:, self.register_token_idx : self.class_token_idx],
-            patch_tokens=z[:, self.class_token_idx :],
-            z_pre_norm=tokens,
-        )
-        output.add_latent_prediction(0, "posteriors", posteriors)
-        output.add_latent_prediction(0, "latent_state", latent_state)
-        for name, head in self.latent_heads.items():
-            output.add_latent_prediction(0, name, head(latent_state))
+        if batch.get_forecast_steps() > 1:
+            # roll-out in latent space
+            for fstep in range(forecast_offset, forecast_offset + batch.get_forecast_steps()):
+                if self.training:
+                    # Impute noise to the latent state
+                    noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
+                    if noise_std > 0.0:
+                        tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+                tokens = self.forecast(model_params, tokens, fstep)
+                # prediction
+                output = self.predict(model_params, fstep, tokens, batch, output)
+                # safe latent prediction
+                latent_state = self.get_latent_state(tokens, None)
+                output.add_latent_prediction(fstep, "latent_state", latent_state) 
+        else:
+            # latents for output
+            z = self.latent_pre_norm(tokens)
+            latent_state = self.get_latent_state(z, tokens)
+            output.add_latent_prediction(0, "posteriors", posteriors)
+            output.add_latent_prediction(0, "latent_state", latent_state)
+            for name, head in self.latent_heads.items():
+                output.add_latent_prediction(0, name, head(latent_state))
+            # prediction for final step
+            output = self.predict(model_params, batch.get_forecast_steps(), tokens, batch, output)
 
-        # roll-out in latent space
-        for fstep in range(forecast_offset, batch.get_forecast_steps()):
-            # prediction
-            output = self.predict(model_params, fstep, tokens, batch, output)
-
-            if self.training:
-                # Impute noise to the latent state
-                noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
-                if noise_std > 0.0:
-                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
-
-            tokens = self.forecast(model_params, tokens, fstep)
-
-            # safe latent prediction
-            latent_state = LatentState(
-                register_tokens=tokens[:, : self.register_token_idx],
-                class_token=tokens[:, self.register_token_idx : self.class_token_idx],
-                patch_tokens=tokens[:, self.class_token_idx :],
-                z_pre_norm=None,
-            )
-            output.add_latent_prediction(fstep, "latent_state", latent_state)
-
-        # prediction for final step
-        output = self.predict(model_params, batch.get_forecast_steps(), tokens, batch, output)
 
         return output
 
