@@ -488,9 +488,9 @@ class ForecastingEngine(torch.nn.Module):
             )
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
-                    tokens = checkpoint(block, tokens, use_reentrant=False)
+                    tokens = block(tokens)
                 else:
-                    tokens = checkpoint(block, tokens, noise_emb, aux_info, use_reentrant=False)
+                    tokens = block(tokens, noise_emb, aux_info)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
