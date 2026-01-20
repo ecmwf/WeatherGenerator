@@ -575,7 +575,7 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        if batch.get_forecast_steps() > 1:
+        if batch.get_forecast_steps() > 0:
             # roll-out in latent space
             for fstep in range(forecast_offset, forecast_offset + batch.get_forecast_steps()):
                 if self.training:
