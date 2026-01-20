@@ -152,6 +152,8 @@ class EncoderModule(torch.nn.Module):
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_unmasked = []
         posteriors = []
+        skipped_iterations = []  # Track which iterations are skipped
+        num_iterations = cell_lens.shape[0] // clen
 
         for i in range(cell_lens.shape[0] // clen):
             # make sure we properly catch all elements in last chunk
@@ -164,8 +166,32 @@ class EncoderModule(torch.nn.Module):
             toks = tokens[l0:l1]
             # if we have a very sparse input, we may have no tokens in the chunk, toks
             # skip processing of the empty chunk in this case
-            if l0 == l1 or toks.shape[0] == 0:
+            # Check if this chunk is empty                                                     
+            is_empty_chunk = (l0 == l1 or toks.shape[0] == 0)                                  
+                                                                                             
+            if is_empty_chunk:                                                                 
+                skipped_iterations.append(i)
+                # Create minimal dummy tensors to maintain consistent checkpoint call count    
+                # across all ranks (required for FSDP gradient sync)                           
+                dummy_toks = torch.zeros(                                                      
+                    1, self.cf.ae_local_dim_embed, device=tokens.device, dtype=tokens.dtype    
+                )                                                                              
+                dummy_cell_lens = torch.tensor([0, 1], device=tokens.device, dtype=torch.int32)
+                dummy_q_lens = torch.tensor([0, 1], device=tokens.device, dtype=torch.int32)   
+                dummy_global = torch.zeros(                                                    
+                    1, self.cf.ae_local_num_queries, self.cf.ae_global_dim_embed,              
+                    device=tokens.device, dtype=tokens.dtype                                   
+                )                                                                              
+                                                                                               
+                # Call engines with dummy data (maintains FSDP sync)                           
+                _ = self.ae_local_engine(dummy_toks, dummy_cell_lens, use_reentrant=False)     
+                _ = self.interpolate_latents(dummy_toks)                                       
+                _ = self.ae_local_global_engine(                                               
+                  dummy_toks, dummy_global, dummy_q_lens, dummy_cell_lens, use_reentrant=False                                                                        
+                )                                                                              
+                # Don't append anything to output - this chunk contributes nothing             
                 continue
+
             toks_global = tokens_global[i * clen : i_end]
             cell_lens_cur = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
             q_cells_lens_cur = q_cells_lens[: cell_lens_cur.shape[0]]
@@ -192,6 +218,10 @@ class EncoderModule(torch.nn.Module):
 
             tokens_global_unmasked += [toks_global_unmasked]
 
+        # DEBUG: Log skip pattern per rank                                                     
+        print(f"[Rank {self.cf.rank}] Skipped iterations: {skipped_iterations} out of {num_iterations}", flush=True) 
+        if len(tokens_global_unmasked) == 0:
+            assert False, "Not yet implemented"
         tokens_global_unmasked = torch.cat(tokens_global_unmasked)
 
         return tokens_global_unmasked, posteriors
@@ -211,6 +241,9 @@ class EncoderModule(torch.nn.Module):
 
         cell_lens_unflattened = torch.sum(tokens_lens, 2)
         batch_lens = cell_lens_unflattened.to(torch.bool).sum(dim=-1).flatten()
+        expected_len = batch_lens.sum().item()
+        actual_len = tokens_global_unmasked.shape[1]                                           
+        assert expected_len == actual_len, f"Shape mismatch: expected {expected_len}, got {actual_len}"
         tokens_global_unmasked = torch.split(tokens_global_unmasked.squeeze(0), list(batch_lens))
         tokens_global_unmasked = torch.cat(
             [
