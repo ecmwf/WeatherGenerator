@@ -113,7 +113,7 @@ def write_output(
 
     # output stream names to be written, use specified ones or all if nothing specified
     stream_names = [stream.name for stream in cf.streams]
-    if val_cfg.get("streams_output") is not None:
+    if val_cfg.get("output").get("streams") is not None:
         output_stream_names = val_cfg.streams_output
     else:
         output_stream_names = stream_names
