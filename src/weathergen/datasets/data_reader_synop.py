@@ -27,7 +27,7 @@ _logger = logging.getLogger(__name__)
 
 
 class DataReaderSynop(DataReaderTimestep):
-    "Wrapper for SYNOP datasets from MetNo in NetCDF"
+    "Wrapper for SYNOP datasets in NetCDF"
 
     def __init__(
         self,
@@ -88,21 +88,49 @@ class DataReaderSynop(DataReaderTimestep):
             self.ds = ds
             self.len = len(ds)
 
-        self.offset_data_channels = 4
-        self.fillvalue = ds["air_temperature"][0, 0].values.item()
-        self.channels_file = [k for k in self.ds.keys()]
+        # handle MetNo SYNOP netCDF files
+        if "air_temperature" in ds.keys():
+            self.ds_type = "MetNo"
+        elif "TT_10" in ds.keys():
+            self.ds_type = "Germany"
+        else:
+            self.ds_type = "Unknown"
+            assert False, "Unknown dataset type"
 
-        # caches lats and lons
+        if self.ds_type == "MetNo":
+            self.fillvalue = ds["air_temperature"][0, 0].values.item()
+
+        self.channels_file = list(ds.keys())
+
+        # helper to get 1D station-static data for german stations
+        def _get_1d(var_name):
+            v = ds[var_name]
+            if self.ds_type == "Germany":
+                return v.isel(time=0)
+                
+            return v
+
+        # Resolve coordinates
         lat_name = stream_info.get("latitude_name", "latitude")
-        self.latitudes = _clip_lat(np.array(ds[lat_name], dtype=np32))
         lon_name = stream_info.get("longitude_name", "longitude")
-        self.longitudes = _clip_lon(np.array(ds[lon_name], dtype=np32))
+        height_name = stream_info.get("height_name", "height") # height for german, altitude for MetNo stations
+        
+        self.latitudes = _clip_lat(np.array(_get_1d(lat_name), dtype=np32))
+        self.longitudes = _clip_lon(np.array(_get_1d(lon_name), dtype=np32))
+        self.heights = np.array(_get_1d(height_name), dtype=np32)
 
+        # Resolve geoinfos
         self.geoinfo_channels = stream_info.get("geoinfos", [])
         self.geoinfo_idx = [self.channels_file.index(ch) for ch in self.geoinfo_channels]
-        # cache geoinfos
-        self.geoinfo_data = np.stack([np.array(ds[ch], dtype=np32) for ch in self.geoinfo_channels])
-        self.geoinfo_data = self.geoinfo_data.transpose()
+        # cache geoinfos (use _get_1d for consistent 1D arrays)
+        geoinfo_data_list = []
+        for ch in self.geoinfo_channels:
+            geoinfo_data_list.append(np.array(_get_1d(ch), dtype=np32))
+        
+        if geoinfo_data_list:
+            self.geoinfo_data = np.stack(geoinfo_data_list).transpose()
+        else:
+            self.geoinfo_data = np.zeros((len(self.latitudes), 0), dtype=np32)
 
         # select/filter requested source channels
         self.source_idx = self.select_channels(ds, "source")
@@ -133,8 +161,9 @@ class DataReaderSynop(DataReaderTimestep):
 
         for ch in self.channels_file:
             data = np.array(self.ds[ch], np.float64)
-            mask = data == self.fillvalue
-            data[mask] = np.nan
+            if self.ds_type == "MetNo":
+                mask = data == self.fillvalue
+                data[mask] = np.nan
             mean += [np.nanmean(data.flatten())]
             stdev += [np.nanstd(data.flatten())]
 
@@ -182,7 +211,9 @@ class DataReaderSynop(DataReaderTimestep):
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+                num_data_fields=len(channels_idx),
+                num_geo_fields=len(self.geoinfo_idx),
+                num_coord_fields=3,
             )
 
         assert t_idxs[0] >= 0, "index must be non-negative"
@@ -195,18 +226,29 @@ class DataReaderSynop(DataReaderTimestep):
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
         # sampling is required here
         sel_channels = [self.channels_file[i] for i in channels_idx]
-        data = self.ds[sel_channels].isel(time=slice(didx_start, didx_end)).to_array().values
+        data = self.ds[sel_channels].isel(time=slice(didx_start, didx_end)).to_array()
+        
+        # Ensure dimensions are (variables, time, spatial)
+        # German files are (variables, spatial, time)
+        # MetNo files are (variables, time, spatial)
+        spatial_dim = "location" if "location" in data.dims else "station_id"
+        if data.dims[1] == spatial_dim:
+             data = data.transpose("variable", "time", spatial_dim)
+
+        data = data.values
         # flatten along time dimension
         data = data.transpose([1, 2, 0]).reshape((data.shape[1] * data.shape[2], data.shape[0]))
-        # set invalid values to NaN
-        mask = data == self.fillvalue
-        data[mask] = np.nan
+        # set invalid values to NaN for MetNo nc files
+        if self.ds_type == "MetNo":
+            mask = data == self.fillvalue
+            data[mask] = np.nan
 
-        # construct lat/lon coords
+        # construct lat/lon/height coords
         latlon = np.concatenate(
             [
                 np.expand_dims(self.latitudes, 0),
                 np.expand_dims(self.longitudes, 0),
+                np.expand_dims(self.heights, 0),
             ],
             axis=0,
         ).transpose()

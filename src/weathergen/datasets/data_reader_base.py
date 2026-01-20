@@ -185,7 +185,7 @@ class ReaderData:
     datetimes: NDArray[NPDT64]
 
     @staticmethod
-    def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
+    def empty(num_data_fields: int, num_geo_fields: int, num_coord_fields: int = 2) -> "ReaderData":
         """
         Create an empty ReaderData object
 
@@ -195,7 +195,7 @@ class ReaderData:
             Empty ReaderData object
         """
         return ReaderData(
-            coords=np.zeros((0, 2), dtype=np.float32),
+            coords=np.zeros((0, num_coord_fields), dtype=np.float32),
             geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
             data=np.zeros((0, num_data_fields), dtype=np.float32),
             datetimes=np.zeros((0,), dtype=np.datetime64),
@@ -232,8 +232,8 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
 
     assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
-    assert rdata.coords.shape[1] == 2, (
-        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
+    assert rdata.coords.shape[1] == 2 or rdata.coords.shape[1] == 3, (
+        f"coords must have 2 or 3 columns (lat, lon(, height)), got {rdata.coords.shape}"
     )
     assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
