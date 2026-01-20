@@ -302,14 +302,6 @@ class DataReaderBase(metaclass=ABCMeta):
     Coordinates must be provided in standard geographical format:
     latitude in degrees from -90 (South) to +90 (North),
     and longitude in degrees from -180 (West) to +180 (East).
-
-    Geoinfo Caching:
-        For readers with static geoinfo (constant across all grid points),
-        set `_cached_geoinfo` during initialization to avoid repeated disk reads.
-        This is particularly useful for grid-based datasets like anemoi where
-        geoinfo (altitude, land-sea mask, etc.) is the same for all timesteps.
-        For observation-based datasets where geoinfo varies per observation,
-        leave `_cached_geoinfo` as None and read geoinfo with each data fetch.
     """
 
     # The fields that need to be set by the child classes
@@ -320,10 +312,6 @@ class DataReaderBase(metaclass=ABCMeta):
     target_idx: list[int] = abstract_attribute()
     geoinfo_idx: list[int] = abstract_attribute()
     target_channel_weights: list[float] = abstract_attribute()
-
-    # Optional cached geoinfo for readers with static geoinfo (grid-based datasets)
-    # Shape: (num_gridpoints, num_geoinfo_channels) or None if not cached
-    _cached_geoinfo: NDArray | None = None
 
     def __init__(
         self,
@@ -364,7 +352,6 @@ class DataReaderBase(metaclass=ABCMeta):
         self.stdev = np.ones(0)
         self.mean_geoinfo = np.zeros(0)
         self.stdev_geoinfo = np.ones(0)
-        self._cached_geoinfo = None
 
     @abstractmethod
     def length(self) -> int:
@@ -553,6 +540,11 @@ class DataReaderBase(metaclass=ABCMeta):
 
         assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
         for i, _ in enumerate(self.geoinfo_idx):
+            # Replace NaN with mean (becomes 0 after normalization - neutral value)
+            nan_mask = np.isnan(geoinfos[..., i])
+            if nan_mask.any():
+                geoinfos[..., i] = np.where(nan_mask, self.mean_geoinfo[i], geoinfos[..., i])
+
             stdev = self.stdev_geoinfo[i]
             # Protect against division by zero for constant fields (stdev=0)
             if stdev == 0 or np.isclose(stdev, 0):

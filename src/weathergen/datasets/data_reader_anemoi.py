@@ -113,52 +113,17 @@ class DataReaderAnemoi(DataReaderTimestep):
         # get target channel weights from stream config
         self.target_channel_weights = self.parse_target_channel_weights()
 
-        # select/filter requested geoinfo channels (static/constant-in-time variables)
+        # select/filter requested geoinfo channels (can be any variable, not just constant-in-time)
         self.geoinfo_idx = self.select_geoinfo_channels(ds0)
         self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
 
-        # set geoinfo normalization statistics and cache geoinfo data
+        # set geoinfo normalization statistics
         if len(self.geoinfo_idx) > 0:
             self.mean_geoinfo = ds.statistics["mean"][self.geoinfo_idx]
             self.stdev_geoinfo = ds.statistics["stdev"][self.geoinfo_idx]
-            # Cache geoinfo data once (constant in time, no need to read every epoch)
-            # Read from first timestep and store for reuse
-            geoinfo_data = ds[0:1][:, list(self.geoinfo_idx), 0]
-            # Shape: (1, num_geoinfo, num_gridpoints) -> (num_gridpoints, num_geoinfo)
-            self._cached_geoinfo = geoinfo_data[0].transpose().astype(np.float32)
-
-            # Log diagnostic info for geoinfo statistics
-            ds_name = stream_info["name"]
-            for i, ch_idx in enumerate(self.geoinfo_idx):
-                ch_name = ds.variables[ch_idx]
-                mean_val = self.mean_geoinfo[i]
-                stdev_val = self.stdev_geoinfo[i]
-                nan_count = np.isnan(self._cached_geoinfo[:, i]).sum()
-                if stdev_val == 0 or np.isclose(stdev_val, 0):
-                    _logger.warning(
-                        f"{ds_name}: geoinfo channel '{ch_name}' has stdev=0 "
-                        "(constant field, will skip division in normalization)"
-                    )
-                if nan_count > 0:
-                    _logger.warning(
-                        f"{ds_name}: geoinfo channel '{ch_name}' has {nan_count} NaN values "
-                        f"({100 * nan_count / len(self._cached_geoinfo):.2f}% of grid points)"
-                    )
-                _logger.debug(
-                    f"{ds_name}: geoinfo '{ch_name}' - mean={mean_val:.4f}, stdev={stdev_val:.4f}"
-                )
-
-            # Replace NaN values in cached geoinfo with 0 (after normalization this will be neutral)
-            total_nans = np.isnan(self._cached_geoinfo).sum()
-            if total_nans > 0:
-                _logger.warning(
-                    f"{ds_name}: Replacing {total_nans} total NaN values in geoinfo with 0"
-                )
-                self._cached_geoinfo = np.nan_to_num(self._cached_geoinfo, nan=0.0)
         else:
             self.mean_geoinfo = np.zeros(0)
             self.stdev_geoinfo = np.ones(0)
-            self._cached_geoinfo = None
 
         ds_name = stream_info["name"]
         _logger.info(f"{ds_name}: source channels: {self.source_channels}")
@@ -176,7 +141,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         super().init_empty()
         self.ds = None
         self.len = 0
-        self._cached_geoinfo = None
 
     @override
     def length(self) -> int:
@@ -223,11 +187,23 @@ class DataReaderAnemoi(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
-        # extract channels
+        num_gridpoints = data.shape[2]
+
+        # extract geoinfo channels (can be time-varying, so read from dataset)
+        if len(self.geoinfo_idx) > 0:
+            geoinfos = (
+                data[:, list(self.geoinfo_idx)]
+                .transpose([0, 2, 1])
+                .reshape((data.shape[0] * num_gridpoints, -1))
+            )
+        else:
+            geoinfos = np.zeros((data.shape[0] * num_gridpoints, 0), dtype=data.dtype)
+
+        # extract data channels
         data = (
             data[:, list(channels_idx)]
             .transpose([0, 2, 1])
-            .reshape((data.shape[0] * data.shape[2], -1))
+            .reshape((data.shape[0] * num_gridpoints, -1))
         )
 
         # construct lat/lon coords
@@ -240,13 +216,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         ).transpose()
         # repeat latlon len(t_idxs) times
         coords = np.vstack((latlon,) * len(t_idxs))
-
-        # use cached geoinfo data (no disk read needed - already loaded during init)
-        if self._cached_geoinfo is not None:
-            # repeat cached geoinfo for all timesteps
-            geoinfos = np.vstack((self._cached_geoinfo,) * len(t_idxs))
-        else:
-            geoinfos = np.zeros((len(data), 0), dtype=data.dtype)
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
@@ -306,7 +275,7 @@ class DataReaderAnemoi(DataReaderTimestep):
 
     def select_geoinfo_channels(self, ds0: anemoi_datasets) -> NDArray[np.int64]:
         """
-        Select geoinfo channels (static/constant-in-time variables)
+        Select geoinfo channels (can be any variable, not just constant-in-time)
 
         Parameters
         ----------
@@ -324,16 +293,12 @@ class DataReaderAnemoi(DataReaderTimestep):
         if not geoinfo_channels:
             return np.array([], dtype=np.int64)
 
-        # Select channels that are constant in time and match the geoinfo list
+        # Select channels that match the geoinfo list (any variable type allowed)
         chs_idx = np.sort(
             [
                 ds0.name_to_index[k]
-                for (k, v) in ds0.typed_variables.items()
-                if (
-                    v.is_constant_in_time
-                    and not v.is_computed_forcing
-                    and np.array([f in k for f in geoinfo_channels]).any()
-                )
+                for k in ds0.typed_variables.keys()
+                if np.array([f in k for f in geoinfo_channels]).any()
             ]
         )
 
