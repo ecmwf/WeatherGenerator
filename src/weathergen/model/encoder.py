@@ -169,7 +169,6 @@ class EncoderModule(torch.nn.Module):
             toks_global = tokens_global[i * clen : i_end]
             cell_lens_cur = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
             q_cells_lens_cur = q_cells_lens[: cell_lens_cur.shape[0]]
-            assert toks.shape[0] > 0
 
             # local assimilation model
             toks = self.ae_local_engine(toks, cell_lens_cur, use_reentrant=False)
@@ -178,18 +177,17 @@ class EncoderModule(torch.nn.Module):
             posteriors += [posteriors_c]
 
             # create mask for global tokens, without first element (used for padding)
-            mask_c = cell_lens_cur[1:].to(torch.bool)
-            toks_global_unmasked = toks_global[mask_c]
-            q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_cur[1:][mask_c]])
-            cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_cur[1:][mask_c]])
+            mask = cell_lens_cur[1:].to(torch.bool)
+            toks_global_unmasked = toks_global[mask]
+            q_cells_lens_unmasked = torch.cat([zero_pad, q_cells_lens_cur[1:][mask]])
+            cell_lens_unmasked = torch.cat([zero_pad, cell_lens_cur[1:][mask]])
 
             # local to global adapter engine
             toks_global_unmasked = self.ae_local_global_engine(
                 toks,
                 toks_global_unmasked,
-                q_cells_lens_unmasked_c,
-                cell_lens_unmasked_c,
-                use_reentrant=False,
+                q_cells_lens_unmasked,
+                cell_lens_unmasked,
             )
 
             tokens_global_unmasked += [toks_global_unmasked]
