@@ -85,6 +85,7 @@ OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
 def _sanitize_start_end_time_keys(sub_conf):
+    """Convert start_date and end_date keys to datetime resolvers."""
     time_keys = ["start_date", "end_date"]
     for key in time_keys:
         if key in sub_conf:
@@ -94,6 +95,7 @@ def _sanitize_start_end_time_keys(sub_conf):
 
 
 def _sanitize_delta_time_keys(sub_conf):
+    """Convert time delta keys to timedelta resolvers."""
     delta_keys = ["time_window_step", "time_window_len"]
     for key in delta_keys:
         if key in sub_conf:
@@ -135,6 +137,7 @@ def _sanitize_time_keys(conf: Config) -> Config:
 
 
 def _strip_interpolation(conf: Config) -> Config:
+    """Remove OmegaConf interpolations and convert timedelta/datetime objects to strings."""
     stripped = OmegaConf.create()
     for key in list(conf.keys()):
         if key.startswith("_"):
@@ -166,12 +169,14 @@ def _strip_interpolation(conf: Config) -> Config:
 
 
 def get_run_id():
+    """Generate a random 8-character run ID."""
     s1 = string.ascii_lowercase
     s2 = string.ascii_lowercase + string.digits
     return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
 
 
 def format_cf(config: Config) -> str:
+    """Format config as a human-readable string."""
     stream = io.StringIO()
     clean_cf = _strip_interpolation(config)
     for key, value in clean_cf.items():
@@ -213,6 +218,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     Returns:
         Configuration object loaded from the specified run and mini_epoch.
     """
+    # Loading path
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
@@ -222,12 +228,24 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
             path = get_path_model(run_id=run_id)
         else:
             path = Path(model_path)
-        fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
-        assert (path / run_id / fname).exists(), (
+
+        # Determine mini_epoch string
+        if mini_epoch is None:
+            mini_epoch_str = None
+        elif mini_epoch == -1:
+            mini_epoch_str = "_latest"
+        elif (path / f"model_{run_id}_epoch{mini_epoch:05d}.json").exists():
+            mini_epoch_str = f"_epoch{mini_epoch:05d}"
+        else:
+            mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+
+        # Get file name
+        fname = path / _get_model_config_file_read_name(run_id, mini_epoch_str)
+        assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
-            (path / run_id / fname),
+            fname,
         )
-        _logger.info(f"Loading config from specified run_id and mini_epoch: {(path / run_id / fname)}")
+        _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
 
     with fname.open() as f:
         json_str = f.read()
@@ -239,6 +257,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
 
 
 def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
+    """Generate the filename for writing a model config file."""
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
@@ -249,15 +268,21 @@ def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
     return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def _get_model_config_file_read_name(path: Path, run_id: str, mini_epoch: int | None):
-    if mini_epoch is None:
+def _get_model_config_file_read_name(run_id: str, mini_epoch_str: str | None):
+    """Generate the filename for reading a model config file."""
+    if mini_epoch_str is None:
         mini_epoch_str = ""
-    elif mini_epoch == -1:
+    elif mini_epoch_str == "-1":
         mini_epoch_str = "_latest"
-    elif (path / run_id / f"model_{run_id}_epoch{mini_epoch:05d}.json").exists():
-        mini_epoch_str = f"_epoch{mini_epoch:05d}"
+    elif (mini_epoch_str.startswith("epoch") or mini_epoch_str.startswith("chkpt")) and len(
+        mini_epoch_str
+    ) == 10:
+        mini_epoch_str = f"_{mini_epoch_str}"
     else:
-        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+        raise ValueError(
+            f"Invalid mini_epoch_str format: {mini_epoch_str}. "
+            "Expected formats are None, '-1', 'epochXXXXX', or 'chkptXXXXX'."
+        )
 
     return f"model_{run_id}{mini_epoch_str}.json"
 
@@ -471,9 +496,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
 
 
 def _load_private_conf(private_home: Path | None = None) -> DictConfig:
-    "Return the private configuration."
-    "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
-
+    """Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF."""
     env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
 
     if private_home is not None and private_home.is_file():
@@ -542,6 +565,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
+    """Load all stream configurations from a directory."""
     # TODO: might want to put this into config later instead of hardcoding it here...
     streams_history = {
         "streams_anemoi": "era5_1deg",
@@ -622,6 +646,7 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
 
 
 def get_path_results(config: Config, mini_epoch: int) -> Path:
+    """Get the path to validation results for a specific mini_epoch and rank."""
     ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
