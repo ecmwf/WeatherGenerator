@@ -566,7 +566,7 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        output = ModelOutput(batch.get_forecast_steps() + 1)
+        output = ModelOutput(max(1, batch.get_forecast_steps() + forecast_offset))
 
         tokens, posteriors = self.encoder(model_params, batch)
 
@@ -574,7 +574,7 @@ class Model(torch.nn.Module):
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
-
+        breakpoint()
         if batch.get_forecast_steps() > 0:
             # roll-out in latent space
             for fstep in range(forecast_offset, forecast_offset + batch.get_forecast_steps()):
@@ -588,7 +588,7 @@ class Model(torch.nn.Module):
                 output = self.predict(model_params, fstep, tokens, batch, output)
                 # safe latent prediction
                 latent_state = self.get_latent_state(tokens, None)
-                output.add_latent_prediction(fstep, "latent_state", latent_state) 
+                output.add_latent_prediction(fstep, "latent_state", latent_state)
         else:
             # latents for output
             z = self.latent_pre_norm(tokens)
@@ -599,7 +599,6 @@ class Model(torch.nn.Module):
                 output.add_latent_prediction(0, name, head(latent_state))
             # prediction for final step
             output = self.predict(model_params, batch.get_forecast_steps(), tokens, batch, output)
-
 
         return output
 
