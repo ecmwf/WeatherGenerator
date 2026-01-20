@@ -45,37 +45,8 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 
-# Add at top of trainer.py                                                                 
-import torch.distributed as dist                                                           
-from datetime import timedelta                                                             
-                                                                                         
+# Add at top of trainer.py
 
-def debug_barrier(name, rank):                                                          
-      """Simple checkpoint function - call at key points in training loop"""
-      _debug_start_time = time.time()
-      torch.cuda.synchronize()                                                               
-      elapsed = time.time() - _debug_start_time                                              
-      print(f"[{elapsed:8.2f}s] [Rank {rank}] CHECKPOINT: {name}", flush=True)               
-                                                                                             
-                                                                                             
-def debug_nccl_barrier(name, rank):                                                        
-  """                                                                                    
-  Perform NCCL-compatible barrier with debugging.                                        
-  All ranks must call this - if one doesn't, others will hang (which is what we want to  
-detect).                                                                                   
-  """                                                                                    
-  torch.cuda.synchronize()                                                               
-  elapsed = time.time() - _debug_start_time                                              
-  print(f"[{elapsed:8.2f}s] [Rank {rank}] ENTERING barrier: {name}", flush=True)         
-                                                                                         
-  if dist.is_initialized():                                                              
-      # all_reduce acts as implicit barrier                                              
-      t = torch.tensor([rank], dtype=torch.float32, device='cuda')                       
-      dist.all_reduce(t, op=dist.ReduceOp.SUM)                                           
-      torch.cuda.synchronize()                                                           
-                                                                                         
-  elapsed = time.time() - _debug_start_time                                              
-  print(f"[{elapsed:8.2f}s] [Rank {rank}] EXITED barrier: {name}", flush=True)
 
 class Trainer(TrainerBase):
     def __init__(self, train_log_freq: Config):
@@ -137,7 +108,9 @@ class Trainer(TrainerBase):
         # get training config and remove disabled options (e.g. because of overrides)
         self.training_cfg = cf.get("training_config")
         self.training_cfg = filter_config_by_enabled(self.training_cfg, keys_to_filter)
-        assert len(self.training_cfg.model_input.keys()) != 0, "You probably have no loss term enabled"
+        assert len(self.training_cfg.model_input.keys()) != 0, (
+            "You probably have no loss term enabled"
+        )
 
         # validation and test configs are training configs, updated by specified keys
         self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
@@ -445,7 +418,6 @@ class Trainer(TrainerBase):
                     batch.get_source_samples(),
                     self.training_cfg.window_offset_prediction,
                 )
-                debug_barrier("after_forward", cf.rank)
 
                 targets_and_auxs = {}
                 for loss_name, target_aux in self.target_and_aux_calculators.items():
@@ -465,7 +437,6 @@ class Trainer(TrainerBase):
                 targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
-            debug_barrier("after_loss", cf.rank)
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:
@@ -484,7 +455,6 @@ class Trainer(TrainerBase):
             # backward pass
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
-            debug_barrier("after_backward", cf.rank)
 
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
@@ -502,7 +472,6 @@ class Trainer(TrainerBase):
             # optimizer step
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
-            debug_barrier("after_optimizer", cf.rank)
 
             # update learning rate
             self.lr_scheduler.step()
@@ -520,12 +489,10 @@ class Trainer(TrainerBase):
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
-            debug_barrier("after_ema", cf.rank)
 
             perf_gpu, perf_mem = self.get_perf()
             self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
             self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
-            debug_barrier("after_ddp_avg", cf.rank)
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
