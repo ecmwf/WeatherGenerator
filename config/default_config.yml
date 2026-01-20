@@ -76,8 +76,8 @@ p_mean: -1.2
 p_std: 1.2
 # Encoder weights (set to null to not load a pretrained encoder)
 # chkpt_encoder_weights: "./models/dhb9q2yo/dhb9q2yo_chkpt00126.chkpt"
-chkpt_encoder_weights: y8wuhr2t #"dhb9q2yo"
-chkpt_encoder_mini_epoch: -1 #126
+chkpt_encoder_weights: null #ß"dhb9q2yo"
+chkpt_encoder_mini_epoch: 126
 
 healpix_level: 5
 
