@@ -496,7 +496,9 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
 
 
 def _load_private_conf(private_home: Path | None = None) -> DictConfig:
-    """Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF."""
+    """
+    Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
+    """
     env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
 
     if private_home is not None and private_home.is_file():
