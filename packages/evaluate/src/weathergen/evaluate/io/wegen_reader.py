@@ -197,8 +197,8 @@ class WeatherGenReader(Reader):
                 # all other cases: recompute scores
                 missing_metrics.setdefault(region, []).append(metric)
                 continue
-        computable_metrics = self.check_computability(missing_metrics)
-        return local_scores, computable_metrics
+        recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
+        return local_scores, recomputable_missing_metrics
 
     def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
@@ -217,7 +217,7 @@ class WeatherGenReader(Reader):
             score = None
         return score
 
-    def check_computability(self, metrics):
+    def get_recomputable_metrics(self, metrics):
         """determine whether given metrics can be re-computed."""
         return metrics
 
@@ -296,7 +296,7 @@ class WeatherGenJSONReader(WeatherGenReader):
         # it can still happen when a particular score was available for a different channel
         raise ValueError(f"Missing JSON data for run {self.run_id}.")
 
-    def check_computability(self, metrics):
+    def get_recomputable_metrics(self, metrics):
         _logger.info(
             f"The following metrics have not yet been computed:{metrics}. Use type: zarr for that."
         )

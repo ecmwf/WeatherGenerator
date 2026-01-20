@@ -221,10 +221,6 @@ def _process_stream(
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
-    if plot_score_maps and type_ != "zarr":
-        _logger.info("score maps skipped, use type:zarr for that.")
-        plot_score_maps = False
-
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
         return run_id, stream, {}
@@ -237,16 +233,18 @@ def _process_stream(
     if not stream_dict.get("evaluation"):
         return run_id, stream, {}
 
-    stream_loaded_scores, computable_metrics = reader.load_scores(
+    stream_loaded_scores, recomputable_metrics = reader.load_scores(
         stream,
         regions,
         metrics,
     )
     scores_dict = stream_loaded_scores
 
-    if computable_metrics or plot_score_maps:
-        regions_to_compute = list(set(computable_metrics.keys())) if computable_metrics else regions
-        metrics_to_compute = computable_metrics if computable_metrics else metrics
+    if recomputable_metrics or (plot_score_maps and type_ == "zarr"):
+        regions_to_compute = (
+            list(set(recomputable_metrics.keys())) if recomputable_metrics else regions
+        )
+        metrics_to_compute = recomputable_metrics if recomputable_metrics else metrics
 
         stream_computed_scores = calc_scores_per_stream(
             reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
