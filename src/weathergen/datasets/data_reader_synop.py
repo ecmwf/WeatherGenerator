@@ -107,14 +107,15 @@ class DataReaderSynop(DataReaderTimestep):
             v = ds[var_name]
             if self.ds_type == "Germany":
                 return v.isel(time=0)
-                
+
             return v
 
         # Resolve coordinates
         lat_name = stream_info.get("latitude_name", "latitude")
         lon_name = stream_info.get("longitude_name", "longitude")
-        height_name = stream_info.get("height_name", "height") # height for german, altitude for MetNo stations
-        
+        # height for german stations and altitude for MetNo stations
+        height_name = stream_info.get("height_name", "height")
+
         self.latitudes = _clip_lat(np.array(_get_1d(lat_name), dtype=np32))
         self.longitudes = _clip_lon(np.array(_get_1d(lon_name), dtype=np32))
         self.heights = np.array(_get_1d(height_name), dtype=np32)
@@ -126,7 +127,7 @@ class DataReaderSynop(DataReaderTimestep):
         geoinfo_data_list = []
         for ch in self.geoinfo_channels:
             geoinfo_data_list.append(np.array(_get_1d(ch), dtype=np32))
-        
+
         if geoinfo_data_list:
             self.geoinfo_data = np.stack(geoinfo_data_list).transpose()
         else:
@@ -227,13 +228,13 @@ class DataReaderSynop(DataReaderTimestep):
         # sampling is required here
         sel_channels = [self.channels_file[i] for i in channels_idx]
         data = self.ds[sel_channels].isel(time=slice(didx_start, didx_end)).to_array()
-        
+
         # Ensure dimensions are (variables, time, spatial)
         # German files are (variables, spatial, time)
         # MetNo files are (variables, time, spatial)
         spatial_dim = "location" if "location" in data.dims else "station_id"
         if data.dims[1] == spatial_dim:
-             data = data.transpose("variable", "time", spatial_dim)
+            data = data.transpose("variable", "time", spatial_dim)
 
         data = data.values
         # flatten along time dimension
