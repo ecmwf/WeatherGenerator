@@ -164,8 +164,13 @@ class EncoderModule(torch.nn.Module):
             toks = tokens[l0:l1]
             # if we have a very sparse input, we may have no tokens in the chunk, toks
             # skip processing of the empty chunk in this case
-            # Check if this chunk is empty
-            if l0 == l1 or toks.shape[0] == 0:
+            # Check if this chunk is empty                                                     
+            is_empty_chunk = (l0 == l1 or toks.shape[0] == 0)                                  
+                                                                                             
+            if is_empty_chunk:                                                                 
+                # Create minimal dummy tensors to maintain consistent checkpoint call count    
+                # across all ranks (required for FSDP gradient sync)                           
+                # Don't append anything to output - this chunk contributes nothing             
                 continue
 
             toks_global = tokens_global[i * clen : i_end]
@@ -195,6 +200,10 @@ class EncoderModule(torch.nn.Module):
 
             tokens_global_unmasked += [toks_global_unmasked]
 
+        # DEBUG: Log skip pattern per rank                                                     
+        # print(f"[Rank {self.cf.rank}] Skipped iterations: {skipped_iterations} out of {num_iterations}", flush=True) 
+        if len(tokens_global_unmasked) == 0:
+            assert False, "Not yet implemented"
         tokens_global_unmasked = torch.cat(tokens_global_unmasked)
 
         return tokens_global_unmasked, posteriors

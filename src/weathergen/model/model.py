@@ -32,6 +32,7 @@ from weathergen.model.engines import (
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
     LatentPredictionHeadMLP,
+    LatentPredictionHeadIdentity,
     LatentPredictionHeadTransformer
 )
 from weathergen.model.layers import MLP, NamedLinear
@@ -461,6 +462,8 @@ class Model(torch.nn.Module):
                     class_token=class_token,
                     patch_token=patch_token,
                 )
+            elif loss_conf["head"] == "identity":
+                return LatentPredictionHeadIdentity()
 
         # TODO: support multiple LossLatentSSLStudentTeacher terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
@@ -608,7 +611,6 @@ class Model(torch.nn.Module):
         )
         output.add_latent_prediction(0, "posteriors", posteriors)
         output.add_latent_prediction(0, "latent_state", latent_state)
-        # import code; code.interact( local=locals())
         for name, head in self.latent_heads.items():
             output.add_latent_prediction(0, name, head(latent_state))
 

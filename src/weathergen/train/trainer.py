@@ -45,9 +45,19 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 
-# Add at top of trainer.py
-
-
+DEBUG = False
+if DEBUG:
+    def debug_barrier(name, rank):                                                          
+        """Simple checkpoint function - call at key points in training loop"""
+        _debug_start_time = time.time()
+        torch.cuda.synchronize()                                                               
+        elapsed = time.time() - _debug_start_time                                              
+        print(f"[{elapsed:8.2f}s] [Rank {rank}] CHECKPOINT: {name}", flush=True)               
+else:
+    def debug_barrier(name, rank):                                                          
+        return
+                                                                                             
+                                                                                             
 class Trainer(TrainerBase):
     def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)
@@ -411,7 +421,6 @@ class Trainer(TrainerBase):
 
             batch.to_device(self.device)
 
-            print("Batch to device")
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,
@@ -423,7 +432,6 @@ class Trainer(TrainerBase):
                     self.training_cfg.window_offset_prediction,
                 )
 
-                print("Model predictions")
                 targets_and_auxs = {}
                 for loss_name, target_aux in self.target_and_aux_calculators.items():
                     # find targets for this target-aux calculator
@@ -436,7 +444,6 @@ class Trainer(TrainerBase):
                         self.model,
                         self.training_cfg.window_offset_prediction,
                     )
-                print("target predictions")
 
             loss = self.loss_calculator.compute_loss(
                 preds=preds,

@@ -903,12 +903,26 @@ class LatentPredictionHeadTransformer(nn.Module):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 patch_class_tokens = block(patch_class_tokens)
             else:
-                patch_class_tokens = checkpoint(block, patch_class_tokens, use_reentrant=False)
+                # patch_class_tokens = checkpoint(block, patch_class_tokens, use_reentrant=False)
+                patch_class_tokens = block(patch_class_tokens)
         return patch_class_tokens
 
 
+class LatentPredictionHeadIdentity(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def reset_parameters(self):
+        return
+
+    def forward(self, x: LatentState):
+        return x.patch_tokens
+
+
 class LatentPredictionHeadMLP(nn.Module):
-    def __init__(self, name, in_dim, out_dim, num_layers, hidden_factor, class_token: bool, patch_token: bool):
+    def __init__(
+        self, name, in_dim, out_dim, num_layers, hidden_factor, class_token: bool, patch_token: bool
+    ):
         super().__init__()
 
         self.name = name
