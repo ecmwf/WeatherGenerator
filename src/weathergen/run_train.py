@@ -47,7 +47,7 @@ def inference_from_args(argl: list[str]):
             start_date=args.start_date,
             end_date=args.end_date,
             samples_per_mini_epoch=args.samples,
-            write_num_samples=args.samples if args.save_samples else 0,
+            output=dict(write_num_samples=args.samples if args.save_samples else 0),
             streams_output=args.streams_output,
         )
     }
