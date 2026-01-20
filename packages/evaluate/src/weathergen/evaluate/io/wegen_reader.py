@@ -171,8 +171,9 @@ class WeatherGenReader(Reader):
         -------
         xr.DataArray
             The metric DataArray.
-        missing_metrics:
-            dictionary of missing regions and metrics that need to be recomputed.
+        computable_metrics:
+            dictionary of regions and metrics that can be recomputed
+            (empty for JSONreader).
         """
 
         local_scores = {}
@@ -196,8 +197,8 @@ class WeatherGenReader(Reader):
                 # all other cases: recompute scores
                 missing_metrics.setdefault(region, []).append(metric)
                 continue
-
-        return local_scores, missing_metrics
+        computable_metrics = self.check_computability(missing_metrics)
+        return local_scores, computable_metrics
 
     def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
@@ -215,6 +216,10 @@ class WeatherGenReader(Reader):
         else:
             score = None
         return score
+
+    def check_computability(self, metrics):
+        """determine whether given metrics can be re-computed."""
+        return metrics
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
@@ -290,6 +295,12 @@ class WeatherGenJSONReader(WeatherGenReader):
         # TODO this should not be needed, the reader should not even be created if this is the case
         # it can still happen when a particular score was available for a different channel
         raise ValueError(f"Missing JSON data for run {self.run_id}.")
+
+    def check_computability(self, metrics):
+        _logger.info(
+            f"The following metrics have not yet been computed:{metrics}. Use type: zarr for that."
+        )
+        return {}
 
 
 class WeatherGenZarrReader(WeatherGenReader):

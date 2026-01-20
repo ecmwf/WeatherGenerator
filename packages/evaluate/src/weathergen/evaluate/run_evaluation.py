@@ -217,50 +217,42 @@ def _process_stream(
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
     """
-    # try:
+
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
+
+    if plot_score_maps and type_ != "zarr":
+        _logger.info("score maps skipped, use type:zarr for that.")
+        plot_score_maps = False
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
         return run_id, stream, {}
 
     # Parallel plotting
-    if stream_dict.get("plotting"):
-        if type_ == "zarr":
-            plot_data(reader, stream, global_plotting_opts)
-        else:
-            _logger.info("skipped plot_data, use type: zarr for that.")
+    if stream_dict.get("plotting") and type_ == "zarr":
+        plot_data(reader, stream, global_plotting_opts)
 
     # Scoring per stream
     if not stream_dict.get("evaluation"):
         return run_id, stream, {}
 
-    stream_loaded_scores, missing_metrics = reader.load_scores(
+    stream_loaded_scores, computable_metrics = reader.load_scores(
         stream,
         regions,
         metrics,
     )
     scores_dict = stream_loaded_scores
 
-    if missing_metrics or plot_score_maps:
-        if type_ == "zarr":
-            regions_to_compute = list(set(missing_metrics.keys())) if missing_metrics else regions
-            metrics_to_compute = missing_metrics if missing_metrics else metrics
+    if computable_metrics or plot_score_maps:
+        regions_to_compute = list(set(computable_metrics.keys())) if computable_metrics else regions
+        metrics_to_compute = computable_metrics if computable_metrics else metrics
 
-            stream_computed_scores = calc_scores_per_stream(
-                reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
-            )
-            metric_list_to_json(reader, stream, stream_computed_scores, regions)
-            scores_dict = merge(stream_loaded_scores, stream_computed_scores)
-        else:
-            if missing_metrics:
-                _logger.info(
-                    f"The following metrics have not yet been computed:"
-                    f"{missing_metrics}. Use type: zarr for that."
-                )
-            if plot_score_maps:
-                _logger.info("score maps skipped, use type:zarr for that.")
+        stream_computed_scores = calc_scores_per_stream(
+            reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
+        )
+        metric_list_to_json(reader, stream, stream_computed_scores, regions)
+        scores_dict = merge(stream_loaded_scores, stream_computed_scores)
 
     return run_id, stream, scores_dict
 
