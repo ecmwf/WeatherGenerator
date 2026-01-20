@@ -273,7 +273,7 @@ class Trainer(TrainerBase):
         if is_root():
             if cf.with_fsdp:
                 logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
-            self.model.print_num_parameters()
+            # self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
