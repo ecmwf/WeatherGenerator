@@ -600,8 +600,6 @@ class Model(torch.nn.Module):
             # prediction for final step
             output = self.predict(model_params, batch.get_forecast_steps(), tokens, batch, output)
 
-        return output
-
     def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
         """Advances latent space representation in time
 
