@@ -7,6 +7,15 @@ import pandas as pd
 def get_train_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     _add_general_arguments(parser)
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        nargs="?",
+        help=(
+            "Path to the base configuration file."
+            "If not provided, ./config/default_config.yml is used."
+        ),
+    )
 
     return parser
 
@@ -111,14 +120,6 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
             "Overwrite individual config options."
             " This takes precedence over overwrites passed via --config or --finetune_forecast."
             " Individual items should be of the form: parent_obj.nested_obj=value"
-        ),
-    )
-    parser.add_argument(
-        "--base-config",
-        type=Path,
-        help=(
-            "Path to the base configuration file."
-            "If not provided, ./config/default_config.yml is used."
         ),
     )
 
