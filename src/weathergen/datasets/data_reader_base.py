@@ -144,6 +144,12 @@ class TimeWindowHandler:
 
         return DTRange(t_start_win, t_end_win)
 
+    def forecast_window(self, idx: TIndex, fstep: int, forecast_dt: NPTDel64):
+        t_start_win = self.t_start + self.t_window_step*idx + fstep*forecast_dt
+        t_end_win = t_start_win + self.t_window_len
+
+        return DTRange(t_start_win, t_end_win)
+
 
 @dataclass
 class ReaderData:
@@ -331,7 +337,7 @@ class DataReaderBase(metaclass=ABCMeta):
 
         return self.length()
 
-    def get_source(self, idx: TIndex) -> ReaderData:
+    def get_source(self, t_range: DTRange) -> ReaderData:
         """
         Get source data for idx
 
@@ -345,11 +351,11 @@ class DataReaderBase(metaclass=ABCMeta):
         source data (coords, geoinfos, data, datetimes)
         """
 
-        rdata = self._get(idx, self.source_idx)
+        rdata = self._get(t_range, self.source_idx)
 
         return rdata
 
-    def get_target(self, idx: TIndex) -> ReaderData:
+    def get_target(self, t_range: DTRange) -> ReaderData:
         """
         Get target data for idx
 
@@ -363,7 +369,7 @@ class DataReaderBase(metaclass=ABCMeta):
         target data (coords, geoinfos, data, datetimes)
         """
 
-        rdata = self._get(idx, self.target_idx)
+        rdata = self._get(t_range, self.target_idx)
 
         return rdata
 
@@ -687,7 +693,7 @@ class DataReaderTimestep(DataReaderBase):
         self.data_end_time = data_end_time
         self.period = period
 
-    def _get_dataset_idxs(self, idx: TIndex) -> tuple[NDArray[np.int64], DTRange]:
+    def _get_dataset_idxs(self, t_range: DTRange) -> tuple[NDArray[np.int64], DTRange]:
         """
         Get dataset indexes for a given time window index.
 
@@ -705,7 +711,7 @@ class DataReaderTimestep(DataReaderBase):
             self.data_start_time,
             self.data_end_time,
             self.period,
-            idx,
+            t_range,
             self.time_window_handler,
         )
 
@@ -720,7 +726,7 @@ def get_dataset_indexes_timestep(
     data_start_time: NPDT64,
     data_end_time: NPDT64 | None,
     period: NPTDel64,
-    idx: TIndex,
+    t_range: DTRange,
     tw_handler: TimeWindowHandler,
 ) -> tuple[NDArray[np.int64], DTRange]:
     """
@@ -747,7 +753,7 @@ def get_dataset_indexes_timestep(
     """
 
     # Function is separated from the class to allow testing without instantiating the class.
-    dtr = tw_handler.window(idx)
+    dtr = t_range
     # If there is no or only marginal overlap with the dataset, return empty index ranges
     if (
         not data_start_time

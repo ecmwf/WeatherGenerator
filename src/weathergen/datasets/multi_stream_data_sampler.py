@@ -21,6 +21,7 @@ from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
     TIndex,
+    DTRange
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
@@ -41,7 +42,7 @@ type StreamName = str
 logger = logging.getLogger(__name__)
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderData:
+def collect_datasources(stream_datasets: list, t_range: DTRange, type: str) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
     """
@@ -59,7 +60,7 @@ def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderD
             assert False, "invalid value for argument `type`"
 
         # get source (of potentially multi-step length)
-        rdata = get_reader_data(idx).remove_nan_coords()
+        rdata = get_reader_data(t_range).remove_nan_coords()
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
@@ -369,7 +370,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for step, idx in enumerate(range(base_idx, base_idx - num_steps_input, -1)):
                 # TODO: check that we are not out of bounds when we go back in time
 
-                time_win_source = self.time_window_handler.window(idx)
+                time_win_source = self.time_window_handler.forecast_window(
+                                            idx,
+                                            -num_steps_input + step,
+                                            self.len_timedelta) 
 
                 # collect all targets for current stream
                 # do we want this to be ascending or descending in time?
@@ -411,8 +415,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # collect for all forecast steps
         dt = self.forecast_offset + forecast_dt
         for step, fstep in enumerate(range(self.forecast_offset, dt + 1)):
-            step_forecast_dt = idx + (self.forecast_delta_dt * fstep) // self.step_timedelta
-            time_win_target = self.time_window_handler.window(step_forecast_dt)
+            time_win_target = self.time_window_handler.forecast_window(
+                                            idx,
+                                            fstep,
+                                            self.forecast_delta_dt)
 
             # collect all targets for current stream
             rdata = output_data[step]
@@ -513,15 +519,22 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # source data: iterate overall input steps
         input_data = []
-        for idx in range(base_idx - num_steps_input_max, base_idx + 1):
+        for step,idx in enumerate(range(base_idx - num_steps_input_max, base_idx + 1)):
             # TODO: check that we are not out of bounds when we go back in time
+            
+            time_win_source = self.time_window_handler.forecast_window(
+                                            idx,
+                                            -num_steps_input_max + step,
+                                            self.len_timedelta) 
 
-            rdata = collect_datasources(stream_ds, idx, "source")
+
+            rdata = collect_datasources(stream_ds, time_win_source, "source")
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(idx)
+                #time_win = self.time_window_handler.window(idx)
+                time_win = time_win_source
                 rdata = spoof(
                     self.healpix_level,
                     time_win.start,
@@ -535,14 +548,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # target data: collect for all forecast steps
         output_data = []
         for fstep in range(self.forecast_offset, self.forecast_offset + forecast_dt + 1):
-            step_forecast_dt = base_idx + (self.forecast_delta_dt * fstep) // self.step_timedelta
+            #step_forecast_dt = base_idx + (self.forecast_delta_dt * fstep) // self.step_timedelta
 
-            rdata = collect_datasources(stream_ds, step_forecast_dt, "target")
+            time_win_target = self.time_window_handler.forecast_window(
+                                            idx,
+                                            fstep,
+                                            self.forecast_delta_dt)
+
+            rdata = collect_datasources(stream_ds, time_win_target, "target")
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(idx)
+                #time_win = self.time_window_handler.window(idx)
+                time_win = time_win_target
                 rdata = spoof(
                     self.healpix_level,
                     time_win.start,
