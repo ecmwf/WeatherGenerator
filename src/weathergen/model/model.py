@@ -574,7 +574,7 @@ class Model(torch.nn.Module):
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
-        breakpoint()
+
         if batch.get_forecast_steps() > 0:
             # roll-out in latent space
             for fstep in range(forecast_offset, forecast_offset + batch.get_forecast_steps()):
@@ -599,6 +599,8 @@ class Model(torch.nn.Module):
                 output.add_latent_prediction(0, name, head(latent_state))
             # prediction for final step
             output = self.predict(model_params, batch.get_forecast_steps(), tokens, batch, output)
+
+        return output
 
     def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
         """Advances latent space representation in time

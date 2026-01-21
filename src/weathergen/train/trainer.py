@@ -410,7 +410,7 @@ class Trainer(TrainerBase):
                 preds = self.model(
                     self.model_params,
                     batch.get_source_samples(),
-                    self.training_cfg.window_offset_prediction,
+                    self.training_cfg.forecast.offset,
                 )
 
                 targets_and_auxs = {}
@@ -423,7 +423,7 @@ class Trainer(TrainerBase):
                         batch.get_target_samples(target_idxs),
                         self.model_params,
                         self.model,
-                        self.training_cfg.window_offset_prediction,
+                        self.training_cfg.forecast.offset,
                     )
 
             loss = self.loss_calculator.compute_loss(
@@ -530,13 +530,13 @@ class Trainer(TrainerBase):
                             preds = self.model(
                                 self.model_params,
                                 batch.get_source_samples(),
-                                mode_cfg.window_offset_prediction,
+                                mode_cfg.forecast.offset,
                             )
                         else:
                             preds = self.ema_model.forward_eval(
                                 self.model_params,
                                 batch.get_source_samples(),
-                                mode_cfg.window_offset_prediction,
+                                mode_cfg.forecast.offset,
                             )
 
                         targets_and_auxs = {}
@@ -547,7 +547,7 @@ class Trainer(TrainerBase):
                                 batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
-                                mode_cfg.window_offset_prediction,
+                                mode_cfg.forecast.offset,
                             )
 
                     _ = self.loss_calculator_val.compute_loss(

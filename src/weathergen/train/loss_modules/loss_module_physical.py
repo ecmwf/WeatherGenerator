@@ -56,7 +56,8 @@ class LossPhysical(LossModuleBase):
         self.device = device
         self.name = "LossPhysical"
 
-        self.forecast_offset = mode_cfg.get("window_offset_prediction", 0)
+        # TODO remove forecast offset dependency by directly looping over preds and targets
+        self.forecast_offset = mode_cfg.get("forecast", {}).get("offset", 0)
 
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -220,22 +221,26 @@ class LossPhysical(LossModuleBase):
             stream_loss_weight, weights_channels = self._get_weights(stream_info)
 
             fstep_loss_weights = self._get_fstep_weights(targets.num_forecast_steps)
+            if self.forecast_offset == 1:
+                fstep_loss_weights.insert(0, None)
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
 
-            for fstep in range(self.forecast_offset, self.forecast_offset + targets.num_forecast_steps):
+            for fstep in range(
+                self.forecast_offset, self.forecast_offset + targets.num_forecast_steps
+            ):
                 fstep_weight = fstep_loss_weights[fstep]
 
                 # get current prediction and target
                 # TODO: consistent ordering of preds and targets
                 preds_batch = preds.physical[fstep].get(stream_name, [])
 
-                targets_batch = targets.physical[stream_name][fstep]["target"]
-                targets_coords_batch = targets.physical[stream_name][fstep]["target_coords"]
-                targets_times_batch = targets.physical[stream_name][fstep]["target_times"]
-                targets_params = targets.physical[stream_name][fstep]["target_metda_data"]
-                targets_is_spoof = targets.physical[stream_name][fstep]["is_spoof"]
+                targets_batch = targets.physical[fstep][stream_name]["target"]
+                targets_coords_batch = targets.physical[fstep][stream_name]["target_coords"]
+                targets_times_batch = targets.physical[fstep][stream_name]["target_times"]
+                targets_params = targets.physical[fstep][stream_name]["target_metda_data"]
+                targets_is_spoof = targets.physical[fstep][stream_name]["is_spoof"]
 
                 loss_batch = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_batch = 0

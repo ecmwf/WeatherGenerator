@@ -40,11 +40,12 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
-    window_offset_prediction = val_cfg.get("window_offset_prediction", 0)
+    forecast_offset = val_cfg.get("forecast", {}).get("offset", 0)
     forecast_steps = max(1, val_cfg.get("forecast", {}).get("num_steps", 1))
     targets_lens = []
-    # for fstep in range(window_offset_prediction, forecast_steps + 1):
-    for fstep in range(window_offset_prediction, forecast_steps):
+    # TODO why does this stop at forecast_steps? Maybe explains #1657
+    # for fstep in range(forecast_offset, forecast_steps + 1):
+    for fstep in range(forecast_offset, forecast_steps):
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
@@ -156,7 +157,7 @@ def write_output(
         source_channels,
         geoinfo_channels,
         sample_start,
-        val_cfg.get("window_offset_prediction", 0),
+        forecast_offset,
     )
     with zarrio_writer(config.get_path_output(cf, mini_epoch)) as zio:
         for subset in data.items():

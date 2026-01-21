@@ -13,6 +13,10 @@ import dataclasses
 
 import torch
 
+from weathergen.model.engines import LatentState
+
+type StreamName = str
+
 
 @dataclasses.dataclass
 class TargetAuxOutput:
@@ -22,9 +26,36 @@ class TargetAuxOutput:
 
     num_forecast_steps: int
 
-    physical: dict[str, torch.Tensor]
-    latent: dict[str, torch.Tensor]
+    physical: list[dict[StreamName, torch.Tensor]]
+    latent: list[dict[str, torch.Tensor | LatentState]]
     aux_outputs: dict[str, torch.Tensor]
+
+    def __init__(self, forecast_offset: int, forecast_steps: int) -> None:
+        len_target = max(1, forecast_offset + forecast_steps)
+        self.num_forecast_steps = forecast_steps
+        self.physical = [{} for _ in range(len_target)]
+        self.latent = [{} for _ in range(len_target)]
+        self.aux_outputs = {}
+
+    def add_physical_target(self, fstep: int, stream_name: StreamName, pred: torch.Tensor) -> None:
+        self.physical[fstep][stream_name] = pred
+
+    def add_latent_target(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
+        self.latent[fstep][latent_name] = pred
+
+    def get_physical_target(
+        self, fstep: int, stream_name: StreamName | None = None, sample_idx: int | None = None
+    ):
+        pred = self.physical[fstep]
+        if stream_name is not None:
+            pred = pred.get(stream_name, None)
+            if sample_idx is not None:
+                assert sample_idx < len(pred), "Invalid sample index."
+                pred = pred[sample_idx]
+        return pred
+
+    def get_latent_target(self, fstep: int):
+        return self.latent[fstep]
 
 
 class TargetAndAuxModuleBase:
@@ -60,18 +91,18 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
+    def compute(self, bidx, batch, model_params, model, forecast_offset) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
         forecast_steps = batch.get_forecast_steps()
 
+        targets = TargetAuxOutput(forecast_offset, forecast_steps)
+
         # collect all targets, concatenating across batch dimension since this is also how it
         # happens for predictions in the model
-        targets = {}
         for stream_name in stream_names:
             # collect targets for all forecast steps
-            targets[stream_name] = []
-            for fstep in range(forecast_steps):
+            for fstep in range(forecast_offset, forecast_offset + forecast_steps):
                 targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
                 is_spoof = []
                 for sample in batch.samples:
@@ -81,18 +112,17 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                     meta_data += [sample.meta_info]
                     is_spoof += [sample.streams_data[stream_name].is_spoof()]
 
-                targets[stream_name].append(
-                    {
+                    targets_cur = {
                         "target": targets_cur,
                         "target_times": target_times_cur,
                         "target_coords": target_coords_cur,
                         "target_metda_data": meta_data,
                         "is_spoof": is_spoof,
                     }
-                )
 
-        aux_outputs = {}
-        return TargetAuxOutput(forecast_steps, targets, None, aux_outputs)
+                    targets.add_physical_target(fstep, stream_name, targets_cur)
+
+        return targets
 
     def to_device(self, device) -> PhysicalTargetAndAux:
         return self

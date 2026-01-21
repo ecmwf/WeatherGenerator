@@ -98,8 +98,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if is_root():
             logger.info(self.time_window_handler)
 
-        self.forecast_offset = mode_cfg.window_offset_prediction
-
         # Handle forecast_delta_hrs which might be int (hours) or string (timedelta)
         if mode_cfg.get("forecast") is not None:
             f_cfg = mode_cfg.forecast
@@ -111,6 +109,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.forecast_steps = np.array(
                 [f_cfg.num_steps] if isinstance(f_cfg.num_steps, int) else f_cfg.num_steps
             )
+
+            self.forecast_offset = f_cfg.offset
 
             self.forecast_policy = f_cfg.policy
 
