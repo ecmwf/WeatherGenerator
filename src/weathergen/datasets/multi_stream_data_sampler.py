@@ -101,23 +101,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # Handle forecast_delta_hrs which might be int (hours) or string (timedelta)
         if mode_cfg.get("forecast") is not None:
             f_cfg = mode_cfg.forecast
-
             # forecast step
             self.forecast_delta_dt = f_cfg.time_step
             # assert self.forecast_delta_dt == self.len_timedelta, "Only supported option."
-
             self.forecast_steps = np.array(
                 [f_cfg.num_steps] if isinstance(f_cfg.num_steps, int) else f_cfg.num_steps
             )
-
             self.forecast_offset = f_cfg.offset
-
             self.forecast_policy = f_cfg.policy
 
         else:
             # no forecast policy specified so set neutral default for no forecasting
             self.forecast_delta_dt = np.timedelta64(0, "ms")
             self.forecast_steps = [0]
+            self.forecast_offset = 0
             self.forecast_policy = None
 
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
@@ -211,10 +208,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // self.batch_size) * self.batch_size
         self.len = min(self.len, len_chunk)
+        perms_len = int(index_range.end - index_range.start)
 
-        fsm = self.forecast_steps[0]
-        forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
-        perms_len = int(index_range.end - index_range.start) - (forecast_len + self.forecast_offset)
+        if mode_cfg.get("forecast") is not None:
+            fsm = self.forecast_steps[0]
+            forecast_len = (self.forecast_delta_dt * (fsm + 1)) // self.step_timedelta
+            perms_len = perms_len - (forecast_len + self.forecast_offset)
+
         n_duplicates = self.len - perms_len
         if n_duplicates > 0:
             # TODO fix this more permanently (#1085)
