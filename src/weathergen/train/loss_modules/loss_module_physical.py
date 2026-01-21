@@ -56,9 +56,6 @@ class LossPhysical(LossModuleBase):
         self.device = device
         self.name = "LossPhysical"
 
-        # TODO remove forecast offset dependency by directly looping over preds and targets
-        self.forecast_offset = mode_cfg.get("forecast", {}).get("offset", 0)
-
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [
@@ -220,16 +217,17 @@ class LossPhysical(LossModuleBase):
 
             stream_loss_weight, weights_channels = self._get_weights(stream_info)
 
-            fstep_loss_weights = self._get_fstep_weights(targets.num_forecast_steps)
-            if self.forecast_offset == 1:
+            # TODO: make nicer
+            fstep_loss_weights = self._get_fstep_weights(len(targets.forecast_steps))
+            if len(targets.physical) - len(targets.forecast_steps) > 0:
                 fstep_loss_weights.insert(0, None)
 
             loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_fsteps = 0
 
-            for fstep in range(
-                self.forecast_offset, self.forecast_offset + targets.num_forecast_steps
-            ):
+            # TODO loop directly through preds and targets
+            fstep_idxs = [0] if len(targets.forecast_steps) == 0 else targets.forecast_steps
+            for fstep in fstep_idxs:
                 fstep_weight = fstep_loss_weights[fstep]
 
                 # get current prediction and target

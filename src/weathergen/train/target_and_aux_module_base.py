@@ -24,15 +24,14 @@ class TargetAuxOutput:
     A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
     """
 
-    num_forecast_steps: int
+    forecast_steps: list
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
     aux_outputs: dict[str, torch.Tensor]
 
-    def __init__(self, forecast_offset: int, forecast_steps: int) -> None:
-        len_target = max(1, forecast_offset + forecast_steps)
-        self.num_forecast_steps = forecast_steps
+    def __init__(self, len_target: int, forecast_steps: list) -> None:
+        self.forecast_steps = forecast_steps
         self.physical = [{} for _ in range(len_target)]
         self.latent = [{} for _ in range(len_target)]
         self.aux_outputs = {}
@@ -91,18 +90,19 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, bidx, batch, model_params, model, forecast_offset) -> TargetAuxOutput:
+    def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
         forecast_steps = batch.get_forecast_steps()
 
-        targets = TargetAuxOutput(forecast_offset, forecast_steps)
+        targets = TargetAuxOutput(batch.get_output_len(), forecast_steps)
 
         # collect all targets, concatenating across batch dimension since this is also how it
         # happens for predictions in the model
+        fstep_idxs = [0] if len(forecast_steps) == 0 else forecast_steps
         for stream_name in stream_names:
             # collect targets for all forecast steps
-            for fstep in range(forecast_offset, forecast_offset + forecast_steps):
+            for fstep in fstep_idxs:
                 targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
                 is_spoof = []
                 for sample in batch.samples:

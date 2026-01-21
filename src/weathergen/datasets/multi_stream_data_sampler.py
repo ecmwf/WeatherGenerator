@@ -408,9 +408,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         """
 
+        # import code
+
+        # code.interact(local=locals())
+
         # collect for all forecast steps
-        dt = self.forecast_offset + forecast_dt
-        for step, fstep in enumerate(range(self.forecast_offset, dt + 1)):
+        dt = self._get_output_length(forecast_dt)
+        for step, fstep in enumerate(range(self.forecast_offset, dt)):
             step_forecast_dt = idx + (self.forecast_delta_dt * fstep) // self.step_timedelta
             time_win_target = self.time_window_handler.window(step_forecast_dt)
 
@@ -476,9 +480,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             StreamData with source and targets masked according to view_meta
         """
 
-        # self.forecast_offset and forecast_dt are zero for pure masking
-        dt = max(1, self.forecast_offset + forecast_dt)
-        stream_data = StreamData(base_idx, num_steps_input, dt, self.num_healpix_cells)
+        dt = self._get_output_length(forecast_dt)
+        stream_data = StreamData(
+            base_idx, num_steps_input, dt, forecast_dt, self.forecast_offset, self.num_healpix_cells
+        )
 
         stream_data = self._build_stream_data_input(
             modes,
@@ -571,6 +576,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             num_source_samples = len(masks[stream_info["name"]][1])
 
         return masks, num_source_samples, num_target_samples
+
+    def _get_output_length(self, forecast_steps):
+        # self.forecast_offset and forecast_dt are zero for pure masking
+        return max(1, self.forecast_offset + forecast_steps)
 
     def _preprocess_model_batch(
         self, batch: ModelBatch, source_input_steps: int, target_input_steps: int

@@ -100,10 +100,15 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         return self.streams_data[stream_name]
 
+    def get_output_len(self) -> int:
+        for _, sdata in self.streams_data.items():
+            output_len = sdata.get_output_len()
+        return output_len
+
     def get_forecast_steps(self) -> int:
         for _, sdata in self.streams_data.items():
-            forecast_dt = sdata.get_forecast_steps()
-        return forecast_dt
+            forecast_steps = sdata.get_forecast_steps()
+        return forecast_steps
 
 
 class BatchSamples:
@@ -168,6 +173,14 @@ class BatchSamples:
         # use sample 0 since the number of forecast steps is constant across batch
         # TODO: fix use of sample 0
         return self.samples[0].get_forecast_steps()
+
+    def get_output_len(self) -> int:
+        """
+        Get length of output
+        """
+        # use sample 0 since the output length is constant across batch
+        # TODO: fix use of sample 0
+        return self.samples[0].get_output_len()
 
     def get_device(self) -> str | torch.device:
         """
@@ -353,6 +366,14 @@ class ModelBatch:
         # use sample 0 since the number of forecast steps is constant across batch
         # TODO: fix use of sample 0
         return self.source_samples.get_forecast_steps()
+
+    def get_output_len(self) -> int:
+        """
+        Get lenght of output
+        """
+        # use sample 0 since the output length is constant across batch
+        # TODO: fix use of sample 0
+        return self.source_samples.get_output_len()
 
     def get_device(self) -> str | torch.device:
         """

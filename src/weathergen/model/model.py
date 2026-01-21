@@ -554,7 +554,7 @@ class Model(torch.nn.Module):
         )
 
     def forward(
-        self, model_params: ModelParams, batch: ModelBatch, forecast_offset: int
+        self, model_params: ModelParams, batch: ModelBatch
     ) -> ModelOutput:
         """Forward pass of the model
 
@@ -566,7 +566,7 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        output = ModelOutput(max(1, batch.get_forecast_steps() + forecast_offset))
+        output = ModelOutput(batch.get_output_len())
 
         tokens, posteriors = self.encoder(model_params, batch)
 
@@ -575,9 +575,9 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        if batch.get_forecast_steps() > 0:
+        if len(batch.get_forecast_steps()) > 0:
             # roll-out in latent space
-            for fstep in range(forecast_offset, forecast_offset + batch.get_forecast_steps()):
+            for fstep in batch.get_forecast_steps():
                 if self.training:
                     # Impute noise to the latent state
                     noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
@@ -598,7 +598,7 @@ class Model(torch.nn.Module):
             for name, head in self.latent_heads.items():
                 output.add_latent_prediction(0, name, head(latent_state))
             # prediction for final step
-            output = self.predict(model_params, batch.get_forecast_steps(), tokens, batch, output)
+            output = self.predict(model_params, 0, tokens, batch, output)
 
         return output
 
