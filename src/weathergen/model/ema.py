@@ -69,9 +69,12 @@ class EMAModel:
 
         for name, p_ema in self.ema_model.named_parameters():
             p_src = self.src_params.get(name, None)
+            p_src = self.src_params.get("module." + name, None) if p_src is None else None
+            if "identity" in name.lower() or "q_cells" in name.lower():
+                continue
             if p_src is None:
                 # EMA-only param or intentionally excluded
-                assert False, "All parameters of the EMA model must be in the base model."
+                assert False, f"{name}: All parameters of the EMA model must be in the base model."
 
             p_ema.lerp_(p_src, 1.0 - beta)
 
