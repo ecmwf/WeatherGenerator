@@ -76,12 +76,14 @@ run_ids :
     #NEW: if "streams" is not specified, the default streams are used
   
   ###############################
-  
+
   #How to define custom variables different than default_streams (default_streams will be ignored for this run_id):
 
   jjc9ym62:
     label: "2 steps window"
     results_base_dir : "./results/"
+    epoch: 1 #optional: if not specified epoch 0 (in inference it is always 0) is used
+    rank: 2 #optional: if not specified rank 0 is used
     streams:
       ERA5:
         channels: ["2t", "10u", "10v"] 
@@ -112,8 +114,6 @@ run_ids :
     metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
     label: "Merged Results"
     results_base_dir : "./results/"
-    epoch: 0
-    rank: 0
     streams:
       ERA5:
         channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
@@ -130,8 +130,6 @@ run_ids :
     type: "json" # <------- VERY IMPORTANT
     label: "WeatherGenerator"
     results_base_dir : "./results/"
-    epoch: 0
-    rank: 0
     streams:
       ERA5:
         channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
