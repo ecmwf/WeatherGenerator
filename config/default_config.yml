@@ -207,10 +207,15 @@ validation_config:
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
-  # number of validation samples that are written to disk
-  write_num_samples: 0
-  # output streams to write; default all
-  output_streams: null
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 8,
+    # write samples in normalized model space
+    normalized_samples: True,
+    # output streams to write; default all
+    streams: null,
+    }
 
   # run validation before training starts (mainly for model development)
   validate_before_training: False

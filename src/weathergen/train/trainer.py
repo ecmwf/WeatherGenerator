@@ -510,6 +510,8 @@ class Trainer(TrainerBase):
 
         dataset_val_iter = iter(self.data_loader_validation)
 
+        num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
@@ -557,16 +559,21 @@ class Trainer(TrainerBase):
                     )
 
                     # log output
-                    num_samples = mode_cfg.get("write_num_samples", 0) * batch_size
-                    if bidx < num_samples:
-                        dn_data = self.dataset_val.denormalize_target_channels
+                    if bidx < num_samples_write:
+                        # denormalization function for data
+                        denormalize_data_fct = (
+                            (lambda x0, x1: x1)
+                            if mode_cfg.get("output", {}).get("normalized_samples", False)
+                            else self.dataset_val.denormalize_target_channels
+                        )
+                        # write output
                         write_output(
                             self.cf,
                             mode_cfg,
                             batch_size,
                             mini_epoch,
                             bidx,
-                            dn_data,
+                            denormalize_data_fct,
                             batch,
                             preds,
                             targets_and_auxs,
