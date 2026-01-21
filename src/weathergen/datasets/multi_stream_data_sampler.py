@@ -17,12 +17,7 @@ from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
-from weathergen.datasets.data_reader_base import (
-    DataReaderBase,
-    TimeWindowHandler,
-    TIndex,
-    DTRange
-)
+from weathergen.datasets.data_reader_base import DataReaderBase, DTRange, TimeWindowHandler, TIndex
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
@@ -370,9 +365,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for step, idx in enumerate(range(base_idx, base_idx - num_steps_input, -1)):
                 # TODO: check that we are not out of bounds when we go back in time
                 time_win_source = self.time_window_handler.forecast_window(
-                                            idx,
-                                            -num_steps_input + step,
-                                            self.len_timedelta) 
+                    idx, -num_steps_input + step, self.len_timedelta
+                )
 
                 # collect all targets for current stream
                 # do we want this to be ascending or descending in time?
@@ -415,9 +409,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         dt = self.forecast_offset + forecast_dt
         for step, fstep in enumerate(range(self.forecast_offset, dt + 1)):
             time_win_target = self.time_window_handler.forecast_window(
-                                            idx,
-                                            fstep,
-                                            self.forecast_delta_dt)
+                idx, fstep, self.forecast_delta_dt
+            )
 
             # collect all targets for current stream
             rdata = output_data[step]
@@ -518,14 +511,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # source data: iterate overall input steps
         input_data = []
-        for step,idx in enumerate(range(base_idx - num_steps_input_max, base_idx + 1)):
+        for step, idx in enumerate(range(base_idx - num_steps_input_max, base_idx + 1)):
             # TODO: check that we are not out of bounds when we go back in time
-            
-            time_win_source = self.time_window_handler.forecast_window(
-                                            idx,
-                                            -num_steps_input_max + step,
-                                            self.len_timedelta) 
 
+            time_win_source = self.time_window_handler.forecast_window(
+                idx, -num_steps_input_max + step, self.len_timedelta
+            )
 
             rdata = collect_datasources(stream_ds, time_win_source, "source")
 
@@ -547,9 +538,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         output_data = []
         for fstep in range(self.forecast_offset, self.forecast_offset + forecast_dt + 1):
             time_win_target = self.time_window_handler.forecast_window(
-                                            idx,
-                                            fstep,
-                                            self.forecast_delta_dt)
+                idx, fstep, self.forecast_delta_dt
+            )
 
             rdata = collect_datasources(stream_ds, time_win_target, "target")
 

@@ -145,7 +145,7 @@ class TimeWindowHandler:
         return DTRange(t_start_win, t_end_win)
 
     def forecast_window(self, idx: TIndex, fstep: int, forecast_dt: NPTDel64):
-        t_start_win = self.t_start + self.t_window_step*idx + fstep*forecast_dt
+        t_start_win = self.t_start + self.t_window_step * idx + fstep * forecast_dt
         t_end_win = t_start_win + self.t_window_len
 
         return DTRange(t_start_win, t_end_win)

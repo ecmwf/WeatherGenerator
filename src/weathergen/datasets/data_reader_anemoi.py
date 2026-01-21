@@ -19,11 +19,10 @@ from numpy.typing import NDArray
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
+    DTRange,
     ReaderData,
     TimeWindowHandler,
-    TIndex,
     check_reader_data,
-    DTRange
 )
 
 _logger = logging.getLogger(__name__)
