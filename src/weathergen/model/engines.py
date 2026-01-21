@@ -169,7 +169,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+            tokens_c = block(tokens_c, cell_lens_c)
         return tokens_c
 
 
@@ -232,15 +232,13 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
-            tokens_global_c = checkpoint(
-                block,
+            tokens_global_c = block(
                 tokens_global_c,
                 tokens_c,
                 q_cells_lens_c,
                 cell_lens_c,
-                use_reentrant=use_reentrant,
             )
         return tokens_global_c
 
@@ -271,7 +269,7 @@ class QueryAggregationEngine(torch.nn.Module):
             # Last block is always global attention
             if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
                 self.ae_aggregation_blocks.append(
-                    MultiSelfAttentionHead(
+                    MultiSelfAttentionHeadVarlen(
                         self.cf.ae_global_dim_embed,
                         num_heads=self.cf.ae_aggregation_num_heads,
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
@@ -283,6 +281,7 @@ class QueryAggregationEngine(torch.nn.Module):
                     )
                 )
             else:
+                assert False, "Incompatible with batchsize > 1 here"
                 self.ae_aggregation_blocks.append(
                     MultiSelfAttentionHeadLocal(
                         self.cf.ae_global_dim_embed,
@@ -310,9 +309,12 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens, batch_lens, use_reentrant):
         for block in self.ae_aggregation_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            if isinstance(block, MultiSelfAttentionHeadVarlen):
+                tokens = block(tokens, x_lens=batch_lens)
+            else:
+                tokens = block(tokens)
         return tokens
 
 
@@ -382,9 +384,9 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens):
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            tokens = block(tokens)
         return tokens
 
 
@@ -470,7 +472,7 @@ class ForecastingEngine(torch.nn.Module):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             else:
-                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+                tokens = block(tokens, aux_info)
         return tokens
 
 
@@ -623,16 +625,14 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
+                tc_tokens = block(tc_tokens, tcs_lens, tcs_aux)
             else:
-                tc_tokens = checkpoint(
-                    block,
+                tc_tokens = block(
                     tc_tokens,
                     tokens_stream,
                     tcs_lens,
                     tokens_lens,
                     tcs_aux,
-                    use_reentrant=False,
                 )
         return tc_tokens
 
@@ -947,6 +947,13 @@ class LatentPredictionHeadMLP(nn.Module):
         if self.use_patch_token:
             outputs.append(self.blocks(x.patch_tokens))
         # We concatenate in the token dimension [Batch, Tokens, Dim]
+        # rank = torch.distributed.get_rank()
+        # print( f"\n\n{rank} : LatentPredictionHead", flush=True)
+        # import traceback
+        # for line in traceback.format_stack():
+        #     print( f"{rank} : {line.strip()}")
+        # import code; code.interact( local=locals())
+
         return torch.cat(outputs, dim=1)
 
 

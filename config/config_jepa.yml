@@ -88,7 +88,8 @@ latent_heads_allowed: True
 freeze_modules: ""
 
 norm_type: "LayerNorm"
-
+# type of zarr_store
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
@@ -125,7 +126,7 @@ train_log_freq:
 # parameters for data loading
 data_loading :
 
-  num_workers: 8
+  num_workers: 12
   rng_seed: ???
 
 
@@ -136,7 +137,7 @@ training_config:
   training_mode: ["student_teacher"]
 
   num_mini_epochs: 32
-  samples_per_mini_epoch: 256
+  samples_per_mini_epoch: 4096
   shuffle: True
 
   start_date: 1979-01-01T00:00
@@ -220,7 +221,7 @@ training_config:
   }
 
   forecast :
-      time_step: 00:00:00
+      time_step: 06:00:00
       num_steps: 0
       policy: null
 
@@ -246,7 +247,7 @@ validation_config:
   output_streams: null
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: 0
   
   # losses: {
   #   "physical": {

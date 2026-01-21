@@ -45,6 +45,9 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 
+# Add at top of trainer.py
+
+
 class Trainer(TrainerBase):
     def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)
@@ -105,6 +108,9 @@ class Trainer(TrainerBase):
         # get training config and remove disabled options (e.g. because of overrides)
         self.training_cfg = cf.get("training_config")
         self.training_cfg = filter_config_by_enabled(self.training_cfg, keys_to_filter)
+        assert len(self.training_cfg.model_input.keys()) != 0, (
+            "You probably have no loss term enabled"
+        )
 
         # validation and test configs are training configs, updated by specified keys
         self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
@@ -182,7 +188,6 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": loader_num_workers,
-            "pin_memory": True,
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset, **loader_params, sampler=None
@@ -228,7 +233,6 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": cf.data_loading.num_workers,
-            "pin_memory": True,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         self.data_loader_validation = torch.utils.data.DataLoader(
@@ -278,7 +282,7 @@ class Trainer(TrainerBase):
         if is_root():
             if cf.with_fsdp:
                 logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
-            self.model.print_num_parameters()
+            # self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
@@ -401,6 +405,10 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            if cf.data_loading.get("memory_pinning", False):
+                # pin memory for faster CPU-GPU transfer
+                batch = batch.pin_memory()
+
             batch.to_device(self.device)
 
             with torch.autocast(
@@ -508,6 +516,10 @@ class Trainer(TrainerBase):
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
+                    if cf.data_loading.get("memory_pinning", False):
+                        # pin memory for faster CPU-GPU transfer
+                        batch = batch.pin_memory()
+
                     batch.to_device(self.device)
 
                     # evaluate model

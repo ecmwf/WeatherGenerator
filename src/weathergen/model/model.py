@@ -605,6 +605,7 @@ class Model(torch.nn.Module):
         )
         output.add_latent_prediction(0, "posteriors", posteriors)
         output.add_latent_prediction(0, "latent_state", latent_state)
+        # import code; code.interact( local=locals())
         for name, head in self.latent_heads.items():
             output.add_latent_prediction(0, name, head(latent_state))
 
@@ -706,7 +707,7 @@ class Model(torch.nn.Module):
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
+            tc_tokens = tc_embed(t_coords)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
@@ -733,12 +734,10 @@ class Model(torch.nn.Module):
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
                 if self.cf.decoder_type == "Linear":
-                    pred = checkpoint(
-                        self.target_token_engines[stream_name],
+                    pred = self.target_token_engines[stream_name](
                         tc_tokens,
                         tokens.reshape(-1, s[-1]),  # collapse the batch and token dimensions
                         tcs_lens,
-                        use_reentrant=False,
                     ).unsqueeze(0)  # add ensemble dim: shape is then [1, preds_per_coord, channels]
                 else:
                     tc_tokens = self.target_token_engines[stream_name](
@@ -750,7 +749,7 @@ class Model(torch.nn.Module):
                     )
 
                     # final prediction head to map back to physical space
-                    pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+                    pred = self.pred_heads[stream_name](tc_tokens)
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)

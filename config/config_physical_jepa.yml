@@ -132,6 +132,11 @@ data_loading :
   num_workers: 12
   rng_seed: ???
 
+  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
+  # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
+  # If this happens, you can disable the flag, but performance will drop on GH200.
+  memory_pinning: True
+
 
 # config for training
 training_config:
@@ -186,7 +191,7 @@ training_config:
         target_and_aux_calc: "Physical",
         },
     "student-teacher": {
-        enabled: False,
+        enabled: True,
         type: LossLatentSSLStudentTeacher,
         weight: 1.0,
         loss_fcts : {
@@ -203,7 +208,7 @@ training_config:
     "random_easy" : {
       # masking strategy: "random", "forecast"
       masking_strategy: "random",
-      num_samples: 2,
+      num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
@@ -238,8 +243,8 @@ training_config:
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
-      policy: "fixed" #null
+      num_steps: 0
+      policy: null
 
 
 # validation config; full validation config is merge of training and validation config
@@ -263,7 +268,7 @@ validation_config:
   output_streams: null
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: 8
+  validate_before_training: 0
   
   losses: {
     "physical": {

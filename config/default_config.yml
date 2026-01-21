@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1024
+ae_local_dim_embed: 512 #1024
 ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -25,8 +25,8 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_dim_embed: 512 #1024 #2048
+ae_global_num_blocks: 2
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -126,6 +126,11 @@ data_loading :
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
+  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
+  # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
+  # If this happens, you can disable the flag, but performance will drop on GH200.
+  memory_pinning: True
+
 
 # config for training
 training_config:
@@ -177,13 +182,15 @@ training_config:
   model_input: {
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
-      masking_strategy: "forecast",
+      masking_strategy: "random",
+      num_samples: 2,
+      masking_strategy_config: { rate: 0.5, rate_sampling: False }
       },
     }
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
+      num_steps: 1
       policy: "fixed"
 
 
