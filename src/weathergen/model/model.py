@@ -441,7 +441,7 @@ class Model(torch.nn.Module):
             global_config, name, loss_conf, use_class_token, use_patch_token
         ):
             global_config = OmegaConf.merge(global_config, loss_conf)
-            if loss_conf["head"] == "mlp":
+            if loss_conf["head"].lower() == "mlp":
                 return LatentPredictionHeadMLP(
                     name,
                     global_config.ae_global_dim_embed,
@@ -449,7 +449,7 @@ class Model(torch.nn.Module):
                     use_class_token=use_class_token,
                     use_patch_token=use_patch_token,
                 )
-            elif loss_conf["head"] == "transformer":
+            elif loss_conf["head"].lower() == "transformer":
                 return LatentPredictionHeadTransformer(
                     global_config,
                     name,
