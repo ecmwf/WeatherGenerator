@@ -190,25 +190,25 @@ training_config:
         },
         target_and_aux_calc: "Physical",
     },
-    # "student-teacher": {
-    #     enabled: True,
-    #     type: LossLatentSSLStudentTeacher,
-    #     weight: 0.5,
-    #     loss_fcts : {
-    #       "JEPA": {
-    #         'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-    #         "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 384, 
-    #         "dropout_rate": 0.1,
-    #         target_source_correspondence: {1 : {1 : "subset"} },
-    #       },
-    #       target_and_aux_calc: { "EMATeacher" : 
-    #         { ema_ramp_up_ratio : 0.09,
-    #           ema_halflife_in_thousands: 1e-3,
-    #           model_param_overrides : { latent_heads_allowed: False },
-    #         }
-    #       }
-    #     },
-    # }
+    "student-teacher": {
+        enabled: True,
+        type: LossLatentSSLStudentTeacher,
+        weight: 0.5,
+        loss_fcts : {
+          "JEPA": {
+            'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
+            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 384, 
+            "dropout_rate": 0.1,
+            target_source_correspondence: {1 : {1 : "subset"} },
+          },
+        },
+        target_and_aux_calc: { "EMATeacher" : 
+          { ema_ramp_up_ratio : 0.09,
+            ema_halflife_in_thousands: 1e-3,
+            model_param_overrides : { latent_heads_allowed: False },
+          }
+        }
+    }
   }
   
   model_input: {
@@ -223,16 +223,17 @@ training_config:
         rate_sampling: False
       },
     },
-    # "input_jepa" : {
-    #   masking_strategy: "random",
-    #   num_samples: 1,
-    #   num_steps_input: 1,
-    #   masking_strategy_config : { 
-    #     diffusion_rn : True, 
-    #     rate : 0.6,
-    #     rate_sampling: False
-    #   },
-    # },
+    "input_jepa" : {
+      # masking strategy: "random", "forecast"
+      masking_strategy: "random",
+      num_samples: 1,
+      num_steps_input: 1,
+      masking_strategy_config : { 
+        diffusion_rn : True, 
+        rate : 0.6,
+        rate_sampling: False
+      },
+    },
   }
 
   target_input: {
@@ -241,11 +242,11 @@ training_config:
       num_samples: 1,
       masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
     },
-    # "target_jepa" : {
-    #   masking_strategy: "healpix",
-    #   num_samples: 1,
-    #   masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
-    # },
+    "target_jepa" : {
+      masking_strategy: "healpix",
+      num_samples: 1,
+      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+    },
   }
 
   forecast :
