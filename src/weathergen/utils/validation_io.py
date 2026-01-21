@@ -94,6 +94,7 @@ def write_output(
     if len(preds_all) == 0:
         _logger.warning("Writing no data since predictions are empty.")
         return
+
     # collect source information
     sources = []
     for sample in batch.get_source_samples().get_samples():
@@ -141,6 +142,7 @@ def write_output(
     )
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
+
     data = io.OutputBatchData(
         sources,
         source_intervals,

@@ -549,7 +549,6 @@ class Trainer(TrainerBase):
                                 self.model,
                                 mode_cfg.window_offset_prediction,
                             )
-                    
 
                     _ = self.loss_calculator_val.compute_loss(
                         preds=preds,
