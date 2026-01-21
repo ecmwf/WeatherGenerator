@@ -147,39 +147,76 @@ class EncoderModule(torch.nn.Module):
         """
         Apply the local assimilation engine and then the
         local-to-global adapter using a chunking in the number of tokens
-        to work around to bug in flash attention, the computations is performed in chunks
+        to work around a bug in flash attention, the computations is performed in chunks.
+
+        This implementation reorders cells so that non-empty cells come first and are
+        distributed evenly across a fixed number of chunks. This ensures:
+        1. No chunk has zero tokens (which would cause FSDP2 bugs)
+        2. All ranks execute the same number of chunks (required for FSDP gradient sync)
+        3. Work is distributed evenly across chunks
+
+        After processing, results maintain the original cell order since non_empty_indices
+        from torch.where are already sorted.
         """
 
-        # combined cell lens for all tokens in batch across all input steps
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
 
-        # subdivision factor for required splitting
+        # Identify non-empty cells (sorted indices from torch.where)
+        non_empty_mask = cell_lens > 0
+        num_non_empty = non_empty_mask.sum().item()
+        non_empty_indices = torch.where(non_empty_mask)[0]
+
+        if num_non_empty == 0:
+            assert False, "No non-empty cells found - cannot process empty input"
+
+        # Gather cell_lens and tokens_global for non-empty cells only
+        # non_empty_indices is sorted, so output will be in original cell order
+        cell_lens_non_empty = cell_lens[non_empty_indices]
+        tokens_global_non_empty = tokens_global[non_empty_indices]
+
+        # Reorder tokens: gather tokens for non-empty cells in their original order
+        cumsum_orig = torch.cat([zero_pad, cell_lens.cumsum(0)])
+        token_indices = torch.cat([
+            torch.arange(cumsum_orig[idx], cumsum_orig[idx + 1], device=tokens.device)
+            for idx in non_empty_indices
+        ])
+        tokens_reordered = tokens[token_indices]
+
+        # Fixed number of chunks based on healpix cells (same for all ranks)
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
-        tokens_global_unmasked = []
+        num_chunks_original = cell_lens.shape[0] // clen
+
+        # Determine actual number of chunks: min of original chunks and non-empty cells
+        # to ensure every chunk has at least one cell
+        num_chunks = min(num_chunks_original, num_non_empty)
+
+        # Distribute non-empty cells evenly across chunks
+        # Base cells per chunk and remainder for load balancing
+        base_cells = num_non_empty // num_chunks
+        remainder = num_non_empty % num_chunks
+
+        tokens_global_results = []
         posteriors = []
+        cell_cursor = 0
+        token_cursor = 0
 
-        for i in range(cell_lens.shape[0] // clen):
-            # make sure we properly catch all elements in last chunk
-            i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
-            l0, l1 = (
-                (0 if i == 0 else cell_lens[: i * clen].cumsum(0)[-1]),
-                cell_lens[:i_end].cumsum(0)[-1],
-            )
+        for i in range(num_chunks):
+            # Cells in this chunk: base + 1 extra for first 'remainder' chunks
+            cells_this_chunk = base_cells + (1 if i < remainder else 0)
+            chunk_start = cell_cursor
+            chunk_end = cell_cursor + cells_this_chunk
+            cell_cursor = chunk_end
 
-            toks = tokens[l0:l1]
-            # if we have a very sparse input, we may have no tokens in the chunk, toks
-            # skip processing of the empty chunk in this case
-            # Check if this chunk is empty                                                     
-            is_empty_chunk = (l0 == l1 or toks.shape[0] == 0)                                  
-                                                                                             
-            if is_empty_chunk:                                                                 
-                # Create minimal dummy tensors to maintain consistent checkpoint call count    
-                # across all ranks (required for FSDP gradient sync)                           
-                # Don't append anything to output - this chunk contributes nothing             
-                continue
+            # Get cell_lens for this chunk
+            cell_lens_chunk = cell_lens_non_empty[chunk_start:chunk_end]
+            num_tokens_chunk = cell_lens_chunk.sum().item()
 
-            toks_global = tokens_global[i * clen : i_end]
-            cell_lens_cur = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
+            # Get tokens for this chunk
+            toks = tokens_reordered[token_cursor : token_cursor + num_tokens_chunk]
+            token_cursor += num_tokens_chunk
+
+            toks_global = tokens_global_non_empty[chunk_start:chunk_end]
+            cell_lens_cur = torch.cat([zero_pad, cell_lens_chunk])
             q_cells_lens_cur = q_cells_lens[: cell_lens_cur.shape[0]]
 
             # local assimilation model
@@ -188,7 +225,7 @@ class EncoderModule(torch.nn.Module):
             toks, posteriors_c = self.interpolate_latents(toks)
             posteriors += [posteriors_c]
 
-            # create mask for global tokens, without first element (used for padding)
+            # Create mask for global tokens (all True since all cells are non-empty)
             mask = cell_lens_cur[1:].to(torch.bool)
             toks_global_unmasked = toks_global[mask]
             q_cells_lens_unmasked = torch.cat([zero_pad, q_cells_lens_cur[1:][mask]])
@@ -202,13 +239,9 @@ class EncoderModule(torch.nn.Module):
                 cell_lens_unmasked,
             )
 
-            tokens_global_unmasked += [toks_global_unmasked]
+            tokens_global_results += [toks_global_unmasked]
 
-        # DEBUG: Log skip pattern per rank                                                     
-        # print(f"[Rank {self.cf.rank}] Skipped iterations: {skipped_iterations} out of {num_iterations}", flush=True) 
-        if len(tokens_global_unmasked) == 0:
-            assert False, "Not yet implemented"
-        tokens_global_unmasked = torch.cat(tokens_global_unmasked)
+        tokens_global_unmasked = torch.cat(tokens_global_results)
 
         return tokens_global_unmasked, posteriors
 
