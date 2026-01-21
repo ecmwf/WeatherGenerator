@@ -93,8 +93,8 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-# streams_directory: "./config/streams/era5_1deg/"
-streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/era5_1deg/"
+# streams_directory: "./config/streams/era5_nppatms_synop/"
 streams: ???
 
 general:
@@ -126,7 +126,7 @@ train_log_freq:
 # parameters for data loading
 data_loading :
 
-  num_workers: 8
+  num_workers: 12
   rng_seed: ???
 
 
@@ -178,7 +178,7 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 384, 
+            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
         },
