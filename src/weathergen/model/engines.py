@@ -843,15 +843,15 @@ class LatentPredictionHeadTransformer(nn.Module):
         in_dim: int,
         out_dim: int,
         intermediate_dim: int,
-        class_token: bool,
-        patch_token: bool,
+        use_class_token: bool,
+        use_patch_token: bool,
     ):
         super().__init__()
 
         self.name = name
         self.cf = cf
-        self.class_token = class_token
-        self.patch_token = patch_token
+        self.use_class_token = use_class_token
+        self.use_patch_token = use_patch_token
 
         self.blocks = nn.ModuleList()
 
@@ -893,9 +893,9 @@ class LatentPredictionHeadTransformer(nn.Module):
         # we concatenate the patch and class tokens to process them together
         # We concatenate in the token dimension [Batch, Tokens, Dim]
         patch_class_tokens = []
-        if self.class_token:
+        if self.use_class_token:
             patch_class_tokens.append(x.class_token)
-        if self.patch_token:
+        if self.use_patch_token:
             patch_class_tokens.append(x.patch_tokens)
         patch_class_tokens = torch.cat(patch_class_tokens, dim=1)
 
