@@ -339,7 +339,7 @@ def evaluate_from_config(
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     if num_processes == 0:
         if log_queue is not None:
-            setup_worker_logger(log_queue)
+            setup_worker_logger(log_queue, verbose)
         results = [_process_stream(**task) for task in tasks]
     else:
         with mp.Pool(
