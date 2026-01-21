@@ -853,13 +853,13 @@ class LatentPredictionHeadTransformer(nn.Module):
         self.class_token = class_token
         self.patch_token = patch_token
 
-        self.pred_blocks = nn.ModuleList()
+        self.blocks = nn.ModuleList()
 
         # first map to intermediate_dim to introduce a bottleneck
-        self.pred_blocks.append(nn.Linear(in_dim, intermediate_dim, bias=False))
+        self.blocks.append(nn.Linear(in_dim, intermediate_dim, bias=False))
 
         for _ in range(self.cf.pred_num_blocks):
-            self.pred_blocks.append(
+            self.blocks.append(
                 MultiSelfAttentionHead(
                     intermediate_dim,
                     num_heads=self.cf.pred_num_heads,
@@ -873,7 +873,7 @@ class LatentPredictionHeadTransformer(nn.Module):
                 )
             )
             # Add MLP block
-            self.pred_blocks.append(
+            self.blocks.append(
                 MLP(
                     intermediate_dim,
                     intermediate_dim,
@@ -887,7 +887,7 @@ class LatentPredictionHeadTransformer(nn.Module):
             )
 
         # finally map from intermediate_dim to the out_dim
-        self.pred_blocks.append(nn.Linear(intermediate_dim, out_dim, bias=False))
+        self.blocks.append(nn.Linear(intermediate_dim, out_dim, bias=False))
 
     def forward(self, x: LatentState):
         # we concatenate the patch and class tokens to process them together
@@ -899,7 +899,7 @@ class LatentPredictionHeadTransformer(nn.Module):
             patch_class_tokens.append(x.patch_tokens)
         patch_class_tokens = torch.cat(patch_class_tokens, dim=1)
 
-        for _b_idx, block in enumerate(self.pred_blocks):
+        for _b_idx, block in enumerate(self.blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 patch_class_tokens = block(patch_class_tokens)
             else:
