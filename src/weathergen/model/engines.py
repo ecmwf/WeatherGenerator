@@ -908,21 +908,21 @@ class LatentPredictionHeadTransformer(nn.Module):
 
 
 class LatentPredictionHeadMLP(nn.Module):
-    def __init__(self, name, in_dim, out_dim, num_layers, hidden_factor, class_token: bool, patch_token: bool):
+    def __init__(self, name, in_dim, out_dim, num_layers, hidden_factor, use_class_token: bool, use_patch_token: bool):
         super().__init__()
 
         self.name = name
-        self.class_token = class_token
-        self.patch_token = patch_token
+        self.use_class_token = use_class_token
+        self.use_patch_token = use_patch_token
         # For now this is a Linear Layer TBD what this architecture should be
-        self.layer = MLP(in_dim, out_dim, num_layers, hidden_factor)
+        self.blocks = MLP(in_dim, out_dim, num_layers, hidden_factor)
 
     def forward(self, x: LatentState):
         outputs = []
-        if self.class_token:
-            outputs.append(self.layer(x.class_token))
-        if self.patch_token:
-            outputs.append(self.layer(x.patch_tokens))
+        if self.use_class_token:
+            outputs.append(self.blocks(x.class_token))
+        if self.use_patch_token:
+            outputs.append(self.blocks(x.patch_tokens))
         # We concatenate in the token dimension [Batch, Tokens, Dim]
         return torch.cat(outputs, dim=1)
 
