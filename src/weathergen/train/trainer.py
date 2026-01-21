@@ -390,6 +390,7 @@ class Trainer(TrainerBase):
         self.model.train()
 
         dataset_iter = iter(self.data_loader)
+        forecast_offset = self.training_cfg.get("forecast", {}).get("offset", 0)
 
         self.optimizer.zero_grad()
 
@@ -410,7 +411,7 @@ class Trainer(TrainerBase):
                 preds = self.model(
                     self.model_params,
                     batch.get_source_samples(),
-                    self.training_cfg.forecast.offset,
+                    forecast_offset,
                 )
 
                 targets_and_auxs = {}
@@ -423,7 +424,7 @@ class Trainer(TrainerBase):
                         batch.get_target_samples(target_idxs),
                         self.model_params,
                         self.model,
-                        self.training_cfg.forecast.offset,
+                        forecast_offset,
                     )
 
             loss = self.loss_calculator.compute_loss(
@@ -509,6 +510,7 @@ class Trainer(TrainerBase):
         self.model.eval()
 
         dataset_val_iter = iter(self.data_loader_validation)
+        forecast_offset = mode_cfg.get("forecast", {}).get("offset", 0)
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
@@ -530,13 +532,13 @@ class Trainer(TrainerBase):
                             preds = self.model(
                                 self.model_params,
                                 batch.get_source_samples(),
-                                mode_cfg.forecast.offset,
+                                forecast_offset,
                             )
                         else:
                             preds = self.ema_model.forward_eval(
                                 self.model_params,
                                 batch.get_source_samples(),
-                                mode_cfg.forecast.offset,
+                                forecast_offset,
                             )
 
                         targets_and_auxs = {}
@@ -547,7 +549,7 @@ class Trainer(TrainerBase):
                                 batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
-                                mode_cfg.forecast.offset,
+                                forecast_offset,
                             )
 
                     _ = self.loss_calculator_val.compute_loss(
