@@ -177,8 +177,8 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "pred_num_blocks": 24, "pred_num_heads": 12, "pred_with_qk_lnorm": True, "pred_intermediate_dim": 768, 
-            "pred_dropout_rate": 0.1,
+            "num_blocks": 24, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+            "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "complement"} },
           }
         },
