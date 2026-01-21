@@ -293,12 +293,12 @@ class DataReaderAnemoi(DataReaderTimestep):
         if not geoinfo_channels:
             return np.array([], dtype=np.int64)
 
-        # Select channels that match the geoinfo list (any variable type allowed)
+        # Select channels that match the geoinfo list (exact match required)
         chs_idx = np.sort(
             [
                 ds0.name_to_index[k]
                 for k in ds0.typed_variables.keys()
-                if np.array([f in k for f in geoinfo_channels]).any()
+                if k in geoinfo_channels
             ]
         )
 

@@ -540,11 +540,6 @@ class DataReaderBase(metaclass=ABCMeta):
 
         assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
         for i, _ in enumerate(self.geoinfo_idx):
-            # Replace NaN with mean (becomes 0 after normalization - neutral value)
-            nan_mask = np.isnan(geoinfos[..., i])
-            if nan_mask.any():
-                geoinfos[..., i] = np.where(nan_mask, self.mean_geoinfo[i], geoinfos[..., i])
-
             stdev = self.stdev_geoinfo[i]
             # Protect against division by zero for constant fields (stdev=0)
             if stdev == 0 or np.isclose(stdev, 0):
