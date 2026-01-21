@@ -369,7 +369,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # iterate overall input steps
             for step, idx in enumerate(range(base_idx, base_idx - num_steps_input, -1)):
                 # TODO: check that we are not out of bounds when we go back in time
-
                 time_win_source = self.time_window_handler.forecast_window(
                                             idx,
                                             -num_steps_input + step,
@@ -533,7 +532,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
-                #time_win = self.time_window_handler.window(idx)
                 time_win = time_win_source
                 rdata = spoof(
                     self.healpix_level,
@@ -548,8 +546,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # target data: collect for all forecast steps
         output_data = []
         for fstep in range(self.forecast_offset, self.forecast_offset + forecast_dt + 1):
-            #step_forecast_dt = base_idx + (self.forecast_delta_dt * fstep) // self.step_timedelta
-
             time_win_target = self.time_window_handler.forecast_window(
                                             idx,
                                             fstep,
@@ -560,7 +556,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
-                #time_win = self.time_window_handler.window(idx)
                 time_win = time_win_target
                 rdata = spoof(
                     self.healpix_level,
