@@ -401,10 +401,8 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            print("Happy to be here")
             batch.to_device(self.device)
 
-            print("Batch to device")
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,
@@ -416,7 +414,6 @@ class Trainer(TrainerBase):
                     self.training_cfg.window_offset_prediction,
                 )
 
-                print("Model predictions")
                 targets_and_auxs = {}
                 for loss_name, target_aux in self.target_and_aux_calculators.items():
                     # find targets for this target-aux calculator
@@ -429,14 +426,13 @@ class Trainer(TrainerBase):
                         self.model,
                         self.training_cfg.window_offset_prediction,
                     )
-                print("target predictions")
 
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
                 targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
-            print("loss calcuclation")
+            
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:
@@ -448,7 +444,6 @@ class Trainer(TrainerBase):
                 for _, target_aux in self.target_and_aux_calculators.items()
             ]
 
-            print("Update Teacher")
             # backward pass
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
@@ -459,7 +454,6 @@ class Trainer(TrainerBase):
                 self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
             )
 
-            print("backward step")
             # log gradient norms
             if self.log_grad_norms:
                 if bidx % self.train_log_freq.terminal == 0:
