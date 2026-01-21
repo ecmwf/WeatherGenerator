@@ -462,6 +462,8 @@ class Model(torch.nn.Module):
                     class_token=class_token,
                     patch_token=patch_token,
                 )
+            else:
+                assert False, f"Unknown latent prediction head type {loss_conf['head']}"
 
         # TODO: support multiple LossLatentSSLStudentTeacher terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
