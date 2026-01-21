@@ -229,18 +229,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path)
 
-        # Determine mini_epoch string
-        if mini_epoch is None:
-            mini_epoch_str = None
-        elif mini_epoch == -1:
-            mini_epoch_str = "_latest"
-        elif (path / f"model_{run_id}_epoch{mini_epoch:05d}.json").exists():
-            mini_epoch_str = f"_epoch{mini_epoch:05d}"
-        else:
-            mini_epoch_str = f"_chkpt{mini_epoch:05d}"
-
-        # Get file name
-        fname = path / _get_model_config_file_read_name(run_id, mini_epoch_str)
+        fname = path / _get_model_config_file_read_name(path, run_id, mini_epoch)
         assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
             fname,
@@ -267,25 +256,18 @@ def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
 
     return f"model_{run_id}{mini_epoch_str}.json"
 
-
-def _get_model_config_file_read_name(run_id: str, mini_epoch_str: str | None):
+def _get_model_config_file_read_name(path: Path, run_id: str, mini_epoch: int | None):
     """Generate the filename for reading a model config file."""
-    if mini_epoch_str is None:
+    if mini_epoch is None:
         mini_epoch_str = ""
-    elif mini_epoch_str == "-1":
+    elif mini_epoch == -1:
         mini_epoch_str = "_latest"
-    elif (mini_epoch_str.startswith("epoch") or mini_epoch_str.startswith("chkpt")) and len(
-        mini_epoch_str
-    ) == 10:
-        mini_epoch_str = f"_{mini_epoch_str}"
+    elif (path / run_id / f"model_{run_id}_epoch{mini_epoch:05d}.json").exists():
+        mini_epoch_str = f"_epoch{mini_epoch:05d}"
     else:
-        raise ValueError(
-            f"Invalid mini_epoch_str format: {mini_epoch_str}. "
-            "Expected formats are None, '-1', 'epochXXXXX', or 'chkptXXXXX'."
-        )
+        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
     return f"model_{run_id}{mini_epoch_str}.json"
-
 
 def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
