@@ -439,28 +439,25 @@ class Model(torch.nn.Module):
         ]
 
         def _create_latent_pred_head(
-            global_config, name, loss_conf, in_dim, class_token, patch_token
+            global_config, name, loss_conf, use_class_token, use_patch_token
         ):
             global_config = OmegaConf.merge(global_config, loss_conf)
             if loss_conf["head"] == "mlp":
                 return LatentPredictionHeadMLP(
                     name,
                     global_config.ae_global_dim_embed,
-                    loss_conf["out_dim"],
-                    loss_conf["num_layers"],
-                    loss_conf["hidden_factor"],
-                    class_token=class_token,
-                    patch_token=patch_token,
+                    loss_conf,
+                    use_class_token=use_class_token,
+                    use_patch_token=use_patch_token,
                 )
             elif loss_conf["head"] == "transformer":
                 return LatentPredictionHeadTransformer(
                     global_config,
                     name,
-                    in_dim=global_config.ae_global_dim_embed,
-                    out_dim=loss_conf["out_dim"],
-                    intermediate_dim=loss_conf["pred_intermediate_dim"],
-                    class_token=class_token,
-                    patch_token=patch_token,
+                    global_config.ae_global_dim_embed,
+                    loss_conf,
+                    use_class_token=use_class_token,
+                    use_patch_token=use_patch_token,
                 )
             else:
                 assert False, f"Unknown latent prediction head type {loss_conf['head']}"
@@ -479,18 +476,16 @@ class Model(torch.nn.Module):
                         cf,
                         f"{loss}-head",
                         loss_conf,
-                        in_dim=cf.ae_global_dim_embed,
-                        class_token=True,
-                        patch_token=True,
+                        use_class_token=True,
+                        use_patch_token=True,
                     )
                 elif loss == "JEPA":
                     self.latent_heads[loss] = _create_latent_pred_head(
                         cf,
                         f"{loss}-head",
                         loss_conf,
-                        in_dim=cf.ae_global_dim_embed,
-                        class_token=False,
-                        patch_token=True,
+                        use_class_token=False,
+                        use_patch_token=True,
                     )
                 elif loss == "DINO":
                     self.latent_heads[loss] = _create_latent_pred_head(
@@ -498,8 +493,8 @@ class Model(torch.nn.Module):
                         f"{loss}-head",
                         loss_conf,
                         in_dim=cf.ae_global_dim_embed,
-                        class_token=True,
-                        patch_token=False,
+                        use_class_token=True,
+                        use_patch_token=False,
                     )
 
         return self

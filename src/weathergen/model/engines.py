@@ -841,15 +841,23 @@ class LatentPredictionHeadTransformer(nn.Module):
         cf: Config,
         name: str,
         in_dim: int,
-        out_dim: int,
-        intermediate_dim: int,
+        loss_conf,
         use_class_token: bool,
         use_patch_token: bool,
     ):
         super().__init__()
+        
+        # "JEPA": {
+        #     'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
+        #     "num_blocks": 24, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+        #     "dropout_rate": 0.1,
+        #     target_source_correspondence: {0 : {0 : "complement"} },
 
         self.name = name
-        self.cf = cf
+        
+        out_dim, num_blocks, num_blocks, with_qk_lnorm, intermediate_dim, dropout_rate = loss_conf["out_dim"], loss_conf["num_blocks"], loss_conf["num_heads"], loss_conf["with_qk_lnorm"], loss_conf["intermediate_dim"], loss_conf["dropout_rate"]
+        
+        self.global_cf = cf
         self.use_class_token = use_class_token
         self.use_patch_token = use_patch_token
 
@@ -858,18 +866,18 @@ class LatentPredictionHeadTransformer(nn.Module):
         # first map to intermediate_dim to introduce a bottleneck
         self.blocks.append(nn.Linear(in_dim, intermediate_dim, bias=False))
 
-        for _ in range(self.cf.pred_num_blocks):
+        for _ in range(num_blocks):
             self.blocks.append(
                 MultiSelfAttentionHead(
                     intermediate_dim,
-                    num_heads=self.cf.pred_num_heads,
-                    dropout_rate=self.cf.pred_dropout_rate,
-                    with_qk_lnorm=self.cf.pred_with_qk_lnorm,
-                    with_flash=self.cf.with_flash_attention,
-                    norm_type=self.cf.norm_type,
+                    num_heads=num_blocks,
+                    dropout_rate=dropout_rate,
+                    with_qk_lnorm=with_qk_lnorm,
+                    with_flash=self.global_cf.with_flash_attention,
+                    norm_type=self.global_cf.norm_type,
                     # dim_aux=dim_aux,
-                    norm_eps=self.cf.norm_eps,
-                    attention_dtype=get_dtype(self.cf.attention_dtype),
+                    norm_eps=self.global_cf.norm_eps,
+                    attention_dtype=get_dtype(self.global_cf.attention_dtype),
                 )
             )
             # Add MLP block
@@ -879,10 +887,10 @@ class LatentPredictionHeadTransformer(nn.Module):
                     intermediate_dim,
                     hidden_factor=4,
                     with_residual=True,
-                    dropout_rate=self.cf.pred_dropout_rate,
-                    norm_type=self.cf.norm_type,
+                    dropout_rate=dropout_rate,
+                    norm_type=self.global_cf.norm_type,
                     # dim_aux=dim_aux,
-                    norm_eps=self.cf.mlp_norm_eps,
+                    norm_eps=self.global_cf.mlp_norm_eps,
                 )
             )
 
@@ -908,10 +916,13 @@ class LatentPredictionHeadTransformer(nn.Module):
 
 
 class LatentPredictionHeadMLP(nn.Module):
-    def __init__(self, name, in_dim, out_dim, num_layers, hidden_factor, use_class_token: bool, use_patch_token: bool):
+    def __init__(self, name, in_dim: int, loss_conf, use_class_token: bool, use_patch_token: bool):
         super().__init__()
 
         self.name = name
+        
+        out_dim, num_layers, hidden_factor =  loss_conf["out_dim"], loss_conf["num_layers"], loss_conf["hidden_factor"]
+        
         self.use_class_token = use_class_token
         self.use_patch_token = use_patch_token
         # For now this is a Linear Layer TBD what this architecture should be
