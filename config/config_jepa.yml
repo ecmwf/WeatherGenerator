@@ -177,20 +177,21 @@ training_config:
         weight: 1.0,
         loss_fcts : {
           "JEPA": {
-            'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
+            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
             "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 384, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
+        },
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : 0.09,
             ema_halflife_in_thousands: 1e-3,
             model_param_overrides : { 
-            training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
+              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
           }
         }
-        }
+      }
   }
   
   model_input: {
@@ -216,9 +217,9 @@ training_config:
   }
 
   forecast :
-      time_step: 00:00:00
-      num_steps: 0
-      policy: null
+    time_step: 00:00:00
+    num_steps: 0
+    policy: null
 
 
 # validation config; full validation config is merge of training and validation config
@@ -244,37 +245,6 @@ validation_config:
   # run validation before training starts (mainly for model development)
   validate_before_training: False
   
-  # losses: {
-  #   "physical": {
-  #       type: LossPhysical,
-  #       weight: 1.0,
-  #       loss_fcts: {
-  #         "mse": {
-  #           weight: 1.0,
-  #         },
-  #       },
-  #     },
-  # }
-
-  # Requires enabled flags
-  # model_input: {
-  #   "random_easy" : {
-  #     enabled : False,
-  #   },
-  #   "random_hard" : {
-  #     enabled : False,
-  #   },
-  #   "strategy1" : {
-  #   # "random", "healpix". Masking strategy to use for model input for masking
-  #     masking_strategy: "forecast",
-  #     num_samples: 1,
-  #     masking_strategy_config : { diffusion_rn : True, rate : 0.4 },
-  #     # relationship: "independent", "subset", "disjoint".
-  #     relationship: "independent",
-  #     num_steps_input: 1,
-  #     }
-  # }
-
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
 

@@ -289,6 +289,7 @@ def get_target_aux_calculator(
         target_aux = PhysicalTargetAndAux(loss_cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
+        cf.with_ddp = False
         meta_ema_model, _ = init_model_and_shard(
             cf,
             dataset,
@@ -309,6 +310,7 @@ def get_target_aux_calculator(
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
         target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
 
+        cf.with_ddp = True
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
 
