@@ -202,7 +202,7 @@ training_config:
     "random_easy" : {
       # masking strategy: "random", "forecast"
       masking_strategy: "random",
-      num_samples: 2,
+      num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
