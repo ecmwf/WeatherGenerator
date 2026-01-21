@@ -432,7 +432,7 @@ class Trainer(TrainerBase):
                 targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
-            
+
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:

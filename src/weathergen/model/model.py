@@ -13,13 +13,12 @@ import logging
 import math
 import warnings
 
-from omegaconf import OmegaConf
-
 import astropy_healpix as hp
 import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
@@ -29,11 +28,11 @@ from weathergen.model.engines import (
     BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
+    LatentPredictionHeadMLP,
+    LatentPredictionHeadTransformer,
     LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
-    LatentPredictionHeadMLP,
-    LatentPredictionHeadTransformer
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters

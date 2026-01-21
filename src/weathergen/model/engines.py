@@ -846,17 +846,24 @@ class LatentPredictionHeadTransformer(nn.Module):
         use_patch_token: bool,
     ):
         super().__init__()
-        
+
         # "JEPA": {
         #     'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-        #     "num_blocks": 24, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+        #     "num_blocks": 24, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768,
         #     "dropout_rate": 0.1,
         #     target_source_correspondence: {0 : {0 : "complement"} },
 
         self.name = name
-        
-        out_dim, num_blocks, num_blocks, with_qk_lnorm, intermediate_dim, dropout_rate = loss_conf["out_dim"], loss_conf["num_blocks"], loss_conf["num_heads"], loss_conf["with_qk_lnorm"], loss_conf["intermediate_dim"], loss_conf["dropout_rate"]
-        
+
+        out_dim, num_blocks, num_blocks, with_qk_lnorm, intermediate_dim, dropout_rate = (
+            loss_conf["out_dim"],
+            loss_conf["num_blocks"],
+            loss_conf["num_heads"],
+            loss_conf["with_qk_lnorm"],
+            loss_conf["intermediate_dim"],
+            loss_conf["dropout_rate"],
+        )
+
         self.global_cf = cf
         self.use_class_token = use_class_token
         self.use_patch_token = use_patch_token
@@ -920,12 +927,17 @@ class LatentPredictionHeadMLP(nn.Module):
         super().__init__()
 
         self.name = name
-        
-        out_dim, num_layers, hidden_factor =  loss_conf["out_dim"], loss_conf["num_layers"], loss_conf["hidden_factor"]
-        
+
+        out_dim, num_layers, hidden_factor = (
+            loss_conf["out_dim"],
+            loss_conf["num_layers"],
+            loss_conf["hidden_factor"],
+        )
+
         self.use_class_token = use_class_token
         self.use_patch_token = use_patch_token
-        # For now this is a Linear Layer TBD what this architecture should be
+        
+        # Create an MLP block
         self.blocks = MLP(in_dim, out_dim, num_layers, hidden_factor)
 
     def forward(self, x: LatentState):
