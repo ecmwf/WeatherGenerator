@@ -52,7 +52,7 @@ class TrainerBase:
         if not use_cuda:
             return torch.device("cpu")
 
-        local_id_node = os.environ.get("LOCAL_RANK", os.environ.get("SLURM_LOCALID", "-1"))
+        local_id_node = dist.get_node_local_rank(fallback_rank=-1) 
         if local_id_node == "-1":
             devices = ["cuda"]
         else:
