@@ -9,7 +9,8 @@
 
 CERRA :
   type : anemoi
-  filenames : ['cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2.zarr']
+  stream_id : 1
+  filenames : ['aifs-meps-2.5km-2020-2025-6h-v7.zarr']
   source_exclude : ["100si_100", "100wdir_100", "10fg", "10wdir", "al", "cos_julian_day", "cos_latitude", "cos_local_time", "cos_longitude", "eva", "insolation", "lsm", "mn2t", "mx2t", "r_100", "r_1000", "r_150", "r_200", "r_250", "r_300", "r_400", "r_50", "r_500", "r_600", "r_700", "r_850", "r_925", "rsn", "sde", "sf", "sf_sf", "sin_julian_day", "sin_latitude", "sin_local_time", "sin_longitude", "skt", "sp", "sr", "ssr", "ssrd", "ssrd_ssrd", "str", "strd", "strd_strd", "t_100", "t_1000", "t_150", "t_200", "t_250", "t_300", "t_400", "t_50", "t_500", "t_600", "t_700", "t_925", "tciwv", "tp_tp", "u_100", "u_1000", "u_150", "u_200", "u_250", "u_300", "u_400", "u_50", "u_500", "u_600", "u_700", "u_925", "v_100", "v_1000", "v_150", "v_200", "v_250", "v_300", "v_400", "v_50", "v_500", "v_600", "v_700", "v_925", "z_100", "z_1000", "z_150", "z_200", "z_250", "z_300", "z_400", "z_50", "z_500", "z_600", "z_700", "z_850", "z_925"]
   target_exclude : ["100si_100", "100wdir_100", "10fg", "10wdir", "al", "cos_julian_day", "cos_latitude", "cos_local_time", "cos_longitude", "eva", "insolation", "lsm", "mn2t", "mx2t", "r_100", "r_1000", "r_150", "r_200", "r_250", "r_300", "r_400", "r_50", "r_500", "r_600", "r_700", "r_850", "r_925", "rsn", "sde", "sf", "sf_sf", "sin_julian_day", "sin_latitude", "sin_local_time", "sin_longitude", "skt", "sp", "sr", "ssr", "ssrd", "ssrd_ssrd", "str", "strd", "strd_strd", "t_100", "t_1000", "t_150", "t_200", "t_250", "t_300", "t_400", "t_50", "t_500", "t_600", "t_700", "t_925", "tciwv", "tp_tp", "u_100", "u_1000", "u_150", "u_200", "u_250", "u_300", "u_400", "u_50", "u_500", "u_600", "u_700", "u_925", "v_100", "v_1000", "v_150", "v_200", "v_250", "v_300", "v_400", "v_50", "v_500", "v_600", "v_700", "v_925", "z_100", "z_1000", "z_150", "z_200", "z_250", "z_300", "z_400", "z_50", "z_500", "z_600", "z_700", "z_850", "z_925"]
   geoinfo : ['al', 'lsm', 'orog']
@@ -21,11 +22,11 @@ CERRA :
     net : transformer
     num_tokens : 1
     num_heads : 2
-    dim_embed : 64
+    dim_embed : 256
     num_blocks : 2
   embed_target_coords :
     net : linear
-    dim_embed : 64
+    dim_embed : 256
   target_readout :
     type : 'obs_value'
     num_layers : 2
