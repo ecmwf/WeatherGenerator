@@ -264,7 +264,6 @@ class Trainer(TrainerBase):
             self.validate_with_ema = validate_with_ema_cfg.get("enabled", True)
         else:
             self.validate_with_ema = False
-        self.validate_with_ema = False
         self.ema_model = None
         if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
@@ -552,7 +551,7 @@ class Trainer(TrainerBase):
                             )
 
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.validate_with_ema_cfg.items():
+                        for loss_name, target_aux in self.target_and_aux_calculators.items():
                             target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
