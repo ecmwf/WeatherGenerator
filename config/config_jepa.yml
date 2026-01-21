@@ -180,7 +180,13 @@ training_config:
             "num_blocks": 24, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "complement"} },
-          }
+          },
+          # "JEPA": {
+          #   'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": MLP,
+          #   "num_layers": 2, "hidden_factor": 4, 
+          #   "dropout_rate": 0.1,
+          #   target_source_correspondence: {0 : {0 : "complement"} },
+          # }
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : 0.09,
