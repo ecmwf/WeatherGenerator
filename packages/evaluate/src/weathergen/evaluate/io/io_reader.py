@@ -219,7 +219,7 @@ class Reader:
                 if available_data is not None and reader_data[name] != available[name]:
                     _logger.info(
                         f"Requested all {name}s for {mode}, but previous config was a "
-                        "strict subset. Recomputing."
+                        "strict subset. Recomputation required."
                     )
                     check_score = False
 
@@ -231,7 +231,7 @@ class Reader:
                     missing.remove("mean")
                 if missing:
                     _logger.info(
-                        f"Requested {name}(s) {missing} do(es) not exist in Zarr. "
+                        f"Requested {name}(s) {missing} is unavailable. "
                         f"Removing missing {name}(s) for {mode}."
                     )
                     requested[name] = requested[name] & reader_data[name]
@@ -241,7 +241,8 @@ class Reader:
             if available_data is not None and not requested[name] <= available[name]:
                 missing = requested[name] - available[name]
                 _logger.info(
-                    f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
+                    f"{name.capitalize()}(s) {missing} missing in previous evaluation."
+                    "Recomputation required."
                 )
                 check_score = False
 

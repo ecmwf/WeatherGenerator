@@ -1,3 +1,14 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+from __future__ import annotations
+
 from typing import Any
 
 import torch
@@ -11,7 +22,7 @@ from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, 
 
 
 class EMATeacher(TargetAndAuxModuleBase):
-    def __init__(self, model, ema_model, batch_size, **kwargs):
+    def __init__(self, model, ema_model, batch_size, training_cfg, **kwargs):
         # One of the issues is that the teacher model may have a different architecture
         # to the student, e.g. JEPA. So we need quite a flexible way to instantiate the
         # the teacher. Because of the device sharding etc that requires quite a bit of
@@ -21,9 +32,14 @@ class EMATeacher(TargetAndAuxModuleBase):
         self.batch_size = batch_size
 
         # is a dict of TargetProcessing classes as we may use several in parallel
-        self.postprocess_targets = get_target_postprocessing(
-            kwargs["losses"]["LossLatentSSLStudentTeacher"], **kwargs
-        )
+
+        losses_cfg = [
+            v.loss_fcts
+            for k, v in training_cfg.losses.items()
+            if v.type == "LossLatentSSLStudentTeacher"
+        ]
+        # TODO: support multiple LossLatentSSLStudentTeacher loss terms
+        self.postprocess_targets = get_target_postprocessing(losses_cfg[0], training_cfg, **kwargs)
 
         self.reset()
 
@@ -40,20 +56,27 @@ class EMATeacher(TargetAndAuxModuleBase):
             self.ema_model.ema_model.reshard()
         self.ema_model.update(istep, self.batch_size)
 
-    def compute(self, bidx, batch, model_params, model) -> tuple[Any, Any]:
+    def compute(self, bidx, batch, model_params, model, forecast_offset) -> tuple[Any, Any]:
         with torch.no_grad():
-            outputs = self.ema_model.forward_eval(model_params, batch).get_latent_prediction(0)
+            outputs = self.ema_model.forward_eval(
+                model_params, batch, forecast_offset
+            ).get_latent_prediction(0)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
-            return TargetAuxOutput(0, physical={}, latent=targets, aux_outputs={})
 
-    def to_device(self, device):
+            # collect target meta-information for selected samples
+            aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
+
+            return TargetAuxOutput(0, physical={}, latent=targets, aux_outputs=aux_outputs)
+
+    def to_device(self, device) -> EMATeacher:
         for _, module in self.postprocess_targets.items():
             module.to(device)
+        return self
 
 
-def get_target_postprocessing(target_losses: list[str], **kwargs):
+def get_target_postprocessing(target_losses: list[str], training_cfg, **kwargs):
     return_dict = {}
     for loss_name, conf in target_losses.items():
         if loss_name == "iBOT":

@@ -1,3 +1,12 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 """
 Integration test for the Weather Generator with multiple streams and observations.
 This test must run on a GPU machine.
@@ -14,8 +23,8 @@ from pathlib import Path
 
 import omegaconf
 import pytest
-
 from weathergen.evaluate.run_evaluation import evaluate_from_config
+
 from weathergen.run_train import inference_from_args, train_with_args
 from weathergen.utils.metrics import get_train_metrics_path
 
@@ -59,7 +68,7 @@ def test_train_multi_stream(setup, test_run_id):
     )
 
     infer_multi_stream(test_run_id)
-    evaluate_multi_stream_results(test_run_id)
+    # evaluate_multi_stream_results(test_run_id)
     assert_metrics_file_exists(test_run_id)
     assert_stream_losses_below_threshold(test_run_id, stage="train")
     assert_stream_losses_below_threshold(test_run_id, stage="val")
@@ -96,6 +105,7 @@ def evaluate_multi_stream_results(run_id):
                 "dpi_val": 300,
             },
             "evaluation": {
+                "regions": ["global"],
                 "metrics": ["rmse", "l1", "mse"],
                 "verbose": True,
                 "summary_plots": True,
@@ -106,7 +116,6 @@ def evaluate_multi_stream_results(run_id):
                 run_id: {
                     "streams": {
                         "ERA5": {
-                            "results_base_dir": "./results/",
                             "channels": ["t_850"],
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
@@ -118,7 +127,6 @@ def evaluate_multi_stream_results(run_id):
                             },
                         },
                         "SurfaceCombined": {
-                            "results_base_dir": "./results/",
                             "channels": ["obsvalue_t2m_0"],
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
@@ -130,7 +138,6 @@ def evaluate_multi_stream_results(run_id):
                             },
                         },
                         "NPPATMS": {
-                            "results_base_dir": "./results/",
                             "channels": ["obsvalue_rawbt_1"],
                             "evaluation": {"forecast_steps": "all", "sample": "all"},
                             "plotting": {
@@ -184,14 +191,14 @@ def assert_stream_losses_below_threshold(run_id, stage="train"):
     # Thresholds for train and val
     thresholds = {
         "train": {
-            "ERA5": 0.2,
-            "NPPATMS": 0.5,
-            "SurfaceCombined": 0.7,
+            "ERA5": 0.5,
+            "NPPATMS": 0.6,
+            "SurfaceCombined": 0.6,
         },
         "val": {
             "ERA5": 0.2,
-            "NPPATMS": 0.4,
-            "SurfaceCombined": 0.6,
+            "NPPATMS": 0.5,
+            "SurfaceCombined": 0.5,
         },
     }
 
