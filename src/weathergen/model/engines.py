@@ -232,7 +232,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
             tokens_global_c = block(
                 tokens_global_c,
@@ -384,7 +384,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens):
         for block in self.ae_global_blocks:
             tokens = block(tokens)
         return tokens
@@ -938,6 +938,13 @@ class LatentPredictionHeadMLP(nn.Module):
         if self.patch_token:
             outputs.append(self.layer(x.patch_tokens))
         # We concatenate in the token dimension [Batch, Tokens, Dim]
+        # rank = torch.distributed.get_rank()
+        # print( f"\n\n{rank} : LatentPredictionHead", flush=True)
+        # import traceback
+        # for line in traceback.format_stack():
+        #     print( f"{rank} : {line.strip()}")
+        # import code; code.interact( local=locals())
+
         return torch.cat(outputs, dim=1)
 
 

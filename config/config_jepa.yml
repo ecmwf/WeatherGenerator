@@ -179,7 +179,7 @@ training_config:
             'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
             "pred_num_blocks": 24, "pred_num_heads": 12, "pred_with_qk_lnorm": True, "pred_intermediate_dim": 768, 
             "pred_dropout_rate": 0.1,
-            target_source_correspondence: {0 : {0 : "complement"} },
+            target_source_correspondence: {0 : {0 : "subset"} },
           }
         },
         target_and_aux_calc: { "EMATeacher" : 
@@ -244,17 +244,17 @@ validation_config:
   # run validation before training starts (mainly for model development)
   validate_before_training: False
   
-  losses: {
-    "physical": {
-        type: LossPhysical,
-        weight: 1.0,
-        loss_fcts: {
-          "mse": {
-            weight: 1.0,
-          },
-        },
-      },
-  }
+  # losses: {
+  #   "physical": {
+  #       type: LossPhysical,
+  #       weight: 1.0,
+  #       loss_fcts: {
+  #         "mse": {
+  #           weight: 1.0,
+  #         },
+  #       },
+  #     },
+  # }
 
   # Requires enabled flags
   # model_input: {
