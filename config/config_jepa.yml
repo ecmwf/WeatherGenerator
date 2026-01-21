@@ -137,7 +137,7 @@ training_config:
   training_mode: ["student_teacher"]
 
   num_mini_epochs: 32
-  samples_per_mini_epoch: 256
+  samples_per_mini_epoch: 4096
   shuffle: True
 
   start_date: 1979-01-01T00:00
