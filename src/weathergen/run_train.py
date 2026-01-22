@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def inference():
     # By default, arguments from the command line are read.
-    inference_from_args(sys.argv[1:])
+    inference_from_args(sys.argv[2:])
 
 
 def inference_from_args(argl: list[str]):
@@ -95,7 +95,7 @@ def train_continue() -> None:
         continue training. Defaults to None.
     Note: All model configurations are set in the function body.
     """
-    train_continue_from_args(sys.argv[1:])
+    train_continue_from_args(sys.argv[2:])
 
 
 def train_continue_from_args(argl: list[str]):
@@ -146,7 +146,7 @@ def train() -> None:
         continue training. Defaults to None.
     Note: All model configurations are set in the function body.
     """
-    train_with_args(sys.argv[1:], None)
+    train_with_args(sys.argv[2:], None)
 
 
 def train_with_args(argl: list[str], stream_dir: str | None):
@@ -191,6 +191,12 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 if __name__ == "__main__":
 
+    if (args_count := len(sys.argv)) < 1:
+        logger.error(f"At least one argument expected, got {args_count - 1}")
+        raise SystemExit(2)
+
+    stage = 'STAGE_NOT_SET'
+
     stage = sys.argv[1]
 
     if stage == "train":
@@ -202,3 +208,5 @@ if __name__ == "__main__":
             train()
     elif stage == "inference":
         inference()
+    else:
+        logger.error(f'The selected stage is unknown, got {stage}.')
