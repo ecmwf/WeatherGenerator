@@ -36,16 +36,21 @@ class TargetAuxOutput:
         self.latent = [{} for _ in range(len_target)]
         self.aux_outputs = {}
 
-    def add_physical_target(self, fstep: int, stream_name: StreamName, pred: torch.Tensor) -> None:
-        self.physical[fstep][stream_name] = pred
+    def add_physical_target(
+        self, timestep_idx: int, stream_name: StreamName, pred: torch.Tensor
+    ) -> None:
+        self.physical[timestep_idx][stream_name] = pred
 
-    def add_latent_target(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
-        self.latent[fstep][latent_name] = pred
+    def add_latent_target(self, timestep_idx: int, latent_name: str, pred: torch.Tensor) -> None:
+        self.latent[timestep_idx][latent_name] = pred
 
     def get_physical_target(
-        self, fstep: int, stream_name: StreamName | None = None, sample_idx: int | None = None
+        self,
+        timestep_idx: int,
+        stream_name: StreamName | None = None,
+        sample_idx: int | None = None,
     ):
-        pred = self.physical[fstep]
+        pred = self.physical[timestep_idx]
         if stream_name is not None:
             pred = pred.get(stream_name, None)
             if sample_idx is not None:
@@ -53,8 +58,8 @@ class TargetAuxOutput:
                 pred = pred[sample_idx]
         return pred
 
-    def get_latent_target(self, fstep: int):
-        return self.latent[fstep]
+    def get_latent_target(self, timestep_idx: int):
+        return self.latent[timestep_idx]
 
 
 class TargetAndAuxModuleBase:
@@ -99,16 +104,16 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
 
         # collect all targets, concatenating across batch dimension since this is also how it
         # happens for predictions in the model
-        fstep_idxs = [0] if len(forecast_steps) == 0 else forecast_steps
+        timestep_idxs = [0] if len(forecast_steps) == 0 else forecast_steps
         for stream_name in stream_names:
             # collect targets for all forecast steps
-            for fstep in fstep_idxs:
+            for t_idx in timestep_idxs:
                 targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
                 is_spoof = []
                 for sample in batch.samples:
-                    targets_cur += [sample.streams_data[stream_name].target_tokens[fstep]]
-                    target_times_cur += [sample.streams_data[stream_name].target_times_raw[fstep]]
-                    target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[fstep]]
+                    targets_cur += [sample.streams_data[stream_name].target_tokens[t_idx]]
+                    target_times_cur += [sample.streams_data[stream_name].target_times_raw[t_idx]]
+                    target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[t_idx]]
                     meta_data += [sample.meta_info]
                     is_spoof += [sample.streams_data[stream_name].is_spoof()]
 
@@ -120,7 +125,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                         "is_spoof": is_spoof,
                     }
 
-                    targets.add_physical_target(fstep, stream_name, targets_cur)
+                    targets.add_physical_target(t_idx, stream_name, targets_cur)
 
         return targets
 

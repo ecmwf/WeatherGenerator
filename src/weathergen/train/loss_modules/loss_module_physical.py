@@ -222,25 +222,27 @@ class LossPhysical(LossModuleBase):
             if len(targets.physical) - len(targets.forecast_steps) > 0:
                 fstep_loss_weights.insert(0, None)
 
-            loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
-            ctr_fsteps = 0
+            # loss_stream: loss for given stream
+            loss_stream = torch.tensor(0.0, device=self.device, requires_grad=True)
+            ctr_timesteps = 0
+            for timestep_idx, (preds_cur, target_cur) in enumerate(
+                zip(preds.physical, targets.physical, strict=False)
+            ):
+                preds_batch = preds_cur.get(stream_name, [])
+                if not preds_batch:
+                    # skip to next timestep if preds of current timestep are empty
+                    continue
 
-            # TODO loop directly through preds and targets
-            fstep_idxs = [0] if len(targets.forecast_steps) == 0 else targets.forecast_steps
-            for fstep in fstep_idxs:
-                fstep_weight = fstep_loss_weights[fstep]
+                targets_batch = target_cur[stream_name]["target"]
+                targets_coords_batch = target_cur[stream_name]["target_coords"]
+                targets_times_batch = target_cur[stream_name]["target_times"]
+                targets_params = target_cur[stream_name]["target_metda_data"]
+                targets_is_spoof = target_cur[stream_name]["is_spoof"]
 
-                # get current prediction and target
-                # TODO: consistent ordering of preds and targets
-                preds_batch = preds.physical[fstep].get(stream_name, [])
+                fstep_weight = fstep_loss_weights[timestep_idx]
 
-                targets_batch = targets.physical[fstep][stream_name]["target"]
-                targets_coords_batch = targets.physical[fstep][stream_name]["target_coords"]
-                targets_times_batch = targets.physical[fstep][stream_name]["target_times"]
-                targets_params = targets.physical[fstep][stream_name]["target_metda_data"]
-                targets_is_spoof = targets.physical[fstep][stream_name]["is_spoof"]
-
-                loss_batch = torch.tensor(0.0, device=self.device, requires_grad=True)
+                # loss_timestep: loss for given timestep
+                loss_timestep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_batch = 0
                 for pred, pred_params in zip(preds_batch, output_info, strict=True):
                     # source has a unique target but index is not invariant with multiple
@@ -263,8 +265,8 @@ class LossPhysical(LossModuleBase):
                         stream_info, targets_coords_batch[target_idx]
                     )
 
-                    # accumulate loss from different loss functions
-                    loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
+                    # loss_st_corr: loss for give source-target correspondence
+                    loss_st_corr = torch.tensor(0.0, device=self.device, requires_grad=True)
                     ctr_loss_fcts = 0
                     for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
                         # skip is loss is not computed for this sample
@@ -289,10 +291,15 @@ class LossPhysical(LossModuleBase):
                         assert pred.shape[1] > 0
 
                         # get masks for sub-time steps
-                        substep_masks = self._get_substep_masks(stream_info, fstep, target_times)
+                        substep_masks = self._get_substep_masks(
+                            stream_info, timestep_idx, target_times
+                        )
 
-                        losses_all[stream_name][str(fstep)][loss_fct_name] = defaultdict(dict)
-                        # loss for current loss function
+                        losses_all[stream_name][str(timestep_idx)][loss_fct_name] = defaultdict(
+                            dict
+                        )
+                        # loss_lfct: loss for given loss function aggregated over all channels
+                        # loss_lfct_chs: loss for given loss function per channel
                         loss_lfct, loss_lfct_chs = self._loss_per_loss_function(
                             loss_fct,
                             target,
@@ -303,26 +310,26 @@ class LossPhysical(LossModuleBase):
                         )
 
                         for ch_n, v in zip(target_channels, loss_lfct_chs, strict=True):
-                            losses_all[stream_name][str(fstep)][loss_fct_name][ch_n] = (
+                            losses_all[stream_name][str(timestep_idx)][loss_fct_name][ch_n] = (
                                 spoof_weight * v if v != 0.0 else torch.nan
                             )
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
                         loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * fstep_weight
-                        loss_fstep = loss_fstep + loss_cur_w
+                        loss_st_corr = loss_st_corr + loss_cur_w
                         ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
 
-                    loss_batch = loss_batch + loss_fstep
+                    loss_timestep = loss_timestep + loss_st_corr
                     ctr_batch += 1 if ctr_loss_fcts > 0.0 else 0
 
-                loss_fsteps = loss_fsteps + loss_batch
-                ctr_fsteps += 1 if ctr_batch > 0 else 0
+                loss_stream = loss_stream + loss_timestep
+                ctr_timesteps += 1 if ctr_batch > 0 else 0
 
-            denom = ctr_fsteps if ctr_fsteps > 0 else 1.0
-            loss = loss + (stream_loss_weight * loss_fsteps) / denom
+            denom = ctr_timesteps if ctr_timesteps > 0 else 1.0
+            loss = loss + (stream_loss_weight * loss_stream) / denom
 
-            ctr_streams += 1 if ctr_fsteps > 0 else 0
+            ctr_streams += 1 if ctr_timesteps > 0 else 0
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
