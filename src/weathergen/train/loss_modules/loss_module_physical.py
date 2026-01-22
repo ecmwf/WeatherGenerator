@@ -91,13 +91,13 @@ class LossPhysical(LossModuleBase):
 
         return stream_info_loss_weight, weights_channels
 
-    def _get_fstep_weights(self, forecast_steps):
+    def _get_fstep_weights(self, len_forecast_steps):
         timestep_weight_config = self.mode_cfg.forecast.get("timestep_weight")
         if timestep_weight_config is None:
-            return [1.0 for _ in range(forecast_steps)]
+            return [1.0 for _ in range(len_forecast_steps)]
         weights_timestep_fct = getattr(loss_fns, list(timestep_weight_config.keys())[0])
         decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
-        return weights_timestep_fct(forecast_steps, decay_factor)
+        return weights_timestep_fct(len_forecast_steps, decay_factor)
 
     def _get_location_weights(self, stream_info, target_coords):
         location_weight_type = stream_info.get("location_weight", None)
@@ -218,8 +218,8 @@ class LossPhysical(LossModuleBase):
             stream_loss_weight, weights_channels = self._get_weights(stream_info)
 
             # TODO: make nicer
-            fstep_loss_weights = self._get_fstep_weights(len(targets.forecast_steps))
-            if len(targets.physical) - len(targets.forecast_steps) > 0:
+            fstep_loss_weights = self._get_fstep_weights(len(targets.forecast_idxs))
+            if len(targets.physical) - len(targets.forecast_idxs) > 0:
                 fstep_loss_weights.insert(0, None)
 
             # loss_stream: loss for given stream

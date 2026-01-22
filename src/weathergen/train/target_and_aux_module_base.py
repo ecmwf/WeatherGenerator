@@ -24,14 +24,14 @@ class TargetAuxOutput:
     A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
     """
 
-    forecast_steps: list
+    forecast_idxs: list
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
     aux_outputs: dict[str, torch.Tensor]
 
-    def __init__(self, len_target: int, forecast_steps: list) -> None:
-        self.forecast_steps = forecast_steps
+    def __init__(self, len_target: int, forecast_idxs: list) -> None:
+        self.forecast_idxs = forecast_idxs
         self.physical = [{} for _ in range(len_target)]
         self.latent = [{} for _ in range(len_target)]
         self.aux_outputs = {}
@@ -98,13 +98,13 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
-        forecast_steps = batch.get_forecast_steps()
+        forecast_idxs = batch.get_forecast_idxs()
 
-        targets = TargetAuxOutput(batch.get_output_len(), forecast_steps)
+        targets = TargetAuxOutput(batch.get_output_len(), forecast_idxs)
 
         # collect all targets, concatenating across batch dimension since this is also how it
         # happens for predictions in the model
-        timestep_idxs = [0] if len(forecast_steps) == 0 else forecast_steps
+        timestep_idxs = [0] if len(forecast_idxs) == 0 else forecast_idxs
         for stream_name in stream_names:
             # collect targets for all forecast steps
             for t_idx in timestep_idxs:

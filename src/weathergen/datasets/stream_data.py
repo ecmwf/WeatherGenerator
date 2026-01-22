@@ -56,7 +56,7 @@ class StreamData:
         idx: int,
         input_steps: int,
         output_steps: int,
-        forecast_steps,
+        num_forecast_steps,
         forecast_offset,
         healpix_cells: int,
     ) -> None:
@@ -72,7 +72,7 @@ class StreamData:
         output_steps : int
             Number of output steps
             Note -- Last input step and first output step always overlap.
-        forecast_steps : int
+        num_forecast_steps : int
             Number of forecast steps.
         forecast_offset : int
             Either 0 or 1. If 1, first output entry is empty.
@@ -94,7 +94,9 @@ class StreamData:
         self.target_is_spoof = False
 
         # define forecast indices
-        self.forecast_idxs = [fs for fs in range(forecast_offset, forecast_offset + forecast_steps)]
+        self.forecast_idxs = [
+            fs for fs in range(forecast_offset, forecast_offset + num_forecast_steps)
+        ]
 
         # initialize empty members
         self.sample_idx = idx
@@ -385,9 +387,9 @@ class StreamData:
         """
         return self.source_is_spoof or self.target_is_spoof
 
-    def get_forecast_steps(self) -> int:
+    def get_forecast_idxs(self) -> int:
         """
-        Get number of forecast steps
+        Get forecast indices
         """
         return self.forecast_idxs
 

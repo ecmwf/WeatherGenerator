@@ -105,10 +105,10 @@ class Sample:
             output_len = sdata.get_output_len()
         return output_len
 
-    def get_forecast_steps(self) -> int:
+    def get_forecast_idxs(self) -> int:
         for _, sdata in self.streams_data.items():
-            forecast_steps = sdata.get_forecast_steps()
-        return forecast_steps
+            forecast_idxs = sdata.get_forecast_idxs()
+        return forecast_idxs
 
 
 class BatchSamples:
@@ -166,13 +166,13 @@ class BatchSamples:
 
         return min(lens)
 
-    def get_forecast_steps(self) -> int:
+    def get_forecast_idxs(self) -> int:
         """
-        Get forecast steps
+        Get forecast indices
         """
-        # use sample 0 since the number of forecast steps is constant across batch
+        # use sample 0 since forecast indices are identical across batch
         # TODO: fix use of sample 0
-        return self.samples[0].get_forecast_steps()
+        return self.samples[0].get_forecast_idxs()
 
     def get_output_len(self) -> int:
         """
@@ -359,13 +359,13 @@ class ModelBatch:
         """
         return int(self.source2target_matching_idxs[source_idx])
 
-    def get_forecast_steps(self) -> int:
+    def get_forecast_idxs(self) -> int:
         """
         Get forecast steps
         """
         # use sample 0 since the number of forecast steps is constant across batch
         # TODO: fix use of sample 0
-        return self.source_samples.get_forecast_steps()
+        return self.source_samples.get_forecast_idxs()
 
     def get_output_len(self) -> int:
         """

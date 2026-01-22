@@ -50,9 +50,9 @@ class ModelOutput:
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
 
-    def __init__(self, forecast_steps: int) -> None:
-        self.physical = [{} for _ in range(forecast_steps)]
-        self.latent = [{} for _ in range(forecast_steps)]
+    def __init__(self, len_output: int) -> None:
+        self.physical = [{} for _ in range(len_output)]
+        self.latent = [{} for _ in range(len_output)]
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
@@ -553,9 +553,7 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
-    def forward(
-        self, model_params: ModelParams, batch: ModelBatch
-    ) -> ModelOutput:
+    def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -575,9 +573,9 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        if len(batch.get_forecast_steps()) > 0:
+        if len(batch.get_forecast_idxs()) > 0:
             # roll-out in latent space
-            for fstep in batch.get_forecast_steps():
+            for fstep in batch.get_forecast_idxs():
                 if self.training:
                     # Impute noise to the latent state
                     noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
