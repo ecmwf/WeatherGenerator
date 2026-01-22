@@ -40,12 +40,12 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
-    forecast_offset = val_cfg.get("forecast", {}).get("offset", 0)
-    forecast_steps = max(1, val_cfg.get("forecast", {}).get("num_steps", 1))
+    fstep_idxs = [0] if len(batch.get_forecast_steps()) == 0 else batch.get_forecast_steps()
+    forecast_offset = fstep_idxs[0]
     targets_lens = []
-    # TODO why does this stop at forecast_steps? Maybe explains #1657
-    # for fstep in range(forecast_offset, forecast_steps + 1):
-    for fstep in range(forecast_offset, forecast_steps):
+
+    # TODO Maybe stopping at forecast_steps explained #1657
+    for fstep in fstep_idxs:
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
@@ -54,8 +54,8 @@ def write_output(
         for stream_info in cf.streams:
             sname = stream_info["name"]
             # predictions
-            preds = model_output.get_physical_prediction(fstep, stream_info["name"])
-            targets = target_aux_out.physical[stream_info["name"]][fstep]["target"]
+            preds = model_output.get_physical_prediction(fstep, sname)
+            targets = target_aux_out.physical[fstep][sname]["target"]
 
             preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
             targets_lens[-1] += [[]]
@@ -74,9 +74,9 @@ def write_output(
                 targets_s += [dn_data(sname, target).detach().cpu().numpy()]
 
                 key = "target_coords"
-                t_coords_s += [target_aux_out.physical[sname][fstep][key][i_batch].cpu().numpy()]
+                t_coords_s += [target_aux_out.physical[fstep][sname][key][i_batch].cpu().numpy()]
                 key = "target_times"
-                t_times_s += [target_aux_out.physical[sname][fstep][key][i_batch]]
+                t_times_s += [target_aux_out.physical[fstep][sname][key][i_batch]]
 
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
 
