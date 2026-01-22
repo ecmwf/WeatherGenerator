@@ -219,7 +219,7 @@ class Reader:
                 if available_data is not None and reader_data[name] != available[name]:
                     _logger.info(
                         f"Requested all {name}s for {mode}, but previous config was a "
-                        "strict subset. Recomputing."
+                        "strict subset. Recomputation required."
                     )
                     check_score = False
 
@@ -241,7 +241,8 @@ class Reader:
             if available_data is not None and not requested[name] <= available[name]:
                 missing = requested[name] - available[name]
                 _logger.info(
-                    f"{name.capitalize()}(s) {missing} missing in previous evaluation. Recomputing."
+                    f"{name.capitalize()}(s) {missing} missing in previous evaluation."
+                    "Recomputation required."
                 )
                 check_score = False
 
