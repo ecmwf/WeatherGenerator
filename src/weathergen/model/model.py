@@ -18,7 +18,6 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
-from omegaconf import OmegaConf
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
@@ -284,6 +283,31 @@ class Model(torch.nn.Module):
         self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
         self.register_token_idx = cf.num_register_tokens
 
+    def _create_latent_pred_head(
+        self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
+    ):
+        if loss_cfg["head"].lower() == "mlp":
+            return LatentPredictionHeadMLP(
+                name,
+                global_cfg.ae_global_dim_embed,
+                loss_cfg,
+                use_class_token=use_class_token,
+                use_patch_token=use_patch_token,
+            )
+        elif loss_cfg["head"].lower() == "transformer":
+            return LatentPredictionHeadTransformer(
+                global_cfg,
+                name,
+                global_cfg.ae_global_dim_embed,
+                loss_cfg,
+                use_class_token=use_class_token,
+                use_patch_token=use_patch_token,
+            )
+        elif loss_cfg["head"].lower() == "identity":
+            return LatentPredictionHeadIdentity()
+        else:
+            assert False, f"Unknown latent prediction head type {loss_cfg['head']}"
+
     def create(self) -> "Model":
         """Create each individual module of the model"""
         cf = self.cf
@@ -437,43 +461,15 @@ class Model(torch.nn.Module):
             if v.type == "LossLatentSSLStudentTeacher"
         ]
 
-        def _create_latent_pred_head(
-            global_config, name, loss_conf, use_class_token, use_patch_token
-        ):
-            global_config = OmegaConf.merge(global_config, loss_conf)
-            if loss_conf["head"].lower() == "mlp":
-                return LatentPredictionHeadMLP(
-                    name,
-                    global_config.ae_global_dim_embed,
-                    loss_conf,
-                    use_class_token=use_class_token,
-                    use_patch_token=use_patch_token,
-                )
-            elif loss_conf["head"].lower() == "transformer":
-                return LatentPredictionHeadTransformer(
-                    global_config,
-                    name,
-                    global_config.ae_global_dim_embed,
-                    loss_conf,
-                    use_class_token=use_class_token,
-                    use_patch_token=use_patch_token,
-                )
-            elif loss_conf["head"].lower() == "identity":
-                return LatentPredictionHeadIdentity()
-            else:
-                assert False, f"Unknown latent prediction head type {loss_conf['head']}"
-
         # TODO: support multiple LossLatentSSLStudentTeacher terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
         for ssl_target_losses in ssl_losses_cfgs:
-            # TODO implement later
-            # shared_heads = cf.get("shared_heads", False)
             self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
             self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
             self.register_token_idx = cf.num_register_tokens
             for loss, loss_conf in ssl_target_losses.loss_fcts.items():
                 if loss == "iBOT":
-                    self.latent_heads[loss] = _create_latent_pred_head(
+                    self.latent_heads[loss] = self._create_latent_pred_head(
                         cf,
                         f"{loss}-head",
                         loss_conf,
@@ -481,7 +477,7 @@ class Model(torch.nn.Module):
                         use_patch_token=True,
                     )
                 elif loss == "JEPA":
-                    self.latent_heads[loss] = _create_latent_pred_head(
+                    self.latent_heads[loss] = self._create_latent_pred_head(
                         cf,
                         f"{loss}-head",
                         loss_conf,
@@ -489,7 +485,7 @@ class Model(torch.nn.Module):
                         use_patch_token=True,
                     )
                 elif loss == "DINO":
-                    self.latent_heads[loss] = _create_latent_pred_head(
+                    self.latent_heads[loss] = self._create_latent_pred_head(
                         cf,
                         f"{loss}-head",
                         loss_conf,

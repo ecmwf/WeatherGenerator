@@ -847,15 +847,9 @@ class LatentPredictionHeadTransformer(nn.Module):
     ):
         super().__init__()
 
-        # "JEPA": {
-        #     'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-        #     "num_blocks": 24, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768,
-        #     "dropout_rate": 0.1,
-        #     target_source_correspondence: {0 : {0 : "complement"} },
-
         self.name = name
 
-        out_dim, num_blocks, num_blocks, with_qk_lnorm, intermediate_dim, dropout_rate = (
+        out_dim, num_blocks, num_heads, with_qk_lnorm, intermediate_dim, dropout_rate = (
             loss_conf["out_dim"],
             loss_conf["num_blocks"],
             loss_conf["num_heads"],
@@ -877,7 +871,7 @@ class LatentPredictionHeadTransformer(nn.Module):
             self.blocks.append(
                 MultiSelfAttentionHead(
                     intermediate_dim,
-                    num_heads=num_blocks,
+                    num_heads=num_heads,
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=with_qk_lnorm,
                     with_flash=self.global_cf.with_flash_attention,
@@ -957,13 +951,6 @@ class LatentPredictionHeadMLP(nn.Module):
             outputs.append(self.blocks(x.class_token))
         if self.use_patch_token:
             outputs.append(self.blocks(x.patch_tokens))
-        # We concatenate in the token dimension [Batch, Tokens, Dim]
-        # rank = torch.distributed.get_rank()
-        # print( f"\n\n{rank} : LatentPredictionHead", flush=True)
-        # import traceback
-        # for line in traceback.format_stack():
-        #     print( f"{rank} : {line.strip()}")
-        # import code; code.interact( local=locals())
 
         return torch.cat(outputs, dim=1)
 

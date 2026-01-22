@@ -205,7 +205,7 @@ class EncoderModule(torch.nn.Module):
 
         return tokens_global_unmasked, posteriors
 
-    def aggregation_engine_umasked(
+    def aggregation_engine_unmasked(
         self, tokens_global_unmasked, tokens_global_register_class, tokens_lens
     ):
         """
@@ -282,7 +282,7 @@ class EncoderModule(torch.nn.Module):
         )
 
         # apply aggregation engine on unmasked tokens
-        tokens_global_unmasked = self.aggregation_engine_umasked(
+        tokens_global_unmasked = self.aggregation_engine_unmasked(
             tokens_global_unmasked, tokens_global_register_class, batch.tokens_lens
         )
 
