@@ -550,7 +550,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # target data: collect for all forecast steps
         output_data = []
         num_timesteps = self._get_output_length(num_forecast_steps)
-        for timestep_idx in enumerate(range(self.forecast_offset, num_timesteps)):
+        for timestep_idx in range(self.forecast_offset, num_timesteps):
             step_forecast_dt = (
                 base_idx + (self.forecast_delta_dt * timestep_idx) // self.step_timedelta
             )
@@ -731,7 +731,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # since there are empty batches
         idx_raw = iter_start
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
-            # num_forecast_steps needs to be constant per batch (amortized through data parallel training)
+            # num_forecast_steps needs to be constant per batch
+            # (amortized through data parallel training)
             num_forecast_steps = self.perms_num_forecast_steps[i]
 
             # use while loop due to the scattered nature of the data in time and to
