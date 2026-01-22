@@ -271,7 +271,7 @@ def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None, use_ol
     else:
         mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
-    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
+    return f"model_{run_id}{mini_epoch_str}.json"
 
 def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
