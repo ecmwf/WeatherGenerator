@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 2
+ae_local_num_blocks: 4
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -26,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 8
+ae_global_num_blocks: 2
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 2
+ae_aggregation_num_blocks: 8
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -63,12 +63,6 @@ fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm 
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
-
-sslpred_num_blocks: 12
-sslpred_num_heads: 12
-sslpred_dropout_rate: 0.1
-sslpred_with_qk_lnorm: True 
-sslpred_intermediate_dim: 384
 
 healpix_level: 5
 
@@ -197,7 +191,7 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 384, 
+            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
             "dropout_rate": 0.1,
             target_source_correspondence: {1 : {1 : "subset"} },
           },
@@ -205,7 +199,9 @@ training_config:
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : 0.09,
             ema_halflife_in_thousands: 1e-3,
-            model_param_overrides : { latent_heads_allowed: False },
+            model_param_overrides : { 
+              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
+            },
           }
         }
     }
@@ -215,7 +211,7 @@ training_config:
     "input_physical" : {
       # masking strategy: "random", "forecast"
       masking_strategy: "random",
-      num_samples: 2,
+      num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 

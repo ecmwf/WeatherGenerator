@@ -51,8 +51,7 @@ class EMAModel:
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
         self.ema_model.eval()
 
-    @torch.no_grad()
-    def set_requires_grad(self, flag: bool):
+    def requires_grad_(self, flag: bool):
         for p in self.ema_model.parameters():
             p.requires_grad = flag
 
@@ -69,6 +68,8 @@ class EMAModel:
 
         for name, p_ema in self.ema_model.named_parameters():
             p_src = self.src_params.get(name, None)
+            # Due to DDP only being applied only to the student the names may missmatch
+            # Thus, we check for the alternate naming scheme
             p_src = self.src_params.get("module." + name, None) if p_src is None else p_src
             if "identity" in name.lower() or "q_cells" in name.lower():
                 continue

@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 2
+ae_local_num_blocks: 4
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -71,6 +71,7 @@ with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
 with_fsdp: False
+ddp_find_unused_parameters: False
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
