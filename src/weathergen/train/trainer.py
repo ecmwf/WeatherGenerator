@@ -202,7 +202,7 @@ class Trainer(TrainerBase):
         )
 
         # get target_aux calculators for different loss terms
-        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
+        self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.test_cfg)
 
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
@@ -277,7 +277,7 @@ class Trainer(TrainerBase):
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
-        # self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
+        self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
@@ -452,6 +452,10 @@ class Trainer(TrainerBase):
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
             ]
+            [
+                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators_val.items()
+            ]
 
             # backward pass
             self.optimizer.zero_grad()
@@ -479,10 +483,16 @@ class Trainer(TrainerBase):
 
             batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
             step = batch_size_total * self.cf.general.istep
+
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
             ]
+            [
+                target_aux.update_state_post_opt_step(step, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators_val.items()
+            ]
+
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
@@ -543,8 +553,8 @@ class Trainer(TrainerBase):
                             )
 
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.target_and_aux_calculators.items():
-                            target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
                                 batch.get_target_samples(target_idxs),
