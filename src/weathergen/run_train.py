@@ -195,8 +195,6 @@ if __name__ == "__main__":
         logger.error(f"At least one argument expected, got {args_count - 1}")
         raise SystemExit(2)
 
-    stage = 'STAGE_NOT_SET'
-
     stage = sys.argv[1]
 
     if stage == "train":
