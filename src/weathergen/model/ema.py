@@ -69,7 +69,7 @@ class EMAModel:
 
         for name, p_ema in self.ema_model.named_parameters():
             p_src = self.src_params.get(name, None)
-            p_src = self.src_params.get("module." + name, None) if p_src is None else p_src 
+            p_src = self.src_params.get("module." + name, None) if p_src is None else p_src
             if "identity" in name.lower() or "q_cells" in name.lower():
                 continue
             if p_src is None:

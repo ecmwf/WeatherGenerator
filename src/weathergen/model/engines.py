@@ -921,6 +921,7 @@ class LatentPredictionHeadTransformer(nn.Module):
                 patch_class_tokens = checkpoint(block, patch_class_tokens, use_reentrant=False)
         return patch_class_tokens
 
+
 class LatentPredictionHeadIdentity(nn.Module):
     def __init__(self):
         super().__init__()
@@ -930,8 +931,6 @@ class LatentPredictionHeadIdentity(nn.Module):
 
     def forward(self, x: LatentState):
         return x.patch_tokens
-
-
 
 
 class LatentPredictionHeadMLP(nn.Module):
@@ -948,7 +947,7 @@ class LatentPredictionHeadMLP(nn.Module):
 
         self.use_class_token = use_class_token
         self.use_patch_token = use_patch_token
-        
+
         # Create an MLP block
         self.blocks = MLP(in_dim, out_dim, num_layers, hidden_factor)
 

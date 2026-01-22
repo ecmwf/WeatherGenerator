@@ -59,8 +59,7 @@ class TrainerBase:
         else:
             local_id_node = int(local_id_node)
             devices = [
-                f"cuda:{local_id_node * num_accs_per_task + i}"
-                for i in range(num_accs_per_task)
+                f"cuda:{local_id_node * num_accs_per_task + i}" for i in range(num_accs_per_task)
             ]
         torch.cuda.set_device(local_id_node * num_accs_per_task)
 
