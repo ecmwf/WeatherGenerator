@@ -197,6 +197,8 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.test_cfg.training_mode,
             devices[0],
+            cf.with_ddp,
+            cf.with_fsdp,
         )
 
         # get target_aux calculators for different loss terms
@@ -243,6 +245,8 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.training_cfg.training_mode,
             devices[0],
+            cf.with_ddp,
+            cf.with_fsdp,
         )
 
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
@@ -260,7 +264,8 @@ class Trainer(TrainerBase):
                 mini_epoch_contd,
                 cf.training_config.training_mode,
                 devices[0],
-                {},
+                cf.with_ddp,
+                cf.with_fsdp,
             )
             self.ema_model = EMAModel(
                 self.model,

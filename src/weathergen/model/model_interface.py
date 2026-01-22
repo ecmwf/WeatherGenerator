@@ -53,15 +53,10 @@ def init_model_and_shard(
     mini_epoch_contd,
     training_mode,
     device,
+    with_ddp,
+    with_fsdp,
     overrides={},
-    with_ddp=None,
-    with_fsdp=None,
 ):
-    if with_ddp is None:
-        with_ddp = cf.with_ddp
-    if with_fsdp is None:
-        with_fsdp = cf.with_fsdp
-
     model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
@@ -312,9 +307,9 @@ def get_target_aux_calculator(
             None,
             "student",
             device,
-            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
             with_ddp=False,
             with_fsdp=False,
+            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
         ema_model = EMAModel(
             model,
