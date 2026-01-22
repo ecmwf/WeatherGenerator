@@ -201,4 +201,4 @@ if __name__ == "__main__":
     elif any("inference" in arg for arg in sys.argv):
         inference()
     else:
-        logger.error(f'The selected stage is unknown, got {stage}.')
+        logger.error("No stage was found.")
