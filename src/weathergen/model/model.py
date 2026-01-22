@@ -489,7 +489,6 @@ class Model(torch.nn.Module):
                         cf,
                         f"{loss}-head",
                         loss_conf,
-                        in_dim=cf.ae_global_dim_embed,
                         use_class_token=True,
                         use_patch_token=False,
                     )

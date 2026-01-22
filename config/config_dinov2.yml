@@ -172,7 +172,10 @@ training_config:
             out_dim: 4096, # 16384, 
             teacher_temp: 0.1,
             teacher_style: "softmax_center",
-            center_momentum: 0.9
+            center_momentum: 0.9,
+            head: "mlp",
+            num_layers: 2,
+            hidden_factor: 2,
           }, 
           "DINO": {
             weight: 0.25, 
@@ -181,7 +184,10 @@ training_config:
             out_dim: 4096, # 16384, 
             teacher_temp: 0.1,
             teacher_style: "softmax_center",
-            center_momentum: 0.9
+            center_momentum: 0.9,
+            head: "mlp",
+            num_layers: 2,
+            hidden_factor: 2,
           },
         },
         target_and_aux_calc: "EMATeacher",
