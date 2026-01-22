@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def inference():
     # By default, arguments from the command line are read.
-    inference_from_args(sys.argv[2:])
+    inference_from_args(sys.argv[1:])
 
 
 def inference_from_args(argl: list[str]):
@@ -95,7 +95,7 @@ def train_continue() -> None:
         continue training. Defaults to None.
     Note: All model configurations are set in the function body.
     """
-    train_continue_from_args(sys.argv[2:])
+    train_continue_from_args(sys.argv[1:])
 
 
 def train_continue_from_args(argl: list[str]):
@@ -146,7 +146,7 @@ def train() -> None:
         continue training. Defaults to None.
     Note: All model configurations are set in the function body.
     """
-    train_with_args(sys.argv[2:], None)
+    train_with_args(sys.argv[1:], None)
 
 
 def train_with_args(argl: list[str], stream_dir: str | None):
@@ -191,20 +191,14 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 if __name__ == "__main__":
 
-    if (args_count := len(sys.argv)) < 1:
-        logger.error(f"At least one argument expected, got {args_count - 1}")
-        raise SystemExit(2)
-
-    stage = sys.argv[1]
-
-    if stage == "train":
+    if any("train" in arg for arg in sys.argv):
         # Entry point for slurm script.
         # Check whether --from_run_id passed as argument.
         if any("--from_run_id" in arg for arg in sys.argv):
             train_continue()
         else:
             train()
-    elif stage == "inference":
+    elif any("inference" in arg for arg in sys.argv):
         inference()
     else:
         logger.error(f'The selected stage is unknown, got {stage}.')
