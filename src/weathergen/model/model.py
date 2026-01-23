@@ -110,7 +110,7 @@ class ModelParams(torch.nn.Module):
             self.register_buffer(
                 "rope_coords",
                 torch.zeros(
-                    bs,
+                    cf.batch_size_per_gpu,
                     self.num_healpix_cells * cf.ae_local_num_queries,
                     2,
                     dtype=self.dtype,
