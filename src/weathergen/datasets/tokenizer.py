@@ -27,6 +27,7 @@ class Tokenizer:
     def __init__(self, healpix_level: int):
         ref = torch.tensor([1.0, 0.0, 0.0])
 
+        self.healpix_level = healpix_level
         self.hl_source = healpix_level
         self.hl_target = healpix_level
 

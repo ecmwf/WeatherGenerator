@@ -5,6 +5,7 @@
 
 SurfaceCombined :
   type : obs
+  stream_id : 2
   filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
   loss_weight : 1.0
   masking_rate : 0.6

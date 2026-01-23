@@ -1,17 +1,16 @@
-from collections.abc import Callable
-
 import numpy as np
 import pandas as pd
 import torch
 from astropy_healpix.healpy import ang2pix
 from torch import Tensor
 
+from weathergen.common.io import IOReaderData
 from weathergen.datasets.utils import (
+    locs_to_cell_coords_ctrs,
+    locs_to_ctr_coords,
     r3tos2,
     s2tor3,
 )
-
-CoordNormalizer = Callable[[torch.Tensor], torch.Tensor]
 
 # on some clusters our numpy version is pinned to be 1.x.x where the np.argsort does not
 # the stable=True argument
@@ -26,6 +25,13 @@ def arc_alpha(sin_alpha, cos_alpha):
     mask = sin_alpha < 0.0
     t[mask] = (2.0 * np.pi) - t[mask]
     return t
+
+
+def theta_phi_to_standard_coords(coords):
+    thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
+    phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
+
+    return thetas, phis
 
 
 def encode_times_source(times, time_win) -> torch.tensor:
@@ -88,8 +94,8 @@ def encode_times_target(times, time_win) -> torch.tensor:
     time_tensor[..., 3] = np.cos(time_tensor[..., 3] / (12.0 * 3600.0) * 2.0 * np.pi)
     time_tensor[..., 4] = np.sin(time_tensor[..., 4] / (12.0 * 3600.0) * 2.0 * np.pi)
 
-    # We add + 0.5 as in ERA5 very often we otherwise get 0 as the first time and to prevent too
-    # many zeros in the input, where we cannot learn anything we add an offset
+    # We add + 0.5 as for datasets with regular time steps we otherwise very often get 0 as the
+    # first time and to prevent too many zeros in the input
     return time_tensor + 0.5
 
 
@@ -100,13 +106,10 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
       hpy_idxs_ord_split : list of per cell indices into thetas,phis,posr3
       thetas : thetas in rad
       phis : phis in rad
-      posr3 : (thetas,phis) as position in R3
     """
-    thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
-    phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
+    thetas, phis = theta_phi_to_standard_coords(coords)
     # healpix cells for all points
     hpy_idxs = ang2pix(2**hl, thetas, phis, nest=True)
-    posr3 = s2tor3(thetas, phis)
 
     # extract information to split according to cells by first sorting and then finding split idxs
     hpy_idxs_ord = np.argsort(hpy_idxs, **numpy_argsort_args)
@@ -119,7 +122,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
     for b, x in zip(np.unique(np.unique(hpy_idxs[hpy_idxs_ord])), hpy_idxs_ord_temp, strict=True):
         hpy_idxs_ord_split[b] = x
 
-    return (hpy_idxs_ord_split, thetas, phis, posr3)
+    return (hpy_idxs_ord_split, thetas, phis)
 
 
 def hpy_splits(
@@ -133,11 +136,10 @@ def hpy_splits(
         idxs_ord : flat list of indices (to data points) per healpix cell
         idxs_ord_lens : lens of lists per cell
         (so that data[idxs_ord].split( idxs_ord_lens) provides per cell data)
-        posr3 : R^3 positions of coords
     """
 
     # list of data points per healpix cell
-    (hpy_idxs_ord_split, thetas, phis, posr3) = hpy_cell_splits(coords, hl)
+    (hpy_idxs_ord_split, thetas, phis) = hpy_cell_splits(coords, hl)
 
     # if token_size is exceeed split based on latitude
     # TODO: split by hierarchically traversing healpix scheme
@@ -153,156 +155,358 @@ def hpy_splits(
 
     # helper variables to split according to cells
     # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
+    offset = 1 if pad_tokens else 0
+    int32 = torch.int32
     idxs_ord = [
-        torch.split(
-            torch.cat((torch.from_numpy(np.take(idxs, ts) + 1), torch.zeros(r, dtype=torch.int32))),
-            token_size,
+        list(
+            torch.split(
+                torch.cat(
+                    (torch.from_numpy(np.take(idxs, ts) + offset), torch.zeros(r, dtype=int32))
+                ),
+                token_size,
+            )
         )
+        if len(idxs) > 0
+        else []
         for idxs, ts, r in zip(hpy_idxs_ord_split, thetas_sorted, rem, strict=True)
     ]
 
     # extract length and flatten nested list
     idxs_ord_lens = [[len(a) for a in aa] for aa in idxs_ord]
-    idxs_ord = [torch.cat([idxs for idxs in iidxs]) for iidxs in idxs_ord]
 
-    return idxs_ord, idxs_ord_lens, posr3
+    return idxs_ord, idxs_ord_lens
 
 
-def tokenize_window_space(
-    stream_id: float,
-    coords: torch.tensor,
-    geoinfos,
-    source,
-    times,
-    time_win,
+def tokenize_space(
+    rdata,
     token_size,
     hl,
-    hpy_verts_rots,
-    n_coords: CoordNormalizer,
-    enc_time,
     pad_tokens=True,
-    local_coords=True,
 ):
     """Process one window into tokens"""
 
-    # len(source)==1 would require special case handling that is not worth the effort
-    if len(source) < 2:
-        return
-
     # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens, posr3 = hpy_splits(coords, hl, token_size, pad_tokens)
+    idxs_ord, idxs_ord_lens = hpy_splits(rdata.coords, hl, token_size, pad_tokens)
 
-    # pad with zero at the beggining for token size padding
-    times_enc = enc_time(times, time_win)
-    times_enc_padded = torch.cat([torch.zeros_like(times_enc[0]).unsqueeze(0), times_enc])
-    geoinfos_padded = torch.cat([torch.zeros_like(geoinfos[0]).unsqueeze(0), geoinfos])
-    source_padded = torch.cat([torch.zeros_like(source[0]).unsqueeze(0), source])
-
-    # convert to local coordinates
-    # TODO: avoid that padded lists are rotated, which means potentially a lot of zeros
-    if local_coords:
-        coords_local = _coords_local(posr3, hpy_verts_rots, idxs_ord, n_coords)
-    else:
-        coords_local = torch.cat([torch.zeros_like(coords[0]).unsqueeze(0), coords])
-        coords_local = [coords_local[idxs] for idxs in idxs_ord]
-
-    # reorder based on cells (except for coords_local) and then cat along
-    # (time,coords,geoinfos,source) dimension and then split based on cells
-    tokens_cells = [
-        (
-            list(
-                torch.split(
-                    torch.cat(
-                        (
-                            torch.full([len(idxs), 1], stream_id, dtype=torch.float32),
-                            times_enc_padded[idxs],
-                            coords_local[i],
-                            geoinfos_padded[idxs],
-                            source_padded[idxs],
-                        ),
-                        1,
-                    ),
-                    idxs_lens,
-                )
-            )
-            if idxs_lens[0] > 0
-            else []
-        )
-        for i, (idxs, idxs_lens) in enumerate(zip(idxs_ord, idxs_ord_lens, strict=True))
-    ]
-
-    return tokens_cells
+    return idxs_ord, idxs_ord_lens
 
 
-def tokenize_window_spacetime(
-    stream_id,
-    coords,
-    geoinfos,
-    source,
-    times,
-    time_win,
+def tokenize_spacetime(
+    rdata,
     token_size,
     hl,
-    hpy_verts_rots,
-    n_coords,
-    enc_time,
     pad_tokens=True,
-    local_coords=True,
 ):
     """Tokenize respecting an intrinsic time step in the data, i.e. each time step is tokenized
     separately
     """
 
     num_healpix_cells = 12 * 4**hl
-    tokens_cells = [[] for _ in range(num_healpix_cells)]
+    idxs_cells = [[] for _ in range(num_healpix_cells)]
+    idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
 
-    t_unique = np.unique(times)
+    t_unique = np.unique(rdata.datetimes)
     for _, t in enumerate(t_unique):
-        mask = t == times
-        tokens_cells_cur = tokenize_window_space(
-            stream_id,
-            coords[mask],
-            geoinfos[mask],
-            source[mask],
-            times[mask],
-            time_win,
-            token_size,
-            hl,
-            hpy_verts_rots,
-            n_coords,
-            enc_time,
-            pad_tokens,
-            local_coords,
+        # data for current time step
+        mask = t == rdata.datetimes
+        rdata_cur = IOReaderData(
+            rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
         )
+        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens)
 
-        tokens_cells = [t + tc for t, tc in zip(tokens_cells, tokens_cells_cur, strict=True)]
+        # collect data for all time steps
+        idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
+        idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
 
-    return tokens_cells
+    return idxs_cells, idxs_cells_lens
 
 
-def _coords_local(
-    posr3: Tensor, hpy_verts_rots: Tensor, idxs_ord: list[Tensor], n_coords: CoordNormalizer
+def tokenize_apply_mask_source(
+    idxs_cells,
+    idxs_cells_lens,
+    mask_tokens,
+    mask_channels,
+    stream_id,
+    rdata,
+    time_win,
+    hpy_verts_rots,
+    enc_time,
+):
+    """
+    Apply masking to the data.
+
+    Conceptually, the data is a matrix with the rows corresponding to data points / tokens and
+    the cols the channels. Thereby mask_tokens acts on the rows, grouped according to the tokens as
+    specified in idxs_cells and mask_channels acts on the columns.
+
+    """
+
+    # convert to token level, forgetting about cells
+    idxs_tokens = [i for t in idxs_cells for i in t]
+    idxs_lens = [i for t in idxs_cells_lens for i in t]
+
+    # apply spatial masking on a per token level
+    if mask_tokens is not None:
+        # filter tokens using mask to obtain flat per data point index list
+        idxs_data = [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
+
+        if len(idxs_data) == 0:
+            tokens_cells = [torch.tensor([])]
+            tokens_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
+            return tokens_cells, tokens_per_cell
+
+        idxs_data = torch.cat(idxs_data)
+        # filter list of token lens using mask and obtain flat list for splitting
+        idxs_data_lens = torch.tensor([t for t, m in zip(idxs_lens, mask_tokens, strict=True) if m])
+
+        # pad with zero at the begining of the conceptual 2D data tensor:
+        # idxs_cells -> idxs_tokens -> idxs_data has been prepared so
+        # that the zero-index is used to add the padding to the tokens to ensure fixed size
+        times_enc = enc_time(rdata.datetimes, time_win)
+        zeros_like = torch.zeros_like
+        datetimes_enc_padded = torch.cat([zeros_like(times_enc[0]).unsqueeze(0), times_enc])
+        geoinfos_padded = torch.cat([zeros_like(rdata.geoinfos[0]).unsqueeze(0), rdata.geoinfos])
+        coords_padded = torch.cat([zeros_like(rdata.coords[0]).unsqueeze(0), rdata.coords])
+        data_padded = torch.cat([zeros_like(rdata.data[0]).unsqueeze(0), rdata.data])
+
+        # apply mask
+        datetimes = datetimes_enc_padded[idxs_data]
+        geoinfos = geoinfos_padded[idxs_data]
+        coords = coords_padded[idxs_data]
+        data = data_padded[idxs_data]
+
+    if mask_channels is not None:
+        assert False, "to be implemented"
+        # data = data_padded[ : channel_mask]
+
+    # local coords
+    num_tokens_per_cell = [len(idxs) for idxs in idxs_cells_lens]
+    mask_tokens_per_cell = torch.split(torch.from_numpy(mask_tokens), num_tokens_per_cell)
+    tokens_per_cell = torch.tensor([t.sum() for t in mask_tokens_per_cell])
+    masked_points_per_cell = torch.tensor(
+        [
+            torch.tensor([len(t) for t, m in zip(tt, mm, strict=False) if m]).sum()
+            for tt, mm in zip(idxs_cells, mask_tokens_per_cell, strict=False)
+        ]
+    ).to(dtype=torch.int32)
+    coords_local = get_source_coords_local(coords, hpy_verts_rots, masked_points_per_cell)
+
+    # create tensor that contains all data
+    stream_ids = torch.full([len(datetimes), 1], stream_id, dtype=torch.float32)
+    tokens = torch.cat((stream_ids, datetimes, coords_local, geoinfos, data), 1)
+
+    # split up tensor into tokens
+    # TODO: idxs_data_lens is currently only defined when mask_tokens is not None
+    idxs_data_lens = idxs_data_lens.tolist()
+    tokens_cells = torch.split(tokens, idxs_data_lens)
+
+    return tokens_cells, tokens_per_cell
+
+
+def tokenize_apply_mask_target(
+    hl,
+    idxs_cells,
+    idxs_cells_lens,
+    mask_tokens,
+    mask_channels,
+    rdata,
+    time_win,
+    hpy_verts_rots,
+    hpy_verts_local,
+    hpy_nctrs,
+    enc_time,
+):
+    """
+    Apply masking to the data.
+
+    Conceptually, the data is a matrix with the rows corresponding to data points / tokens and
+    the cols the channels. Thereby mask_tokens acts on the rows, grouped according to the tokens as
+    specified in idxs_cells and mask_channels acts on the columns.
+
+    """
+
+    # convert to token level, forgetting about cells
+    idxs_tokens = [i for t in idxs_cells for i in t]
+    idxs_lens = [i for t in idxs_cells_lens for i in t]
+
+    # apply spatial masking on a per token level
+    if mask_tokens is not None:
+        # filter tokens using mask to obtain flat per data point index list
+        idxs_data = [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
+
+        if len(idxs_data) == 0:
+            do = torch.zeros([0, rdata.data.shape[-1]])
+            coords = torch.zeros([0, rdata.coords.shape[-1]])
+            dt = np.array([], dtype=np.datetime64)
+            masked_points_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
+            # data, datetimes, coords, coords_local, masked_points_per_cell
+            return do, dt, coords, coords, masked_points_per_cell
+
+        idxs_data = torch.cat(idxs_data)
+
+        # apply mask
+        datetimes = rdata.datetimes[idxs_data]
+        datetimes_enc = enc_time(datetimes, time_win)
+        geoinfos = rdata.geoinfos[idxs_data]
+        coords = rdata.coords[idxs_data]
+        data = rdata.data[idxs_data]
+
+    if mask_channels is not None:
+        assert False, "to be implemented"
+        # data = data_padded[ : channel_mask]
+
+    num_tokens_per_cell = [len(idxs) for idxs in idxs_cells_lens]
+    mask_tokens_per_cell = torch.split(torch.from_numpy(mask_tokens), num_tokens_per_cell)
+    masked_points_per_cell = torch.tensor(
+        [
+            torch.tensor([len(t) for t, m in zip(tt, mm, strict=False) if m]).sum()
+            for tt, mm in zip(idxs_cells, mask_tokens_per_cell, strict=False)
+        ]
+    ).to(dtype=torch.int32)
+
+    # compute encoding of target coordinates used in prediction network
+    if torch.tensor(idxs_lens).sum() > 0:
+        coords_local = get_target_coords_local(
+            hl,
+            masked_points_per_cell,
+            coords,
+            geoinfos,
+            datetimes_enc,
+            hpy_verts_rots,
+            hpy_verts_local,
+            hpy_nctrs,
+        )
+        coords_local.requires_grad = False
+    else:
+        coords_local = torch.tensor([])
+
+    return data, datetimes, coords, coords_local, masked_points_per_cell
+
+
+def get_source_coords_local(
+    coords: Tensor,
+    hpy_verts_rots: Tensor,
+    masked_points_per_cell,
 ) -> list[Tensor]:
     """Compute simple local coordinates for a set of 3D positions on the unit sphere."""
-    fp32 = torch.float32
-    posr3 = torch.cat([torch.zeros_like(posr3[0]).unsqueeze(0), posr3])  # prepend zero
 
-    idxs_ords_lens_l = [len(idxs) for idxs in idxs_ord]
-    # int32 should be enough
-    idxs_ords_lens = torch.tensor(idxs_ords_lens_l, dtype=torch.int32)
-    # concat all indices
-    idxs_ords_c = torch.cat(idxs_ord)
-    # Copy the rotation matrices for each healpix cell
-    # num_points x 3 x 3
-    rots = torch.repeat_interleave(hpy_verts_rots, idxs_ords_lens, dim=0)
+    # remove padding from coords
+    posr3 = s2tor3(*theta_phi_to_standard_coords(coords))
+    posr3[0, 0] = 0.0
+    posr3[0, 1] = 0.0
+    posr3[0, 2] = 0.0
+
+    rots = torch.repeat_interleave(hpy_verts_rots, masked_points_per_cell, dim=0)
     # BMM only works for b x n x m and b x m x 1
     # adding a dummy dimension to posr3
-    # numpoints x 3 x 1
-    posr3_sel = posr3[idxs_ords_c].unsqueeze(-1)
-    vec_rot = torch.bmm(rots, posr3_sel)
-    vec_rot = vec_rot.squeeze(-1)
-    vec_scaled = n_coords(r3tos2(vec_rot).to(fp32))
-    # split back to ragged list
-    # num_points x 2
-    coords_local = torch.split(vec_scaled, idxs_ords_lens_l, dim=0)
-    return list(coords_local)
+    vec_rot = torch.bmm(rots, posr3.unsqueeze(-1)).squeeze(-1)
+    vec_scaled = r3tos2(vec_rot).to(torch.float32)
+
+    # TODO: vec_scaled are small -> should they be normalized/rescaled?
+
+    return vec_scaled
+
+
+def get_target_coords_local(
+    hlc,
+    masked_points_per_cell,
+    coords,
+    target_geoinfos,
+    target_times,
+    verts_rots,
+    verts_local,
+    nctrs,
+):
+    """Generate local coordinates for target coords w.r.t healpix cell vertices and
+    and for healpix cell vertices themselves
+    """
+
+    # target_coords_lens = [len(t) for t in target_coords]
+    # tcs, target_coords = tcs_optimized(target_coords)
+    target_coords = s2tor3(*theta_phi_to_standard_coords(coords))
+    tcs = torch.split(target_coords, masked_points_per_cell.tolist())
+
+    if target_coords.shape[0] == 0:
+        return torch.tensor([])
+    # target_geoinfos = torch.cat(target_geoinfos)
+    # target_times = torch.cat(target_times)
+
+    verts00_rots, verts10_rots, verts11_rots, verts01_rots, vertsmm_rots = verts_rots
+
+    a = torch.zeros(
+        [
+            *target_coords.shape[:-1],
+            1 + target_geoinfos.shape[1] + target_times.shape[1] + 5 * (3 * 5) + 3 * 8,
+        ]
+    )
+    # TODO: properly set stream_id, implicitly zero at the moment
+    geoinfo_offset = 1
+    a[..., geoinfo_offset : geoinfo_offset + target_times.shape[1]] = target_times
+    geoinfo_offset += target_times.shape[1]
+    a[..., geoinfo_offset : geoinfo_offset + target_geoinfos.shape[1]] = target_geoinfos
+    geoinfo_offset += target_geoinfos.shape[1]
+
+    ref = torch.tensor([1.0, 0.0, 0.0])
+
+    tcs_lens = torch.tensor([tt.shape[0] for tt in tcs], dtype=torch.int32)
+    tcs_lens_mask = tcs_lens > 0
+    tcs_lens = tcs_lens[tcs_lens_mask]
+
+    vls = torch.cat(
+        [
+            vl.repeat([tt, 1, 1])
+            for tt, vl in zip(tcs_lens, verts_local[tcs_lens_mask], strict=False)
+        ],
+        0,
+    )
+    vls = vls.transpose(0, 1)
+
+    zi = 0
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts00_rots, tcs
+    )
+
+    zi = 3
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[0]
+
+    zi = 15
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts10_rots, tcs
+    )
+
+    zi = 18
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[1]
+
+    zi = 30
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts11_rots, tcs
+    )
+
+    zi = 33
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[2]
+
+    zi = 45
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        verts01_rots, tcs
+    )
+
+    zi = 48
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[3]
+
+    zi = 60
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + 3)] = ref - locs_to_cell_coords_ctrs(
+        vertsmm_rots, tcs
+    )
+
+    zi = 63
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + vls.shape[-1])] = vls[4]
+
+    tcs_ctrs = torch.cat([ref - torch.cat(locs_to_ctr_coords(c, tcs)) for c in nctrs], -1)
+    zi = 75
+    a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + (3 * 8))] = tcs_ctrs
+
+    # remaining geoinfos (zenith angle etc)
+    zi = 99
+    a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
+
+    return a

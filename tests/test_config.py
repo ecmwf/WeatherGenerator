@@ -62,6 +62,10 @@ EXCLUDED_STREAMS = [
     (pathlib.Path("#test.yml"), DUMMY_STREAM_CONF),
 ]
 
+DUMMY_BASE_CONF = {
+    "foo": "bar"
+}
+
 
 def contains_keys(super_config, sub_config):
     keys_present = [key in super_config.keys() for key in sub_config.keys()]
@@ -152,6 +156,17 @@ def config_fresh(private_config_file):
 
     return cf
 
+@pytest.fixture
+def base_config():
+    return OmegaConf.create(DUMMY_BASE_CONF)
+
+@pytest.fixure
+def base_file(base_config):
+    with tempfile.NamedTemporaryFile("w+") as temp:
+        temp.write(OmegaConf.to_yaml(base_config))
+        temp.flush()
+        yield pathlib.Path(temp.name)
+
 
 def test_contains_private(config_fresh):
     sanitized_private_conf = DUMMY_PRIVATE_CONF.copy()
@@ -167,14 +182,14 @@ def test_is_paths_set(config_fresh):
 
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_dict(overwrite_dict, private_config_file):
-    cf = config.load_merge_configs(private_config_file, None, None, overwrite_dict)
+    cf = config.load_merge_configs(private_config_file, None, None, None, overwrite_dict)
 
     assert contains(cf, overwrite_dict)
 
 
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_config(overwrite_config, private_config_file):
-    cf = config.load_merge_configs(private_config_file, None, None, overwrite_config)
+    cf = config.load_merge_configs(private_config_file, None, None, None, overwrite_config)
 
     assert contains(cf, overwrite_config)
 
@@ -182,7 +197,20 @@ def test_load_with_overwrite_config(overwrite_config, private_config_file):
 @pytest.mark.parametrize("overwrite_dict", DUMMY_OVERWRITES, indirect=True)
 def test_load_with_overwrite_file(private_config_file, overwrite_file):
     sub_cf = OmegaConf.load(overwrite_file)
-    cf = config.load_merge_configs(private_config_file, None, None, overwrite_file)
+    cf = config.load_merge_configs(private_config_file, None, None, None, overwrite_file)
+
+    assert contains(cf, sub_cf)
+
+
+def test_load_with_base_config(private_config_file, base_config):
+    cf = config.load_merge_configs(private_config_file, None, None, base_config)
+
+    assert contains(cf, base_config)
+
+
+def test_load_with_base_file(private_config_file, base_file):
+    sub_cf = OmegaConf.load(base_file)
+    cf = config.load_merge_configs(private_config_file, None, None, base_file)
 
     assert contains(cf, sub_cf)
 
@@ -191,7 +219,7 @@ def test_load_with_stream_in_overwrite(private_config_file, streams_dir, mocker)
     overwrite = {"streams_directory": streams_dir}
     stub = mocker.patch("weathergen.common.config.load_streams", return_value=streams_dir)
 
-    config.load_merge_configs(private_config_file, None, None, overwrite)
+    config.load_merge_configs(private_config_file, None, None, None, overwrite)
 
     stub.assert_called_once_with(streams_dir)
 
@@ -200,7 +228,7 @@ def test_load_multiple_overwrites(private_config_file):
     overwrites = [{"foo": 1, "bar": 1, "baz": 1}, {"foo": 2, "bar": 2}, {"foo": 3}]
 
     expected = {"foo": 3, "bar": 2, "baz": 1}
-    cf = config.load_merge_configs(private_config_file, None, None, *overwrites)
+    cf = config.load_merge_configs(private_config_file, None, None, None, *overwrites)
 
     assert contains(cf, expected)
 

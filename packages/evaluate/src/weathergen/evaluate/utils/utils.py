@@ -23,7 +23,9 @@ from tqdm import tqdm
 from weathergen.evaluate.io.io_reader import Reader
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
+    heat_maps_metric_region,
     plot_metric_region,
+    ratio_plot_metric_region,
     score_card_metric_region,
 )
 from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, ScoreCards
@@ -52,7 +54,13 @@ def get_next_data(fstep, da_preds, da_tars, fsteps):
     return preds_next, tars_next
 
 
-def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=False):
+def calc_scores_per_stream(
+    reader: Reader,
+    stream: str,
+    regions: list[str],
+    metrics_dict: dict,
+    plot_score_maps: bool = False,
+):
     """
     Calculate scores for a given run and stream using the specified metrics.
 
@@ -66,8 +74,8 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
         Dictionary for scores with structure scores_dict[metric][region][stream][run_id]
     regions :
         List of regions to calculate scores on.
-    metrics :
-        List of metric names to calculate.
+    metrics_dict :
+        Dictionary mapping regions to lists of metric names to calculate.
     plot_score_maps :
         When it is True and the stream is on a regular grid the scores are
         recomputed as a function of the "ipoint" and plotted on a 2D scatter map.
@@ -79,8 +87,6 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
     Dictionary containing scores for each metric and stream.
     """
     local_scores = {}  # top-level dict: metric -> region -> stream -> run_id
-
-    _logger.info(f"RUN {reader.run_id} - {stream}: Calculating scores for metrics {metrics}...")
     if plot_score_maps:
         _logger.info(f"RUN {reader.run_id} - {stream}: Plotting scores is enabled.")
 
@@ -112,6 +118,12 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
     for region in regions:
         bbox = RegionBoundingBox.from_region_name(region)
+        metrics = metrics_dict[region]
+
+        _logger.info(
+            f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
+            f" and metrics {metrics}..."
+        )
 
         metric_stream = xr.DataArray(
             np.full(
@@ -126,6 +138,8 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
                 "ens": ensemble,
             },
         )
+
+        lead_time_map = {}
 
         for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
             if preds.ipoint.size == 0:
@@ -154,6 +168,7 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
             # Add it only if it is not None
             valid_scores = []
+
             for metric in metrics:
                 score = get_score(
                     score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
@@ -187,10 +202,26 @@ def calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps=Fal
 
             metric_stream.loc[criteria] = combined_metrics
 
+            lead_time_map[fstep] = (
+                np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
+                if "lead_time" in combined_metrics.coords
+                else None
+            )
+
             if is_regular and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
                 _plot_score_maps_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
+                )
+
+        if all(lead_time_map[f] is not None for f in lead_time_map):
+            lead_time_values = np.array(
+                [lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values]
+            ).squeeze()
+
+            if lead_time_values.shape == metric_stream.forecast_step.shape:
+                metric_stream = metric_stream.assign_coords(
+                    lead_time=("forecast_step", lead_time_values)
                 )
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
@@ -418,10 +449,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
 
 def metric_list_to_json(
     reader: Reader,
-    metrics_list: list[xr.DataArray],
-    npoints_sample_list: list[xr.DataArray],
-    streams: list[str],
-    region: str,
+    stream: str,
+    metrics_dict: list[xr.DataArray],
+    regions: list[str],
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -446,34 +476,24 @@ def metric_list_to_json(
     mini_epoch :
         Mini_epoch number.
     """
-    assert len(metrics_list) == len(npoints_sample_list) == len(streams), (
-        "The lengths of metrics_list, npoints_sample_list, and streams must be the same."
-    )
-
+    # stream_loaded_scores['rmse']['nhem']['ERA5']['jjqce6x5']
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    for s_idx, stream in enumerate(streams):
-        metrics_stream, npoints_sample_stream = (
-            metrics_list[s_idx],
-            npoints_sample_list[s_idx],
-        )
+    for metric, metric_stream in metrics_dict.items():
+        for region in regions:
+            metric_now = metric_stream[region][stream]
+            for run_id in metric_now.keys():
+                metric_now = metric_now[run_id]
 
-        for metric in metrics_stream.coords["metric"].values:
-            metric_now = metrics_stream.sel(metric=metric)
+                # Match the expected filename pattern
+                save_path = (
+                    reader.metrics_dir
+                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
+                )
 
-            # Save as individual DataArray, not Dataset
-            metric_now.attrs["npoints_per_sample"] = npoints_sample_stream.values.tolist()
-            metric_dict = metric_now.to_dict()
-
-            # Match the expected filename pattern
-            save_path = (
-                reader.metrics_dir
-                / f"{reader.run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
-            )
-
-            _logger.info(f"Saving results to {save_path}")
-            with open(save_path, "w") as f:
-                json.dump(metric_dict, f, indent=4)
+                _logger.info(f"Saving results to {save_path}")
+                with open(save_path, "w") as f:
+                    json.dump(metric_now.to_dict(), f, indent=4)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "
@@ -494,7 +514,6 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         Dictionary containing scores for each metric and stream.
     """
     _logger.info("Plotting summary of evaluation results...")
-
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
     print_summary = cfg.evaluation.get("print_summary", False)
@@ -517,7 +536,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     br_plotter = BarPlots(plot_cfg, summary_dir)
     for region in regions:
         for metric in metrics:
-            plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("summary_plots", True):
+                plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("ratio_plots", False):
+                ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("heat_maps", False):
+                heat_maps_metric_region(metric, region, runs, scores_dict, plotter)
             if eval_opt.get("score_cards", False):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
@@ -664,3 +688,26 @@ def nested_dict():
 def triple_nested_dict():
     """Three-level nested dict factory: dict[key1][key2][key3] = value"""
     return defaultdict(nested_dict)
+
+
+def merge(dst: dict, src: dict) -> dict:
+    """
+    Recursively merge src into dst.
+    Values in src overwrite values in dst.
+    Parameters
+    ----------
+    dst : dict
+        Destination dictionary.
+    src : dict
+        Source dictionary.
+    Returns
+    -------
+    dict
+        Merged dictionary.
+    """
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
