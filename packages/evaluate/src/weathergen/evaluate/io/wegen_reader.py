@@ -171,8 +171,9 @@ class WeatherGenReader(Reader):
         -------
         xr.DataArray
             The metric DataArray.
-        missing_metrics:
-            dictionary of missing regions and metrics that need to be recomputed.
+        computable_metrics:
+            dictionary of regions and metrics that can be recomputed
+            (empty for JSONreader).
         """
 
         local_scores = {}
@@ -196,8 +197,8 @@ class WeatherGenReader(Reader):
                 # all other cases: recompute scores
                 missing_metrics.setdefault(region, []).append(metric)
                 continue
-
-        return local_scores, missing_metrics
+        recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
+        return local_scores, recomputable_missing_metrics
 
     def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
@@ -211,10 +212,14 @@ class WeatherGenReader(Reader):
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
-                score = xr.DataArray.from_dict(data_dict)  # not a dict though
+                score = xr.DataArray.from_dict(data_dict)
         else:
             score = None
         return score
+
+    def get_recomputable_metrics(self, metrics):
+        """determine whether given metrics can be re-computed."""
+        return metrics
 
     def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
@@ -261,12 +266,7 @@ class WeatherGenJSONReader(WeatherGenReader):
             for region in regions:
                 for metric in metrics:
                     score = self.load_single_score(stream, region, metric)
-                    if score is None:
-                        raise ValueError(
-                            f"JSONreader couldn't find {metric} for {run_id}, stream {stream}, "
-                            f"region {region}. Use type: zarr instead if possible."
-                        )
-                    else:
+                    if score is not None:
                         for name in coord_names:
                             vals = set(score[name].values)
                             all_coords[name].append(vals)
@@ -295,6 +295,12 @@ class WeatherGenJSONReader(WeatherGenReader):
         # TODO this should not be needed, the reader should not even be created if this is the case
         # it can still happen when a particular score was available for a different channel
         raise ValueError(f"Missing JSON data for run {self.run_id}.")
+
+    def get_recomputable_metrics(self, metrics):
+        _logger.info(
+            f"The following metrics have not yet been computed:{metrics}. Use type: zarr for that."
+        )
+        return {}
 
 
 class WeatherGenZarrReader(WeatherGenReader):
