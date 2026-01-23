@@ -105,6 +105,9 @@ class Trainer(TrainerBase):
         # get training config and remove disabled options (e.g. because of overrides)
         self.training_cfg = cf.get("training_config")
         self.training_cfg = filter_config_by_enabled(self.training_cfg, keys_to_filter)
+        assert len(self.training_cfg.model_input.keys()) != 0, (
+            "You probably have no loss term enabled"
+        )
 
         # validation and test configs are training configs, updated by specified keys
         self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
@@ -147,6 +150,8 @@ class Trainer(TrainerBase):
         batch_size = get_batch_size_from_config(mode_cfg)
 
         # get target_aux calculators for different loss terms
+        # del self.cf.training_config.losses["student-teacher"]["loss_fcts"]["JEPA"]
+        # del mode_cfg.losses["student-teacher"]["loss_fcts"]["JEPA"]
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
@@ -180,7 +185,6 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": loader_num_workers,
-            "pin_memory": True,
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset, **loader_params, sampler=None
@@ -193,6 +197,8 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.test_cfg.training_mode,
             devices[0],
+            cf.with_ddp,
+            cf.with_fsdp,
         )
 
         # get target_aux calculators for different loss terms
@@ -226,7 +232,6 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": cf.data_loading.num_workers,
-            "pin_memory": True,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         self.data_loader_validation = torch.utils.data.DataLoader(
@@ -240,6 +245,8 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.training_cfg.training_mode,
             devices[0],
+            cf.with_ddp,
+            cf.with_fsdp,
         )
 
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
@@ -257,7 +264,8 @@ class Trainer(TrainerBase):
                 mini_epoch_contd,
                 cf.training_config.training_mode,
                 devices[0],
-                {},
+                cf.with_ddp,
+                cf.with_fsdp,
             )
             self.ema_model = EMAModel(
                 self.model,
@@ -269,13 +277,13 @@ class Trainer(TrainerBase):
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
-        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
+        # self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
             if cf.with_fsdp:
                 logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
-            self.model.print_num_parameters()
+            # self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
@@ -398,6 +406,10 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            if cf.data_loading.get("memory_pinning", False):
+                # pin memory for faster CPU-GPU transfer
+                batch = batch.pin_memory()
+
             batch.to_device(self.device)
 
             with torch.autocast(
@@ -429,6 +441,7 @@ class Trainer(TrainerBase):
                 targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
+
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:
@@ -438,10 +451,6 @@ class Trainer(TrainerBase):
             [
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.validate_with_ema_cfg.items()
             ]
 
             # backward pass
@@ -473,10 +482,6 @@ class Trainer(TrainerBase):
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.validate_with_ema_cfg.items()
             ]
             # EMA update
             if self.validate_with_ema:
@@ -512,6 +517,10 @@ class Trainer(TrainerBase):
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
+                    if cf.data_loading.get("memory_pinning", False):
+                        # pin memory for faster CPU-GPU transfer
+                        batch = batch.pin_memory()
+
                     batch.to_device(self.device)
 
                     # evaluate model
@@ -534,7 +543,7 @@ class Trainer(TrainerBase):
                             )
 
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.validate_with_ema_cfg.items():
+                        for loss_name, target_aux in self.target_and_aux_calculators.items():
                             target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
