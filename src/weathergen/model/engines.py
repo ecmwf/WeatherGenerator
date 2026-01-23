@@ -271,6 +271,8 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.rope_2D,
+                        rope_learnable_freq=self.cf.rope_learnable_freq,
                     )
                 )
             else:
@@ -286,6 +288,8 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.rope_2D,
+                        rope_learnable_freq=self.cf.rope_learnable_freq,
                     )
                 )
             # MLP block
@@ -342,6 +346,8 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.rope_2D,
+                        rope_learnable_freq=self.cf.rope_learnable_freq,
                     )
                 )
             else:
@@ -357,6 +363,8 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.rope_2D,
+                        rope_learnable_freq=self.cf.rope_learnable_freq,
                     )
                 )
             # MLP block
@@ -416,6 +424,8 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            with_2d_rope=self.cf.rope_2D,
+                            rope_learnable_freq=self.cf.rope_learnable_freq,
                         )
                     )
                 else:
@@ -432,6 +442,8 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            with_2d_rope=self.cf.rope_2D,
+                            rope_learnable_freq=self.cf.rope_learnable_freq,
                         )
                     )
                 # Add MLP block

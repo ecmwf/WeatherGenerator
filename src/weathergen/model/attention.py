@@ -198,6 +198,8 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        with_2d_rope=False,
+        rope_learnable_freq=False,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -233,6 +235,27 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported."
 
+        if rope_learnable_freq and not with_2d_rope:
+            raise ValueError("rope_learnable_freq requires with_2d_rope=True")
+
+        self.with_2d_rope = with_2d_rope
+        self.rope_learnable_freq = rope_learnable_freq
+        if self.with_2d_rope and (self.dim_head_proj % 4 != 0):
+            raise ValueError(
+                f"2D rotary embeddings require dim to be divisible by 4; got {self.dim_head_proj}"
+            )
+
+        half_dim = self.dim_head_proj // 2
+        base = 10000.0
+        inv_freq_lat = 1.0 / (base ** (torch.arange(0, half_dim, 2).float() / half_dim))
+        inv_freq_lon = 1.0 / (base ** (torch.arange(0, half_dim, 2).float() / half_dim))
+        if self.rope_learnable_freq:
+            self.rope_inv_freq_lat = torch.nn.Parameter(inv_freq_lat.clone())
+            self.rope_inv_freq_lon = torch.nn.Parameter(inv_freq_lon.clone())
+        else:
+            self.register_buffer("rope_inv_freq_lat", inv_freq_lat)
+            self.register_buffer("rope_inv_freq_lon", inv_freq_lon)
+        
         # define block mask
         def mask_block_local(batch, head, idx_q, idx_kv):
             return (idx_q // block_factor) == (idx_kv // block_factor)
@@ -254,8 +277,10 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
         vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
 
-        if coords is not None:
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
+        if self.with_2d_rope:
+            if coords is None:
+                raise ValueError("coords must be provided when with_2d_rope=True")
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, self.rope_inv_freq_lat, self.rope_inv_freq_lon, unsqueeze_dim=1)
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
@@ -491,6 +516,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        with_2d_rope=False,
+        rope_learnable_freq=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -531,6 +558,27 @@ class MultiSelfAttentionHead(torch.nn.Module):
             self.att = self.attention
             self.softmax = torch.nn.Softmax(dim=-1)
 
+        if rope_learnable_freq and not with_2d_rope:
+            raise ValueError("rope_learnable_freq requires with_2d_rope=True")
+
+        self.with_2d_rope = with_2d_rope
+        self.rope_learnable_freq = rope_learnable_freq
+        if self.with_2d_rope and (self.dim_head_proj % 4 != 0):
+            raise ValueError(
+                f"2D rotary embeddings require dim to be divisible by 4; got {self.dim_head_proj}"
+            )
+
+        half_dim = self.dim_head_proj // 2
+        base = 10000.0
+        inv_freq_lat = 1.0 / (base ** (torch.arange(0, half_dim, 2).float() / half_dim))
+        inv_freq_lon = 1.0 / (base ** (torch.arange(0, half_dim, 2).float() / half_dim))
+        if self.rope_learnable_freq:
+            self.rope_inv_freq_lat = torch.nn.Parameter(inv_freq_lat.clone())
+            self.rope_inv_freq_lon = torch.nn.Parameter(inv_freq_lon.clone())
+        else:
+            self.register_buffer("rope_inv_freq_lat", inv_freq_lat)
+            self.register_buffer("rope_inv_freq_lon", inv_freq_lon)
+
     def forward(self, x, coords=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
@@ -543,8 +591,10 @@ class MultiSelfAttentionHead(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
 
-        if coords is not None:
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=2)
+        if self.with_2d_rope:
+            if coords is None:
+                raise ValueError("coords must be provided when with_2d_rope=True")
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, self.rope_inv_freq_lat, self.rope_inv_freq_lon, unsqueeze_dim=2)
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
