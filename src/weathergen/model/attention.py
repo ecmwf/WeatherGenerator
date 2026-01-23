@@ -23,6 +23,7 @@ Some blocks optionally apply 2D RoPE. When enabled, the caller must provide per-
 coordinates aligned with the token order (lat, lon in radians).
 """
 
+
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
         self,
@@ -254,7 +255,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             else:
                 self.register_buffer("rope_inv_freq_lat", inv_freq_lat)
                 self.register_buffer("rope_inv_freq_lon", inv_freq_lon)
-        
+
         # define block mask
         def mask_block_local(batch, head, idx_q, idx_kv):
             return (idx_q // block_factor) == (idx_kv // block_factor)
@@ -279,7 +280,9 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         if self.with_2d_rope:
             if coords is None:
                 raise ValueError("coords must be provided when with_2d_rope=True")
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, self.rope_inv_freq_lat, self.rope_inv_freq_lon, unsqueeze_dim=1)
+            qs, ks = rotary_pos_emb_2d(
+                qs, ks, coords, self.rope_inv_freq_lat, self.rope_inv_freq_lon, unsqueeze_dim=1
+            )
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
@@ -586,7 +589,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
         if self.with_2d_rope:
             if coords is None:
                 raise ValueError("coords must be provided when with_2d_rope=True")
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, self.rope_inv_freq_lat, self.rope_inv_freq_lon, unsqueeze_dim=2)
+            qs, ks = rotary_pos_emb_2d(
+                qs, ks, coords, self.rope_inv_freq_lat, self.rope_inv_freq_lon, unsqueeze_dim=2
+            )
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
