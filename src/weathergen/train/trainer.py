@@ -118,12 +118,13 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = get_batch_size_from_config(self.validation_cfg)
         self.batch_size_test_per_gpu = get_batch_size_from_config(self.test_cfg)
 
-        if self.training_cfg.get("forecast", {}):
-            config.validate_forecast_policy_and_steps(self.training_cfg.forecast)
-        if self.validation_cfg.get("forecast", {}):
-            config.validate_forecast_policy_and_steps(self.validation_cfg.forecast)
-        if self.test_cfg.get("forecast", {}):
-            config.validate_forecast_policy_and_steps(self.test_cfg.forecast)
+        for mode, mode_cfg in zip(
+            ["training_config", "validation_config", "test_config"],
+            [self.training_cfg, self.validation_cfg, self.test_cfg],
+            strict=True,
+        ):
+            if mode_cfg.get("forecast", {}):
+                config.validate_forecast_policy_and_steps(mode_cfg.forecast, mode)
 
         self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 

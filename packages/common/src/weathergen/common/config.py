@@ -686,7 +686,7 @@ def get_shared_wg_path(local_path: str | Path) -> Path:
     return Path(pcfg.get("path_shared_working_dir")) / local_path
 
 
-def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf):
+def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     """
     Validates the forecast policy, steps and offset within a configuration object.
 
@@ -706,6 +706,7 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf):
     Args:
         mode_cfg (OmegaConf): The training/validation/test configuration object containing the
                              `forecast.num_steps` and `forecast.policy` attributes.
+        mode (str): the training mode, i.e. training_config, validation_config, or test_config
 
     Raises:
         TypeError: If `forecast.offset` is not an integer of value 0 or 1.
@@ -715,21 +716,22 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf):
                         if any of the forecast steps in a list are negative.
     """
     provide_forecast_policy = (
-        "A 'forecast.policy' must be specified when 'forecast.num_steps' is not zero and "
-        "'forecast.offset' is 1. "
+        f"'{mode}.forecast.policy' must be specified when '{mode}.forecast.num_steps' is not zero "
+        f"and '{mode}.forecast.offset' is 1. "
     )
     valid_forecast_policies = (
-        "Valid values for 'forecast.policy' are, e.g., 'fixed' when using constant number of "
-        "forecast steps throughout the training, or 'sequential' when varying the number of "
+        "Valid values for '{mode}.forecast.policy' are, e.g., 'fixed' when using constant number "
+        "of forecast steps throughout the training, or 'sequential' when varying the number of "
         "forecast steps over mini_epochs, such as, e.g., 'forecast.num_steps: [2, 2, 4, 4]'. "
     )
-    valid_forecast_offset = "'forecast.offset' must be an integer of either value 0 or 1. "
+    valid_forecast_offset = f"'{mode}.forecast.offset' must be an integer of either value 0 or 1. "
     valid_forecast_steps_offset0 = (
-        "For 'forecast.offset: 0', 'forecast.num_steps' must be an integer of value either 0 or 1. "
+        f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer of value "
+        f"either 0 or 1. "
     )
     valid_forecast_steps_offset1 = (
-        "For 'forecast.offset: 0', 'forecast.num_steps' must be an integer greater than 1 or a "
-        "non-empty list and all of its elements must be integers greater than 1."
+        f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer greater "
+        "than 1 or a non-empty list and all of its elements must be integers greater than 1."
     )
     assert isinstance(forecast_cfg.offset, int), TypeError(valid_forecast_offset)
     if forecast_cfg.offset == 0:
