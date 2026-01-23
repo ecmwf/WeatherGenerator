@@ -322,39 +322,13 @@ class Model(torch.nn.Module):
 
                 # extract and setup relevant parameters
                 etc = si["embed_target_coords"]
-                tro_type = (
-                    si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
-                )
-                dim_embed = si["embed_target_coords"]["dim_embed"]
-                dim_out = max(
-                    dim_embed,
-                    si["token_size"] * self.targets_num_channels[i_stream],
-                )
                 tr = si["target_readout"]
                 num_layers = tr["num_layers"]
                 tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
                 tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
                 softcap = tr["softcap"] if "softcap" in tr else 0.0
 
-                if tro_type == "obs_value":
-                    # fixed dimension for obs_value type
-                    dims_embed = [
-                        si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
-                    ]
-                else:
-                    if cf.pred_dyadic_dims:
-                        coord_dim = self.geoinfo_sizes[i_stream] * si["token_size"]
-                        dims_embed = torch.tensor(
-                            [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
-                        )
-                        dims_embed[dims_embed < coord_dim] = dims_embed[
-                            torch.where(dims_embed >= coord_dim)[0][0]
-                        ]
-                        dims_embed = dims_embed.tolist()
-                    else:
-                        dims_embed = torch.linspace(
-                            dim_embed, dim_out, num_layers + 1, dtype=torch.int32
-                        ).tolist()
+                dims_embed = [si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)]
 
                 if is_root():
                     logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
@@ -403,7 +377,6 @@ class Model(torch.nn.Module):
                         tr_dim_head_proj,
                         tr_mlp_hidden_factor,
                         softcap,
-                        tro_type,
                         stream_name=stream_name,
                     )
 
