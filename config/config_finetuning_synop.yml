@@ -90,7 +90,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_decoding_nppatms_synop/"
+streams_directory: "./config/streams/era5_decoding_synop/"
 streams: ???
 
 general:
@@ -171,14 +171,26 @@ training_config:
         type: LossPhysical,
         loss_fcts: { "mse": { }, },
         },
+    "student-teacher":{
+      enabled: False
+    }
     }
   
   model_input: {
+    "random_easy" : { enabled : False},
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       },
     }
+  target_input: {
+  "forecasting_target" : {
+    masking_strategy: "forecast"  
+  },
+  "random_easy_target" : {
+    enabled: False
+  }
+}
 
   forecast :
       time_step: 00:00:00
