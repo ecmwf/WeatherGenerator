@@ -120,7 +120,7 @@ class EncoderModule(torch.nn.Module):
 
         global_tokens, posteriors = self.assimilate_local(model_params, stream_cell_tokens, batch)
 
-        global_tokens = self.assimilate_global(global_tokens)
+        global_tokens = self.assimilate_global(model_params, global_tokens)
 
         return global_tokens, posteriors
 
@@ -251,7 +251,7 @@ class EncoderModule(torch.nn.Module):
 
         return tokens_global, posteriors
 
-    def assimilate_global(self, tokens: torch.Tensor) -> torch.Tensor:
+    def assimilate_global(self, model_params, tokens: torch.Tensor) -> torch.Tensor:
         """Performs transformer based global assimilation in latent space
         Args:
             model_params : Query and embedding parameters (never used)
@@ -261,6 +261,6 @@ class EncoderModule(torch.nn.Module):
         """
 
         # global assimilation engine and adapter
-        tokens = self.ae_global_engine(tokens, use_reentrant=False)
+        tokens = self.ae_global_engine(tokens, coords=model_params.rope_coords, use_reentrant=False)
 
         return tokens
