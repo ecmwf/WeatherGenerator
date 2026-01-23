@@ -136,9 +136,28 @@ class CsvReader(Reader):
 
         data = data.copy()
         data["sample"] = data["date"].astype("category").cat.codes
-        data = data.rename(columns={"step": "forecast_step"})
+        data["forecast_step"] = data["step"].astype("category").cat.codes
+        data = data.rename(columns={"step": "lead_time"})
         data = data.rename(columns={"score": "metric"})
-        return data
+
+        data = data[["sample", "forecast_step", "lead_time", "channel", "metric", "value"]]
+        df = data.set_index(["sample", "forecast_step", "channel", "metric"])
+        da = df["value"].to_xarray()
+
+        lead_time_map = (
+            data[["forecast_step", "lead_time"]]
+            .drop_duplicates()
+            .set_index("forecast_step")["lead_time"]
+        )
+
+        da = da.assign_coords(
+            lead_time=("forecast_step", lead_time_map.loc[da.forecast_step.values].values)
+        )
+
+        da.attrs["npoints_per_sample"] = self.npoints_per_sample
+        da["metric"] = [metric]
+
+        return da
 
     def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray:
         """
@@ -174,8 +193,8 @@ class CsvReader(Reader):
                     region=region, metric=metric, forecast_steps=fsteps, channels=channels
                 )
 
-                if data.empty:
-                    da = xr.DataArray(
+                if data.size == 0:
+                    data = xr.DataArray(
                         np.full(
                             (len(samples), len(fsteps), len(channels), 1),
                             np.nan,
@@ -184,22 +203,17 @@ class CsvReader(Reader):
                         dims=("sample", "forecast_step", "channel", "metric"),
                         coords={
                             "sample": samples,
-                            "forecast_step": fsteps,
+                            "lead_time": fsteps,
+                            "forecast_step": range(len(fsteps)),
                             "channel": channels,
                             "metric": [metric],
                         },
                         attrs={"npoints_per_sample": self.npoints_per_sample},
                     )
-                else:
-                    df = data[["sample", "forecast_step", "channel", "metric", "value"]]
-                    df = df.set_index(["sample", "forecast_step", "channel", "metric"])
-                    da = df["value"].to_xarray()
-                    da.attrs["npoints_per_sample"] = self.npoints_per_sample
-                    da["metric"] = [metric]
 
                 local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
                     self.run_id
-                ] = da
+                ] = data
 
         return local_scores, None
 

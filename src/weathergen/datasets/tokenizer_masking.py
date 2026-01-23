@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
@@ -72,6 +73,14 @@ class TokenizerMasking(Tokenizer):
 
         return tokens
 
+    def build_samples_for_stream(
+        self, training_mode: str, num_cells: int, training_cfg: dict
+    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
+        """
+        Create masks for samples
+        """
+        return self.masker.build_samples_for_stream(training_mode, num_cells, training_cfg)
+
     def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
         """ """
 
@@ -117,12 +126,7 @@ class TokenizerMasking(Tokenizer):
         if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
             source_tokens_cells = [torch.tensor([])]
             source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-            mask_state = {
-                "strategy": self.masker.current_strategy,
-                "mask_tokens": None,
-                "mask_channels": None,
-            }
-            return (source_tokens_cells, source_tokens_lens, mask_state)
+            return (source_tokens_cells, source_tokens_lens)
 
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
@@ -145,14 +149,7 @@ class TokenizerMasking(Tokenizer):
             encode_times_source,
         )
 
-        # capture per-view mask state to later produce consistent targets
-        mask_state = {
-            "strategy": None,  # self.masker.current_strategy,
-            "mask_tokens": mask_tokens,
-            "mask_channels": mask_channels,
-        }
-
-        return (source_tokens_cells, source_tokens_lens, mask_state)
+        return (source_tokens_cells, source_tokens_lens)
 
     # batchify_target_for_view now unified into batchify_target via optional mask_state
 
@@ -194,9 +191,6 @@ class TokenizerMasking(Tokenizer):
             self.hpy_nctrs_target,
             encode_times_target,
         )
-
-        # TODO, TODO, TODO: max_num_targets
-        # max_num_targets = stream_info.get("max_num_targets", -1)
 
         return (data, datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
 

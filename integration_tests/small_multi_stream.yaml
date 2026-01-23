@@ -1,19 +1,12 @@
-streams_directory: "./integration_tests/streams_multi/"
-run_path: "./results"
-model_path: "./models"
-loss_fcts: [["mse", 1.0]]
-loss_fcts_val: [["mse", 1.0]]
-num_mini_epochs: 1
-samples_per_mini_epoch: 128
-samples_per_validation: 32
-lr_steps_warmup: 4
-lr_steps_cooldown: 2
-loader_num_workers: 8
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
 
-# forecast_offset: 0
-forecast_offset : 1
-forecast_steps: 2
-forecast_policy: "fixed"
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
 fe_num_blocks: 2
@@ -24,11 +17,111 @@ fe_layer_norm_after_blocks: []
 impute_latent_noise_std: 0.0
 
 healpix_level: 4
-training_mode: "forecast"
 
-train_log:
-  log_interval: 1
+################
 
-start_date: 201210010000
-# need to customize the starting date for NPPATMS
-# otherwise Integration Test can fails (nan values in the losses)
+streams_directory: "./integration_tests/streams_multi/"
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+  # local_rank, 
+  # with_ddp,
+  # paths in the private config
+  # data_path_*, 
+  # model_path, 
+  # run_path, 
+  # path_shared_
+  # multiprocessing_method
+
+  desc: ""
+
+  run_id: ???
+  run_history: []
+
+train_log_freq:
+  terminal: 10
+  metrics: 20
+  checkpoint: 100
+
+# config for training
+training_config:
+  
+  training_mode: ["masking"]
+
+  num_mini_epochs: 1
+  samples_per_mini_epoch: 512 #128 #256
+  shuffle: True
+
+  start_date: 2012-01-01T00:00
+  end_date: 2020-12-31T00:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
+  window_offset_prediction : 1
+  
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 0.00005
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 20
+    num_steps_cooldown: 10
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw :
+      # parameters are scaled by number of DDP workers
+      beta1 : 0.975
+      beta2 : 0.9875
+      eps : 2e-08
+
+  losses : {
+    "physical": {
+        type: LossPhysical,
+        loss_fcts: { "mse": { }, },
+        },
+    }
+
+  model_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+    }
+  }
+
+  forecast :
+      time_step: 06:00:00
+      num_steps: 2
+      policy: "fixed" 
+
+
+# validation config; full validation config is merge of training and validation config
+validation_config: 
+
+  samples_per_mini_epoch: 32
+  shuffle: False
+
+  start_date: 2021-10-10T00:00
+  end_date: 2022-10-11T00:00
+
+  validate_with_ema: 
+    enabled : True
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 1e-3
+
+  write_num_samples: 0
+
+test_config: 
+  
+  write_num_samples: 2

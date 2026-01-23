@@ -41,20 +41,23 @@ def inference_from_args(argl: list[str]):
     parser = cli.get_inference_parser()
     args = parser.parse_args(argl)
 
-    inference_overwrite = dict(
-        shuffle=False,
-        start_date_val=args.start_date,
-        end_date_val=args.end_date,
-        samples_per_validation=args.samples,
-        log_validation=args.samples if args.save_samples else 0,
-        streams_output=args.streams_output,
-    )
+    inference_overwrite = {
+        "test_config": dict(
+            shuffle=False,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            samples_per_mini_epoch=args.samples,
+            output=dict(write_num_samples=args.samples if args.save_samples else 0),
+            streams_output=args.streams_output,
+        )
+    }
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
+        args.base_config,
         *args.config,
         inference_overwrite,
         cli_overwrite,
@@ -64,11 +67,11 @@ def inference_from_args(argl: list[str]):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    init_loggers(cf.run_id)
+    init_loggers(cf.general.run_id)
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
-    cf.run_history += [(args.from_run_id, cf.istep)]
+    cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
     trainer = Trainer(cf.train_log_freq)
     try:
@@ -76,7 +79,8 @@ def inference_from_args(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -98,25 +102,26 @@ def train_continue_from_args(argl: list[str]):
     parser = cli.get_continue_parser()
     args = parser.parse_args(argl)
 
-    finetune_overwrite = dict()
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
-        finetune_overwrite,
+        args.base_config,
         *args.config,
+        {},
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    devices = Trainer.init_torch()
+    mp_method = cf.general.get("multiprocessing_method", "fork")
+    devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
-    init_loggers(cf.run_id)
+    init_loggers(cf.general.run_id)
 
     # track history of run to ensure traceability of results
-    cf.run_history += [(args.from_run_id, cf.istep)]
+    cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
     trainer = Trainer(cf.train_log_freq)
 
@@ -125,7 +130,8 @@ def train_continue_from_args(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 ####################################################################################################
@@ -151,17 +157,19 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
-    cf = config.load_merge_configs(args.private_config, None, None, *args.config, cli_overwrite)
+    cf = config.load_merge_configs(
+        args.private_config, None, None, args.base_config, *args.config, cli_overwrite
+    )
     cf = config.set_run_id(cf, args.run_id, False)
 
-    cf.data_loader_rng_seed = int(time.time())
-    devices = Trainer.init_torch()
+    cf.data_loading.rng_seed = int(time.time())
+    mp_method = cf.general.get("multiprocessing_method", "fork")
+    devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
-    # if cf.rank == 0:
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
-    init_loggers(cf.run_id)
+    init_loggers(cf.general.run_id)
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
@@ -177,13 +185,14 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 if __name__ == "__main__":
     # Entry point for slurm script.
     # Check whether --from_run_id passed as argument.
-    if next((True for arg in sys.argv if "--from_run_id" in arg), False):
+    if any("--from_run_id" in arg for arg in sys.argv):
         train_continue()
     else:
         train()

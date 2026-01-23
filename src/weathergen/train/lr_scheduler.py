@@ -14,6 +14,10 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import ExponentialLR, LinearLR, OneCycleLR
 
+from weathergen.utils.distributed import is_root
+
+logger = logging.getLogger(__name__)
+
 
 class LearningRateScheduler:
     def __init__(
@@ -21,18 +25,9 @@ class LearningRateScheduler:
         optimizer,
         batch_size,
         world_size,
-        lr_start,
-        lr_max,
-        lr_final_decay,
-        lr_final,
-        n_steps_warmup,
-        n_steps_decay,
-        n_steps_cooldown,
-        policy_warmup,
-        policy_decay,
-        policy_cooldown,
-        step_contd=-1,
-        scaling_policy="sqrt",
+        istep,
+        lr_steps,
+        lr_cfg,
     ):
         # '''
         # Three-phase learning rate schedule
@@ -43,101 +38,125 @@ class LearningRateScheduler:
         # TODO: implement cool down mode that continues a run but performs just cooldown
         # from current learning rate, see https://arxiv.org/abs/2106.04560
 
-        assert lr_final_decay >= lr_final
-
         self.optimizer = optimizer
         self.batch_size = batch_size
         self.world_size = world_size
 
-        self.n_steps_warmup = n_steps_warmup
-        self.n_steps_decay = n_steps_decay
-        self.n_steps_cooldown = n_steps_cooldown
+        # check validity of parameters and adjust if necessary
+        self.lr_steps = lr_steps
+        self.n_steps_warmup = lr_cfg.num_steps_warmup
+        self.n_steps_cooldown = lr_cfg.num_steps_cooldown
 
-        if scaling_policy == "const":
+        self.n_steps_decay = lr_steps - self.n_steps_warmup - self.n_steps_cooldown
+
+        if is_root():
+            logger.debug(f"steps_decay={self.n_steps_decay} lr_steps={lr_steps}")
+        # ensure that steps_decay has a reasonable value
+        if self.n_steps_decay < int(0.2 * lr_steps):
+            self.n_steps_warmup = int(0.1 * lr_steps)
+            self.n_steps_cooldown = int(0.05 * lr_steps)
+            self.n_steps_decay = lr_steps - self.n_steps_warmup - self.n_steps_cooldown
+            s = (
+                "cf.lr_steps_warmup and cf.lr_steps_cooldown",
+                f" were larger than cf.lr_steps={lr_steps}",
+            )
+            s += (f". The value have been adjusted to lr_steps_warmup={self.n_steps_warmup} and ",)
+            s += (
+                f" lr_steps_cooldown={self.n_steps_cooldown} so steps_decay={self.n_steps_decay}.",
+            )
+            if is_root():
+                logger.warning(s)
+
+        assert lr_cfg.lr_final_decay >= lr_cfg.lr_final
+
+        if lr_cfg.parallel_scaling_policy == "const":
             kappa = 1
-        elif scaling_policy == "sqrt":
+        elif lr_cfg.parallel_scaling_policy == "sqrt":
             kappa = np.sqrt(batch_size * self.world_size)
-        elif scaling_policy == "linear":
+        elif lr_cfg.parallel_scaling_policy == "linear":
             kappa = batch_size * self.world_size
         else:
             assert False, "unsupported learning rate policy"
 
-        self.lr_max_scaled = kappa * lr_max
-        lr_final_decay_scaled = kappa * lr_final_decay
+        self.lr_max_scaled = kappa * lr_cfg.lr_max
+        lr_final_decay_scaled = kappa * lr_cfg.lr_final_decay
 
-        self.policy_warmup = policy_warmup
-        self.policy_decay = policy_decay
-        self.policy_cooldown = policy_cooldown
+        self.policy_warmup = lr_cfg.policy_warmup
+        self.policy_decay = lr_cfg.policy_decay
+        self.policy_cooldown = lr_cfg.policy_cooldown
 
-        self.step_contd = step_contd
+        self.step_contd = istep
 
         # create learning rate schedulers
 
-        ##########################
         # warmup
-        if policy_warmup == "linear":
+
+        if self.policy_warmup == "linear":
             self.scheduler_warmup = LinearLR(
                 optimizer,
-                start_factor=lr_start / self.lr_max_scaled,
+                start_factor=lr_cfg.lr_start / self.lr_max_scaled,
                 end_factor=1.0,
-                total_iters=n_steps_warmup,
+                total_iters=self.n_steps_warmup,
             )
 
-        elif policy_warmup == "cosine":
-            n_steps = n_steps_warmup + n_steps_decay + 1
-            pct_start = n_steps_warmup / n_steps
+        elif self.policy_warmup == "cosine":
+            n_steps = self.n_steps_warmup + self.n_steps_decay + 1
+            pct_start = self.n_steps_warmup / n_steps
             self.scheduler_warmup = OneCycleLR(
                 optimizer,
                 max_lr=self.lr_max_scaled,
                 total_steps=n_steps,
                 pct_start=pct_start,
-                div_factor=self.lr_max_scaled / lr_start,
-                final_div_factor=lr_final_decay_scaled / lr_start,
+                div_factor=self.lr_max_scaled / lr_cfg.lr_start,
+                final_div_factor=lr_final_decay_scaled / lr_cfg.lr_start,
             )
         else:
-            if n_steps_warmup > 0:
+            if self.n_steps_warmup > 0:
                 assert False, "Unsupported warmup policy for learning rate scheduler"
 
-        ##########################
         # decay
-        if policy_decay == "linear":
+
+        if self.policy_decay == "linear":
             self.scheduler_decay = LinearLR(
                 optimizer,
                 start_factor=1.0,
-                end_factor=lr_final_decay / self.lr_max_scaled,
-                total_iters=n_steps_decay,
+                end_factor=lr_cfg.lr_final_decay / self.lr_max_scaled,
+                total_iters=self.n_steps_decay,
             )
 
-        elif policy_decay == "exponential":
+        elif self.policy_decay == "exponential":
             gamma = np.power(
-                np.float64(lr_final_decay / self.lr_max_scaled), 1.0 / np.float64(n_steps_decay)
+                np.float64(lr_cfg.lr_final_decay / self.lr_max_scaled),
+                1.0 / np.float64(self.n_steps_decay),
             )
             self.scheduler_decay = ExponentialLR(optimizer, gamma=gamma)
 
-        elif policy_decay == "cosine":
+        elif self.policy_decay == "cosine":
             # OneCycleLR has global state so more work needed to have independent ones
-            assert policy_decay == policy_warmup
+            assert self.policy_decay == self.policy_warmup
             self.scheduler_decay = self.scheduler_warmup
 
-        elif policy_decay == "sqrt":
-            self.decay_factor = self.lr_max_scaled * np.sqrt(n_steps_warmup)
+        elif self.policy_decay == "sqrt":
+            self.decay_factor = self.lr_max_scaled * np.sqrt(self.n_steps_warmup)
             self.scheduler_decay = None
 
-        elif policy_decay == "constant":
+        elif self.policy_decay == "constant":
             self.decay_factor = 0.0
             self.scheduler_decay = None
 
         else:
             assert False, "Unsupported decay policy for learning rate scheduler"
 
-        ##########################
         # cool down
-        if policy_cooldown == "linear":
+
+        if self.policy_cooldown == "linear":
             self.scheduler_cooldown = LinearLR(
                 optimizer,
-                start_factor=lr_start / self.lr_max_scaled,
-                end_factor=lr_final / lr_final_decay if lr_final_decay > 0.0 else 0.0,
-                total_iters=n_steps_cooldown,
+                start_factor=lr_cfg.lr_start / self.lr_max_scaled,
+                end_factor=lr_cfg.lr_final / lr_cfg.lr_final_decay
+                if lr_cfg.lr_final_decay > 0.0
+                else 0.0,
+                total_iters=self.n_steps_cooldown,
             )
         # TODO: this overwrites the cosine scheduler for warmup (seems there are some global vars )
         # elif policy_cooldown == 'cosine' :
@@ -148,11 +167,15 @@ class LearningRateScheduler:
         #     pct_start=0.0,
         # )
         else:
-            if n_steps_cooldown > 0:
+            if self.n_steps_cooldown > 0:
                 assert "Unsupported cooldown policy for learning rate scheduler"
 
+        # final setup
+
         # set initial scheduler
-        self.cur_scheduler = self.scheduler_warmup if n_steps_warmup > 0 else self.scheduler_decay
+        self.cur_scheduler = (
+            self.scheduler_warmup if self.n_steps_warmup > 0 else self.scheduler_decay
+        )
 
         # explicitly track steps to be able to switch between optimizers
         self.i_step = 0
@@ -164,10 +187,9 @@ class LearningRateScheduler:
         # won't have a material effect since grads are zero at this point
         if self.step_contd > 0:
             optimizer.step()
-            for _ in range(step_contd):
+            for _ in range(self.step_contd):
                 self.step()
 
-    #######################################
     def step(self):
         """
         Perform one step of learning rate schedule
@@ -202,24 +224,22 @@ class LearningRateScheduler:
         # switch scheduler when learning rate regime completed
         if self.i_step == self.n_steps_warmup:
             self.cur_scheduler = self.scheduler_decay
-            str = f"Switching scheduler to {self.cur_scheduler} at scheduler step = {self.i_step}."
+            str = f"Switching lr scheduler to '{self.policy_decay}' at step = {self.i_step}."
             logging.getLogger("obslearn").info(str)
 
         # switch scheduler when learning rate completed
         if self.i_step == self.n_steps_warmup + self.n_steps_decay:
             self.cur_scheduler = self.scheduler_cooldown
-            str = f"Switching scheduler to {self.cur_scheduler} at scheduler step = {self.i_step}."
+            str = f"Switching lr scheduler to '{self.policy_cooldown}' at step = {self.i_step}."
             logging.getLogger("obslearn").info(str)
 
         self.i_step += 1
 
         return self.lr
 
-    #######################################
     def get_lr(self):
         return self.lr
 
-    #######################################
     @staticmethod
     def plot():
         """
