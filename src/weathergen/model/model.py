@@ -297,9 +297,7 @@ class Model(torch.nn.Module):
         self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
         if cf.get("fe_diffusion_model", False):
             self.forecast_engine = DiffusionForecastEngine(
-                forecast_engine=ForecastingEngine(
-                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
-                )
+                cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
             )
 
         # embed coordinates yielding one query token for each target token
