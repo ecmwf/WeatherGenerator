@@ -289,7 +289,7 @@ def get_target_aux_calculator(
         target_aux = PhysicalTargetAndAux(loss_cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
-        cf.with_ddp = False
+        # cf.with_ddp = False
         meta_ema_model, _ = init_model_and_shard(
             cf,
             dataset,
