@@ -14,8 +14,14 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-from weathergen.model.positional_encoding import rotary_pos_emb_2d
+from weathergen.model.positional_encoding import build_rope_inv_freq_2d, rotary_pos_emb_2d
 
+"""
+Attention blocks used by WeatherGenerator.
+
+Some blocks optionally apply 2D RoPE. When enabled, the caller must provide per-token 2D
+coordinates aligned with the token order (lat, lon in radians).
+"""
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
@@ -240,21 +246,14 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         self.with_2d_rope = with_2d_rope
         self.rope_learnable_freq = rope_learnable_freq
-        if self.with_2d_rope and (self.dim_head_proj % 4 != 0):
-            raise ValueError(
-                f"2D rotary embeddings require dim to be divisible by 4; got {self.dim_head_proj}"
-            )
-
-        half_dim = self.dim_head_proj // 2
-        base = 10000.0
-        inv_freq_lat = 1.0 / (base ** (torch.arange(0, half_dim, 2).float() / half_dim))
-        inv_freq_lon = 1.0 / (base ** (torch.arange(0, half_dim, 2).float() / half_dim))
-        if self.rope_learnable_freq:
-            self.rope_inv_freq_lat = torch.nn.Parameter(inv_freq_lat.clone())
-            self.rope_inv_freq_lon = torch.nn.Parameter(inv_freq_lon.clone())
-        else:
-            self.register_buffer("rope_inv_freq_lat", inv_freq_lat)
-            self.register_buffer("rope_inv_freq_lon", inv_freq_lon)
+        if self.with_2d_rope:
+            inv_freq_lat, inv_freq_lon = build_rope_inv_freq_2d(self.dim_head_proj)
+            if self.rope_learnable_freq:
+                self.rope_inv_freq_lat = torch.nn.Parameter(inv_freq_lat)
+                self.rope_inv_freq_lon = torch.nn.Parameter(inv_freq_lon)
+            else:
+                self.register_buffer("rope_inv_freq_lat", inv_freq_lat)
+                self.register_buffer("rope_inv_freq_lon", inv_freq_lon)
         
         # define block mask
         def mask_block_local(batch, head, idx_q, idx_kv):
@@ -563,21 +562,14 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         self.with_2d_rope = with_2d_rope
         self.rope_learnable_freq = rope_learnable_freq
-        if self.with_2d_rope and (self.dim_head_proj % 4 != 0):
-            raise ValueError(
-                f"2D rotary embeddings require dim to be divisible by 4; got {self.dim_head_proj}"
-            )
-
-        half_dim = self.dim_head_proj // 2
-        base = 10000.0
-        inv_freq_lat = 1.0 / (base ** (torch.arange(0, half_dim, 2).float() / half_dim))
-        inv_freq_lon = 1.0 / (base ** (torch.arange(0, half_dim, 2).float() / half_dim))
-        if self.rope_learnable_freq:
-            self.rope_inv_freq_lat = torch.nn.Parameter(inv_freq_lat.clone())
-            self.rope_inv_freq_lon = torch.nn.Parameter(inv_freq_lon.clone())
-        else:
-            self.register_buffer("rope_inv_freq_lat", inv_freq_lat)
-            self.register_buffer("rope_inv_freq_lon", inv_freq_lon)
+        if self.with_2d_rope:
+            inv_freq_lat, inv_freq_lon = build_rope_inv_freq_2d(self.dim_head_proj)
+            if self.rope_learnable_freq:
+                self.rope_inv_freq_lat = torch.nn.Parameter(inv_freq_lat)
+                self.rope_inv_freq_lon = torch.nn.Parameter(inv_freq_lon)
+            else:
+                self.register_buffer("rope_inv_freq_lat", inv_freq_lat)
+                self.register_buffer("rope_inv_freq_lon", inv_freq_lon)
 
     def forward(self, x, coords=None, ada_ln_aux=None):
         if self.with_residual:

@@ -131,6 +131,19 @@ def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
 
 
 ####################################################################################################
+def build_rope_inv_freq_2d(dim_head, base=10000.0, device=None, dtype=None):
+    """Build inverse frequencies for 2D RoPE."""
+    assert dim_head % 4 == 0, (
+        f"2D rotary embeddings require dim to be divisible by 4; got {dim_head}"
+    )
+    half_dim = dim_head // 2
+    inv_freq = 1.0 / (
+        base ** (torch.arange(0, half_dim, 2, device=device, dtype=dtype) / half_dim)
+    )
+    return inv_freq, inv_freq.clone()
+
+
+####################################################################################################
 def rotary_embedding_2d(coords, inv_freq_lat, inv_freq_lon):
     """Create 2D RoPE embeddings from latitude/longitude coordinates.
 
@@ -143,8 +156,9 @@ def rotary_embedding_2d(coords, inv_freq_lat, inv_freq_lon):
         Tuple of (cos, sin) tensors with shape (..., dim_head).
     """
 
-    if coords.shape[-1] != 2:
-        raise ValueError(f"coords last dimension must be 2 (lat, lon); got {coords.shape[-1]}")
+    assert coords.shape[-1] == 2, (
+        f"coords last dimension must be 2 (lat, lon); got {coords.shape[-1]}"
+    )
 
     lat, lon = coords.unbind(dim=-1)
     freq_lat = lat.unsqueeze(-1) * inv_freq_lat

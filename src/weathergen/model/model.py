@@ -105,14 +105,14 @@ class ModelParams(torch.nn.Module):
         ### ROPE COORDS ###
         self.rope_2D = cf.get("rope_2D", False)
         if self.rope_2D:
-            self.rope_coords = torch.nn.Parameter(
+            self.register_buffer(
+                "rope_coords",
                 torch.zeros(
                     bs,
                     self.num_healpix_cells * cf.ae_local_num_queries,
                     2,
                     dtype=self.dtype,
                 ),
-                requires_grad=False,
             )
         else:
             self.rope_coords = None

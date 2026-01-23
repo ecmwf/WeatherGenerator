@@ -306,11 +306,9 @@ class QueryAggregationEngine(torch.nn.Module):
             )
 
     def forward(self, tokens, coords=None, use_reentrant=False):
+        ada_ln_aux = None
         for block in self.ae_aggregation_blocks:
-            if isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
-                tokens = checkpoint(block, tokens, coords, use_reentrant=use_reentrant)
-            else:
-                tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            tokens = checkpoint(block, tokens, coords, ada_ln_aux, use_reentrant=use_reentrant)
         return tokens
 
 
@@ -385,11 +383,9 @@ class GlobalAssimilationEngine(torch.nn.Module):
             )
 
     def forward(self, tokens, coords=None, use_reentrant=False):
+        ada_ln_aux = None
         for block in self.ae_global_blocks:
-            if isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
-                tokens = checkpoint(block, tokens, coords, use_reentrant=use_reentrant)
-            else:
-                tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            tokens = checkpoint(block, tokens, coords, ada_ln_aux, use_reentrant=use_reentrant)
         return tokens
 
 
@@ -486,10 +482,8 @@ class ForecastingEngine(torch.nn.Module):
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
-            elif isinstance(block, MultiSelfAttentionHead | MultiSelfAttentionHeadLocal):
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
             else:
-                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
 
         return tokens
 
