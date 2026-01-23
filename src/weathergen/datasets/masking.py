@@ -117,7 +117,7 @@ class Masker:
 
         # number of healpix cells
         self.healpix_level_data = healpix_level
-        self.healpix_num_cells = 12 * (4**healpix_level)
+        self.num_healpix_cells = 12 * (4**healpix_level)
 
     def reset_rng(self, rng) -> None:
         """
@@ -432,7 +432,7 @@ class Masker:
         # params describing the masking
         masking_params = {}
 
-        assert num_cells == self.healpix_num_cells, (
+        assert num_cells == self.num_healpix_cells, (
             "num_cells inconsistent with configured healpix level."
         )
 
