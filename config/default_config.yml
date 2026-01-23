@@ -212,7 +212,7 @@ validation_config:
     # number of samples that are written
     num_samples: 8,
     # write samples in normalized model space
-    normalized_samples: True,
+    normalized_samples: False,
     # output streams to write; default all
     streams: null,
     }
