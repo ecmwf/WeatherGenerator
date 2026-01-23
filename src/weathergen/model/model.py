@@ -292,11 +292,14 @@ class Model(torch.nn.Module):
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
 
+        # Initialize forecasting engine: standard or diffusion-wrapped
         mode_cfg = cf.training_config
         self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
-        if cf.fe_diffusion_model:
+        if cf.get("fe_diffusion_model", False):
             self.forecast_engine = DiffusionForecastEngine(
-                cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                forecast_engine=ForecastingEngine(
+                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                )
             )
 
         # embed coordinates yielding one query token for each target token
