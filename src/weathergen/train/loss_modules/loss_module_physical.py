@@ -239,7 +239,8 @@ class LossPhysical(LossModuleBase):
 
                 loss_batch = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_batch = 0
-                for pred, pred_params in zip(preds_batch, output_info, strict=True):
+                # preds_batch can be empty and output_info not for forcings
+                for pred, pred_params in zip(preds_batch, output_info, strict=False):
                     # source has a unique target but index is not invariant with multiple
                     # target_aux calculators
                     target_idx_native = pred_params.global_params.get("correspondence", -1)

@@ -121,6 +121,10 @@ class TokenizerMasking(Tokenizer):
     ):
         stream_id = stream_info["stream_id"]
         is_diagnostic = stream_info.get("diagnostic", False)
+        is_diagnostic = is_diagnostic or (
+            len(stream_info.train_source_channels) == 0
+            and len(stream_info.val_source_channels) == 0
+        )
 
         # return empty if there is no data or we are in diagnostic mode
         if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
@@ -151,49 +155,6 @@ class TokenizerMasking(Tokenizer):
 
         return (source_tokens_cells, source_tokens_lens)
 
-    # batchify_target_for_view now unified into batchify_target via optional mask_state
-
-    def get_target(
-        self,
-        stream_info: dict,
-        sampling_rate_target: float,
-        rdata: IOReaderData,
-        token_data,
-        time_win: tuple,
-        mask_state: dict | None = None,
-    ):
-        # TODO: remove
-
-        # create tokenization index
-        (idxs_cells, idxs_cells_lens) = token_data
-
-        # Apply per-view mask state if provided
-        if mask_state is not None:
-            self.masker.current_strategy = mask_state.get("strategy", self.masker.masking_strategy)
-            self.masker.mask_tokens = mask_state.get("mask_tokens")
-            self.masker.mask_channels = mask_state.get("mask_channels")
-
-        (mask_tokens, mask_channels, idxs_ord_inv) = self.masker.mask_targets_idxs(
-            idxs_cells,
-            idxs_cells_lens,
-        )
-
-        data, datetimes, coords, coords_local, coords_per_cell = tokenize_apply_mask_target(
-            self.hl_target,
-            idxs_cells,
-            idxs_cells_lens,
-            mask_tokens,
-            mask_channels,
-            rdata,
-            time_win,
-            self.hpy_verts_rots_target,
-            self.hpy_verts_local_target,
-            self.hpy_nctrs_target,
-            encode_times_target,
-        )
-
-        return (data, datetimes, coords, coords_local, coords_per_cell, idxs_ord_inv)
-
     def get_target_coords(
         self,
         stream_info: dict,
@@ -203,6 +164,17 @@ class TokenizerMasking(Tokenizer):
         cell_mask,
         # mask_state: dict | None = None,
     ):
+        is_forcing = stream_info.get("forcing", False)
+        is_forcing = is_forcing or (
+            len(stream_info.train_target_channels) == 0
+            and len(stream_info.val_target_channels) == 0
+        )
+
+        if is_forcing:
+            coords_local = torch.zeros((0, 105))
+            coords_per_cell = torch.zeros((self.masker.num_healpix_cells), dtype=torch.int)
+            return (coords_local, coords_per_cell)
+
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
@@ -263,6 +235,19 @@ class TokenizerMasking(Tokenizer):
         # mask_state: dict | None = None,
         # selection: torch.Tensor | None = None,
     ):
+        is_forcing = stream_info.get("forcing", False)
+        is_forcing = is_forcing or (
+            len(stream_info.train_target_channels) == 0
+            and len(stream_info.val_target_channels) == 0
+        )
+
+        if is_forcing:
+            data = torch.tensor([])
+            datetimes = np.array([], dtype="datetime64[s]")
+            coords = torch.tensor((0, 2))
+            idxs_ord_inv = None
+            return (data, datetimes, coords, idxs_ord_inv)
+
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
