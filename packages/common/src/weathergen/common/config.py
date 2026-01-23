@@ -16,21 +16,152 @@ import string
 import subprocess
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import yaml
 import yaml.constructor
 import yaml.scanner
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
+from weathergen.common.io import StoreType
+
 _REPO_ROOT = Path(
     __file__
 ).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
+_DATETIME_TYPE_NAME = "datetime"  # Names for custom resolvers used in Omegaconf
+_TIMEDELTA_TYPE_NAME = "timedelta"
+
+
 _logger = logging.getLogger(__name__)
 
 
 Config = DictConfig
+
+
+def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
+    """
+    Parse a value into a numpy timedelta64[ms].
+    Integers and floats are interpreted as hours.
+    Strings are parsed using pandas.to_timedelta.
+    """
+    if isinstance(val, int | float | np.number):
+        return np.timedelta64(pd.to_timedelta(val, unit="s")).astype("timedelta64[ms]")
+    return np.timedelta64(pd.to_timedelta(val)).astype("timedelta64[ms]")
+
+
+def timedelta_to_str(val: np.timedelta64 | pd.Timedelta) -> str:
+    """
+    Put timedelta into string in format HH:MM:SS
+    """
+    dt = pd.to_timedelta(val)
+    total_seconds = int(dt.total_seconds())
+
+    # Calculate HH:MM:SS
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    # Format string (e.g., "06:00:00" or "24:00:00")
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
+def str_to_datetime64(s: str | int | np.datetime64) -> np.datetime64:
+    """
+    Convert a string to a numpy datetime64 object.
+    """
+    if isinstance(s, np.datetime64):
+        return s
+
+    # Convert to string to handle YAML integers (e.g. 20001010000000)
+    s = str(s)
+    return pd.to_datetime(s).to_datetime64()
+
+
+OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
+OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
+
+
+def _sanitize_start_end_time_keys(sub_conf):
+    time_keys = ["start_date", "end_date"]
+    for key in time_keys:
+        if key in sub_conf:
+            raw_key = f"_{key}"
+            sub_conf[raw_key] = f"${{{key}}}"
+            sub_conf[key] = f"${{{_DATETIME_TYPE_NAME}:{sub_conf[key]}}}"
+
+
+def _sanitize_delta_time_keys(sub_conf):
+    delta_keys = ["time_window_step", "time_window_len"]
+    for key in delta_keys:
+        if key in sub_conf:
+            raw_key = f"_{key}"
+            sub_conf[raw_key] = f"${{{key}}}"
+            sub_conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf[key]}}}"
+
+    if sub_conf.get("forecast") is not None:
+        key = "time_step"
+        if key in sub_conf.forecast:
+            raw_key = f"_{key}"
+            sub_conf.forecast[raw_key] = f"${{{key}}}"
+            sub_conf.forecast[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf.forecast[key]}}}"
+
+
+def _sanitize_time_keys(conf: Config) -> Config:
+    """
+    Convert time keys into a time format supported by OmegaConf
+
+    Create an alias using interpolation syntax "${_keyname}"
+    This stores a string instead of the resolved timedelta object.
+    """
+
+    conf = conf.copy()
+
+    if conf.get("training_config") is not None:
+        _sanitize_delta_time_keys(conf.training_config)
+        _sanitize_start_end_time_keys(conf.training_config)
+
+    if conf.get("validation_config") is not None:
+        _sanitize_delta_time_keys(conf.validation_config)
+        _sanitize_start_end_time_keys(conf.validation_config)
+
+    if conf.get("test_config") is not None:
+        _sanitize_delta_time_keys(conf.test_config)
+        _sanitize_start_end_time_keys(conf.test_config)
+
+    return conf
+
+
+def _strip_interpolation(conf: Config) -> Config:
+    stripped = OmegaConf.create()
+    for key in list(conf.keys()):
+        if key.startswith("_"):
+            # Skip hidden/backup keys
+            continue
+        elif OmegaConf.is_interpolation(conf, key):
+            raw_key = f"_{key}"
+            if raw_key in conf:
+                # Retrieve the value from the backup key (resolves interpolation)
+                val = conf[raw_key]
+            else:
+                # Fallback to the original key
+                val = conf[key]
+        else:
+            # Standard key retrieval
+            val = conf[key]
+
+        # Convert unsupported types (timedelta/datetime) to strings
+        if isinstance(val, np.timedelta64 | pd.Timedelta):
+            val = timedelta_to_str(val)
+        elif isinstance(val, np.datetime64 | pd.Timestamp):
+            dt = pd.to_datetime(val)
+            # Format: Standard ISO without microseconds
+            val = dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+        stripped[key] = val
+
+    return stripped
 
 
 def get_run_id():
@@ -41,7 +172,8 @@ def get_run_id():
 
 def format_cf(config: Config) -> str:
     stream = io.StringIO()
-    for key, value in config.items():
+    clean_cf = _strip_interpolation(config)
+    for key, value in clean_cf.items():
         match key:
             case "streams":
                 for rt in value:
@@ -58,20 +190,28 @@ def save(config: Config, mini_epoch: int | None):
     """Save current config into the current runs model directory."""
     path_models = Path(config.model_path)
     # save in directory with model files
-    dirname = path_models / config.run_id
+    dirname = path_models / config.general.run_id
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_write_name(path_models, config.run_id, mini_epoch)
+    fname = _get_model_config_file_write_name(path_models, config.general.run_id, mini_epoch)
 
-    json_str = json.dumps(OmegaConf.to_container(config))
+    json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with fname.open("w") as f:
         f.write(json_str)
 
 
-def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
+def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
     """
     Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
+
+    Args:
+        run_id: Run ID of the pretrained WeatherGenerator model
+        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        model_path: Path to the model directory. If None, uses the model_path from private config.
+
+    Returns:
+        Configuration object loaded from the specified run and mini_epoch.
     """
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
@@ -96,6 +236,7 @@ def load_model_config(run_id: str, mini_epoch: int | None, model_path: str | Non
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
+    config = _sanitize_time_keys(config)
 
     return _apply_fixes(config)
 
@@ -130,20 +271,18 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
-    zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.zarr"
-    zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.zarr"
+    for ext in StoreType.extensions():
+        zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
+        zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
-    if zarr_path_new.exists() or zarr_path_new.is_dir():
-        zarr_path = zarr_path_new
-    elif zarr_path_old.exists() or zarr_path_old.is_dir():
-        zarr_path = zarr_path_old
-    else:
-        raise FileNotFoundError(
-            f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
-            f"exist or is not a directory."
-        )
-
-    return zarr_path
+        if zarr_path_new.exists() or zarr_path_new.is_dir():
+            return zarr_path_new
+        elif zarr_path_old.exists() or zarr_path_old.is_dir():
+            return zarr_path_old
+    raise FileNotFoundError(
+        f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+        f"exist or is not a directory."
+    )
 
 
 def _apply_fixes(config: Config) -> Config:
@@ -172,27 +311,39 @@ def _check_logging(config: Config) -> Config:
     return config
 
 
-def load_config(
-    private_home: Path | None,
-    from_run_id: str | None,
-    mini_epoch: int | None,
+def merge_configs(base_config: Config, update_config: Config):
+    """
+    Merge two configs using OmegaConf's default strategy
+    """
+    return OmegaConf.merge(base_config, update_config)
+
+
+def load_merge_configs(
+    private_home: Path | None = None,
+    from_run_id: str | None = None,
+    mini_epoch: int | None = None,
+    base: Path | Config | None = None,
     *overwrites: Path | dict | Config,
 ) -> Config:
     """
     Merge config information from multiple sources into one run_config. Anything in the
-    private configs "secrets" section will be discarted.
+    private configs "secrets" section will be discarded.
 
     Args:
-        private_home: Configuration file containing platform dependent information and secretes
+        private_home: Configuration file containing platform dependent information and secrets
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
-        mini_epoch: mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        base: Path to the base configuration file. Uses default configuration if None.
         *overwrites: Additional overwrites from different sources
 
-    Note: The order of precendence for merging the final config is in ascending order:
+    Note: The order of precedence for merging the final config is in ascending order:
         - base config (either default config or loaded from previous run)
         - private config
         - overwrites (also in ascending order)
+
+    Returns:
+        Merged configuration object.
     """
     private_config = _load_private_conf(private_home)
     overwrite_configs: list[Config] = []
@@ -210,27 +361,27 @@ def load_config(
             c = _load_overwrite_conf(overwrite)
             c = _load_streams_in_config(c)
             overwrite_configs.append(c)
-
     private_config = set_paths(private_config)
 
     if from_run_id is None:
-        base_config = _load_default_conf()
+        base_config = _load_base_conf(base)
     else:
-        base_config = load_model_config(
+        base_config = load_run_config(
             from_run_id, mini_epoch, private_config.get("model_path", None)
         )
-        from_run_id = base_config.run_id
+        from_run_id = base_config.general.run_id
+
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
+    c = _sanitize_time_keys(c)
 
     # Ensure the config has mini-epoch notation
     if hasattr(c, "samples_per_epoch"):
         c.samples_per_mini_epoch = c.samples_per_epoch
         c.num_mini_epochs = c.num_epochs
-
     return c
 
 
@@ -272,17 +423,17 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
     """
     config = config.copy()
     if reuse_run_id:
-        assert config.run_id is not None, "run_id loaded from previous run should not be None."
-        _logger.info(f"reusing run_id from previous run: {config.run_id}")
+        assert config.general.run_id is not None, "Loaded run_id should not be None."
+        _logger.info(f"reusing run_id from previous run: {config.general.run_id}")
     else:
         if run_id is None:
             # generate new id if run_id is None
-            config.run_id = run_id or get_run_id()
-            _logger.info(f"using generated run_id: {config.run_id}")
+            config.general.run_id = run_id or get_run_id()
+            _logger.info(f"Using generated run_id: {config.general.run_id}")
         else:
-            config.run_id = run_id
+            config.general.run_id = run_id
             _logger.info(
-                f"using assigned run_id: {config.run_id}."
+                f"Using assigned run_id: {config.general.run_id}."
                 f" If you manually selected this run_id, this is an error."
             )
 
@@ -381,11 +532,20 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     return private_cf
 
 
-def _load_default_conf() -> Config:
-    """Deserialize default configuration."""
-    c = OmegaConf.load(_DEFAULT_CONFIG_PTH)
-    assert isinstance(c, Config)
-    return c
+def _load_base_conf(base: Path | Config | None) -> Config:
+    """Return the base configuration"""
+    match base:
+        case Path():
+            _logger.info(f"Loading specified base config from file: {base}.")
+            conf = OmegaConf.load(base)
+        case Config():
+            _logger.info(f"Using existing config as base: {base}.")
+            conf = base
+        case _:
+            _logger.info("Deserialize default configuration.")
+            conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
+    assert isinstance(conf, Config)
+    return conf
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
@@ -481,17 +641,18 @@ def _get_config_attribute(config: Config, attribute_name: str, fallback: str) ->
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs run_path for storing run results and logs."""
-    return Path(config.run_path) / config.run_id
+    return Path(config.run_path) / config.general.run_id
 
 
 def get_path_model(config: Config) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
-    return Path(config.model_path) / config.run_id
+    return Path(config.model_path) / config.general.run_id
 
 
 def get_path_output(config: Config, mini_epoch: int) -> Path:
+    ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.zarr"
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 
     return base_path / fname
 

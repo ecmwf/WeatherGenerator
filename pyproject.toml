@@ -12,8 +12,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
- 'zarr~=2.17',
- 'anemoi-datasets~=0.5.16',
+ 'zarr~=3.1.3',
  'pandas~=2.2',
  'pynvml',
  'tqdm',
@@ -26,9 +25,10 @@ dependencies = [
  "dask~=2025.5.1",
  "hatchling",
  "numexpr>=2.11.0",
+ "anemoi-datasets",
  "weathergen-common",
  "weathergen-evaluate",
- "weathergen-readers-extra",
+ "weathergen-readers-extra"
 ]
 
 
@@ -63,6 +63,7 @@ dev = [
  "ruff==0.9.7",
  "tensorboard>=2.20.0",
  "pdbpp>=0.11.7",
+ "pylint==4.0.3",
  "pyrefly==0.36.0",
 ]
 
@@ -80,7 +81,7 @@ cpu = [
 ]
 
 gpu = [
-  'torch==2.6.0+cu126',
+  'torch==2.6.0',
   # flash-attn also has a torch dependency.
   "flash-attn",
 ]
@@ -144,7 +145,14 @@ ignore = [
 # Use Unix `\n` line endings for all files
 line-ending = "lf"
 
+# Some useful warnings are not yet in ruff
 
+[tool.pylint.main]
+ignore = ["tests"]
+
+[tool.pylint.messages_control]
+disable = ["all"]
+enable = ["W0201"]
 
 
 [tool.uv]
@@ -168,7 +176,7 @@ required-version = ">=0.7.0"
 environments = [
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
-#    "sys_platform == 'darwin'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 # One can only have cpu or gpu.
@@ -227,7 +235,7 @@ flash-attn = [
 # This version was rebuilt locally on santis and uploaded.
   { url = "https://object-store.os-api.cci1.ecmwf.int/weathergenerator-dev/wheels/flash_attn-2.7.3-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
   { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
-#  { index = "pytorch-cpu", marker = "sys_platform == 'darwin'"},
+  # There is no official support for flash-attn on macos
 ]
 
 
@@ -237,7 +245,12 @@ torch = [
   { url = "https://download.pytorch.org/whl/cu126/torch-2.6.0%2Bcu126-cp312-cp312-manylinux_2_28_x86_64.whl", marker = 'sys_platform == "linux"  and platform_machine == "x86_64"', extra="gpu" },
 # Use the public repo for CPU versions.
   { index = "pytorch-cpu", marker = "sys_platform == 'linux'", extra="cpu"},
+  { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="cpu"},
+  # No acceleration for now.
+  # TODO: explore pytorch + metal backend
+  { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
+anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", branch = "feature/zarr3" }
 
 [tool.pytest.ini_options]
 log_cli = true

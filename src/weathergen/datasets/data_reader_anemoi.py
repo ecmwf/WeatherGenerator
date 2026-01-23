@@ -23,7 +23,6 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
     check_reader_data,
-    str_to_timedelta,
 )
 
 _logger = logging.getLogger(__name__)
@@ -65,7 +64,7 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         kwargs = {}
         if "frequency" in stream_info:
-            kwargs["frequency"] = str_to_timedelta(stream_info["frequency"])
+            kwargs["frequency"] = stream_info["frequency"]
         if "subsampling_rate" in stream_info:
             name = stream_info["name"]
             _logger.warning(

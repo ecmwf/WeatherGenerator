@@ -9,6 +9,7 @@
 # weathergen-evaluate = { path = "../../../../../packages/evaluate" }
 # ///
 
+# Standard library
 import argparse
 import logging
 import multiprocessing as mp
@@ -17,17 +18,27 @@ from collections import defaultdict
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
+# Third-party
 import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf
 
+# Local application / package
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
-from weathergen.evaluate.io_reader import CsvReader, WeatherGenReader
-from weathergen.evaluate.plot_utils import collect_channels
-from weathergen.evaluate.utils import (
+from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.wegen_reader import (
+    WeatherGenJSONReader,
+    WeatherGenMergeReader,
+    WeatherGenReader,
+    WeatherGenZarrReader,
+)
+from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
+    merge,
+    metric_list_to_json,
     plot_data,
     plot_summary,
     triple_nested_dict,
@@ -146,6 +157,27 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
     evaluate_from_config(cf, mlflow_client, log_queue)
 
 
+def get_reader(
+    reader_type: str,
+    run: dict,
+    run_id: str,
+    private_paths: dict[str, str],
+    region: str | None = None,
+    metric: str | None = None,
+):
+    if reader_type == "zarr":
+        reader = WeatherGenZarrReader(run, run_id, private_paths)
+    elif reader_type == "csv":
+        reader = CsvReader(run, run_id, private_paths)
+    elif reader_type == "json":
+        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
+    elif reader_type == "merge":
+        reader = WeatherGenMergeReader(run, run_id, private_paths)
+    else:
+        raise ValueError(f"Unknown reader type: {reader_type}")
+    return reader
+
+
 def _process_stream_wrapper(
     args: dict[str, object],
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
@@ -184,35 +216,47 @@ def _process_stream(
         List of metrics to be processed.
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
-
     """
-    try:
-        type_ = run.get("type", "zarr")
-        reader = (
-            WeatherGenReader(run, run_id, private_paths)
-            if type_ == "zarr"
-            else CsvReader(run, run_id, private_paths)
+    # try:
+    type_ = run.get("type", "zarr")
+    reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
+
+    stream_dict = reader.get_stream(stream)
+    if not stream_dict:
+        return run_id, stream, {}
+
+    # Parallel plotting
+    if stream_dict.get("plotting"):
+        plot_data(reader, stream, global_plotting_opts)
+
+    # Scoring per stream
+    if not stream_dict.get("evaluation"):
+        return run_id, stream, {}
+
+    stream_loaded_scores, missing_metrics = reader.load_scores(
+        stream,
+        regions,
+        metrics,
+    )
+    scores_dict = stream_loaded_scores
+
+    if missing_metrics or plot_score_maps:
+        regions_to_compute = list(set(missing_metrics.keys())) if missing_metrics else regions
+        metrics_to_compute = missing_metrics if missing_metrics else metrics
+
+        stream_computed_scores = calc_scores_per_stream(
+            reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
         )
 
-        stream_dict = reader.get_stream(stream)
-        if not stream_dict:
-            return run_id, stream, {}
+        metric_list_to_json(reader, stream, stream_computed_scores, regions)
+        scores_dict = merge(stream_loaded_scores, stream_computed_scores)
 
-        # Parallel plotting
-        if stream_dict.get("plotting"):
-            plot_data(reader, stream, global_plotting_opts)
+    return run_id, stream, scores_dict
 
-        # Scoring per stream
-        if not stream_dict.get("evaluation"):
-            return run_id, stream, {}
 
-        stream_scores = calc_scores_per_stream(reader, stream, regions, metrics, plot_score_maps)
-
-        return run_id, stream, stream_scores
-
-    except Exception as e:
-        _logger.error(f"Error processing {run_id} - {stream}: {e}")
-        return run_id, stream, {}
+# except Exception as e:
+#     _logger.error(f"Error processing {run_id} - {stream}: {e}")
+#     return run_id, stream, {}
 
 
 # Weird typing error from python: mp.Queue is seen as a method with a "|" operator => this fai
@@ -257,11 +301,10 @@ def evaluate_from_config(
     # Build tasks per stream
     for run_id, run in runs.items():
         type_ = run.get("type", "zarr")
-        reader = (
-            WeatherGenReader(run, run_id, private_paths)
-            if type_ == "zarr"
-            else CsvReader(run, run_id, private_paths)
+        reader = get_reader(
+            type_, run, run_id, private_paths, cfg.evaluation.regions, cfg.evaluation.metrics
         )
+
         for stream in reader.streams:
             tasks.append(
                 {
@@ -330,7 +373,7 @@ def evaluate_from_config(
                     )
 
     # summary plots
-    if scores_dict and cfg.evaluation.get("summary_plots", True):
+    if scores_dict:
         _logger.info("Started creating summary plots...")
         plot_summary(cfg, scores_dict, summary_dir)
 

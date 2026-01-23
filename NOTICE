@@ -38,3 +38,13 @@ https://github.com/facebookresearch/DiT
 
 The code and model weights are licensed under CC-BY-NC. 
 See https://raw.githubusercontent.com/facebookresearch/DiT/refs/heads/main/LICENSE.txt for details.
+This project includes code derived from project "DINOv2: Learning Robust Visual Features without Supervision",
+originally developed by Meta Platforms, Inc. and affiliates,
+licensed under the Apache License, Version 2.0.
+
+Original NOTICE from project DINOv2
+--------------------------------------
+
+N/A
+
+

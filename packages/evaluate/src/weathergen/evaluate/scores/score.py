@@ -16,7 +16,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.score_utils import to_list
+from weathergen.evaluate.scores.score_utils import to_list
 
 # from common.io import MockIO
 
@@ -168,7 +168,7 @@ class Scores:
         Returns
         -------
         """
-        self._agg_dims_in = self._validate_agg_dims(agg_dims)
+        self._agg_dims = self._validate_agg_dims(agg_dims)
         self._ens_dim = self._validate_ens_dim(ens_dim)
 
         self.det_metrics_dict = {
@@ -257,18 +257,17 @@ class Scores:
                 }"
             )
 
-        if self._agg_dims_in == "all":
+        if self._agg_dims == "all":
             # Aggregate over all dimensions of the prediction data
             self._agg_dims = list(data.prediction.dims)
         else:
             # Check if _agg_dims is in prediction data
-            for dim in self._agg_dims_in:
+            for dim in self._agg_dims:
                 if dim not in data.prediction.dims:
                     raise ValueError(
                         f"Average dimension '{dim}' not found in prediction data "
                         f"dimensions: {data.prediction.dims}"
                     )
-            self._agg_dims = self._agg_dims_in
 
         arg_names: list[str] = inspect.getfullargspec(f).args[1:]
 

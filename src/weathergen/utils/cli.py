@@ -90,7 +90,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--config",
         type=Path,
-        nargs="+",
+        nargs="*",
         default=[],
         help="Optional experiment specfic configuration files in ascending order of precedence.",
     )
@@ -111,6 +111,14 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
             "Overwrite individual config options."
             " This takes precedence over overwrites passed via --config or --finetune_forecast."
             " Individual items should be of the form: parent_obj.nested_obj=value"
+        ),
+    )
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        help=(
+            "Path to the base configuration file."
+            "If not provided, ./config/default_config.yml is used."
         ),
     )
 

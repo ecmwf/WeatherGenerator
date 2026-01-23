@@ -14,6 +14,7 @@ import logging
 import re
 from pathlib import Path
 
+import omegaconf
 import torch
 from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
@@ -21,7 +22,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import distribute_tensor
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, merge_configs
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -35,8 +36,9 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import freeze_weights
 from weathergen.train.target_and_aux_diffusion import DiffusionLatentTargetEncoder
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import apply_overrides_to_dict, get_dtype
+from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -52,16 +54,19 @@ def init_model_and_shard(
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
-    freeze_modules = cf.freeze_modules
-
     # freeze request model part
     for name, module in model.named_modules():
         name = module.name if hasattr(module, "name") else name
         # avoid the whole model element which has name ''
         if name == "":
             continue
-        if re.fullmatch(freeze_modules, name) is not None:
+        if re.fullmatch(cf.freeze_modules, name) is not None:
+            logger.info(f"Froze weights {name}")
             freeze_weights(module)
+        
+    # TODO: this should be handled in the encoder to be close where q_cells is defined
+    if "q_cells" in cf.freeze_modules:
+        model.encoder.q_cells.requires_grad = False
 
     if cf.with_ddp and not cf.with_fsdp:
         # create DDP model if running without FSDP
@@ -94,15 +99,15 @@ def init_model_and_shard(
             MultiSelfAttentionHeadVarlen,
         )
 
-        for module in model.ae_local_engine.ae_local_blocks.modules():
+        for module in model.encoder.ae_local_engine.ae_local_blocks.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
-        for module in model.ae_local_global_engine.ae_adapter.modules():
+        for module in model.encoder.ae_local_global_engine.ae_adapter.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
-        for module in model.ae_global_engine.ae_global_blocks.modules():
+        for module in model.encoder.ae_global_engine.ae_global_blocks.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
@@ -124,9 +129,6 @@ def init_model_and_shard(
                 else None
             ),
         }
-        for module in model.pred_adapter_kv.modules():
-            if isinstance(module, modules_to_shard):
-                fully_shard(module, **full_precision_fsdp_kwargs)
 
         for module in model.target_token_engines.modules():
             if isinstance(module, modules_to_shard):
@@ -142,7 +144,7 @@ def init_model_and_shard(
         # functions in the embedding engine as forward functions. Thus, yielding a crash
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
-        for embed in model.embed_engine.embeds.values():
+        for embed in model.encoder.embed_engine.embeds.values():
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
@@ -161,12 +163,12 @@ def init_model_and_shard(
     # LOAD AND FREEZE ENCODER WEIGHTS
     # ONLY FOR EXPERIMENTATION, TO BE REMOVED
     if cf.chkpt_encoder_weights:
-        params = torch.load(
-            cf.chkpt_encoder_weights,
-            map_location=torch.device("cpu"),
-            mmap=True,
-            weights_only=True,
-        )
+        if is_root():
+            logger.info(
+                f"Loading chkpt from run_id={cf.chkpt_encoder_weights}"\
+                f" at mini_epoch {cf.chkpt_encoder_mini_epoch}."
+            )
+
         encoder_modules = [
             "embed_engine",
             "ae_local_engine",
@@ -174,34 +176,15 @@ def init_model_and_shard(
             "ae_global_engine",
         ]
 
-        # Load encoder weights
-        params_temp = {}
-        for name in params.keys():
-            if any(e_module in name for e_module in encoder_modules):
-                if cf.with_ddp:
-                    params_temp[f"module.{name}"] = params[name]
-                else:
-                    params_temp[name] = params[name]
-        params = params_temp
-        mkeys, ukeys = model.load_state_dict(params, strict=False)
+        model = load_encoder(
+            cf,
+            model,
+            encoder_modules,
+            device,
+            cf.chkpt_encoder_weights,
+            cf.chkpt_encoder_mini_epoch,
+        )
 
-        # Freeze encoder weights
-        for name, module in model.named_modules():
-            if any(e_module in name for e_module in encoder_modules):
-                for p in module.parameters():
-                    p.requires_grad = False
-
-        model = model.to(f"cuda:{cf.local_rank}")
-
-        # warn about difference in checkpoint and model
-        if len(mkeys) == 0 and len(ukeys) == 0:
-            logger.info(
-                f"Checkpoint {cf.chkpt_encoder_weights} loaded successfully with all weights."
-            )
-        if len(mkeys) > 0:
-            logger.warning(f"Missing keys when loading model: {mkeys}")
-        if len(ukeys) > 0:
-            logger.warning(f"Unused keys when loading model: {ukeys}")
     # ------------------------------------------------------------------------------------------
 
     # model params
@@ -211,7 +194,93 @@ def init_model_and_shard(
 
     return model, model_params
 
+def load_encoder(cf, model, encoder_modules, device, run_id: str, mini_epoch=-1):
+    """Loads model state from checkpoint and checks for missing and unused keys.
+    Args:
+        run_id : model_id of the trained model
+        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
+    """
 
+    path_run = Path(cf.model_path) / run_id
+    mini_epoch_id = (
+        f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+    )
+    filename = f"{run_id}_{mini_epoch_id}.chkpt"
+
+    if not (path_run / filename).exists():
+        mini_epoch_id = f"epoch{mini_epoch:05d}"
+        filename = f"{run_id}_{mini_epoch_id}.chkpt"
+    if is_root():
+        logger.info(path_run / filename)
+
+    params = torch.load(
+        path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
+    )
+
+    is_model_sharded = cf.with_ddp and cf.with_fsdp
+    if is_model_sharded:
+        meta_sharded_sd = model.state_dict()
+        maybe_sharded_sd = {}
+        for param_name, full_tensor in params.items():
+            if any(e_module in param_name for e_module in encoder_modules):
+                sharded_meta_param = meta_sharded_sd.get(param_name)
+                sharded_tensor = distribute_tensor(
+                    full_tensor,
+                    sharded_meta_param.device_mesh,
+                    sharded_meta_param.placements,
+                )
+                # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
+                maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+        # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
+        mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
+
+        if is_root():
+            if len(mkeys) > 0:
+                logger.warning(f"Missing keys when loading model: {mkeys}")
+            if len(ukeys) > 0:
+                logger.warning(f"Unused keys when loading model: {mkeys}")
+
+        # # new network parts (e.g. for fine-tuning)
+        # if mkeys:
+        #     # Get the unique parent modules for the missing parameters
+        #     new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
+
+        #     # Find the highest-level "root" new modules to avoid redundant initializations
+        #     root_new_modules = set()
+        #     for path in sorted(list(new_modules_to_init)):
+        #         if not any(path.startswith(root + ".") for root in root_new_modules):
+        #             root_new_modules.add(path)
+
+        #     # Get all modules for quick lookup and initialize the new ones
+        #     all_modules = dict(model.named_modules())
+        #     for path in root_new_modules:
+        #         if is_root():
+        #             logger.info(f"Initializing new module not found in checkpoint: {path}")
+        #         module_to_init = all_modules[path]
+        #         module_to_init.to_empty(device="cuda")
+        #         module_to_init.reset_parameters()
+
+    else:
+        if not cf.with_ddp:
+            params_temp = {}
+            for k in params.keys():
+                if any(e_module in k for e_module in encoder_modules):
+                    params_temp[k.replace("module.", "")] = params[k]
+            params = params_temp
+
+        mkeys, ukeys = model.load_state_dict(params, strict=False)
+        model = model.to(device)
+
+    # warn about difference in checkpoint and model
+    if len(mkeys) == 0 and len(ukeys) == 0:
+        logger.info(f"Checkpoint {filename} loaded successfully with all weights matching.")
+    if len(mkeys) > 0:
+        logger.warning(f"Missing keys when loading model: {mkeys}")
+    if len(ukeys) > 0:
+        logger.warning(f"Unused keys when loading model: {mkeys}")
+
+    return model
+    
 def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
@@ -303,37 +372,58 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
     targets_num_channels = dataset.get_targets_num_channels()
     targets_coords_size = dataset.get_targets_coords_size()
 
-    cf_with_overrides = apply_overrides_to_dict(cf, overrides)
+    cf_with_overrides = merge_configs(cf, overrides)
     return Model(
         cf_with_overrides, sources_size, targets_num_channels, targets_coords_size
     ).create()
 
 
-def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
+def get_target_aux_calculator(
+    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
+):
     """
     Create target aux calculator
     """
 
-    target_aux = None
+    target_and_aux_calc_cfg = loss_cfg.get("target_and_aux_calc", "Physical")
 
-    target_and_aux_calc = cf.get("target_and_aux_calc", "physical")
-    if target_and_aux_calc == "physical":
-        target_aux = PhysicalTargetAndAux(cf, model)
+    # parse target_and_aux_calc_cfg specification which can either be a string or config dict
+    if type(target_and_aux_calc_cfg) is str:
+        target_and_aux_calc = target_and_aux_calc_cfg
+        target_and_aux_calc_params = {}
+    elif type(target_and_aux_calc_cfg) is omegaconf.dictconfig.DictConfig:
+        # single key is the target_and_aux_calc type
+        target_and_aux_calc = list(target_and_aux_calc_cfg.keys())[0]
+        # value is dict with the target_and_aux_calc parameters
+        target_and_aux_calc_params = list(target_and_aux_calc_cfg.values())[0]
+    else:
+        assert False, "target_and_aux_calc needs either be name or config dict."
+
+    # create target_and_aux_calc
+    if target_and_aux_calc == "Physical":
+        target_aux = PhysicalTargetAndAux(loss_cfg, model)
     elif target_and_aux_calc == "DiffusionLatentTargetEncoder":
-        return DiffusionLatentTargetEncoder(model)
+        target_aux = DiffusionLatentTargetEncoder(model)
     elif target_and_aux_calc == "EMATeacher":
-        # batch_size = get_batch_size(cf, cf.world_size_original)
-
-        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device)
+        meta_ema_model, _ = init_model_and_shard(
+            cf,
+            dataset,
+            None,
+            None,
+            "student",
+            device,
+            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
+        )
         ema_model = EMAModel(
             model,
             meta_ema_model,
-            halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
-            rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
+            halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
+            rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
             is_model_sharded=(cf.with_ddp and cf.with_fsdp),
         )
 
-        raise NotImplementedError(f"{target_and_aux_calc} is not implemented : {type(ema_model)}")
+        batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
+        target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
 
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")

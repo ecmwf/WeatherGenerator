@@ -6,12 +6,15 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+import dataclasses
 
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -42,6 +45,7 @@ class EmbeddingEngine(torch.nn.Module):
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
+        self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
         self.stream_names = list(stream_names)
@@ -79,52 +83,51 @@ class EmbeddingEngine(torch.nn.Module):
             else:
                 raise ValueError("Unsupported embedding network type")
 
-    def forward(self, streams_data, source_cell_lens, pe_embed, dtype, device):
-        num_step_input = len(source_cell_lens)
+    def forward(self, batch, pe_embed):
+        num_steps_input = batch.get_num_steps()
 
-        offsets_base = [torch.cumsum(s[1:], 0) for s in source_cell_lens]
+        num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
+        tokens_all = torch.empty(
+            (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
+        )
 
-        tokens_all = [
-            torch.empty((int(ob[-1]), self.cf.ae_local_dim_embed), dtype=dtype, device=device)
-            for ob in offsets_base
-        ]
+        # iterate over all streams
+        x_embeds = []
+        for stream_name in self.stream_names:
+            # collect all source tokens from all input_steps and all samples in the batch
+            sdata = []
+            for istep in range(num_steps_input):
+                for sample in batch.get_samples():
+                    sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
 
-        # TODO: handling of input steps should be done using encoder
-        # iterate over all input steps and streams
-        for istep in range(num_step_input):
-            # TODO: what is this list dimension??? Where should the istep index be???
-            for _, sb in enumerate(streams_data):
-                for stream_name, s_data in zip(self.stream_names, sb, strict=True):
-                    # embedding network
-                    embed = self.embeds[stream_name]
+            sdata = torch.cat(sdata).to(tokens_all.dtype)
+            # skip empty stream
+            if len(sdata) == 0:
+                continue
 
-                    # skip empty stream
-                    if s_data.source_empty():
-                        continue
+            # embedding from physical space to per patch latent representation
+            x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 
-                    idxs = s_data.source_idxs_embed[istep].to(device)
-                    idxs_pe = s_data.source_idxs_embed_pe[istep].to(device)
+        # switch from stream to cell-based ordering and apply per cell positional encoding
 
-                    # create full scatter index
-                    # (there's no broadcasting which is likely highly inefficient)
-                    idxs = idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-                    x_embed = embed(s_data.source_tokens_cells[istep]).flatten(0, 1)
-                    # there's undocumented limitation in flash_attn that will make embed fail if
-                    # #tokens is too large; code below is a work around
-                    # x_embed = torch.cat(
-                    #     [
-                    #         embed(s_c, c_c).flatten(0, 1)
-                    #         for s_c, c_c in zip(
-                    #             torch.split(s.source_tokens_cells, 49152),
-                    #             torch.split(s.source_centroids, 49152),
-                    #         )
-                    #     ]
-                    # )
+        # computer scatter index across batch items and input steps
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten()
+        repeat = torch.repeat_interleave
+        scatter_idxs = repeat(
+            torch.ones(len(tok_counts), dtype=torch.int64, device=tok_counts.device), tok_counts
+        )
+        scatter_idxs = scatter_idxs.cumsum(0) - 1
+        # scatter index must exist for each element and not just per row
+        scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-                    # scatter write to reorder from per stream to per cell ordering
-                    tokens_all[istep].scatter_(0, idxs, x_embed + pe_embed[idxs_pe])
+        # per cell indices into positional encoding
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        pe_idxs = torch.cat([torch.arange(c) for c in tok_counts])
 
-        return tokens_all[0]
+        # actual scatter operation
+        tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
+
+        return tokens_all
 
 
 class LocalAssimilationEngine(torch.nn.Module):
@@ -242,6 +245,77 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
         return tokens_global_c
 
 
+class QueryAggregationEngine(torch.nn.Module):
+    name: "QueryAggregationEngine"
+
+    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
+        """
+        Initialize the QueryAggregationEngine with the configuration.
+
+        This engine is used for aggregating information from all query tokens coming
+        from healpix cells, that are not masked.
+
+        :param cf: Configuration object containing parameters for the engine.
+        :param num_healpix_cells: Number of healpix cells used for local queries.
+        """
+        super(QueryAggregationEngine, self).__init__()
+        self.cf = cf
+        self.num_healpix_cells = num_healpix_cells
+
+        self.ae_aggregation_blocks = torch.nn.ModuleList()
+
+        global_rate = int(1 / self.cf.ae_aggregation_att_dense_rate)
+        for i in range(self.cf.ae_aggregation_num_blocks):
+            ## Alternate between local and global attention
+            #  as controlled by cf.ae_dense_local_att_dense_rate
+            # Last block is always global attention
+            if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
+                self.ae_aggregation_blocks.append(
+                    MultiSelfAttentionHead(
+                        self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.ae_aggregation_num_heads,
+                        dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                        with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
+                        with_flash=self.cf.with_flash_attention,
+                        norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
+                    )
+                )
+            else:
+                self.ae_aggregation_blocks.append(
+                    MultiSelfAttentionHeadLocal(
+                        self.cf.ae_global_dim_embed,
+                        num_heads=self.cf.ae_aggregation_num_heads,
+                        qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
+                        block_factor=self.cf.ae_aggregation_block_factor,
+                        dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                        with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
+                        with_flash=self.cf.with_flash_attention,
+                        norm_type=self.cf.norm_type,
+                        norm_eps=self.cf.norm_eps,
+                        attention_dtype=get_dtype(self.cf.attention_dtype),
+                    )
+                )
+            # MLP block
+            self.ae_aggregation_blocks.append(
+                MLP(
+                    self.cf.ae_global_dim_embed,
+                    self.cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=self.cf.ae_aggregation_dropout_rate,
+                    hidden_factor=self.cf.ae_aggregation_mlp_hidden_factor,
+                    norm_type=self.cf.norm_type,
+                    norm_eps=self.cf.mlp_norm_eps,
+                )
+            )
+
+    def forward(self, tokens, use_reentrant):
+        for block in self.ae_aggregation_blocks:
+            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+        return tokens
+
+
 class GlobalAssimilationEngine(torch.nn.Module):
     name: "GlobalAssimilationEngine"
 
@@ -303,10 +377,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                     norm_eps=self.cf.mlp_norm_eps,
                 )
             )
-
-        self.ae_global_blocks.append(
-            torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
-        )
+        if self.cf.get("ae_global_trailing_layer_norm", False):
+            self.ae_global_blocks.append(
+                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+            )
 
     def forward(self, tokens, use_reentrant):
         for block in self.ae_global_blocks:
@@ -317,7 +391,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
-    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
+    def __init__(self, cf: Config, mode_cfg, num_healpix_cells: int, dim_aux: int = None) -> None:
         """
         Initialize the ForecastingEngine with the configuration.
 
@@ -330,7 +404,7 @@ class ForecastingEngine(torch.nn.Module):
         self.fe_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
-        if self.cf.forecast_policy is not None:
+        if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
                 if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
@@ -342,7 +416,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=(1 if cf.forecast_with_step_conditioning else None),
+                            dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_noise_conditioning=self.cf.fe_diffusion_model,
@@ -359,7 +433,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            dim_aux=(1 if cf.forecast_with_step_conditioning else None),
+                            dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_noise_conditioning=self.cf.fe_diffusion_model,
@@ -373,11 +447,16 @@ class ForecastingEngine(torch.nn.Module):
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
-                        dim_aux=(1 if cf.forecast_with_step_conditioning else None),
+                        dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         with_noise_conditioning=self.cf.fe_diffusion_model,
                     )
                 )
+                # Optionally, add LayerNorm after i-th layer
+                if i in self.cf.get("fe_layer_norm_after_blocks", []):
+                    self.fe_blocks.append(
+                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+                    )
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
@@ -388,7 +467,13 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep, noise_emb=None):
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        fstep: int,
+        meta_info: SampleMetaData = None,
+        noise_emb: torch.Tensor = None,
+    ) -> torch.Tensor:
         # predict residual to last time step if requested
         forecast_residual = self.cf.get("forecast_residual", False)
         if forecast_residual:
@@ -402,10 +487,16 @@ class ForecastingEngine(torch.nn.Module):
                 "Noise embedding must be provided for diffusion forecast engine"
             )
             for block in self.fe_blocks:
-                tokens = checkpoint(block, tokens, noise_emb, aux_info, use_reentrant=False)
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = block(tokens)
+                else:
+                    tokens = block(tokens, noise_emb, aux_info)
         else:
             for block in self.fe_blocks:
-                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = checkpoint(block, tokens, use_reentrant=False)
+                else:
+                    tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
 
@@ -618,7 +709,6 @@ class TargetPredictionEngine(nn.Module):
         self.tro_type = tro_type
 
         # For backwards compatibility
-        from omegaconf import OmegaConf
 
         self.cf = OmegaConf.merge(
             OmegaConf.create({"decoder_type": "PerceiverIOCoordConditioning"}), self.cf
@@ -758,3 +848,54 @@ class TargetPredictionEngine(nn.Module):
             else output
         )
         return output
+
+
+@dataclasses.dataclass
+class LatentState:
+    """
+    A dataclass to encapsulate the latent state aka the intput to latent heads.
+    """
+
+    class_token: torch.Tensor
+    register_tokens: torch.Tensor
+    patch_tokens: torch.Tensor
+    z_pre_norm: torch.Tensor
+
+
+class LatentPredictionHead(nn.Module):
+    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
+        super().__init__()
+
+        self.name = name
+        self.class_token = class_token
+        self.patch_token = patch_token
+        # For now this is a Linear Layer TBD what this architecture should be
+        self.layer = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, x: LatentState):
+        outputs = []
+        if self.class_token:
+            outputs.append(self.layer(x.class_token))
+        if self.patch_token:
+            outputs.append(self.layer(x.patch_tokens))
+        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        return torch.cat(outputs, dim=1)
+
+
+class BilinearDecoder(nn.Module):
+    def __init__(self, stream_name, coord_dim, latent_dim, out_dim):
+        super().__init__()
+
+        self.name = f"BilinearDecoder_{stream_name}"
+        self.latent_dim = latent_dim
+        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
+
+    def forward(self, coords_md, latent_nd, tcs_lens_n1):
+        """
+        Using Noam Shazeer notation
+        N = Number of latent tokens*batch_size (N1 means N+1)
+        M = Number of coordinates to decode
+        D = Hidden dimension
+        """
+        latent_md = torch.repeat_interleave(latent_nd, tcs_lens_n1[1:], 0)
+        return self.bilin(coords_md, latent_md)
