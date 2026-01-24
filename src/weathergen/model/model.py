@@ -18,7 +18,6 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
@@ -27,7 +26,9 @@ from weathergen.model.engines import (
     BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
-    LatentPredictionHead,
+    LatentPredictionHeadIdentity,
+    LatentPredictionHeadMLP,
+    LatentPredictionHeadTransformer,
     LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
@@ -284,6 +285,31 @@ class Model(torch.nn.Module):
         self.register_token_idxs = list(range(cf.num_register_tokens))
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
 
+    def _create_latent_pred_head(
+        self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
+    ):
+        if loss_cfg["head"].lower() == "mlp":
+            return LatentPredictionHeadMLP(
+                name,
+                global_cfg.ae_global_dim_embed,
+                loss_cfg,
+                use_class_token=use_class_token,
+                use_patch_token=use_patch_token,
+            )
+        elif loss_cfg["head"].lower() == "transformer":
+            return LatentPredictionHeadTransformer(
+                global_cfg,
+                name,
+                global_cfg.ae_global_dim_embed,
+                loss_cfg,
+                use_class_token=use_class_token,
+                use_patch_token=use_patch_token,
+            )
+        elif loss_cfg["head"].lower() == "identity":
+            return LatentPredictionHeadIdentity()
+        else:
+            assert False, f"Unknown latent prediction head type {loss_cfg['head']}"
+
     def create(self) -> "Model":
         """Create each individual module of the model"""
         cf = self.cf
@@ -438,36 +464,35 @@ class Model(torch.nn.Module):
             for _, v in cf.training_config.losses.items()
             if v.type == "LossLatentSSLStudentTeacher"
         ]
+
         # TODO: support multiple LossLatentSSLStudentTeacher terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
         for ssl_target_losses in ssl_losses_cfgs:
-            # TODO implement later
-            # shared_heads = cf.get("shared_heads", False)
             self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
             for loss, loss_conf in ssl_target_losses.loss_fcts.items():
                 if loss == "iBOT":
-                    self.latent_heads[loss] = LatentPredictionHead(
+                    self.latent_heads[loss] = self._create_latent_pred_head(
+                        cf,
                         f"{loss}-head",
-                        cf.ae_global_dim_embed,
-                        loss_conf["out_dim"],
-                        class_token=True,
-                        patch_token=True,
+                        loss_conf,
+                        use_class_token=True,
+                        use_patch_token=True,
                     )
                 elif loss == "JEPA":
-                    self.latent_heads[loss] = LatentPredictionHead(
+                    self.latent_heads[loss] = self._create_latent_pred_head(
+                        cf,
                         f"{loss}-head",
-                        cf.ae_global_dim_embed,
-                        loss_conf["out_dim"],
-                        class_token=False,
-                        patch_token=True,
+                        loss_conf,
+                        use_class_token=False,
+                        use_patch_token=True,
                     )
                 elif loss == "DINO":
-                    self.latent_heads[loss] = LatentPredictionHead(
+                    self.latent_heads[loss] = self._create_latent_pred_head(
+                        cf,
                         f"{loss}-head",
-                        cf.ae_global_dim_embed,
-                        loss_conf["out_dim"],
-                        class_token=True,
-                        patch_token=False,
+                        loss_conf,
+                        use_class_token=True,
+                        use_patch_token=False,
                     )
 
         return self
@@ -672,7 +697,7 @@ class Model(torch.nn.Module):
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
+            tc_tokens = tc_embed(t_coords)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
@@ -699,12 +724,10 @@ class Model(torch.nn.Module):
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
                 if self.cf.decoder_type == "Linear":
-                    pred = checkpoint(
-                        self.target_token_engines[stream_name],
+                    pred = self.target_token_engines[stream_name](
                         tc_tokens,
                         tokens.reshape(-1, s[-1]),  # collapse the batch and token dimensions
                         tcs_lens,
-                        use_reentrant=False,
                     ).unsqueeze(0)  # add ensemble dim: shape is then [1, preds_per_coord, channels]
                 else:
                     tc_tokens = self.target_token_engines[stream_name](
@@ -716,7 +739,7 @@ class Model(torch.nn.Module):
                     )
 
                     # final prediction head to map back to physical space
-                    pred = checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
+                    pred = self.pred_heads[stream_name](tc_tokens)
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)

@@ -52,15 +52,16 @@ class TrainerBase:
         if not use_cuda:
             return torch.device("cpu")
 
-        local_id_node = os.environ.get("SLURM_LOCALID", "-1")
-        if local_id_node == "-1":
+        # if local_id_node == "-1":
+        local_id_node = dist.get_node_local_rank(fallback_rank=-1)
+        if local_id_node == -1:
             devices = ["cuda"]
         else:
+            local_id_node = int(local_id_node)
             devices = [
-                f"cuda:{int(local_id_node) * num_accs_per_task + i}"
-                for i in range(num_accs_per_task)
+                f"cuda:{local_id_node * num_accs_per_task + i}" for i in range(num_accs_per_task)
             ]
-        torch.cuda.set_device(int(local_id_node) * num_accs_per_task)
+        torch.cuda.set_device(local_id_node * num_accs_per_task)
 
         return devices
 
