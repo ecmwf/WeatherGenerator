@@ -10,6 +10,7 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
+import re
 import time
 
 import numpy as np
@@ -390,6 +391,15 @@ class Trainer(TrainerBase):
 
         cf = self.cf
         self.model.train()
+
+        if cf.get("set_freeze_models_to_eval", False):
+            for name, module in self.model.named_modules():
+                name = module.name if hasattr(module, "name") else name
+                # avoid the whole model element which has name ''
+                if name == "":
+                    continue
+                if re.fullmatch(cf.freeze_modules, name) is not None:
+                    module.eval()
 
         dataset_iter = iter(self.data_loader)
 
