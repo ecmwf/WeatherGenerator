@@ -465,6 +465,12 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
+        if self.training:
+            # Impute noise to the latent state
+            noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
+            if noise_std > 0.0:
+                tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+
         aux_info = None
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):

@@ -279,8 +279,10 @@ class Model(torch.nn.Module):
         self.num_register_tokens = cf.num_register_tokens
         self.latent_heads = None
         self.latent_pre_norm = None
-        self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
-        self.register_token_idx = cf.num_register_tokens
+        # auxiliary tokens
+        self.class_token_idxs = list(range(cf.num_register_tokens, cf.num_class_tokens))
+        self.register_token_idxs = list(range(cf.num_register_tokens))
+        self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
 
     def create(self) -> "Model":
         """Create each individual module of the model"""
@@ -291,7 +293,9 @@ class Model(torch.nn.Module):
         )
 
         mode_cfg = cf.training_config
-        self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+        self.forecast_engine = None
+        if cf.fe_num_blocks > 0:
+            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -440,8 +444,6 @@ class Model(torch.nn.Module):
             # TODO implement later
             # shared_heads = cf.get("shared_heads", False)
             self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
-            self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
-            self.register_token_idx = cf.num_register_tokens
             for loss, loss_conf in ssl_target_losses.loss_fcts.items():
                 if loss == "iBOT":
                     self.latent_heads[loss] = LatentPredictionHead(
@@ -545,11 +547,11 @@ class Model(torch.nn.Module):
         ]
         print("-----------------")
 
-    def get_latent_state(self, z, tokens):
+    def tokens_to_latent_state(self, z, tokens) -> LatentState:
         return LatentState(
-            register_tokens=z[:, : self.register_token_idx],
-            class_token=z[:, self.register_token_idx : self.class_token_idx],
-            patch_tokens=z[:, self.class_token_idx :],
+            register_tokens=z[:, self.register_token_idxs] if z is not None else z,
+            class_token=z[:, self.class_token_idxs] if z is not None else z,
+            patch_tokens=z[:, (self.aux_token_idxs[-1] + 1) :] if z is not None else z,
             z_pre_norm=tokens,
         )
 
@@ -567,65 +569,64 @@ class Model(torch.nn.Module):
         output = ModelOutput(batch.get_output_len())
 
         tokens, posteriors = self.encoder(model_params, batch)
+        output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        if len(batch.get_forecast_idxs()) > 0:
-            # roll-out in latent space
-            for fstep in batch.get_forecast_idxs():
-                if self.training:
-                    # Impute noise to the latent state
-                    noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
-                    if noise_std > 0.0:
-                        tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
-                tokens = self.forecast(model_params, tokens, fstep)
-                # prediction
-                output = self.predict(model_params, fstep, tokens, batch, output)
-                # safe latent prediction
-                latent_state = self.get_latent_state(tokens, None)
-                output.add_latent_prediction(fstep, "latent_state", latent_state)
-        else:
-            # latents for output
-            z = self.latent_pre_norm(tokens)
-            latent_state = self.get_latent_state(z, tokens)
-            output.add_latent_prediction(0, "posteriors", posteriors)
-            output.add_latent_prediction(0, "latent_state", latent_state)
-            for name, head in self.latent_heads.items():
-                output.add_latent_prediction(0, name, head(latent_state))
-            # prediction for final step
-            output = self.predict(model_params, 0, tokens, batch, output)
+        # roll-out in latent space, iterate over all steps but generate output only as requested
+        output_idxs = batch.get_output_idxs()
+        for step in range(batch.get_output_len()):
+            # apply forecasting engine
+            if self.forecast_engine:
+                tokens = self.forecast_engine(tokens, step)
+
+            if step in output_idxs:
+                # decoder predictions
+                output = self.predict_decoders(model_params, step, tokens, batch, output)
+
+                # latent predictions (raw and with SSL heads)
+                output = self.predict_latent(model_params, step, tokens, batch, output)
 
         return output
 
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
-        """Advances latent space representation in time
-
-        Args:
-            model_params : Query and embedding parameters (never used)
-            tokens : Input tokens to be processed by the model.
-            fstep: Current forecast step index (can be used as aux info).
-        Returns:
-            Processed tokens
-        Raises:
-            ValueError: For unexpected arguments in checkpoint method
-        """
-
-        tokens = self.forecast_engine(tokens, fstep)
-
-        return tokens
-
-    def predict(
+    def predict_latent(
         self,
         model_params: ModelParams,
-        fstep: int,
+        step: int,
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
-    ) -> list[torch.Tensor]:
-        """Predict outputs at the specific target coordinates based on the input weather state and
+    ) -> ModelOutput:
+        """
+        Compute latent predictions
+        """
+
+        # safe latent prediction
+        tokens_pre_norm = self.latent_pre_norm(tokens) if step == 0 else None
+        latent_state = self.tokens_to_latent_state(tokens_pre_norm, tokens)
+        output.add_latent_prediction(step, "latent_state", latent_state)
+
+        # latent predictions for SSL training
+        for name, head in self.latent_heads.items():
+            output.add_latent_prediction(step, name, head(latent_state))
+
+        return output
+
+    def predict_decoders(
+        self,
+        model_params: ModelParams,
+        step: int,
+        tokens: torch.Tensor,
+        batch: ModelBatch,
+        output: ModelOutput,
+    ) -> ModelOutput:
+        """
+        Compute decoder-based predictions
+
+        Predict outputs at the specific target coordinates based on the input weather state and
         pre-training task and projects the latent space representation back to physical space.
 
         Args:
@@ -643,7 +644,7 @@ class Model(torch.nn.Module):
             return output
 
         # remove register  and class tokens
-        tokens = tokens[:, self.class_token_idx :]
+        tokens = tokens[:, (self.aux_token_idxs[-1] + 1) :]
 
         # get 1-ring neighborhood for prediction
         batch_size = len(batch)
@@ -660,7 +661,7 @@ class Model(torch.nn.Module):
         for stream_name in self.stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
-                batch.samples[i_b].streams_data[stream_name].target_coords[fstep]
+                batch.samples[i_b].streams_data[stream_name].target_coords[step]
                 for i_b in range(batch_size)
             ]
             t_coords_lens = [len(t) for t in t_coords]
@@ -691,7 +692,7 @@ class Model(torch.nn.Module):
                 # lens for varlen attention
                 tcls = torch.cat(
                     [
-                        sample.streams_data[stream_name].target_coords_lens[fstep]
+                        sample.streams_data[stream_name].target_coords_lens[step]
                         for sample in batch.samples
                     ]
                 )
@@ -719,6 +720,6 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-            output.add_physical_prediction(fstep, stream_name, pred)
+            output.add_physical_prediction(step, stream_name, pred)
 
         return output
