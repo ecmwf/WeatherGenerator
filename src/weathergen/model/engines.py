@@ -82,9 +82,7 @@ class EmbeddingEngine(torch.nn.Module):
                 )
             else:
                 raise ValueError("Unsupported embedding network type")
-            
-        #for debugging only
-        # self.cur_x_embeds = None
+        
 
     def forward(self, batch, pe_embed):
         num_steps_input = batch.get_num_steps()
@@ -111,12 +109,6 @@ class EmbeddingEngine(torch.nn.Module):
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
         
-        # if self.cur_x_embeds is not None:
-        #     for (x, y) in zip(x_embeds, self.cur_x_embeds):
-        #         print(f'checking x_embeds')
-        #         assert torch.equal(x, y), 'x_embeds were different between iterations – violates single sample overfitting'
-        # self.cur_x_embeds = x_embeds
-
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
         # computer scatter index across batch items and input steps

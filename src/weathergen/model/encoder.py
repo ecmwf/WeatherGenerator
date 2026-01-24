@@ -111,52 +111,19 @@ class EncoderModule(torch.nn.Module):
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
-        #for debugging only
-        # self.cur_stream_cell_tokens = None
-        # self.cur_global_tokens_inter = None
-        # self.cur_global_tokens_final = None
-        # self.cur_batch = None
-        # self.cur_pe_embed = None
-
     def forward(self, model_params, batch):
         """
         Encoder forward
         """
 
-        # if self.cur_batch is not None:
-        #     cur_samples = self.cur_batch.get_samples()
-        #     samples = batch.get_samples()
-        #     for istep in range(self.cur_batch.get_num_steps()):
-        #         for (n, (cur_sample, sample)) in enumerate(zip(cur_samples, samples)):
-        #             for stream_name in cur_sample.streams_data.keys():
-        #                 print(f'checking {stream_name} at step {istep} for sample {n}')
-        #                 assert torch.equal(cur_sample.streams_data[stream_name].source_tokens_cells[istep], sample.streams_data[stream_name].source_tokens_cells[istep]), f"Mismatch in stream {stream_name} at step {istep}"
-        # self.cur_batch = batch
-
-        # if self.cur_pe_embed is not None:
-        #     assert torch.equal(self.cur_pe_embed, model_params.pe_embed), 'pe_embed was different between iterations – violates single sample overfitting'
-        # self.cur_pe_embed = model_params.pe_embed
-
         stream_cell_tokens = self.embed_engine(batch, model_params.pe_embed)
-
-        # if self.cur_stream_cell_tokens is not None:
-        #     assert torch.equal(self.cur_stream_cell_tokens, stream_cell_tokens), 'stream cell tokens were different between iterations – violates single sample overfitting'
-        # self.cur_stream_cell_tokens = stream_cell_tokens
 
         global_tokens, posteriors = self.assimilate_local(model_params, stream_cell_tokens, batch)
 
-        # if self.cur_global_tokens_inter is not None:
-        #     assert torch.equal(self.cur_global_tokens_inter, global_tokens), 'global tokens before final assimilation were different between iterations – violates single sample overfitting'
-        # self.cur_global_tokens_inter = global_tokens
-
         global_tokens = self.assimilate_global(global_tokens)
 
-        # if self.cur_global_tokens_final is not None:
-        #     assert torch.equal(self.cur_global_tokens_final, global_tokens), 'global tokens after final assimilation were different between iterations – violates single sample overfitting'
-        # self.cur_global_tokens_final = global_tokens
-
         return global_tokens, posteriors
-    
+
 
     def assimilate_local(
         self, model_params, tokens: torch.Tensor, batch: ModelBatch

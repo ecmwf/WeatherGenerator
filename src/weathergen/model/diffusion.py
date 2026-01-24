@@ -26,11 +26,13 @@
 import math
 
 import torch
+import logging
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
+logger = logging.getLogger(__name__)
 
 class DiffusionForecastEngine(torch.nn.Module):
     # Adopted from https://github.com/NVlabs/edm/blob/main/training/loss.py#L72
@@ -75,7 +77,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         #TODO: remove after single sample experiments
         if self.cur_token is not None:
-            print("checking single sampling")
+            logger.info("checking single sampling")
             assert self.cur_token[0].shape == tokens[0].shape, 'first token shape was different between iterations – violates single sample overfitting with difference'
             assert torch.equal(self.cur_token[0], tokens[0]), f'first token was different between iterations – violates single sample overfitting {self.cur_token[0] - tokens[0]}'
             assert torch.equal(self.cur_token, tokens), 'tokens were different between iterations – violates single sample overfitting'

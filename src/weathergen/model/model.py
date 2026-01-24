@@ -284,9 +284,6 @@ class Model(torch.nn.Module):
         self.class_token_idx = cf.num_class_tokens + cf.num_register_tokens
         self.register_token_idx = cf.num_register_tokens
 
-        # self.cur_tokens = None #for debugging single sample processing
-        # self.cur_batch = None
-
     def create(self) -> "Model":
         """Create each individual module of the model"""
         cf = self.cf
@@ -574,21 +571,7 @@ class Model(torch.nn.Module):
 
         output = ModelOutput(batch.get_forecast_steps() + 1)
 
-        # if self.cur_batch is not None:
-        #     print("checking batch")
-        #     assert self.cur_batch[0].shape == batch[0].shape, 'first batch shape was different between iterations – violates single sample overfitting with difference'
-        #     assert torch.equal(self.cur_batch[0], batch[0]), f'first batch was different between iterations – violates single sample overfitting {self.cur_batch[0] - batch[0]}'
-        #     assert torch.equal(self.cur_batch, batch), 'batch were different between iterations – violates single sample overfitting'
-        # self.cur_batch = batch
-
         tokens, posteriors = self.encoder(model_params, batch)
-
-        # if self.cur_tokens is not None:
-        #     print("checking tokens")
-        #     assert self.cur_tokens[0].shape == tokens[0].shape, 'first token shape was different between iterations – violates single sample overfitting with difference'
-        #     assert torch.equal(self.cur_tokens[0], tokens[0]), f'first token was different between iterations – violates single sample overfitting {self.cur_tokens[0] - tokens[0]}'
-        #     assert torch.equal(self.cur_tokens, tokens), 'tokens were different between iterations – violates single sample overfitting'
-        # self.cur_tokens = tokens
 
         # recover batch dimension and separate input_steps
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
