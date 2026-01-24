@@ -715,6 +715,10 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
                         if `forecast_step` is negative while `forecast.policy` is provided, or
                         if any of the forecast steps in a list are negative.
     """
+
+    if len(forecast_cfg) == 0:
+        return
+
     provide_forecast_policy = (
         f"'{mode}.forecast.policy' must be specified when '{mode}.forecast.num_steps' is not zero "
         f"and '{mode}.forecast.offset' is 1. "
@@ -733,19 +737,24 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
         f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer greater "
         "than 1 or a non-empty list and all of its elements must be integers greater than 1."
     )
-    assert isinstance(forecast_cfg.offset, int), TypeError(valid_forecast_offset)
-    if forecast_cfg.offset == 0:
-        if isinstance(forecast_cfg.num_steps, int):
-            assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
+
+    # check forecast offset
+    if forecast_cfg.get("offset") is not None:
+        assert isinstance(forecast_cfg.offset, int), TypeError(valid_forecast_offset)
+        if forecast_cfg.offset == 0:
+            if isinstance(forecast_cfg.num_steps, int):
+                assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
+            else:
+                raise TypeError(valid_forecast_steps_offset0)
+        elif forecast_cfg.offset == 1:
+            assert forecast_cfg.policy, (provide_forecast_policy, valid_forecast_policies)
+            if isinstance(forecast_cfg.num_steps, int):
+                assert forecast_cfg.num_steps > 0, valid_forecast_steps_offset1
+            elif isinstance(forecast_cfg.num_steps, ListConfig) and len(forecast_cfg.num_steps) > 0:
+                assert all(step > 0 for step in forecast_cfg.num_steps), (
+                    valid_forecast_steps_offset1
+                )
+            else:
+                raise TypeError(valid_forecast_steps_offset1)
         else:
-            raise TypeError(valid_forecast_steps_offset0)
-    if forecast_cfg.offset == 1:
-        assert forecast_cfg.policy, (provide_forecast_policy, valid_forecast_policies)
-        if isinstance(forecast_cfg.num_steps, int):
-            assert forecast_cfg.num_steps > 0, valid_forecast_steps_offset1
-        elif isinstance(forecast_cfg.num_steps, ListConfig) and len(forecast_cfg.num_steps) > 0:
-            assert all(step > 0 for step in forecast_cfg.num_steps), valid_forecast_steps_offset1
-        else:
-            raise TypeError(valid_forecast_steps_offset1)
-    else:
-        raise TypeError(valid_forecast_offset)
+            raise TypeError(valid_forecast_offset)
