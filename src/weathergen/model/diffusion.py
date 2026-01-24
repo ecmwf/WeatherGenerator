@@ -23,16 +23,17 @@
 # ----------------------------------------------------------------------------
 
 
+import logging
 import math
 
 import torch
-import logging
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
 logger = logging.getLogger(__name__)
+
 
 class DiffusionForecastEngine(torch.nn.Module):
     # Adopted from https://github.com/NVlabs/edm/blob/main/training/loss.py#L72
@@ -56,7 +57,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.rho = self.cf.rho
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
-        self.cur_token = None #for debugging only
+        self.cur_token = None  # for debugging only
 
     def forward(
         self, tokens: torch.Tensor, fstep: int, meta_info: dict[str, SampleMetaData]
@@ -75,12 +76,21 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
 
-        #TODO: remove after single sample experiments
+        # TODO: remove after single sample experiments
         if self.cur_token is not None:
             logger.info("checking single sampling")
-            assert self.cur_token[0].shape == tokens[0].shape, 'first token shape was different between iterations – violates single sample overfitting with difference'
-            assert torch.equal(self.cur_token[0], tokens[0]), f'first token was different between iterations – violates single sample overfitting {self.cur_token[0] - tokens[0]}'
-            assert torch.equal(self.cur_token, tokens), 'tokens were different between iterations – violates single sample overfitting'
+            assert self.cur_token[0].shape == tokens[0].shape, (
+                "first token shape was different between iterations "
+                "– violates single sample overfitting with difference"
+            )
+            assert torch.equal(self.cur_token[0], tokens[0]), (
+                f"first token was different between iterations "
+                f"– violates single sample overfitting {self.cur_token[0] - tokens[0]}"
+            )
+            assert torch.equal(self.cur_token, tokens), (
+                f"tokens were different between iterations "
+                f"– violates single sample overfitting {self.cur_token - tokens}"
+            )
         self.cur_token = tokens
 
         y = tokens

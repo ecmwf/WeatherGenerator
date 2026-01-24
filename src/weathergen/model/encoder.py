@@ -124,7 +124,6 @@ class EncoderModule(torch.nn.Module):
 
         return global_tokens, posteriors
 
-
     def assimilate_local(
         self, model_params, tokens: torch.Tensor, batch: ModelBatch
     ) -> torch.Tensor:

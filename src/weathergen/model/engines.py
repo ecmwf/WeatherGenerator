@@ -82,7 +82,6 @@ class EmbeddingEngine(torch.nn.Module):
                 )
             else:
                 raise ValueError("Unsupported embedding network type")
-        
 
     def forward(self, batch, pe_embed):
         num_steps_input = batch.get_num_steps()
@@ -108,7 +107,7 @@ class EmbeddingEngine(torch.nn.Module):
 
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
-        
+
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
         # computer scatter index across batch items and input steps

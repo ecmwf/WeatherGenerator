@@ -167,7 +167,7 @@ def init_model_and_shard(
     if cf.chkpt_encoder_weights:
         if is_root():
             logger.info(
-                f"Loading chkpt from run_id={cf.chkpt_encoder_weights}"\
+                f"Loading chkpt from run_id={cf.chkpt_encoder_weights}"
                 f" at mini_epoch {cf.chkpt_encoder_mini_epoch}."
             )
 
@@ -195,6 +195,7 @@ def init_model_and_shard(
     model_params = model_params.to(f"cuda:{cf.local_rank}")
 
     return model, model_params
+
 
 def load_encoder(cf, model, encoder_modules, device, run_id: str, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
@@ -282,7 +283,8 @@ def load_encoder(cf, model, encoder_modules, device, run_id: str, mini_epoch=-1)
         logger.warning(f"Unused keys when loading model: {mkeys}")
 
     return model
-    
+
+
 def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
