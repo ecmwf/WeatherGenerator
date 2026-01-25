@@ -274,7 +274,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.list_num_forecast_steps[
                 min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
             ]
-            if self.forecast_cfg.policy != "random"
+            if self.forecast_cfg.get("policy") != "random"
             else self.list_num_forecast_steps.max()
         )
         if fsm > 0:
