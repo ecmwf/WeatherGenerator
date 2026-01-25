@@ -281,10 +281,10 @@ class Model(torch.nn.Module):
         self.latent_heads = None
         self.latent_pre_norm = None
         # auxiliary tokens
-        self.register_token_idxs = list(range(cf.num_register_tokens))
         self.class_token_idxs = list(
             range(cf.num_register_tokens, cf.num_register_tokens + cf.num_class_tokens)
         )
+        self.register_token_idxs = list(range(cf.num_register_tokens))
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
 
     def _create_latent_pred_head(
