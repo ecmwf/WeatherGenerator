@@ -679,9 +679,10 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
     npoints = sort_idx.size
     aligned = []
+    samples = []
     for i, a in enumerate(ref):
         a_sorted = a.isel(ipoint=sort_idx)
-
+        samples.append(a_sorted.sample.values)
         a_sorted = a_sorted.assign_coords(
             ipoint=np.arange(npoints),
             lat=("ipoint", ref_lat.values[sort_idx]),
@@ -692,8 +693,8 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
             a_sorted = a_sorted.expand_dims(sample=[i])
 
         aligned.append(a_sorted)
-
-    return xr.concat(aligned, dim="sample")
+    
+    return xr.concat(aligned, dim="sample").assign_coords({"sample": samples})
 
 
 class WeatherGenMergeReader(Reader):

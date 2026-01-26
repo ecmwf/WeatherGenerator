@@ -69,6 +69,9 @@ class CsvReader(Reader):
             else:
                 self.data = pd.concat([self.data, data], ignore_index=True)
 
+        self.data = self.data.dropna(subset=["step", "level"])
+        self.data["level"] = self.data["level"].astype(int)
+
         self.data["channel"] = (
             self.data["parameter"].astype(str) + "_" + self.data["level"].astype(str)
             if "level" in self.data.columns
