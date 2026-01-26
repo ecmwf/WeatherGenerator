@@ -40,7 +40,7 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
-    timestep_idxs = [0] if len(batch.get_forecast_idxs()) == 0 else batch.get_forecast_idxs()
+    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
     targets_lens = []
 
@@ -105,10 +105,9 @@ def write_output(
             sources[-1] += [stream_data.source_raw[0]]
 
     sample_idxs = [
-        [sdata.sample_idx for _, sdata in sample.streams_data.items()]
+        list(sample.streams_data.values())[0].sample_idx
         for sample in batch.get_source_samples().get_samples()
     ]
-    sample_idxs = [s[0].item() for s in sample_idxs]
 
     # more prep work
 
