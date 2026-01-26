@@ -194,7 +194,7 @@ if __name__ == "__main__":
     try:
         stage = os.environ.get("WEATHERGEN_STAGE")
     except KeyError as e:
-        msg = f"missing environment variable 'WEATHERGEN_STAGE'"
+        msg = "missing environment variable 'WEATHERGEN_STAGE'"
         raise ValueError(msg) from e
 
     if stage == "train":
