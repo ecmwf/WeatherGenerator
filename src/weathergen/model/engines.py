@@ -35,24 +35,19 @@ from weathergen.utils.utils import get_dtype
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
-    def __init__(self, cf: Config, sources_size, stream_names: list[str]) -> None:
+    def __init__(self, cf: Config, sources_size) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param sources_size: List of source sizes for each stream.
-        :param stream_names: Ordered list of stream identifiers aligned with cf.streams.
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names = list(stream_names)
-
-        assert len(self.stream_names) == len(self.cf.streams), (
-            "stream_names must align with cf.streams"
-        )
+        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
 
         for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
@@ -538,7 +533,6 @@ class TargetPredictionEngineClassic(nn.Module):
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
         softcap,
-        tro_type,
         stream_name: str,
     ):
         """
@@ -550,7 +544,6 @@ class TargetPredictionEngineClassic(nn.Module):
         :param tr_dim_head_proj: Dimension for head projection.
         :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
         :param softcap: Softcap value for the attention layers.
-        :param tro_type: Type of target readout (e.g., "obs_value").
         """
         super(TargetPredictionEngineClassic, self).__init__()
         self.name = f"TargetPredictionEngine_{stream_name}"
@@ -561,7 +554,6 @@ class TargetPredictionEngineClassic(nn.Module):
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
-        self.tro_type = tro_type
         self.tte = torch.nn.ModuleList()
 
         for i in range(len(self.dims_embed) - 1):
@@ -605,7 +597,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 MLP(
                     self.dims_embed[i],
                     self.dims_embed[i + 1],
-                    with_residual=(self.cf.pred_dyadic_dims or self.tro_type == "obs_value"),
+                    with_residual=True,
                     hidden_factor=self.tr_mlp_hidden_factor,
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     norm_type=self.cf.norm_type,
@@ -646,7 +638,6 @@ class TargetPredictionEngine(nn.Module):
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
         softcap,
-        tro_type,
         stream_name: str,
     ):
         """
@@ -658,7 +649,6 @@ class TargetPredictionEngine(nn.Module):
         :param tr_dim_head_proj: Dimension for head projection.
         :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
         :param softcap: Softcap value for the attention layers.
-        :param tro_type: Type of target readout (e.g., "obs_value").
 
         the decoder_type decides the how the conditioning is done
 
@@ -679,7 +669,6 @@ class TargetPredictionEngine(nn.Module):
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
-        self.tro_type = tro_type
 
         # For backwards compatibility
 
@@ -771,7 +760,6 @@ class TargetPredictionEngine(nn.Module):
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,
-                        tro_type=tro_type,
                         mlp_norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
