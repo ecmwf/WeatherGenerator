@@ -512,7 +512,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     ######## reader utils ########
 
-    def add_lead_time_coord(self, da: xr.DataArray, sample_dim="ipoint") -> xr.DataArray:
+    def add_lead_time_coord(self, da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
         """
         Add lead_time coordinate computed as:
         valid_time - source_interval_end
@@ -524,8 +524,8 @@ class WeatherGenZarrReader(WeatherGenReader):
         da :
             Input DataArray
         sample_dim :
-            The name of the sample dimension (default is "ipoint"). collapse over this
-            dimension and **keep** the others (e.g. sample).
+            The name of the sample dimension (default is "sample") which should be kept.
+            Collapse over the others.
         Returns
         -------
             Returns a Dataset with an added lead_time coordinate.
