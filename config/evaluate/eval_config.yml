@@ -34,49 +34,59 @@ evaluation:
   num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
   # baseline: "ar40mckx"
 
+
+default_streams:
+  ERA5:
+    channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
+    plotting:
+      sample: [1, 3]
+      forecast_step: [1,3, 2]
+      ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
+      plot_maps: true
+      plot_target: false
+      plot_histograms: true
+      plot_animations: true
+  CERRA:
+    channels: ["z_500", "t_850", "u_850"] #, "blah"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+    plotting:
+      sample: [2, 3, 0]
+      forecast_step: [1,3, 4, 5]
+      plot_maps: true
+      plot_target: false
+      plot_histograms: true
+      plot_animations: true
+      
 run_ids :
   ar40mckx:
     label: "pretrained model ar40mckx"
     results_base_dir : "./results/"
-    mini_epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
-        evaluation:
-          forecast_step: "all"
-          sample: "all"
-          ensemble: "all" #supported: "all", "mean", [0,1,2]
-        plotting:
-          sample: [1, 3]
-          forecast_step: [1,3, 2] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
-          ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
-          plot_maps: true
-          plot_target: false
-          plot_histograms: true
-          plot_animations: true
-      CERRA:
-        channels: ["z_500", "t_850", "u_850"] #, "blah"]
-        evaluation:
-          forecast_step: "all"
-          sample: "all"
-        plotting:
-          sample: [2, 3, 0]
-          forecast_step: [1,3, 4, 5]
-          plot_maps: true
-          plot_target: false
-          plot_histograms: true
-          plot_animations: true
+    #NEW: if "streams" is not specified, the default streams are used
+    
       
   c8g5katp:
     label: "2 steps window"
     results_base_dir : "./results/"
-    mini_epoch: 0
-    rank: 0
+    #NEW: if "streams" is not specified, the default streams are used
+  
+  ###############################
+
+  #How to define custom variables different than default_streams (default_streams will be ignored for this run_id):
+
+  jjc9ym62:
+    label: "2 steps window"
+    results_base_dir : "./results/"
+    epoch: 1 #optional: if not specified epoch 0 (in inference it is always 0) is used
+    rank: 2 #optional: if not specified rank 0 is used
     streams:
       ERA5:
-        #climatology_path: "<path>/aifs-ea-an-oper-0001-mars-o96-1980-2020-6h-v6_climatology.zarr"
-        channels: ["2t", "10u", "10v"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+        channels: ["2t", "10u", "10v"] 
         evaluation:
           forecast_step: "all"
           sample: "all"
@@ -90,17 +100,20 @@ run_ids :
           plot_histograms: true
           plot_animations: true
 
+  
+
+  #WeatherGeneratorMerge example:
+  ###############################
+
   #Example of syntax to stack multiple runs over the ensemble dimension  
-  merge_test: <------ This is the new run_id name of the merged dataset. NB. you always need to specify one
-    type: "merge" <------- VERY IMPORTANT
+  merge_test: #<------ This is the new run_id name of the merged dataset. NB. you always need to specify one
+    type: "merge" # <------- VERY IMPORTANT
     merge_run_ids:
       - so67dku4
       - c9cg8ql3
-    metrics_dir: "./merge_test/metrics/" <------- VERY IMPORTANT
+    metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
     label: "Merged Results"
     results_base_dir : "./results/"
-    epoch: 0
-    rank: 0
     streams:
       ERA5:
         channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
@@ -109,13 +122,14 @@ run_ids :
           sample: [0, 1, 2, 3]
           ensemble: "all" 
 
+  #WeatherGeneratorJSON example:
+  ##############################
+
   #Example of syntax to run over pre-computed scores when the .zarr output is not available anymore
   so67dku1:
-    type: "json"
+    type: "json" # <------- VERY IMPORTANT
     label: "WeatherGenerator"
     results_base_dir : "./results/"
-    epoch: 0
-    rank: 0
     streams:
       ERA5:
         channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
@@ -123,6 +137,10 @@ run_ids :
           forecast_step: [2,4,6] 
           sample: [0, 1, 2, 3]
           ensemble: "all" #supported
+
+
+  # CSV Reader example:
+  ###############################
 
   #ADVANCED (please handle with care): example of how to use the csv reader to Plot PanguWeather scores computed with quaver
   pangu:
