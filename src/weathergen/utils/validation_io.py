@@ -40,7 +40,7 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
-    timestep_idxs = [0] if len(batch.get_forecast_idxs()) == 0 else batch.get_forecast_idxs()
+    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
     targets_lens = []
 
