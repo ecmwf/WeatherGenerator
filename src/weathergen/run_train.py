@@ -12,6 +12,7 @@ The entry point for training and inference weathergen-atmo
 """
 
 import logging
+import os
 import pdb
 import sys
 import time
@@ -190,9 +191,20 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 
 if __name__ == "__main__":
-    # Entry point for slurm script.
-    # Check whether --from_run_id passed as argument.
-    if any("--from_run_id" in arg for arg in sys.argv):
-        train_continue()
+    try:
+        stage = os.environ.get("WEATHERGEN_STAGE")
+    except KeyError as e:
+        msg = "missing environment variable 'WEATHERGEN_STAGE'"
+        raise ValueError(msg) from e
+
+    if stage == "train":
+        # Entry point for slurm script.
+        # Check whether --from_run_id passed as argument.
+        if any("--from_run_id" in arg for arg in sys.argv):
+            train_continue()
+        else:
+            train()
+    elif stage == "inference":
+        inference()
     else:
-        train()
+        logger.error("No stage was found.")
