@@ -334,7 +334,7 @@ def score_card_metric_region(
             selected_data.append(data)
             run_ids.append(run_id)
 
-        if selected_data and len(selected_data) > 1.0:
+        if selected_data:
             sc_plotter._logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
@@ -380,7 +380,7 @@ def bar_plot_metric_region(
             selected_data.append(data)
             run_ids.append(run_id)
 
-        if selected_data and len(selected_data) > 1.0:
+        if selected_data:
             br_plotter._logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
