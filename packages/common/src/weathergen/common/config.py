@@ -175,6 +175,11 @@ def get_run_id():
     return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
 
 
+def get_run_id_from_config(config: Config) -> str:
+    general_cfg = config.get("general", None)
+    return general_cfg.run_id if general_cfg else config.run_id
+
+
 def format_cf(config: Config) -> str:
     """Format config as a human-readable string."""
     stream = io.StringIO()
@@ -198,7 +203,7 @@ def save(config: Config, mini_epoch: int | None):
     dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_write_name(config.general.run_id, mini_epoch)
+    fname = _get_model_config_file_write_name(get_run_id_from_config(config), mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with (dirname / fname).open("w") as f:
@@ -376,7 +381,7 @@ def load_merge_configs(
         base_config = _load_base_conf(base)
     else:
         base_config = load_run_config(from_run_id, mini_epoch, None)
-        from_run_id = base_config.general.run_id
+        from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
@@ -429,8 +434,8 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
     """
     config = config.copy()
     if reuse_run_id:
-        assert config.general.run_id is not None, "Loaded run_id should not be None."
-        _logger.info(f"reusing run_id from previous run: {config.general.run_id}")
+        assert get_run_id_from_config(config) is not None, "Loaded run_id should not be None."
+        _logger.info(f"reusing run_id from previous run: {get_run_id_from_config(config)}")
     else:
         if run_id is None:
             # generate new id if run_id is None
@@ -622,13 +627,13 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
-    return _get_shared_wg_path() / "results" / config.general.run_id
+    return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
 
 
 def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
     if config or run_id:
-        run_id = run_id if run_id else config.general.run_id
+        run_id = run_id if run_id else get_run_id_from_config(config)
     else:
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
