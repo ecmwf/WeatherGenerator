@@ -284,7 +284,7 @@ class Model(torch.nn.Module):
             range(cf.num_register_tokens, cf.num_register_tokens + cf.num_class_tokens)
         )
         self.register_token_idxs = list(range(cf.num_register_tokens))
-        self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
+        self.first_patch_token_idx = cf.num_register_tokens + cf.num_class_tokens
 
     def create(self) -> "Model":
         """Create each individual module of the model"""
@@ -553,7 +553,7 @@ class Model(torch.nn.Module):
         return LatentState(
             register_tokens=z[:, self.register_token_idxs] if z is not None else None,
             class_token=z[:, self.class_token_idxs] if z is not None else None,
-            patch_tokens=z[:, (self.aux_token_idxs[-1] + 1) :] if z is not None else None,
+            patch_tokens=z[:, self.first_patch_token_idx :] if z is not None else None,
             z_pre_norm=tokens,
         )
 
@@ -587,10 +587,9 @@ class Model(torch.nn.Module):
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
-
+            # latent predictions (raw and with SSL heads)
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
-
         return output
 
     def predict_latent(
@@ -607,8 +606,8 @@ class Model(torch.nn.Module):
 
         # safe latent prediction
         tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
+        tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
-        output.add_latent_prediction(step, "latent_state", latent_state)
 
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
@@ -645,7 +644,7 @@ class Model(torch.nn.Module):
             return output
 
         # remove register  and class tokens
-        tokens = tokens[:, (self.aux_token_idxs[-1] + 1) :]
+        tokens = tokens[:, self.first_patch_token_idx :]
 
         # get 1-ring neighborhood for prediction
         batch_size = len(batch)
