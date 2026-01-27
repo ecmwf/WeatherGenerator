@@ -179,15 +179,16 @@ def get_reader(
     private_paths: dict[str, str],
     region: str | None = None,
     metric: str | None = None,
+    verbose: bool = True,
 ):
     if reader_type == "zarr":
-        reader = WeatherGenZarrReader(run, run_id, private_paths)
+        reader = WeatherGenZarrReader(run, run_id, private_paths, verbose)
     elif reader_type == "csv":
-        reader = CsvReader(run, run_id, private_paths)
+        reader = CsvReader(run, run_id, private_paths, verbose)
     elif reader_type == "json":
-        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
+        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric, verbose)
     elif reader_type == "merge":
-        reader = WeatherGenMergeReader(run, run_id, private_paths)
+        reader = WeatherGenMergeReader(run, run_id, private_paths, verbose)
     else:
         raise ValueError(f"Unknown reader type: {reader_type}")
     return reader
@@ -295,6 +296,7 @@ def evaluate_from_config(
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     use_parallel = cfg.evaluation.get("num_processes", 0)
+
     verbose = cfg.evaluation.get("verbose", True)
     default_streams = cfg.get("default_streams", {})
 
@@ -327,7 +329,7 @@ def evaluate_from_config(
         regions = cfg.evaluation.regions
         metrics = cfg.evaluation.metrics
 
-        reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
+        reader = get_reader(type_, run, run_id, private_paths, regions, metrics, verbose)
 
         for stream in reader.streams:
             tasks.append(
@@ -352,15 +354,8 @@ def evaluate_from_config(
         with mp.Pool(
             processes=num_processes,
             initializer=setup_worker_logger,
-<<<<<<< HEAD
-<<<<<<< HEAD
             initargs=(log_queue, verbose),
-=======
-            initargs=(log_queue,verbose),
->>>>>>> e62a22f2 (latent_space evaluation scripts + propagate verbose)
-=======
-            initargs=(log_queue, verbose),
->>>>>>> acd0439c (lint)
+
         ) as pool:
             results = pool.map(
                 _process_stream_wrapper,

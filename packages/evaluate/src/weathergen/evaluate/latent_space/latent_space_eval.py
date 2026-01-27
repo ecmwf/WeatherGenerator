@@ -13,7 +13,7 @@ This test must run on a GPU machine.
 It performs training and inference with multiple data sources including gridded and obs data.
 
 Command:
-uv run --offline packages/evaluate/src/weathergen/evaluate/latent_space/latent_space_eval.py --run_id j2dkivn8
+uv run --offline packages/evaluate/src/weathergen/evaluate/latent_space/latent_space_eval.py --run-id j2dkivn8
 """
 
 import argparse
@@ -64,7 +64,7 @@ def infer_multi_stream(run_id):
             "forecast_offset=0",
             "zarr_store=zip",
         ]
-        + ["--from_run_id", run_id, "--run_id", new_run_id, "--streams_output"]
+        + ["--from-run-id", run_id, "--run-id", new_run_id, "--streams-output"]
         + streams
         + [
             "--config",
@@ -244,7 +244,7 @@ def load_scores(eval_cfg, run_id):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run multi-stream latent space evaluation")
     parser.add_argument(
-        "--run_id", type=str, required=True, help="Run identifier for the model to evaluate"
+        "--run-id", type=str, required=True, help="Run identifier for the model to evaluate"
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose output", default=False

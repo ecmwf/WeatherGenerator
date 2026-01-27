@@ -90,7 +90,7 @@ class Reader:
 
         self._logger = logging.getLogger(__name__)
 
-        logger_level = logging.INFO if verbose else logging.WARNING
+        logger_level = logging.INFO if verbose else logging.CRITICAL + 1
         self._logger.setLevel(logger_level)
 
     def get_stream(self, stream: str):

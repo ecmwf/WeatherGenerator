@@ -256,8 +256,9 @@ class WeatherGenJSONReader(WeatherGenReader):
         private_paths: dict | None = None,
         regions: list[str] | None = None,
         metrics: list[str] | None = None,
+        verbose=True,
     ):
-        super().__init__(eval_cfg, run_id, private_paths)
+        super().__init__(eval_cfg, run_id, private_paths, verbose)
         # goes looking for the coordinates available for all streams, regions, metrics
         streams = list(self.eval_cfg.streams.keys())
         coord_names = ["sample", "forecast_step", "ens"]
@@ -300,16 +301,18 @@ class WeatherGenJSONReader(WeatherGenReader):
         raise ValueError(f"Missing JSON data for run {self.run_id}.")
 
     def get_recomputable_metrics(self, metrics):
-        _logger.info(
-            f"The following metrics have not yet been computed:{metrics}. Use type: zarr for that."
-        )
+        if metrics:
+            self._logger.info(
+                f"The following metrics have not yet been computed:{metrics}. "
+                "Use type: zarr for that. Skipping them."
+            )
         return {}
 
 
 class WeatherGenZarrReader(WeatherGenReader):
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True):
         """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
-        super().__init__(eval_cfg, run_id, private_paths)
+        super().__init__(eval_cfg, run_id, private_paths, verbose)
 
         zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
         # for backwards compatibility assume zarr store is local i.e. .zarr format

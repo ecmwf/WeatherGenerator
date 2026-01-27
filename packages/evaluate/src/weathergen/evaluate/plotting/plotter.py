@@ -1553,7 +1553,7 @@ class BarPlots:
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
             data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
         elif len(runs) < 2:
-            _logger.warning(
+            self._logger.warning(
                 "BarPlots:: Less than two runs provided. Generating bar plot against ones."
             )
             ones_array = xr.full_like(data[0], 1.0)
