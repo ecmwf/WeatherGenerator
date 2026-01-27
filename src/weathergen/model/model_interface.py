@@ -63,7 +63,7 @@ def init_model_and_shard(
         if re.fullmatch(cf.freeze_modules, name) is not None:
             logger.info(f"Froze weights {name}")
             freeze_weights(module)
-
+        
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
@@ -280,7 +280,7 @@ def load_encoder(cf, model, encoder_modules, device, run_id: str, mini_epoch=-1)
         logger.warning(f"Unused keys when loading model: {mkeys}")
 
     return model
-    
+
 def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
