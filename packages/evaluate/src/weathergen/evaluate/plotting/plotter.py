@@ -1550,12 +1550,8 @@ class BarPlots:
             runs = [""] + runs
             data = [ones_array] + data
 
-
         for run_index in range(1, len(runs)):
-
-            score, channels_per_comparison = self.calc_ratio_per_run_id(
-                data, channels, run_index
-            )
+            score, channels_per_comparison = self.calc_ratio_per_run_id(data, channels, run_index)
             if len(score) > 0:
                 ax[run_index - 1].barh(
                     np.arange(len(score)),
@@ -1565,9 +1561,7 @@ class BarPlots:
                     edgecolor="black",
                     linewidth=0.5,
                 )
-                ax[run_index - 1].set_yticks(
-                    np.arange(len(score)), labels=channels_per_comparison
-                )
+                ax[run_index - 1].set_yticks(np.arange(len(score)), labels=channels_per_comparison)
                 ax[run_index - 1].invert_yaxis()
 
                 xlabel = (
@@ -1636,7 +1630,7 @@ class BarPlots:
         """
         ratio_score = []
         channels_per_comparison = []
-        
+
         for _, var in enumerate(channels):
             if var not in data[0].channel.values or var not in data[run_index].channel.values:
                 continue
@@ -1649,12 +1643,12 @@ class BarPlots:
             )
 
             ratio_score.append(model_score / baseline_score)
-        
+
         if np.allclose(baseline_score, 1.0, atol=1e-6):
             ratio_score = np.array(ratio_score)
         else:
             ratio_score = np.array(ratio_score) - 1
-        
+
         return ratio_score, channels_per_comparison
 
     def colors(self, ratio_score: np.array, metric: str) -> list[tuple]:
