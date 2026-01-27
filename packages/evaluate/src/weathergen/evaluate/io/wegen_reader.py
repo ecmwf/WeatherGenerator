@@ -46,7 +46,7 @@ class WeatherGenReader(Reader):
         self.inference_cfg = self.get_inference_config()
 
         if not self.results_base_dir:
-            self.results_base_dir = Path(get_shared_wg_path("results"))
+            self.results_base_dir = get_path_run(self.inference_cfg)
             self._logger.info(
                 f"Results directory obtained from private config: {self.results_base_dir}"
             )
