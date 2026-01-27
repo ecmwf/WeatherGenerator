@@ -105,10 +105,9 @@ def write_output(
             sources[-1] += [stream_data.source_raw[0]]
 
     sample_idxs = [
-        [sdata.sample_idx for _, sdata in sample.streams_data.items()]
+        list(sample.streams_data.values())[0].sample_idx
         for sample in batch.get_source_samples().get_samples()
     ]
-    sample_idxs = [s[0].item() for s in sample_idxs]
 
     # more prep work
 

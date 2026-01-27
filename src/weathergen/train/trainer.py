@@ -123,8 +123,7 @@ class Trainer(TrainerBase):
             [self.training_cfg, self.validation_cfg, self.test_cfg],
             strict=True,
         ):
-            if mode_cfg.get("forecast", {}):
-                config.validate_forecast_policy_and_steps(mode_cfg.forecast, mode)
+            config.validate_forecast_policy_and_steps(mode_cfg.get("forecast", {}), mode)
 
         self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 

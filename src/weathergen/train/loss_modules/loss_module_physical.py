@@ -91,9 +91,9 @@ class LossPhysical(LossModuleBase):
 
         return stream_info_loss_weight, weights_channels
 
-    def _get_fstep_weights(self, len_forecast_steps):
-        timestep_weight_config = self.mode_cfg.forecast.get("timestep_weight")
-        if timestep_weight_config is None:
+    def _get_output_step_weights(self, len_forecast_steps):
+        timestep_weight_config = self.mode_cfg.get("forecast", {}).get("timestep_weight", {})
+        if len(timestep_weight_config) == 0:
             return [1.0 for _ in range(len_forecast_steps)]
         weights_timestep_fct = getattr(loss_fns, list(timestep_weight_config.keys())[0])
         decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
@@ -109,7 +109,7 @@ class LossPhysical(LossModuleBase):
 
         return weights_locations
 
-    def _get_substep_masks(self, stream_info, fstep, target_times):
+    def _get_substep_masks(self, stream_info, output_step, target_times):
         """
         Find substeps and create corresponding masks (reused across loss functions)
         """
@@ -168,7 +168,7 @@ class LossPhysical(LossModuleBase):
 
         The computed loss is:
 
-        Mean_{stream}( Mean_{fsteps}( Mean_{loss_fcts}( loss_fct( target, pred, weigths) )))
+        Mean_{stream}( Mean_{output_steps}( Mean_{loss_fcts}( loss_fct( target, pred, weigths) )))
 
         This method orchestrates the calculation of the overall loss by iterating through
         different data streams, forecast steps, channels, and configured loss functions.
@@ -218,15 +218,15 @@ class LossPhysical(LossModuleBase):
             stream_loss_weight, weights_channels = self._get_weights(stream_info)
 
             # TODO: make nicer
-            fstep_loss_weights = self._get_fstep_weights(len(targets.forecast_idxs))
-            if len(targets.physical) - len(targets.forecast_idxs) > 0:
-                fstep_loss_weights.insert(0, None)
+            output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
+            if len(targets.physical) - len(targets.output_idxs) > 0:
+                output_step_loss_weights.insert(0, None)
 
             # loss_stream: loss for given stream
             loss_stream = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_timesteps = 0
             for timestep_idx, (preds_cur, target_cur) in enumerate(
-                zip(preds.physical, targets.physical, strict=False)
+                zip(preds.physical, targets.physical, strict=True)
             ):
                 preds_batch = preds_cur.get(stream_name, [])
                 if not preds_batch:
@@ -239,7 +239,7 @@ class LossPhysical(LossModuleBase):
                 targets_params = target_cur[stream_name]["target_metda_data"]
                 targets_is_spoof = target_cur[stream_name]["is_spoof"]
 
-                fstep_weight = fstep_loss_weights[timestep_idx]
+                output_step_weight = output_step_loss_weights[timestep_idx]
 
                 # loss_timestep: loss for given timestep
                 loss_timestep = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -316,7 +316,7 @@ class LossPhysical(LossModuleBase):
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
-                        loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * fstep_weight
+                        loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
                         loss_st_corr = loss_st_corr + loss_cur_w
                         ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
 
@@ -343,23 +343,23 @@ class LossPhysical(LossModuleBase):
         def _nested_dict():
             return defaultdict(dict)
 
-        # Reorder losses_all to [stream_name][loss_fct_name][ch_n][fstep]
+        # Reorder losses_all to [stream_name][loss_fct_name][ch_n][output_step]
         reordered_losses = defaultdict(dict)
-        for stream_name, fstep_dict in losses_all.items():
+        for stream_name, output_step_dict in losses_all.items():
             reordered_losses[stream_name] = defaultdict(_nested_dict)
-            for fstep, lfct_dict in fstep_dict.items():
+            for output_step, lfct_dict in output_step_dict.items():
                 for loss_fct_name, ch_dict in lfct_dict.items():
                     for ch_n, v in ch_dict.items():
-                        reordered_losses[stream_name][loss_fct_name][ch_n][fstep] = v
+                        reordered_losses[stream_name][loss_fct_name][ch_n][output_step] = v
 
-        # Calculate per stream, per lfct average across channels and fsteps
+        # Calculate per stream, per lfct average across channels and output_steps
         for stream_name, lfct_dict in reordered_losses.items():
             for loss_fct_name, ch_dict in lfct_dict.items():
                 reordered_losses[stream_name][loss_fct_name]["avg"] = 0
                 count = 0
-                for ch_n, fstep_dict in ch_dict.items():
+                for ch_n, output_step_dict in ch_dict.items():
                     if ch_n != "avg":
-                        for _, v in fstep_dict.items():
+                        for _, v in output_step_dict.items():
                             reordered_losses[stream_name][loss_fct_name]["avg"] += v
                             count += 1
                 reordered_losses[stream_name][loss_fct_name]["avg"] /= count

@@ -24,14 +24,14 @@ class TargetAuxOutput:
     A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
     """
 
-    forecast_idxs: list
+    output_idxs: list[int]
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
     aux_outputs: dict[str, torch.Tensor]
 
-    def __init__(self, len_target: int, forecast_idxs: list) -> None:
-        self.forecast_idxs = forecast_idxs
+    def __init__(self, len_target: int, output_idxs: list) -> None:
+        self.output_idxs = output_idxs
         self.physical = [{} for _ in range(len_target)]
         self.latent = [{} for _ in range(len_target)]
         self.aux_outputs = {}
@@ -98,26 +98,26 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
-        forecast_idxs = batch.get_forecast_idxs()
+        output_idxs = batch.get_output_idxs()
+        assert len(output_idxs) > 0
 
-        targets = TargetAuxOutput(batch.get_output_len(), forecast_idxs)
+        targets = TargetAuxOutput(batch.get_output_len(), output_idxs)
 
         # collect all targets, concatenating across batch dimension since this is also how it
         # happens for predictions in the model
-        timestep_idxs = [0] if len(forecast_idxs) == 0 else forecast_idxs
         for stream_name in stream_names:
             # collect targets for all forecast steps
-            for t_idx in timestep_idxs:
+            for step in output_idxs:
                 targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
                 is_spoof = []
                 for sample in batch.samples:
-                    targets_cur += [sample.streams_data[stream_name].target_tokens[t_idx]]
-                    target_times_cur += [sample.streams_data[stream_name].target_times_raw[t_idx]]
-                    target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[t_idx]]
+                    targets_cur += [sample.streams_data[stream_name].target_tokens[step]]
+                    target_times_cur += [sample.streams_data[stream_name].target_times_raw[step]]
+                    target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[step]]
                     meta_data += [sample.meta_info]
                     is_spoof += [sample.streams_data[stream_name].is_spoof()]
 
-                    targets_cur = {
+                    targets_step = {
                         "target": targets_cur,
                         "target_times": target_times_cur,
                         "target_coords": target_coords_cur,
@@ -125,7 +125,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                         "is_spoof": is_spoof,
                     }
 
-                    targets.add_physical_target(t_idx, stream_name, targets_cur)
+                    targets.add_physical_target(step, stream_name, targets_step)
 
         return targets
 
