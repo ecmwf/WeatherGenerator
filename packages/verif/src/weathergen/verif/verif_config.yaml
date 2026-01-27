@@ -1,0 +1,59 @@
+# Default config file
+# mapping variables from zarr and observation files
+# to verif files
+
+- name:       "2t"
+  attributes: {
+    units:       "K",
+    long_name:   "2 meter temperature",
+    conventions: "verif_1.0.0"}
+  zarr_names: ["2t"]
+  zarr_units: {"CERRA": "K",
+               "ERA5":  "K"}
+  obs_name:   "air_temperature"
+  obs_units:  "K"
+
+- name:       "sp"
+  attributes: {
+    units:       "Pa",
+    long_name:   "Surface pressure",
+    conventions: "verif_1.0.0"}
+  zarr_names: ["sp"]
+  zarr_units: {"CERRA": "Pa",
+               "ERA5":  "Pa"}
+  obs_name:   "surface_air_pressure"
+  obs_units:  "Pa"
+
+- name:       "tp"
+  attributes: {
+    units:       "kg/m^2",
+    long_name:   "Total precipitation amount",
+    conventions: "verif_1.0.0"}
+  zarr_names: ["tp"]
+  zarr_units: {"CERRA": "kg/m^2",
+               "ERA5":  "m"}
+  obs_name:   "precipitation_amount_1h"
+  obs_units:  "kg/m^2"
+
+- name:       "mslp"
+  attributes: {
+    units:       "Pa",
+    long_name:   "Mean sea level pressure",
+    conventions: "verif_1.0.0"}
+  zarr_names: ["msl"]
+  zarr_units: {"CERRA": "Pa",
+               "ERA5":  "Pa"}
+  obs_name:   "surface_air_pressure"
+  obs_units:  "Pa"
+
+- name:       "wind"
+  attributes: {
+    units:       "m/s",
+    long_name:   "wind speed",
+    conventions: "verif_1.0.0"}
+  zarr_names:  ["10si", ["10u", "10v"]]
+  zarr_units: {"CERRA": "m/s",
+               "ERA5":  "m/s"}
+  obs_name:   "wind_speed"
+  obs_units:  "m/s"
+
