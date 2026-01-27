@@ -580,7 +580,6 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space, iterate and generate output over requested output steps
         # Note: currently it's not possible to generate output only at a subset of steps
-        breakpoint()
         for step in batch.get_output_idxs():
             # apply forecasting engine
             if self.forecast_engine:
