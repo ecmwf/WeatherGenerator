@@ -227,7 +227,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         if model_path is None:
             path = get_path_model(run_id=run_id)
         else:
-            path = Path(model_path)
+            path = Path(model_path) / run_id
 
         fname = path / _get_model_config_file_read_name(run_id, mini_epoch)
         if not fname.exists():
@@ -260,6 +260,7 @@ def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
 
     return f"model_{run_id}{mini_epoch_str}.json"
 
+
 def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None, use_old_name=False):
     """Generate the filename for reading a model config file."""
     if mini_epoch is None:
@@ -267,11 +268,12 @@ def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None, use_ol
     elif mini_epoch == -1:
         mini_epoch_str = "_latest"
     elif use_old_name:
-        mini_epoch_str = f"_epoch{mini_epoch:05d}" # TODO remove compatibility
+        mini_epoch_str = f"_epoch{mini_epoch:05d}"  # TODO remove compatibility
     else:
         mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
     return f"model_{run_id}{mini_epoch_str}.json"
+
 
 def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     """
