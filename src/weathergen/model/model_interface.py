@@ -47,9 +47,17 @@ type TrainingMode = str
 
 
 def init_model_and_shard(
-    cf, dataset, run_id_contd, mini_epoch_contd, training_mode, device, overrides={}
+    cf,
+    dataset,
+    run_id_contd,
+    mini_epoch_contd,
+    training_mode,
+    device,
+    with_ddp,
+    with_fsdp,
+    overrides={},
 ):
-    model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
+    model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
@@ -67,17 +75,17 @@ def init_model_and_shard(
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
 
-    if cf.with_ddp and not cf.with_fsdp:
+    if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             broadcast_buffers=True,
-            find_unused_parameters=True,
+            find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
         )
 
-    elif cf.with_ddp and cf.with_fsdp:
+    elif with_ddp and with_fsdp:
         # with DDP *and() FSDP
         fsdp_kwargs = {
             "mp_policy": (
@@ -114,6 +122,10 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
+        for module in model.latent_heads.modules():
+            if isinstance(module, modules_to_shard):
+                fully_shard(module, **fsdp_kwargs)
+
         full_precision_fsdp_kwargs = {
             "mp_policy": (
                 MixedPrecisionPolicy(
@@ -129,7 +141,7 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
-    if cf.with_ddp and cf.with_fsdp:
+    if with_ddp and with_fsdp:
         fully_shard(model)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
@@ -145,9 +157,9 @@ def init_model_and_shard(
 
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is None:
-        if cf.with_ddp and cf.with_fsdp:
+        if with_ddp and with_fsdp:
             model.to_empty(device="cuda")
-            if cf.with_fsdp:
+            if with_fsdp:
                 model.reset_parameters()
     else:
         if is_root():
@@ -285,6 +297,9 @@ def get_target_aux_calculator(
         target_aux = PhysicalTargetAndAux(loss_cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
+        # work around for problems with FSDP2
+        assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"
+
         meta_ema_model, _ = init_model_and_shard(
             cf,
             dataset,
@@ -292,6 +307,8 @@ def get_target_aux_calculator(
             None,
             "student",
             device,
+            with_ddp=False,
+            with_fsdp=False,
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
         ema_model = EMAModel(

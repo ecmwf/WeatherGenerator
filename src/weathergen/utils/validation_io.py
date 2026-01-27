@@ -40,11 +40,12 @@ def write_output(
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
 
-    window_offset_prediction = val_cfg.get("window_offset_prediction", 0)
-    forecast_steps = max(1, val_cfg.get("forecast", {}).get("num_steps", 1))
+    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+    forecast_offset = timestep_idxs[0]
     targets_lens = []
-    # for fstep in range(window_offset_prediction, forecast_steps + 1):
-    for fstep in range(window_offset_prediction, forecast_steps):
+
+    # TODO Maybe stopping at forecast_steps explained #1657
+    for t_idx in timestep_idxs:
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
@@ -53,8 +54,8 @@ def write_output(
         for stream_info in cf.streams:
             sname = stream_info["name"]
             # predictions
-            preds = model_output.get_physical_prediction(fstep, stream_info["name"])
-            targets = target_aux_out.physical[stream_info["name"]][fstep]["target"]
+            preds = model_output.get_physical_prediction(t_idx, sname)
+            targets = target_aux_out.physical[t_idx][sname]["target"]
 
             preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
             targets_lens[-1] += [[]]
@@ -73,9 +74,9 @@ def write_output(
                 targets_s += [dn_data(sname, target).detach().cpu().numpy()]
 
                 key = "target_coords"
-                t_coords_s += [target_aux_out.physical[sname][fstep][key][i_batch].cpu().numpy()]
+                t_coords_s += [target_aux_out.physical[t_idx][sname][key][i_batch].cpu().numpy()]
                 key = "target_times"
-                t_times_s += [target_aux_out.physical[sname][fstep][key][i_batch]]
+                t_times_s += [target_aux_out.physical[t_idx][sname][key][i_batch]]
 
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
 
@@ -88,8 +89,8 @@ def write_output(
     #           if len(idxs_inv) > 0:
     #               pred = pred[:, idxs_inv]
     #               target = target[idxs_inv]
-    #               targets_coords_raw[fstep][i_strm] = targets_coords_raw[fstep][i_strm][idxs_inv]
-    #               targets_times_raw[fstep][i_strm] = targets_times_raw[fstep][i_strm][idxs_inv]
+    #               targets_coords_raw[t_idx][i_strm] = targets_coords_raw[t_idx][i_strm][idxs_inv]
+    #               targets_times_raw[t_idx][i_strm] = targets_times_raw[t_idx][i_strm][idxs_inv]
 
     if len(preds_all) == 0:
         _logger.warning("Writing no data since predictions are empty.")
@@ -104,10 +105,9 @@ def write_output(
             sources[-1] += [stream_data.source_raw[0]]
 
     sample_idxs = [
-        [sdata.sample_idx for _, sdata in sample.streams_data.items()]
+        list(sample.streams_data.values())[0].sample_idx
         for sample in batch.get_source_samples().get_samples()
     ]
-    sample_idxs = [s[0].item() for s in sample_idxs]
 
     # more prep work
 
@@ -156,7 +156,7 @@ def write_output(
         source_channels,
         geoinfo_channels,
         sample_start,
-        val_cfg.get("window_offset_prediction", 0),
+        forecast_offset,
     )
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():

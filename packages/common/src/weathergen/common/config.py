@@ -656,51 +656,73 @@ def _get_shared_wg_path() -> Path:
     return Path(private_config.get("path_shared_working_dir"))
 
 
-def validate_forecast_policy_and_steps(cf: OmegaConf):
+def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     """
-    Validates the forecast policy and steps within a configuration object.
+    Validates the forecast policy, steps and offset within a configuration object.
 
-    This method enforces specific rules for the `forecast_steps` attribute, which can be
+    This method enforces specific rules for the `forecast.num_steps` attribute, which can be
     either a single integer or a list of integers, ensuring consistency with the
-    `forecast_policy` attribute.
+    `forecast.policy` attribute. Furthermore `forecast.offset` is enforeced to be either 0 or 1.
 
     The validation logic is as follows:
-    - If `cf.forecast_steps` is a single integer, a `forecast_policy` must be defined
-    (i.e., not None or empty) only if `forecast_steps` is unequal to 0.
-    - If `cf.forecast_steps` is a list, it must be non-empty, and all of its elements
-    must be non-negative integers. Additionally, a `forecast_policy` must be
-    defined if any of the forecast steps in the list are greater than 0.
+    - `forecast.offset` must either be 0 or 1.
+    - If `forecast.offset` is 0, `forecast.num_steps` must be an integer and can either be 0 (e.g.
+      used for SSL training without forecast engine) or 1 (e.g. used for diffusion in which the
+      forecast engine is used to denoise the current time window).
+    - If `forecast.offset` is 1, a `forecast.policy` must be specified and `forecast.num_steps` can
+      either be a single integer greater than 1 or a non-empty list and all of its elements must be
+      integers greater than 1.
 
     Args:
-        cf (OmegaConf): The configuration object containing the `forecast_steps`
-                        and `forecast_policy` attributes.
+        mode_cfg (OmegaConf): The training/validation/test configuration object containing the
+                             `forecast.num_steps` and `forecast.policy` attributes.
+        mode (str): the training mode, i.e. training_config, validation_config, or test_config
 
     Raises:
-        TypeError: If `cf.forecast_steps` is not an integer or a non-empty list.
-        AssertionError: If a `forecast_policy` is required but not provided, or
-                        if `forecast_step` is negative while `forecast_policy` is provided, or
+        TypeError: If `forecast.offset` is not an integer of value 0 or 1.
+        TypeError: If `forecast.num_steps` is not an integer or a non-empty list.
+        AssertionError: If a `forecast.policy` is required but not provided, or
+                        if `forecast_step` is negative while `forecast.policy` is provided, or
                         if any of the forecast steps in a list are negative.
     """
+
+    if len(forecast_cfg) == 0:
+        return
+
     provide_forecast_policy = (
-        "A 'forecast_policy' must be specified when 'forecast_steps' is not zero. "
+        f"'{mode}.forecast.policy' must be specified when '{mode}.forecast.num_steps' is not zero "
+        f"and '{mode}.forecast.offset' is 1. "
     )
     valid_forecast_policies = (
-        "Valid values for 'forecast_policy' are, e.g., 'fixed' when using constant "
-        "forecast steps throughout the training, or 'sequential' when varying the forecast "
-        "steps over mini_epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
+        "Valid values for '{mode}.forecast.policy' are, e.g., 'fixed' when using constant number "
+        "of forecast steps throughout the training, or 'sequential' when varying the number of "
+        "forecast steps over mini_epochs, such as, e.g., 'forecast.num_steps: [2, 2, 4, 4]'. "
     )
-    valid_forecast_steps = (
-        "'forecast_steps' must be a positive integer or a non-empty list of positive integers. "
+    valid_forecast_offset = f"'{mode}.forecast.offset' must be an integer of either value 0 or 1. "
+    valid_forecast_steps_offset0 = (
+        f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer of value "
+        f"either 0 or 1. "
     )
-    if isinstance(cf.forecast_steps, int):
-        assert cf.forecast_policy and cf.forecast_steps > 0 if cf.forecast_steps != 0 else True, (
-            provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
-        )
-    elif isinstance(cf.forecast_steps, ListConfig) and len(cf.forecast_steps) > 0:
-        assert (
-            cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
-            if any(n > 0 for n in cf.forecast_steps)
-            else True
-        ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
+    valid_forecast_steps_offset1 = (
+        f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer greater "
+        "than 1 or a non-empty list and all of its elements must be integers greater than 1."
+    )
+
+    # get output_offset or set default to 0 as in multi_stream_data_sampler.py
+    output_offset = forecast_cfg.get("offset", 0)
+    assert isinstance(output_offset, int), TypeError(valid_forecast_offset)
+    if output_offset == 0:
+        if isinstance(forecast_cfg.num_steps, int):
+            assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
+        else:
+            raise TypeError(valid_forecast_steps_offset0)
+    elif output_offset == 1:
+        assert forecast_cfg.policy, (provide_forecast_policy, valid_forecast_policies)
+        if isinstance(forecast_cfg.num_steps, int):
+            assert forecast_cfg.num_steps > 0, valid_forecast_steps_offset1
+        elif isinstance(forecast_cfg.num_steps, ListConfig) and len(forecast_cfg.num_steps) > 0:
+            assert all(step > 0 for step in forecast_cfg.num_steps), valid_forecast_steps_offset1
+        else:
+            raise TypeError(valid_forecast_steps_offset1)
     else:
-        raise TypeError(valid_forecast_steps)
+        raise TypeError(valid_forecast_offset)

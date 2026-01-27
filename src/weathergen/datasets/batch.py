@@ -100,11 +100,6 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         return self.streams_data[stream_name]
 
-    def get_forecast_steps(self) -> int:
-        for _, sdata in self.streams_data.items():
-            forecast_dt = sdata.get_forecast_steps()
-        return forecast_dt
-
 
 class BatchSamples:
     """
@@ -113,11 +108,15 @@ class BatchSamples:
 
     samples: list[Sample]
     tokens_lens: torch.Tensor | None
+    output_steps: int
+    output_idxs: list[int]
     device: str | None
 
-    def __init__(self, streams: dict, num_samples: int) -> None:
+    def __init__(self, streams: dict, num_samples: int, output_steps, output_idxs) -> None:
         self.samples = [Sample(streams) for _ in range(num_samples)]
         self.tokens_lens = None
+        self.output_steps = output_steps
+        self.output_idxs = output_idxs
         self.device = None
 
     def __len__(self) -> int:
@@ -161,13 +160,17 @@ class BatchSamples:
 
         return min(lens)
 
-    def get_forecast_steps(self) -> int:
+    def get_output_idxs(self) -> int:
         """
-        Get forecast steps
+        Get forecast indices
         """
-        # use sample 0 since the number of forecast steps is constant across batch
-        # TODO: fix use of sample 0
-        return self.samples[0].get_forecast_steps()
+        return self.output_idxs
+
+    def get_output_len(self) -> int:
+        """
+        Get length of output
+        """
+        return self.output_steps
 
     def get_device(self) -> str | torch.device:
         """
@@ -206,14 +209,33 @@ class ModelBatch:
     source2target_matching_idxs: np.typing.NDArray[np.int32]
     target2source_matching_idxs: np.typing.NDArray[np.int32]
 
+    # indices of valid outputs
+    output_idxs: list[int]
+
     # device of the tensors in the batch
     device: str | torch.device
 
-    def __init__(self, streams: dict, num_source_samples: int, num_target_samples: int) -> None:
+    def __init__(
+        self,
+        streams: dict,
+        num_source_samples: int,
+        num_target_samples: int,
+        output_offset,
+        output_steps,
+    ) -> None:
         """ """
 
-        self.source_samples = BatchSamples(streams, num_source_samples)
-        self.target_samples = BatchSamples(streams, num_target_samples)
+        # define forecast indices
+        self.output_offset = output_offset
+        self.output_steps = output_steps
+        self.output_idxs = list(range(output_offset, output_steps))
+
+        self.source_samples = BatchSamples(
+            streams, num_source_samples, output_steps, self.output_idxs
+        )
+        self.target_samples = BatchSamples(
+            streams, num_target_samples, output_steps, self.output_idxs
+        )
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
@@ -346,13 +368,17 @@ class ModelBatch:
         """
         return int(self.source2target_matching_idxs[source_idx])
 
-    def get_forecast_steps(self) -> int:
+    def get_output_idxs(self) -> int:
         """
-        Get forecast steps
+        Get valid output steps
         """
-        # use sample 0 since the number of forecast steps is constant across batch
-        # TODO: fix use of sample 0
-        return self.source_samples.get_forecast_steps()
+        return self.output_idxs
+
+    def get_output_len(self) -> int:
+        """
+        Get length of output
+        """
+        return self.output_steps
 
     def get_device(self) -> str | torch.device:
         """
