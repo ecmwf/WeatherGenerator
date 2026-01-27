@@ -92,8 +92,8 @@ class LossPhysical(LossModuleBase):
         return stream_info_loss_weight, weights_channels
 
     def _get_output_step_weights(self, len_forecast_steps):
-        timestep_weight_config = self.mode_cfg.forecast.get("timestep_weight")
-        if timestep_weight_config is None:
+        timestep_weight_config = self.mode_cfg.get("forecast", {}).get("timestep_weight", {})
+        if len(timestep_weight_config) == 0:
             return [1.0 for _ in range(len_forecast_steps)]
         weights_timestep_fct = getattr(loss_fns, list(timestep_weight_config.keys())[0])
         decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
