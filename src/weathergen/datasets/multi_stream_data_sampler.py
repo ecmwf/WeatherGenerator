@@ -285,6 +285,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if self.forecast_policy != "random"
             else self.forecast_steps.max()
         )
+        if fsm > 0:
+            logger.info(f"forecast_steps : {fsm}")
 
         # data
         index_range = self.time_window_handler.get_index_range()
