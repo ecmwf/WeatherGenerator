@@ -155,11 +155,11 @@ class DataReaderSynop(DataReaderTimestep):
         self.mean_geoinfo = self.mean[self.geoinfo_idx]
         self.stdev_geoinfo = self.stdev[self.geoinfo_idx]
 
-    def _load_or_compute_mean_stdev(self) -> tuple(np.array, np.array):
+    def _load_or_compute_mean_stdev(self) -> (np.array, np.array):
         """
         Load mean and stdev from data file if specified in stream config, otherwise compute.
 
-        Returns: tuple(np.array, np.array)
+        Returns: (np.array, np.array)
             Mean and standard deviation arrays for all channels
         """
         mean_key = self.stream_info.get("mean_key")
@@ -170,7 +170,7 @@ class DataReaderSynop(DataReaderTimestep):
             mean = np.array(self.ds[mean_key], dtype=np.float64)
             stdev = np.array(self.ds[stdev_key], dtype=np.float64)
             
-            # Validate that the loaded statistics have the correct shape
+            # Validate that the loaded mean and stdev have the correct shape
             expected_len = len(self.channels_file)
             if len(mean) != expected_len or len(stdev) != expected_len:
                 _logger.warning(
