@@ -751,9 +751,7 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
         if isinstance(forecast_cfg.num_steps, int):
             assert forecast_cfg.num_steps > 0, valid_forecast_steps_offset1
         elif isinstance(forecast_cfg.num_steps, ListConfig) and len(forecast_cfg.num_steps) > 0:
-            assert all(step > 0 for step in forecast_cfg.num_steps), (
-                valid_forecast_steps_offset1
-            )
+            assert all(step > 0 for step in forecast_cfg.num_steps), valid_forecast_steps_offset1
         else:
             raise TypeError(valid_forecast_steps_offset1)
     else:
