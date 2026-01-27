@@ -469,10 +469,6 @@ class WeatherGenZarrReader(WeatherGenReader):
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
 
-                # apply z scaling if needed
-                da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
-                da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
-
                 if len(samples) == 1:
                     _logger.debug("Repeating sample coordinate for single-sample case.")
                     for da in (da_tars_fs, da_preds_fs):
@@ -495,6 +491,10 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                     da_tars_fs = da_tars_fs.sel(channel=channels)
                     da_preds_fs = da_preds_fs.sel(channel=channels)
+
+                # apply z scaling if needed
+                da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
+                da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
 
                 da_tars.append(da_tars_fs)
                 da_preds.append(da_preds_fs)
