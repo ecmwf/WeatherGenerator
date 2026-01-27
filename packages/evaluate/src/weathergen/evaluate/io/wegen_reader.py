@@ -26,6 +26,7 @@ from weathergen.common.config import (
     load_run_config,
 )
 from weathergen.common.io import zarrio_reader
+
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
@@ -66,7 +67,7 @@ class WeatherGenReader(Reader):
         )
         # for backward compatibility allow metric_dir to be specified in the run config
         self.metrics_dir = Path(
-            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
+            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / "evaluation")
         )
 
     def get_inference_config(self):
