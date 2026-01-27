@@ -107,7 +107,7 @@ date
 #cd $WEATHERGEN_HOME
 source .venv/bin/activate
 
-srun uv run --offline inference --from_run_id "$FROM_RUN_ID" --samples=16 --options forecast_steps=80
+srun uv run --offline inference --from_run_id "$FROM_RUN_ID" --samples=16 --start_date=2023-10-01 --end_date=2023-12-01 --options forecast_steps=80
 #srun uv run inference --from_run_id "$FROM_RUN_ID" --run_id "$RUN_ID" --samples 16 --start_date=2023-10-01 --end_date=2023-12-01 --options forecast_steps=80
 
 echo "Finished job."

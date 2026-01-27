@@ -50,40 +50,40 @@ run_ids :
   #        forecast_step: "all"
 
   # lr=1e-4  
-  u2qk39pi:
-    label: "cosine scheduler lr_max=1e-4 v1  epoch=32"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #u2qk39pi:
+  #  label: "cosine scheduler lr_max=1e-4 v1  epoch=32"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  zswipf53:
-    label: "cosine scheduler lr_max=1e-4 v2 epoch=32"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #zswipf53:
+  #  label: "cosine scheduler lr_max=1e-4 v2 epoch=32"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  dsdvzg59:
-    label: "cosine scheduler lr_max=1e-4 v3 epoch=32"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #dsdvzg59:
+  #  label: "cosine scheduler lr_max=1e-4 v3 epoch=32"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  ikvap8bm:
+  qc5dw7ki:
     label: "cosine scheduler lr_max=1e-4 v1 epoch=48"
     epoch: 0
     rank: 0
@@ -94,7 +94,7 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  o5b9wnu3:
+  oqe79vpk:
     label: "cosine scheduler lr_max=1e-4 v2 epoch=48"
     epoch: 0
     rank: 0
@@ -105,7 +105,7 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  y94xmnhj:
+  hhblaokc:
     label: "cosine scheduler lr_max=1e-4 v3 epoch=48" 
     epoch: 0
     rank: 0
