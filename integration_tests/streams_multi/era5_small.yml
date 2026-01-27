@@ -23,7 +23,6 @@ ERA5:
     net: linear
     dim_embed: 16
   target_readout:
-    type: 'obs_value'
     num_layers: 2
     num_heads: 2
   pred_head:

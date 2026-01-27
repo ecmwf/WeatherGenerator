@@ -979,18 +979,20 @@ class LinePlots:
         data_list, label_list = self._check_lengths(data, labels)
 
         if len(data_list) < 2:
-            _logger.warning("Ratio plot requires at least two datasets to compare. Skipping.")
-            return
-
-        baseline_name = self.baseline
-        baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
-        if baseline_idx is not None:
-            _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
-            baseline = data_list[baseline_idx]
-
+            baseline = xr.full_like(data_list[0], 1.0)
+            baseline_name = "ones"
+            descr = "scores"
         else:
-            baseline_name = run_ids[0]
-            baseline = data_list[0]
+            descr = "ratio_plot"
+            baseline_name = self.baseline
+            baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
+            if baseline_idx is not None:
+                _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
+                baseline = data_list[baseline_idx]
+
+            else:
+                baseline_name = run_ids[0]
+                baseline = data_list[0]
 
         ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
 
@@ -1023,11 +1025,14 @@ class LinePlots:
                 linestyle="-",
             )
 
-        parts = ["ratio_plot", tag]
+        parts = [descr, tag]
         name = "_".join(filter(None, parts))
         plt.xticks(rotation=90, ha="right")
         plt.grid(True, linestyle="--", color="gray", alpha=0.2)
-        title = f"Ratio plot {tag.split('_')[0]} - {tag.split('_')[-1]} (baseline: {baseline_name})"
+        title = (
+            f"{descr.replace('_', ' ')} {tag.split('_')[0]} -"
+            f" {tag.split('_')[-1]} (baseline: {baseline_name})"
+        )
         self._plot_base(fig, name, x_dim, y_dim, print_summary, line=1.0, vlines=True, title=title)
 
     def heat_map(
@@ -1514,7 +1519,7 @@ class BarPlots:
 
         fig, ax = plt.subplots(
             1,
-            len(runs) - 1,
+            len(runs) - 1 if len(runs) > 1 else 1,
             figsize=(5 * len(runs), 2 * len(channels)),
             dpi=self.dpi_val,
             squeeze=False,
@@ -1525,6 +1530,13 @@ class BarPlots:
             baseline_idx = runs.index(self.baseline)
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
             data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
+        elif len(runs) < 2:
+            _logger.warning(
+                "BarPlots:: Less than two runs provided. Generating bar plot against ones."
+            )
+            ones_array = xr.full_like(data[0], 1.0)
+            runs = [""] + runs
+            data = [ones_array] + data
 
         for run_index in range(1, len(runs)):
             ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
@@ -1543,10 +1555,20 @@ class BarPlots:
                     np.arange(len(ratio_score)), labels=channels_per_comparison
                 )
                 ax[run_index - 1].invert_yaxis()
-                ax[run_index - 1].set_xlabel(
+
+                xlabel = (
                     f"Relative {data[0].coords['metric'].item().upper()}: "
                     f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
                 )
+
+                if len(runs) == 2 and runs[0] == "":
+                    xlabel = xlabel.replace("Relative ", "")
+                    xlabel = xlabel.replace(
+                        f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})",
+                        f"Model ({runs[run_index]})",
+                    )
+
+                ax[run_index - 1].set_xlabel(xlabel)
             else:
                 ax[run_index - 1].set_visible(False)  # or annotate as missing
                 # Or show a message:
@@ -1560,7 +1582,7 @@ class BarPlots:
                 )
 
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
-        parts = ["bar_plot_compare", tag] + runs
+        parts = ["bar_plot", tag] + runs
         name = "_".join(filter(None, parts))
         plt.savefig(
             f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
@@ -1600,6 +1622,7 @@ class BarPlots:
         """
         ratio_score = []
         channels_per_comparison = []
+
         for _, var in enumerate(channels):
             if var not in data[0].channel.values or var not in data[run_index].channel.values:
                 continue
