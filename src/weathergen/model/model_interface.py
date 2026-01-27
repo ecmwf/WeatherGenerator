@@ -70,6 +70,9 @@ def init_model_and_shard(
         if re.fullmatch(cf.freeze_modules, name) is not None:
             logger.info(f"Froze weights {name}")
             freeze_weights(module)
+            module.eval()
+        else:
+            logger.info(f"Did not freeze weights {name}")
 
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:

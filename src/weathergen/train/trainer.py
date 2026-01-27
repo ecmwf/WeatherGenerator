@@ -11,6 +11,7 @@
 import copy
 import logging
 import time
+import re
 
 import numpy as np
 import torch
@@ -404,6 +405,15 @@ class Trainer(TrainerBase):
 
         cf = self.cf
         self.model.train()
+
+        #TODO: ablate this vs. just using no_grad
+        for name, module in self.model.named_modules():
+            name = module.name if hasattr(module, "name") else name
+            # avoid the whole model element which has name ''
+            if name == "":
+                continue
+            if re.fullmatch(cf.freeze_modules, name) is not None:
+                module.eval()
 
         dataset_iter = iter(self.data_loader)
 
