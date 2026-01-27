@@ -4,7 +4,7 @@ This test must run on a GPU machine.
 It performs a training and inference of the Weather Generator model.
 
 Command:
-uv run pytest  ./integration_tests/jepa1.py
+uv run pytest  ./integration_tests/dino1.py
 """
 
 import json
@@ -45,12 +45,12 @@ def setup(test_run_id):
     logger.info("end fixture")
 
 
-@pytest.mark.parametrize("test_run_id", ["test_jepa1_" + commit_hash])
+@pytest.mark.parametrize("test_run_id", ["test_dinov21_" + commit_hash])
 def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id} {WEATHERGEN_HOME}")
 
     train_with_args(
-        [ f"--base-config={WEATHERGEN_HOME}/integration_tests/jepa1.yaml" ]
+        [ f"--base-config={WEATHERGEN_HOME}/integration_tests/dinov21.yaml" ]
         + [
             "--run_id",
             test_run_id,
