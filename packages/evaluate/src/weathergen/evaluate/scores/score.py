@@ -190,6 +190,7 @@ class Scores:
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
+            "qq_analysis": self.calc_qq_analysis,
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
@@ -1495,3 +1496,163 @@ class Scores:
             raise ValueError(f"Second-order differentation is not implemenetd in {method} yet.")
 
         return var_diff_amplitude
+
+    def calc_qq_analysis(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        n_quantiles: int = 100,
+        quantile_method: str = "linear",
+        focus_extremes: bool = True,
+        extreme_percentiles: tuple[float, float] = (5.0, 95.0),
+    ) -> xr.DataArray:
+        """
+        Calculate quantile-quantile (Q-Q) analysis metric for extreme value evaluation.
+        
+        This metric compares the distribution of forecast values with ground truth values
+        by computing quantiles and their deviations. 
+        
+        The Q-Q analysis returns quantile values from both prediction and ground truth,
+        along with metrics to assess how well the forecast captures the observed distribution,
+        especially in the tails (extremes).
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        n_quantiles: int
+            Number of quantiles to calculate for the Q-Q plot. Default is 100.
+            Higher values provide finer resolution of the distribution.
+        quantile_method: str
+            Method for quantile calculation. Options: 'linear', 'lower', 'higher', 
+            'midpoint', 'nearest'. Default is 'linear'.
+        focus_extremes: bool
+            If True, additional quantiles are computed in the extreme tails of the
+            distribution for better resolution of extreme values. Default is True.
+        extreme_percentiles: tuple[float, float]
+            Lower and upper percentile thresholds to define extremes.
+            Default is (5.0, 95.0), meaning values below 5th and above 95th percentile
+            are considered extremes.
+
+        Returns
+        -------
+        xr.DataArray
+            Dataset containing Q-Q analysis results with the following variables:
+            - 'quantile': Theoretical quantile levels (0 to 1)
+            - 'p_quantiles': Quantile values from prediction data
+            - 'gt_quantiles': Quantile values from ground truth data
+            - 'qq_deviation': Absolute difference between prediction and ground truth quantiles
+            - 'qq_deviation_normalized': Normalized deviation (relative to ground truth IQR)
+            - 'extreme_low_mse': MSE for lower extreme quantiles
+            - 'extreme_high_mse': MSE for upper extreme quantiles
+            - 'overall_qq_score': Overall Q-Q score (lower is better, 0 is perfect)
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate Q-Q analysis without aggregation dimensions "
+                "(agg_dims=None)."
+            )
+
+        # Generate quantile levels
+        if focus_extremes:
+            # Add more resolution in the tails for extreme value analysis
+            lower_tail = np.linspace(0.001, extreme_percentiles[0] / 100, 20)
+            middle = np.linspace(
+                extreme_percentiles[0] / 100, extreme_percentiles[1] / 100, n_quantiles - 40
+            )
+            upper_tail = np.linspace(extreme_percentiles[1] / 100, 0.999, 20)
+            quantile_levels = np.concatenate([lower_tail, middle, upper_tail])
+        else:
+            quantile_levels = np.linspace(0.001, 0.999, n_quantiles)
+
+        # Flatten the data across aggregation dimensions while preserving other dimensions
+        # Determine which dimensions to keep (not in agg_dims)
+        keep_dims = [dim for dim in p.dims if dim not in self._agg_dims]
+        
+        if keep_dims:
+            # Stack aggregation dimensions into a single dimension
+            p_flat = p.stack({"_agg_points": self._agg_dims})
+            gt_flat = gt.stack({"_agg_points": self._agg_dims})
+        else:
+            # If all dimensions are aggregated, add a dummy dimension
+            p_flat = p.stack({"_agg_points": self._agg_dims}).expand_dims("dummy")
+            gt_flat = gt.stack({"_agg_points": self._agg_dims}).expand_dims("dummy")
+            keep_dims = ["dummy"]
+
+        # Remove NaN values before quantile calculation
+        p_flat = p_flat.dropna(dim="_agg_points", how="all")
+        gt_flat = gt_flat.dropna(dim="_agg_points", how="all")
+
+        # Calculate quantiles using xarray's quantile method
+        p_quantiles = p_flat.quantile(
+            quantile_levels, dim="_agg_points", method=quantile_method
+        )
+        gt_quantiles = gt_flat.quantile(
+            quantile_levels, dim="_agg_points", method=quantile_method
+        )
+
+        # Calculate Q-Q deviations
+        qq_deviation = np.abs(p_quantiles - gt_quantiles)
+
+        # Calculate normalized deviation (relative to interquartile range of ground truth)
+        gt_q25 = gt_flat.quantile(0.25, dim="_agg_points")
+        gt_q75 = gt_flat.quantile(0.75, dim="_agg_points")
+        iqr = gt_q75 - gt_q25
+        # Avoid division by zero
+        iqr = iqr.where(iqr > 1e-10, 1.0)
+        
+        qq_deviation_normalized = qq_deviation / iqr
+
+        # Calculate MSE for extreme quantiles
+        extreme_low_mask = quantile_levels < (extreme_percentiles[0] / 100)
+        extreme_high_mask = quantile_levels > (extreme_percentiles[1] / 100)
+
+        extreme_low_mse = (
+            ((p_quantiles - gt_quantiles) ** 2)
+            .isel(quantile=extreme_low_mask)
+            .mean(dim="quantile")
+        )
+        extreme_high_mse = (
+            ((p_quantiles - gt_quantiles) ** 2)
+            .isel(quantile=extreme_high_mask)
+            .mean(dim="quantile")
+        )
+
+        # Calculate overall Q-Q score (mean absolute deviation across all quantiles)
+        overall_qq_score = qq_deviation.mean(dim="quantile")
+
+        # Store Q-Q data as a non-scalar coordinate with matching dimensions
+        # This ensures each channel/sample/ens combination gets its own Q-Q data
+        import json
+        
+        # Create separate JSON strings for each position in the multi-dimensional array
+        qq_data_coord_array = np.empty(overall_qq_score.shape, dtype=object)
+        
+        # Iterate over all positions and create individual JSON strings
+        for idx in np.ndindex(overall_qq_score.shape):
+            qq_full_data = {
+                "quantile_levels": quantile_levels.tolist(),
+                "p_quantiles": p_quantiles.values[(...,) + idx].tolist() if p_quantiles.ndim > 1 else p_quantiles.values.tolist(),
+                "gt_quantiles": gt_quantiles.values[(...,) + idx].tolist() if gt_quantiles.ndim > 1 else gt_quantiles.values.tolist(),
+                "qq_deviation": qq_deviation.values[(...,) + idx].tolist() if qq_deviation.ndim > 1 else qq_deviation.values.tolist(),
+                "qq_deviation_normalized": qq_deviation_normalized.values[(...,) + idx].tolist() if qq_deviation_normalized.ndim > 1 else qq_deviation_normalized.values.tolist(),
+                "extreme_low_mse": float(extreme_low_mse.values[idx]) if extreme_low_mse.ndim > 0 else float(extreme_low_mse.values),
+                "extreme_high_mse": float(extreme_high_mse.values[idx]) if extreme_high_mse.ndim > 0 else float(extreme_high_mse.values),
+            }
+            qq_data_coord_array[idx] = json.dumps(qq_full_data)
+        
+        qq_data_coord = xr.DataArray(
+            qq_data_coord_array,
+            dims=overall_qq_score.dims,
+            coords={dim: overall_qq_score.coords[dim] for dim in overall_qq_score.dims},
+            attrs={"description": "Full Q-Q analysis data for plotting"}
+        )
+        overall_qq_score = overall_qq_score.assign_coords({"qq_full_data": qq_data_coord})
+
+        # Remove dummy dimension if it was added
+        if "dummy" in overall_qq_score.dims:
+            overall_qq_score = overall_qq_score.squeeze("dummy", drop=True)
+
+        return overall_qq_score
