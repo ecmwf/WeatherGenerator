@@ -19,9 +19,9 @@ from numpy.typing import NDArray
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
+    DTRange,
     ReaderData,
     TimeWindowHandler,
-    TIndex,
     check_reader_data,
 )
 
@@ -137,7 +137,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         return self.len
 
     @override
-    def _get(self, idx: TIndex, channels_idx: list[int]) -> ReaderData:
+    def _get(self, t_range: DTRange, channels_idx: list[int]) -> ReaderData:
         """
         Get data for window (for either source or target, through public interface)
 
@@ -153,7 +153,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         ReaderData providing coords, geoinfos, data, datetimes
         """
 
-        (t_idxs, dtr) = self._get_dataset_idxs(idx)
+        (t_idxs, dtr) = self._get_dataset_idxs(t_range)
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
