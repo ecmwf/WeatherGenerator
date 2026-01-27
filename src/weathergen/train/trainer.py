@@ -10,8 +10,8 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
-import time
 import re
+import time
 
 import numpy as np
 import torch
@@ -406,7 +406,7 @@ class Trainer(TrainerBase):
         cf = self.cf
         self.model.train()
 
-        #TODO: ablate this vs. just using no_grad
+        # TODO: ablate this vs. just using no_grad
         for name, module in self.model.named_modules():
             name = module.name if hasattr(module, "name") else name
             # avoid the whole model element which has name ''
