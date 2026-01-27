@@ -70,7 +70,6 @@ def init_model_and_shard(
         if re.fullmatch(cf.freeze_modules, name) is not None:
             logger.info(f"Froze weights {name}")
             freeze_weights(module)
-            module.eval()
         else:
             logger.info(f"Did not freeze weights {name}")
 
