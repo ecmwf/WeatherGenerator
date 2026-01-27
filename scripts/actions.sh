@@ -108,6 +108,13 @@ case "$1" in
       uv run --offline pytest ./integration_tests/jepa1_test.py --verbose -s
     )
     ;;
+    integration-test-dinov2)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv sync --offline --all-packages --extra gpu
+      uv run --offline pytest ./integration_tests/dinov21_test.py --verbose -s
+    )
+    ;;
     integration-test)
     (
       cd "$SCRIPT_DIR" || exit 1
