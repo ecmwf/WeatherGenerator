@@ -23,6 +23,7 @@
 # ----------------------------------------------------------------------------
 
 
+import logging
 import math
 
 import torch
@@ -30,6 +31,8 @@ import torch
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
+
+logger = logging.getLogger(__name__)
 
 
 class DiffusionForecastEngine(torch.nn.Module):
@@ -54,6 +57,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.rho = self.cf.rho
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
+        self.cur_token = None  # for debugging only
 
     def forward(
         self, tokens: torch.Tensor, fstep: int, meta_info: dict[str, SampleMetaData]
@@ -71,6 +75,24 @@ class DiffusionForecastEngine(torch.nn.Module):
         # eta = data.get_input_metadata(-1)
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
+
+        # TODO: remove after single sample experiments
+        if self.cur_token is not None:
+            logger.info("checking single sampling")
+            assert self.cur_token[0].shape == tokens[0].shape, (
+                "first token shape was different between iterations "
+                "– violates single sample overfitting with difference"
+            )
+            assert torch.equal(self.cur_token[0], tokens[0]), (
+                f"first token was different between iterations "
+                f"– violates single sample overfitting {self.cur_token[0] - tokens[0]}"
+            )
+            assert torch.equal(self.cur_token, tokens), (
+                f"tokens were different between iterations "
+                f"– violates single sample overfitting {self.cur_token - tokens}"
+            )
+        self.cur_token = tokens
+
         y = tokens
         # TODO: add correct eta from meta_info
         eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)

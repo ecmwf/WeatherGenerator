@@ -68,15 +68,15 @@ with_step_conditioning: True # False
 # Diffusion related parameters
 frequency_embedding_dim: 256
 embedding_dim: 512
-sigma_min: 0.002
-sigma_max: 50000
+sigma_min: 0.001
+sigma_max: 10
 sigma_data: 0.5
 rho: 7
 p_mean: -1.2
 p_std: 1.2
 # Encoder weights (set to null to not load a pretrained encoder)
 # chkpt_encoder_weights: "./models/dhb9q2yo/dhb9q2yo_chkpt00126.chkpt"
-chkpt_encoder_weights: null #ß"dhb9q2yo"
+chkpt_encoder_weights: "dhb9q2yo"
 chkpt_encoder_mini_epoch: 126
 
 healpix_level: 5
@@ -97,7 +97,7 @@ latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
 
-freeze_modules: ".*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*|"
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 
 norm_type: "LayerNorm"
 
@@ -217,8 +217,8 @@ validation_config:
   samples_per_mini_epoch: 256
   shuffle: False
 
-  start_date: 2023-10-01T00:00
-  end_date: 2023-12-31T00:00
+  start_date: 2012-06-01T00:00
+  end_date: 2012-06-01T18:00
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
