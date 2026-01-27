@@ -230,10 +230,6 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
             path = Path(model_path) / run_id
 
         fname = path / _get_model_config_file_read_name(run_id, mini_epoch)
-        if not fname.exists():
-            # Fallback for old naming convention
-            # TODO remove compatibility
-            fname = path / _get_model_config_file_read_name(run_id, mini_epoch, use_old_name=True)
         assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
             fname,
@@ -261,14 +257,12 @@ def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
     return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None, use_old_name=False):
+def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
     """Generate the filename for reading a model config file."""
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
         mini_epoch_str = "_latest"
-    elif use_old_name:
-        mini_epoch_str = f"_epoch{mini_epoch:05d}"  # TODO remove compatibility
     else:
         mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
