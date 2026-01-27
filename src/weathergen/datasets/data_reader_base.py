@@ -626,6 +626,18 @@ class DataReaderTimestep(DataReaderBase):
             self.time_window_handler,
         )
 
+    def _clip_lat(lats: NDArray) -> NDArray[np.float32]:
+        """
+        Clip latitudes to the range [-90, 90] and ensure periodicity.
+        """
+        return (2 * np.clip(lats, -90.0, 90.0) - lats).astype(np.float32)
+
+    def _clip_lon(lons: NDArray) -> NDArray[np.float32]:
+        """
+        Clip longitudes to the range [-180, 180] and ensure periodicity.
+        """
+        return ((lons + 180.0) % 360.0 - 180.0).astype(np.float32)
+
 
 # to avoid rounding issues
 # The basic time precision is 1 millisecond.
