@@ -199,8 +199,8 @@ if __name__ == "__main__":
 
     if stage == "train":
         # Entry point for slurm script.
-        # Check whether --from_run_id passed as argument.
-        if any("--from_run_id" in arg for arg in sys.argv):
+        # Check whether --from-run-id passed as argument.
+        if any("--from-run-id" in arg for arg in sys.argv):
             train_continue()
         else:
             train()
