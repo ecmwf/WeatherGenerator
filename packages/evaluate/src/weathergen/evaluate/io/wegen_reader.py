@@ -21,7 +21,7 @@ from tqdm import tqdm
 
 # Local application / package
 from weathergen.common.config import (
-    get_shared_wg_path,
+    get_path_run,
     load_merge_configs,
     load_run_config,
 )
@@ -39,13 +39,13 @@ class WeatherGenReader(Reader):
         super().__init__(eval_cfg, run_id, private_paths)
 
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
-        self.mini_epoch = eval_cfg.get("mini_epoch", eval_cfg.get("epoch"))
-        self.rank = eval_cfg.rank
+        self.mini_epoch = eval_cfg.get("mini_epoch", 0)
+        self.rank = eval_cfg.get("rank", 0)
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
 
         if not self.results_base_dir:
-            self.results_base_dir = Path(get_shared_wg_path("results"))
+            self.results_base_dir = get_path_run(self.inference_cfg)
             _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
@@ -512,15 +512,32 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     ######## reader utils ########
 
-    def add_lead_time_coord(self, da: xr.DataArray) -> xr.DataArray:
+    def add_lead_time_coord(self, da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
         """
         Add lead_time coordinate computed as:
         valid_time - source_interval_end
 
         lead_time has dims (sample, ipoint) and dtype timedelta64[ns].
+
+        Parameters
+        ----------
+        da :
+            Input DataArray
+        sample_dim :
+            The name of the sample dimension (default is "sample") which should be kept.
+            Collapse over the others.
+        Returns
+        -------
+            Returns a Dataset with an added lead_time coordinate.
         """
 
-        lead_time = np.unique(da["valid_time"]) - da["source_interval_start"]
+        vt = da["valid_time"]
+        sis = da["source_interval_start"]
+
+        vt_reduced = vt.min(dim=[d for d in vt.dims if d != sample_dim])
+
+        lead_time = vt_reduced - sis
+
         return da.assign_coords(lead_time=lead_time)
 
     def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
@@ -662,17 +679,22 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
     npoints = sort_idx.size
     aligned = []
-    for a in ref:
+    samples = []
+    for i, a in enumerate(ref):
         a_sorted = a.isel(ipoint=sort_idx)
-
+        samples.append(a_sorted.sample.values)
         a_sorted = a_sorted.assign_coords(
             ipoint=np.arange(npoints),
             lat=("ipoint", ref_lat.values[sort_idx]),
             lon=("ipoint", ref_lon.values[sort_idx]),
         )
-        aligned.append(a_sorted)
 
-    return xr.concat(aligned, dim="sample")
+        if "sample" not in a_sorted.dims:
+            a_sorted = a_sorted.expand_dims(sample=[i])
+
+        aligned.append(a_sorted)
+    
+    return xr.concat(aligned, dim="sample").assign_coords({"sample": samples})
 
 
 class WeatherGenMergeReader(Reader):
