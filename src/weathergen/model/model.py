@@ -551,9 +551,9 @@ class Model(torch.nn.Module):
 
     def tokens_to_latent_state(self, z, tokens) -> LatentState:
         return LatentState(
-            register_tokens=z[:, self.register_token_idxs] if z is not None else z,
-            class_token=z[:, self.class_token_idxs] if z is not None else z,
-            patch_tokens=z[:, (self.aux_token_idxs[-1] + 1) :] if z is not None else z,
+            register_tokens=z[:, self.register_token_idxs] if z is not None else None,
+            class_token=z[:, self.class_token_idxs] if z is not None else None,
+            patch_tokens=z[:, (self.aux_token_idxs[-1] + 1) :] if z is not None else None,
             z_pre_norm=tokens,
         )
 
@@ -578,19 +578,19 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        # roll-out in latent space, iterate over all steps but generate output only as requested
-        output_idxs = batch.get_output_idxs()
-        for step in range(batch.get_output_len()):
+        # roll-out in latent space, iterate and generate output over requested output steps
+        # Note: currently it's not possible to generate output only at a subset of steps
+        breakpoint()
+        for step in batch.get_output_idxs():
             # apply forecasting engine
             if self.forecast_engine:
                 tokens = self.forecast_engine(tokens, step)
 
-            if step in output_idxs:
-                # decoder predictions
-                output = self.predict_decoders(model_params, step, tokens, batch, output)
+            # decoder predictions
+            output = self.predict_decoders(model_params, step, tokens, batch, output)
 
-                # latent predictions (raw and with SSL heads)
-                output = self.predict_latent(model_params, step, tokens, batch, output)
+            # latent predictions (raw and with SSL heads)
+            output = self.predict_latent(model_params, step, tokens, batch, output)
 
         return output
 
