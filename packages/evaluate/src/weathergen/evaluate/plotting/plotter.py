@@ -1527,7 +1527,6 @@ class BarPlots:
             squeeze=False,
         )
         ax = ax.flatten()
-        single_run = False
         if self.baseline and self.baseline in runs:
             baseline_idx = runs.index(self.baseline)
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
@@ -1539,7 +1538,6 @@ class BarPlots:
             ones_array = xr.full_like(data[0], 1.0)
             runs = [""] + runs
             data = [ones_array] + data
-            single_run = True
 
 
         for run_index in range(1, len(runs)):
