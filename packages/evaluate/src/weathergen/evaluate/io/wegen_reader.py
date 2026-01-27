@@ -61,12 +61,12 @@ class WeatherGenReader(Reader):
         self.step_hrs = self.inference_cfg.get("step_hrs", 1)
 
         self.results_dir, self.runplot_dir = (
-            Path(self.results_base_dir) / self.run_id,
-            Path(self.runplot_base_dir) / self.run_id,
+            Path(self.results_base_dir),
+            Path(self.runplot_base_dir),
         )
         # for backward compatibility allow metric_dir to be specified in the run config
         self.metrics_dir = Path(
-            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / self.run_id / "evaluation")
+            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / "evaluation")
         )
 
     def get_inference_config(self):
@@ -693,7 +693,7 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
             a_sorted = a_sorted.expand_dims(sample=[i])
 
         aligned.append(a_sorted)
-    
+
     return xr.concat(aligned, dim="sample").assign_coords({"sample": samples})
 
 

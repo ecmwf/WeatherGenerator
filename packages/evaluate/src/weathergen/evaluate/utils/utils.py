@@ -199,7 +199,7 @@ def calc_scores_per_stream(
             }
             if "ens" in combined_metrics.dims:
                 criteria["ens"] = combined_metrics.ens.values
-        
+
             metric_stream.loc[criteria] = combined_metrics
 
             lead_time_map[fstep] = (
