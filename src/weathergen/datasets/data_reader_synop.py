@@ -116,8 +116,8 @@ class DataReaderSynop(DataReaderTimestep):
         # height for german stations and altitude for MetNo stations
         height_name = stream_info.get("height_name", "height")
 
-        self.latitudes = _clip_lat(np.array(_get_1d(lat_name), dtype=np32))
-        self.longitudes = _clip_lon(np.array(_get_1d(lon_name), dtype=np32))
+        self.latitudes = self._clip_lat(np.array(_get_1d(lat_name), dtype=np32))
+        self.longitudes = self._clip_lon(np.array(_get_1d(lon_name), dtype=np32))
         self.heights = np.array(_get_1d(height_name), dtype=np32)
 
         # Resolve geoinfos
