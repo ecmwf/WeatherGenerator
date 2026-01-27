@@ -16,42 +16,42 @@ evaluation:
 run_ids :
 
   # lr=5e-4
-  xs5l8zmj:
-    label: "cosine scheduler lr_max=5e-4 v1"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #xs5l8zmj:
+  #  label: "cosine scheduler lr_max=5e-4 v1"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  x9zvml1k:
-    label: "cosine scheduler lr_max=5e-4 v2"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #x9zvml1k:
+  #  label: "cosine scheduler lr_max=5e-4 v2"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  an8rap5h:
-    label: "cosine scheduler lr_max=5e-4 v3"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #an8rap5h:
+  #  label: "cosine scheduler lr_max=5e-4 v3"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
   # lr=1e-4  
   u2qk39pi:
-    label: "cosine scheduler lr_max=1e-4 v1"
+    label: "cosine scheduler lr_max=1e-4 v1  epoch=32"
     epoch: 0
     rank: 0
     streams:
@@ -62,7 +62,7 @@ run_ids :
           forecast_step: "all"
 
   zswipf53:
-    label: "cosine scheduler lr_max=1e-4 v2"
+    label: "cosine scheduler lr_max=1e-4 v2 epoch=32"
     epoch: 0
     rank: 0
     streams:
@@ -73,7 +73,7 @@ run_ids :
           forecast_step: "all"
 
   dsdvzg59:
-    label: "cosine scheduler lr_max=1e-4 v3"
+    label: "cosine scheduler lr_max=1e-4 v3 epoch=32"
     epoch: 0
     rank: 0
     streams:
@@ -83,7 +83,39 @@ run_ids :
           sample: "all"
           forecast_step: "all"
 
-  # lr=5e-5
+  ikvap8bm:
+    label: "cosine scheduler lr_max=1e-4 v1 epoch=48"
+    epoch: 0
+    rank: 0
+    streams:
+      ERA5:
+        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+        evaluation:
+          sample: "all"
+          forecast_step: "all"
+
+  o5b9wnu3:
+    label: "cosine scheduler lr_max=1e-4 v2 epoch=48"
+    epoch: 0
+    rank: 0
+    streams:
+      ERA5:
+        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+        evaluation:
+          sample: "all"
+          forecast_step: "all"
+
+  y94xmnhj:
+    label: "cosine scheduler lr_max=1e-4 v3 epoch=48" 
+    epoch: 0
+    rank: 0
+    streams:
+      ERA5:
+        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+        evaluation:
+          sample: "all"
+          forecast_step: "all"
+  ## lr=5e-5
   #r812ji96:
   #  label: "cosine scheduler lr_max=5e-5 v1"
   #  epoch: 0
@@ -117,71 +149,71 @@ run_ids :
   #        sample: "all"
   #        forecast_step: "all"
 
-          ## lr=1e-5
-  v0yha29i:
-    label: "cosine scheduler lr_max=1e-5 v1"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #        ## lr=1e-5
+  #v0yha29i:
+  #  label: "cosine scheduler lr_max=1e-5 v1"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  cbmk73y0:
-    label: "cosine scheduler lr_max=1e-5 v2"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #cbmk73y0:
+  #  label: "cosine scheduler lr_max=1e-5 v2"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  ngdrjcbt:
-    label: "cosine scheduler lr_max=1e-5 v3"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #ngdrjcbt:
+  #  label: "cosine scheduler lr_max=1e-5 v3"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  # lr=5e-6
-  voulcvsi:
-    label: "cosine scheduler lr_max=5e-6 v1"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  ## lr=5e-6
+  #voulcvsi:
+  #  label: "cosine scheduler lr_max=5e-6 v1"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  urlp39xq:
-    label: "cosine scheduler lr_max=5e-6 v2"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #urlp39xq:
+  #  label: "cosine scheduler lr_max=5e-6 v2"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
 
-  ch1n05gd:
-    label: "cosine scheduler lr_max=5e-6 v3"
-    epoch: 0
-    rank: 0
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
-        evaluation:
-          sample: "all"
-          forecast_step: "all"
+  #ch1n05gd:
+  #  label: "cosine scheduler lr_max=5e-6 v3"
+  #  epoch: 0
+  #  rank: 0
+  #  streams:
+  #    ERA5:
+  #      channels: ["2t", "10u", "10v", "q_850", "t_850", "u_850", "v_850", "z_500"]
+  #      evaluation:
+  #        sample: "all"
+  #        forecast_step: "all"
  

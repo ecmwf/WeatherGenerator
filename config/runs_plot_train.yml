@@ -52,31 +52,31 @@ train :
     #   description: "lr 5e-4, w-dec 0.4, v3"
     #   eval: vgbndhco
     
-    h8l1yem5 : 
-      slurm_id: 0
-      description: "lr 5e-4, v2"
-      eval: vgbndhco
-    jeubm9ld : 
-      slurm_id: 0
-      description: "lr 5e-4, v3"
-      eval: vgbndhco
-    bezt6v8g : 
-      slurm_id: 0
-      description: "lr 5e-4, v1"
-      eval: vgbndhco
-    
-    ya0gty48 : 
-      slurm_id: 0
-      description: "lr 1e-4, v1"
-      eval: vgbndhco
-    djiy1v3e : 
-      slurm_id: 0
-      description: "lr 1e-4, v2"
-      eval: vgbndhco
-    g96y1dq5 : 
-      slurm_id: 0
-      description: "lr 1e-4, v3"
-      eval: vgbndhco
+    #h8l1yem5 : 
+    #  slurm_id: 0
+    #  description: "lr 5e-4, v2"
+    #  eval: vgbndhco
+    #jeubm9ld : 
+    #  slurm_id: 0
+    #  description: "lr 5e-4, v3"
+    #  eval: vgbndhco
+    #bezt6v8g : 
+    #  slurm_id: 0
+    #  description: "lr 5e-4, v1"
+    #  eval: vgbndhco
+    #
+    #ya0gty48 : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, v1"
+    #  eval: vgbndhco
+    #djiy1v3e : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, v2"
+    #  eval: vgbndhco
+    #g96y1dq5 : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, v3"
+    #  eval: vgbndhco
 
 
     # mia69x1h : 
@@ -131,18 +131,18 @@ train :
     #   description: "lr 1e-4, w-dec 0.4, v3"
     #   eval: vgbndhco
     
-    s9sldzyb : 
-      slurm_id: 0
-      description: "lr 1e-4, w-dec 0.6, v1"
-      eval: vgbndhco
-    e29izt1j : 
-      slurm_id: 0
-      description: "lr 1e-4, w-dec 0.6, v2"
-      eval: vgbndhco
-    bmoc645w : 
-      slurm_id: 0
-      description: "lr 1e-4, w-dec 0.6, v3"
-      eval: vgbndhco
+    #s9sldzyb : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, w-dec 0.6, v1"
+    #  eval: vgbndhco
+    #e29izt1j : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, w-dec 0.6, v2"
+    #  eval: vgbndhco
+    #bmoc645w : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, w-dec 0.6, v3"
+    #  eval: vgbndhco
 
 
 
@@ -198,15 +198,43 @@ train :
     #   description: "lr 5e-5, w-dec 0.4, v3"
     #   eval: vgbndhco
     
-    z8vx03bg : 
+    #lvy8406i : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, cool_down_steps=512, v1"
+    #  eval: vgbndhco
+    #ipn3jryk : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, cool_down_steps=512, v2"
+    #  eval: vgbndhco
+    #wrucxsk6 : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, cool_down_steps=2048, v1"
+    #  eval: vgbndhco
+    #dfvo0ir1 : 
+    #  slurm_id: 0
+    #  description: "lr 1e-4, cool_down_steps=2048, v2"
+    #  eval: vgbndhco
+    czfrhdae : 
       slurm_id: 0
-      description: "lr 5e-5, w-dec 0.6, v1"
+      description: "lr 1e-4, cosine_lr=32 epochs, v1"
       eval: vgbndhco
-    e3k2v450 : 
+    zha9i6x3 : 
       slurm_id: 0
-      description: "lr 5e-5, w-dec 0.6, v2"
+      description: "lr 1e-4, cosine_lr=32 epochs, v1"
       eval: vgbndhco
-    qmil5gwk : 
+    ypr1b3a4 : 
       slurm_id: 0
-      description: "lr 5e-5, w-dec 0.6, v3"
+      description: "lr 1e-4, cosine_lr=32 epochs, v1"
+      eval: vgbndhco
+    otn1u3oe : 
+      slurm_id: 0
+      description: "lr 1e-4, cosine_lr=48 epochs, v1"
+      eval: vgbndhco
+    r2z01faj : 
+      slurm_id: 0
+      description: "lr 1e-4, cosine_lr=48 epochs, v2"
+      eval: vgbndhco
+    xxjfcwq1 : 
+      slurm_id: 0
+      description: "lr 1e-4, cosine_lr=48 epochs,v2"
       eval: vgbndhco

@@ -16,10 +16,14 @@
 
 UENV_IMAGE="prgenv-gnu/25.6:v2"
 
-RUN_ID="$1"           
-export RUN_ID 
+FROM_RUN_ID="$1"
+#RUN_ID="$2"
 
-echo "Top-level from_run_id: $RUN_ID"
+export FROM_RUN_ID
+#export RUN_ID 
+
+echo "Top-level from_run_id: $FROM_RUN_ID"
+echo "Top-level run_id: $RUN_ID"
 
 echo "=== Checking for uenv image: $UENV_IMAGE ==="
 
@@ -57,7 +61,8 @@ fi
 echo "✓ Image '$UENV_IMAGE' found"
 echo ""
 
-RUN_ID="$1"
+FROM_RUN_ID="$1"
+#RUN_ID="$2"
 
 uenv run "$UENV_IMAGE" --view=modules -- bash << 'EOF'
 
@@ -88,7 +93,8 @@ export NCCL_DEBUG=INFO
 echo "Starting job."
 echo "Number of Nodes: $SLURM_JOB_NUM_NODES"
 echo "Number of Tasks: $SLURM_NTASKS"
-echo "from_run_id: $RUN_ID"
+echo "from_run_id: $FROM_RUN_ID"
+#echo "run_id: $RUN_ID"
 echo "WEATHERGEN_HOME: $WEATHERGEN_HOME"
 echo "WEATHERGEN_CONFIG_EXTRA: $WEATHERGEN_CONFIG_EXTRA"
 echo "SLURM_JOB_ID: $SLURM_JOB_ID"
@@ -101,8 +107,8 @@ date
 #cd $WEATHERGEN_HOME
 source .venv/bin/activate
 
-srun uv run --offline inference --from_run_id "$RUN_ID" --samples=16 --options forecast_steps=80
-
+srun uv run --offline inference --from_run_id "$FROM_RUN_ID" --samples=16 --options forecast_steps=80
+#srun uv run inference --from_run_id "$FROM_RUN_ID" --run_id "$RUN_ID" --samples 16 --start_date=2023-10-01 --end_date=2023-12-01 --options forecast_steps=80
 
 echo "Finished job."
 sstat -j $SLURM_JOB_ID.batch   --format=JobID,MaxVMSize

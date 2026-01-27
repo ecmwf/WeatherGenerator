@@ -75,22 +75,27 @@
 # done
 
 
-# for run_id in  fmpesclt vvwizau9 vl5n39cj ; do
-#   echo "$run_id"
-#   ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --from-run-id $run_id --run-id $run_id --link-venv
-# done
-#
+ #for run_id in  fmpesclt vvwizau9 vl5n39cj ; do
+ for run_id in  r2z01faj xxjfcwq1 ; do
+   echo "$run_id"
+   ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --time 24:00:00 --from-run-id $run_id --run-id $run_id --link-venv
+ done
 
-for run_id in fl9xrpao ;  do
-  echo "$run_id"
-  ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --from-run-id $run_id --run-id $run_id --link-venv
-done
+
+#for run_id in bwtkj0he pji5hbze pu5ct7ox;  do
+#for run_id in lvy8406i ipn3jryk it0uzsl3 qm45twzj d3gc8fdn  ;  do
+#for run_id in it0uzsl3 qm45twzj d3gc8fdn  ;  do
+#for run_id in ipn3jryk d3gc8fdn  ;  do
+#  echo "$run_id"
+#  ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --from-run-id $run_id --time 24:00:00  --link-venv --options num_epochs=36 lr_steps_cooldown=2048
+#done
 
 
 # Cosine learning_rate test
 #for lr_max in "5e-4" "1e-4" "5e-5" "1e-5" "5e-6" ; do
+#for lr_max in "1e-4" ; do
 #  echo "$lr_max"
-#  for from_run_id in dnl5r61x ; do
-#	  ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --time 24:00:00 --from-run-id $from_run_id --link-venv --options istep=0 num_epochs=32 lr_max=$lr_max lr_policy_decay="cosine" forecast_steps=8 freeze_modules=".*global.*|.*local.*|.*adapter.*|.*ERA5.*"
+#  for from_run_id in dnl5r61x vvwizau9 wyhcr51m; do
+#	  ../WeatherGenerator-private/hpc/launch-slurm.py --nodes 2 --time 24:00:00 --from-run-id $from_run_id --link-venv --options istep=0 num_epochs=48 lr_max=$lr_max lr_policy_decay="cosine" forecast_steps=8 freeze_modules=".*global.*|.*local.*|.*adapter.*|.*ERA5.*"
 #done
 #done
