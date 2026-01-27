@@ -10,7 +10,6 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
-import re
 import time
 
 import numpy as np
