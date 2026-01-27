@@ -52,7 +52,7 @@ def test_train(setup, test_run_id):
     train_with_args(
         [ f"--config={WEATHERGEN_HOME}/integration_tests/jepa1.yaml" ]
         + [
-            "--run_id",
+            "--run-id",
             test_run_id,
         ],
         f"{WEATHERGEN_HOME}/config/streams/streams_test/",

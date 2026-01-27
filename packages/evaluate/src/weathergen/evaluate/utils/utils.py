@@ -193,13 +193,13 @@ def calc_scores_per_stream(
 
             criteria = {
                 "forecast_step": int(fstep),
-                "sample": combined_metrics.sample,
-                "channel": combined_metrics.channel,
-                "metric": combined_metrics.metric,
+                "sample": combined_metrics.sample.values,
+                "channel": combined_metrics.channel.values,
+                "metric": combined_metrics.metric.values,
             }
             if "ens" in combined_metrics.dims:
-                criteria["ens"] = combined_metrics.ens
-
+                criteria["ens"] = combined_metrics.ens.values
+        
             metric_stream.loc[criteria] = combined_metrics
 
             lead_time_map[fstep] = (

@@ -61,7 +61,7 @@ def test_train_multi_stream(setup, test_run_id):
     train_with_args(
         f"--config={WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml".split()
         + [
-            "--run_id",
+            "--run-id",
             test_run_id,
         ],
         f"{WEATHERGEN_HOME}/integration_tests/streams_multi/",
@@ -79,13 +79,13 @@ def infer_multi_stream(run_id):
     """Run inference for multi-stream model."""
     logger.info("run multi-stream inference")
     inference_from_args(
-        ["-start", "2021-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
+        ["-start", "2021-10-10", "-end", "2022-10-11", "--samples", "10", "--mini-epoch", "0"]
         + [
-            "--from_run_id",
+            "--from-run-id",
             run_id,
-            "--run_id",
+            "--run-id",
             run_id,
-            "--streams_output",
+            "--streams-output",
             "ERA5",
             "SurfaceCombined",
             "NPPATMS",

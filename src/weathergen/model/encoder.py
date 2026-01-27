@@ -58,7 +58,7 @@ class EncoderModule(torch.nn.Module):
         # determine stream names once so downstream components use consistent keys
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
         # separate embedding networks for differnt observation types
-        self.embed_engine = EmbeddingEngine(cf, self.sources_size, self.stream_names)
+        self.embed_engine = EmbeddingEngine(cf, self.sources_size)
 
         assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
