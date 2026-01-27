@@ -92,6 +92,8 @@ def get_evaluation_config(run_id, verbose=False):
                 "summary_dir": f"./results/{run_id}/plots/summary/",
                 "print_summary": False,
                 "verbose": verbose,
+                "ratio_plots": True, 
+                "bar_plots": True, 
             },
             "run_ids": {
                 run_id: {
