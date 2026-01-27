@@ -290,7 +290,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             else self.list_num_forecast_steps.max()
         )
         if fsm > 0:
-            logger.info(f"num_forecast_steps at mini_epoch={self.mini_epoch} : {fsm}")
+            logger.info(f"forecast_steps : {fsm}")
 
         # data
         forecast_offset = self.output_offset
