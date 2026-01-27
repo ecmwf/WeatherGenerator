@@ -150,10 +150,42 @@ class DataReaderSynop(DataReaderTimestep):
             "stream_id": 0,
         }
 
-        # TODO: this should be stored/cached
-        self.mean, self.stdev = self._compute_mean_stdev()
+        # Load mean and stdev from data file if specified in stream config, otherwise compute
+        self.mean, self.stdev = self._load_or_compute_mean_stdev()
         self.mean_geoinfo = self.mean[self.geoinfo_idx]
         self.stdev_geoinfo = self.stdev[self.geoinfo_idx]
+
+    def _load_or_compute_mean_stdev(self) -> tuple(np.array, np.array):
+        """
+        Load mean and stdev from data file if specified in stream config, otherwise compute.
+
+        Returns: tuple(np.array, np.array)
+            Mean and standard deviation arrays for all channels
+        """
+        mean_key = self.stream_info.get("mean_key")
+        stdev_key = self.stream_info.get("stdev_key")
+
+        if mean_key and mean_key in self.ds.keys() and stdev_key and stdev_key in self.ds.keys():
+            _logger.info(f"Loading mean from '{mean_key}' and stdev from '{stdev_key}'")
+            mean = np.array(self.ds[mean_key], dtype=np.float64)
+            stdev = np.array(self.ds[stdev_key], dtype=np.float64)
+            
+            # Validate that the loaded statistics have the correct shape
+            expected_len = len(self.channels_file)
+            if len(mean) != expected_len or len(stdev) != expected_len:
+                _logger.warning(
+                    f"Pre-computed statistics have incorrect shape "
+                    f"(mean: {len(mean)}, stdev: {len(stdev)}, expected: {expected_len}). "
+                    f"Falling back to computation."
+                )
+                return self._compute_mean_stdev()
+
+            _logger.info(f"Finished loading mean and stdev.")
+            
+            return mean, stdev
+
+        # Fall back to computing mean and stdev
+        return self._compute_mean_stdev()
 
     def _compute_mean_stdev(self) -> (np.array, np.array):
         _logger.info("Starting computation of mean and stdev.")
