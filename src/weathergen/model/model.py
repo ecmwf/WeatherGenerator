@@ -286,6 +286,7 @@ class Model(torch.nn.Module):
         )
         self.register_token_idxs = list(range(cf.num_register_tokens))
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
+        self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -574,11 +575,15 @@ class Model(torch.nn.Module):
         ]
         print("-----------------")
 
-    def tokens_to_latent_state(self, z, tokens) -> LatentState:
+    def tokens_to_latent_state(self, tokens_post_norm, tokens) -> LatentState:
+        """
+        Extract separate parts from global latent space representation and store in LatentState
+        """
+        toks_pn = tokens_post_norm
         return LatentState(
-            register_tokens=z[:, self.register_token_idxs] if z is not None else z,
-            class_token=z[:, self.class_token_idxs] if z is not None else z,
-            patch_tokens=z[:, (self.aux_token_idxs[-1] + 1) :] if z is not None else z,
+            register_tokens=toks_pn[:, self.register_token_idxs] if toks_pn is not None else None,
+            class_token=toks_pn[:, self.class_token_idxs] if tokens_post_norm is not None else None,
+            patch_tokens=toks_pn[:, self.num_aux_tokens :] if toks_pn is not None else None,
             z_pre_norm=tokens,
         )
 
@@ -603,19 +608,16 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        # roll-out in latent space, iterate over all steps but generate output only as requested
-        output_idxs = batch.get_output_idxs()
-        for step in range(batch.get_output_len()):
-            # apply forecasting engine
+        # roll-out in latent space, iterate and generate output over requested output steps
+        for step in batch.get_output_idxs():
+            # apply forecasting engine (if present)
             if self.forecast_engine:
                 tokens = self.forecast_engine(tokens, step)
 
-            if step in output_idxs:
-                # decoder predictions
-                output = self.predict_decoders(model_params, step, tokens, batch, output)
-
-                # latent predictions (raw and with SSL heads)
-                output = self.predict_latent(model_params, step, tokens, batch, output)
+            # decoder predictions
+            output = self.predict_decoders(model_params, step, tokens, batch, output)
+            # latent predictions (raw and with SSL heads)
+            output = self.predict_latent(model_params, step, tokens, batch, output)
 
         return output
 
@@ -632,8 +634,8 @@ class Model(torch.nn.Module):
         """
 
         # safe latent prediction
-        tokens_pre_norm = self.latent_pre_norm(tokens) if step == 0 else None
-        latent_state = self.tokens_to_latent_state(tokens_pre_norm, tokens)
+        tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
+        latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
         output.add_latent_prediction(step, "latent_state", latent_state)
 
         # latent predictions for SSL training
@@ -671,7 +673,7 @@ class Model(torch.nn.Module):
             return output
 
         # remove register  and class tokens
-        tokens = tokens[:, (self.aux_token_idxs[-1] + 1) :]
+        tokens = tokens[:, self.num_aux_tokens :]
 
         # get 1-ring neighborhood for prediction
         batch_size = len(batch)
