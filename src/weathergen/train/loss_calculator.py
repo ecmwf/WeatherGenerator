@@ -67,7 +67,7 @@ class LossCalculator:
                     [
                         (
                             params.get("weight", 1.0),
-                            getattr(LossModules, params.type)(
+                            LossModules.__dict__[params.type](
                                 cf, mode_cfg, stage, self.device, **params.loss_fcts
                             ),
                         )

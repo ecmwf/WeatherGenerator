@@ -316,12 +316,10 @@ class TokenizerMasking(Tokenizer):
         if max_num_targets is None or max_num_targets <= 0 or num_points <= max_num_targets:
             return None
 
-        rng = getattr(self, "rng", None)
-        if rng is None:
-            rng = np.random.default_rng()
-            self.rng = rng
+        if self.rng is None:
+            self.rng = np.random.default_rng()
 
-        selected = np.sort(rng.choice(num_points, max_num_targets, replace=False))
+        selected = np.sort(self.rng.choice(num_points, max_num_targets, replace=False))
 
         return torch.from_numpy(selected).to(torch.long)
 

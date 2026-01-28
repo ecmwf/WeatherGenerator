@@ -29,11 +29,17 @@ class ABCMeta(NativeABCMeta):
     def __call__(cls, *args, **kwargs):
         instance = NativeABCMeta.__call__(cls, *args, **kwargs)
         # pylint: disable-next=attribute-defined-outside-init
-        abstract_attributes = {
-            name
-            for name in dir(instance)
-            if hasattr(getattr(instance, name), "__is_abstract_attribute__")
-        }
+        abstract_attributes = set()
+
+        for name in dir(instance):
+            # Search the attribute name in the class hierarchy
+            for base in type(instance).__mro__:
+                if name in base.__dict__:
+                    attr = base.__dict__[name]
+                    if hasattr(attr, "__is_abstract_attribute__"):
+                        abstract_attributes.add(name)
+                    break
+
         if abstract_attributes:
             raise NotImplementedError(
                 "Can't instantiate abstract class {} with abstract attributes: {}".format(

@@ -88,10 +88,11 @@ def test_inference_defaults(inference_parser):
     default_values[:2] = [cli._format_date(date) for date in default_values[:2]]
 
     args = inference_parser.parse_args(BASIC_ARGLIST)
+    args_dict = vars(args)
 
     assert all(
         [
-            getattr(args, arg) == default_value
+            args_dict[arg] == default_value
             for arg, default_value in zip(default_args, default_values, strict=True)
         ]
     )

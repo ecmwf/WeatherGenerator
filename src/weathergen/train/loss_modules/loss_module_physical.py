@@ -59,7 +59,7 @@ class LossPhysical(LossModuleBase):
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [
-                getattr(loss_fns, name),
+                loss_fns.__dict__[name],
                 params.get("weight", 1.0),
                 name,
             ]
@@ -95,7 +95,8 @@ class LossPhysical(LossModuleBase):
         timestep_weight_config = self.mode_cfg.get("forecast", {}).get("timestep_weight", {})
         if len(timestep_weight_config) == 0:
             return [1.0 for _ in range(len_forecast_steps)]
-        weights_timestep_fct = getattr(loss_fns, list(timestep_weight_config.keys())[0])
+        weights_timestep_fct_name = list(timestep_weight_config.keys())[0]
+        weights_timestep_fct = loss_fns.__dict__[weights_timestep_fct_name]
         decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
         return weights_timestep_fct(len_forecast_steps, decay_factor)
 
@@ -103,7 +104,7 @@ class LossPhysical(LossModuleBase):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
             return None
-        weights_locations_fct = getattr(loss_fns, location_weight_type)
+        weights_locations_fct = loss_fns.__dict__[location_weight_type]
         weights_locations = weights_locations_fct(target_coords)
         weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
