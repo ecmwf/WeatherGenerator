@@ -69,6 +69,7 @@ class Trainer(TrainerBase):
         self.perf_mem = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
+        self.target_and_aux_calculators_val = None
         self.validate_with_ema_cfg = None
         self.validate_with_ema: bool = False
         self.batch_size_per_gpu = -1
@@ -105,6 +106,9 @@ class Trainer(TrainerBase):
         # get training config and remove disabled options (e.g. because of overrides)
         self.training_cfg = cf.get("training_config")
         self.training_cfg = filter_config_by_enabled(self.training_cfg, keys_to_filter)
+        assert len(self.training_cfg.model_input.keys()) != 0, (
+            "You probably have no loss term enabled"
+        )
 
         # validation and test configs are training configs, updated by specified keys
         self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
@@ -118,7 +122,12 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = get_batch_size_from_config(self.validation_cfg)
         self.batch_size_test_per_gpu = get_batch_size_from_config(self.test_cfg)
 
-        # config.validate_forecast_policy_and_steps(cf=cf)
+        for mode, mode_cfg in zip(
+            ["training_config", "validation_config", "test_config"],
+            [self.training_cfg, self.validation_cfg, self.test_cfg],
+            strict=True,
+        ):
+            config.validate_forecast_policy_and_steps(mode_cfg.get("forecast", {}), mode)
 
         self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 
@@ -147,6 +156,8 @@ class Trainer(TrainerBase):
         batch_size = get_batch_size_from_config(mode_cfg)
 
         # get target_aux calculators for different loss terms
+        # del self.cf.training_config.losses["student-teacher"]["loss_fcts"]["JEPA"]
+        # del mode_cfg.losses["student-teacher"]["loss_fcts"]["JEPA"]
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
@@ -192,10 +203,12 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.test_cfg.training_mode,
             devices[0],
+            cf.with_ddp,
+            cf.with_fsdp,
         )
 
         # get target_aux calculators for different loss terms
-        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
+        self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.test_cfg)
 
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
@@ -238,6 +251,8 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.training_cfg.training_mode,
             devices[0],
+            cf.with_ddp,
+            cf.with_fsdp,
         )
 
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
@@ -255,7 +270,8 @@ class Trainer(TrainerBase):
                 mini_epoch_contd,
                 cf.training_config.training_mode,
                 devices[0],
-                {},
+                cf.with_ddp,
+                cf.with_fsdp,
             )
             self.ema_model = EMAModel(
                 self.model,
@@ -267,13 +283,13 @@ class Trainer(TrainerBase):
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
-        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
+        self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
             if cf.with_fsdp:
                 logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
-            self.model.print_num_parameters()
+            # self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
@@ -410,7 +426,6 @@ class Trainer(TrainerBase):
                 preds = self.model(
                     self.model_params,
                     batch.get_source_samples(),
-                    self.training_cfg.window_offset_prediction,
                 )
 
                 targets_and_auxs = {}
@@ -423,7 +438,6 @@ class Trainer(TrainerBase):
                         batch.get_target_samples(target_idxs),
                         self.model_params,
                         self.model,
-                        self.training_cfg.window_offset_prediction,
                     )
 
             loss = self.loss_calculator.compute_loss(
@@ -431,6 +445,7 @@ class Trainer(TrainerBase):
                 targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
             )
+
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
             # if cf.latent_noise_kl_weight > 0.0:
@@ -443,7 +458,7 @@ class Trainer(TrainerBase):
             ]
             [
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.validate_with_ema_cfg.items()
+                for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
 
             # backward pass
@@ -472,14 +487,16 @@ class Trainer(TrainerBase):
 
             batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
             step = batch_size_total * self.cf.general.istep
+
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
             ]
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.validate_with_ema_cfg.items()
+                for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
+
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
@@ -532,24 +549,21 @@ class Trainer(TrainerBase):
                             preds = self.model(
                                 self.model_params,
                                 batch.get_source_samples(),
-                                mode_cfg.window_offset_prediction,
                             )
                         else:
                             preds = self.ema_model.forward_eval(
                                 self.model_params,
                                 batch.get_source_samples(),
-                                mode_cfg.window_offset_prediction,
                             )
 
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.validate_with_ema_cfg.items():
-                            target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
                                 batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
-                                mode_cfg.window_offset_prediction,
                             )
 
                     _ = self.loss_calculator_val.compute_loss(
