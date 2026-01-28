@@ -1146,8 +1146,8 @@ class LinePlots:
     ) -> None:
         """
         Create quantile-quantile (Q-Q) plots for extreme value analysis.
-        
-        This method generates comprehensive Q-Q plots comparing forecast quantiles 
+
+        This method generates comprehensive Q-Q plots comparing forecast quantiles
         against ground truth quantiles, with emphasis on extreme values.
 
         Parameters
@@ -1177,13 +1177,13 @@ class LinePlots:
         # Create figure with subplots
         fig = plt.figure(figsize=(16, 6), dpi=self.dpi_val)
         gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], wspace=0.3)
-        
+
         ax_qq = fig.add_subplot(gs[0])  # Main Q-Q plot
         ax_dev = fig.add_subplot(gs[1])  # Deviation plot
 
         colors = plt.cm.tab10(np.linspace(0, 1, len(data_list)))
 
-        for i, (ds, label, color) in enumerate(zip(data_list, label_list, colors, strict=False)):
+        for _i, (ds, label, color) in enumerate(zip(data_list, label_list, colors, strict=False)):
             # Extract quantile data
             quantile_levels = ds["quantile_levels"].values
             p_quantiles = ds["p_quantiles"].values
@@ -1215,7 +1215,7 @@ class LinePlots:
         ax_qq.set_xlabel("Ground Truth Quantiles", fontsize=12)
         ax_qq.set_ylabel("Prediction Quantiles", fontsize=12)
         ax_qq.set_title("Quantile-Quantile Plot for Extreme Value Analysis", fontsize=14)
-        
+
         # Add perfect agreement line (y=x)
         min_val = min([ds["gt_quantiles"].min().values for ds in data_list])
         max_val = max([ds["gt_quantiles"].max().values for ds in data_list])
@@ -1227,16 +1227,16 @@ class LinePlots:
             label="Perfect Agreement",
             alpha=0.7,
         )
-        
+
         # Add shaded regions for extremes
         if len(data_list) > 0:
             ds_ref = data_list[0]
             quantile_levels = ds_ref["quantile_levels"].values
-            
+
             # Find extreme regions (typically below 5% and above 95%)
             lower_extreme_idx = quantile_levels < 0.05
             upper_extreme_idx = quantile_levels > 0.95
-            
+
             if np.any(lower_extreme_idx):
                 lower_q = ds_ref["gt_quantiles"].values[lower_extreme_idx]
                 ax_qq.axvspan(
@@ -1246,7 +1246,7 @@ class LinePlots:
                     color="blue",
                     label="Lower Extreme Zone",
                 )
-            
+
             if np.any(upper_extreme_idx):
                 upper_q = ds_ref["gt_quantiles"].values[upper_extreme_idx]
                 ax_qq.axvspan(
@@ -1266,20 +1266,20 @@ class LinePlots:
         ax_dev.set_title("Quantile Deviation", fontsize=14)
         ax_dev.legend(frameon=False, fontsize=10)
         ax_dev.grid(True, linestyle="--", alpha=0.3)
-        
+
         # Highlight extreme regions in deviation plot
         ax_dev.axvspan(0.0, 0.05, alpha=0.1, color="blue")
         ax_dev.axvspan(0.95, 1.0, alpha=0.1, color="red")
 
         plt.tight_layout()
-        
+
         # Save the plot
         parts = ["qq_analysis", tag]
         name = "_".join(filter(None, parts))
         save_path = self.out_plot_dir.joinpath(f"{name}.{self.image_format}")
         plt.savefig(save_path, bbox_inches="tight")
         plt.close()
-        
+
         _logger.info(f"Q-Q plot saved to {save_path}")
 
 

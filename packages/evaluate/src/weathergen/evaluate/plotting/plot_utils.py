@@ -417,9 +417,9 @@ def qq_plot_metric_region(
     plotter: object,
 ) -> None:
     """
-    Create quantile-quantile (Q-Q) plots for extreme value analysis for all streams 
+    Create quantile-quantile (Q-Q) plots for extreme value analysis for all streams
     and channels for a given metric and region.
-    
+
     Parameters
     ----------
     metric: str
@@ -445,21 +445,22 @@ def qq_plot_metric_region(
                 # skip if channel is missing
                 if ch not in np.atleast_1d(data.channel.values):
                     continue
-                
+
                 # Select channel
                 data_for_channel = data.sel(channel=ch) if "channel" in data.dims else data
-                
+
                 # Check for NaN
                 if data_for_channel.isnull().all():
                     continue
-                
+
                 # For qq_analysis, extract full Q-Q data from coordinate
                 if metric == "qq_analysis":
                     if "qq_full_data" in data_for_channel.coords:
                         import json
+
                         # Get the qq_full_data - it may be 0-d (scalar) or multi-d
                         qq_coord = data_for_channel.coords["qq_full_data"]
-                        
+
                         # Extract the first non-empty JSON string
                         if qq_coord.ndim == 0:
                             qq_data_str = qq_coord.item()
@@ -467,76 +468,94 @@ def qq_plot_metric_region(
                             # Flatten and get first non-empty value
                             qq_values = qq_coord.values.flatten()
                             qq_data_str = next((v for v in qq_values if v and v != ""), None)
-                        
+
                         if not qq_data_str:
                             _logger.warning(f"Empty qq_full_data for channel {ch}")
                             continue
-                            
+
                         qq_data = json.loads(qq_data_str)
-                        
+
                         # Convert lists back to numpy arrays for plotting
                         quantile_levels = np.array(qq_data["quantile_levels"])
                         p_quantiles = np.array(qq_data["p_quantiles"])
                         gt_quantiles = np.array(qq_data["gt_quantiles"])
                         qq_deviation = np.array(qq_data["qq_deviation"])
-                        qq_deviation_normalized = np.array(qq_data.get("qq_deviation_normalized", qq_deviation))
+                        qq_deviation_normalized = np.array(
+                            qq_data.get("qq_deviation_normalized", qq_deviation)
+                        )
                         extreme_low_mse = np.array(qq_data.get("extreme_low_mse", 0.0))
                         extreme_high_mse = np.array(qq_data.get("extreme_high_mse", 0.0))
-                        
+
                         # All quantile data is replicated across sample/ens dimensions
                         # Take the first sample's data (they're all identical)
-                        quantile_levels_1d = quantile_levels.flatten() if quantile_levels.ndim > 1 else quantile_levels
-                        
-                        # For p_quantiles and gt_quantiles, average across samples if multidimensional
-                        # Shape is typically (n_quantiles, n_samples, n_ens)
-                        # We want to average across samples (axis 1) and ens (axis 2), keeping quantiles (axis 0)
+                        quantile_levels_1d = (
+                            quantile_levels.flatten()
+                            if quantile_levels.ndim > 1
+                            else quantile_levels
+                        )
+
+                        # For p_quantiles and gt_quantiles, average across samples
+                        # Shape: (n_quantiles, n_samples, n_ens)
+                        # Average across samples (axis 1) and ens (axis 2)
                         if p_quantiles.ndim > 1:
                             # Average across all axes except the first (quantile axis)
-                            p_quantiles_1d = np.mean(p_quantiles, axis=tuple(range(1, p_quantiles.ndim))).flatten()
+                            p_quantiles_1d = np.mean(
+                                p_quantiles, axis=tuple(range(1, p_quantiles.ndim))
+                            ).flatten()
                         else:
                             p_quantiles_1d = p_quantiles
-                            
+
                         if gt_quantiles.ndim > 1:
-                            gt_quantiles_1d = np.mean(gt_quantiles, axis=tuple(range(1, gt_quantiles.ndim))).flatten()
+                            gt_quantiles_1d = np.mean(
+                                gt_quantiles, axis=tuple(range(1, gt_quantiles.ndim))
+                            ).flatten()
                         else:
                             gt_quantiles_1d = gt_quantiles
-                            
+
                         if qq_deviation.ndim > 1:
-                            qq_deviation_1d = np.mean(qq_deviation, axis=tuple(range(1, qq_deviation.ndim))).flatten()
+                            qq_deviation_1d = np.mean(
+                                qq_deviation, axis=tuple(range(1, qq_deviation.ndim))
+                            ).flatten()
                         else:
                             qq_deviation_1d = qq_deviation
-                            
+
                         if qq_deviation_normalized.ndim > 1:
-                            qq_deviation_normalized_1d = np.mean(qq_deviation_normalized, axis=tuple(range(1, qq_deviation_normalized.ndim))).flatten()
+                            qq_deviation_normalized_1d = np.mean(
+                                qq_deviation_normalized,
+                                axis=tuple(range(1, qq_deviation_normalized.ndim)),
+                            ).flatten()
                         else:
                             qq_deviation_normalized_1d = qq_deviation_normalized
-                        
+
                         # Handle scalar MSE values
                         extreme_low_mse_scalar = float(np.mean(extreme_low_mse))
                         extreme_high_mse_scalar = float(np.mean(extreme_high_mse))
-                        
+
                         # Create Dataset with proper dimensions
-                        qq_dataset = xr.Dataset({
-                            "quantile_levels": (["quantile"], quantile_levels_1d),
-                            "p_quantiles": (["quantile"], p_quantiles_1d),
-                            "gt_quantiles": (["quantile"], gt_quantiles_1d),
-                            "qq_deviation": (["quantile"], qq_deviation_1d),
-                            "qq_deviation_normalized": (["quantile"], qq_deviation_normalized_1d),
-                            "extreme_low_mse": ([], extreme_low_mse_scalar),
-                            "extreme_high_mse": ([], extreme_high_mse_scalar),
-                        })
+                        qq_dataset = xr.Dataset(
+                            {
+                                "quantile_levels": (["quantile"], quantile_levels_1d),
+                                "p_quantiles": (["quantile"], p_quantiles_1d),
+                                "gt_quantiles": (["quantile"], gt_quantiles_1d),
+                                "qq_deviation": (["quantile"], qq_deviation_1d),
+                                "qq_deviation_normalized": (
+                                    ["quantile"],
+                                    qq_deviation_normalized_1d,
+                                ),
+                                "extreme_low_mse": ([], extreme_low_mse_scalar),
+                                "extreme_high_mse": ([], extreme_high_mse_scalar),
+                            }
+                        )
                         qq_full_data.append(qq_dataset)
                     else:
-                        _logger.warning(f"qq_full_data not found in coords for qq_analysis metric")
-                
+                        _logger.warning("qq_full_data not found in coords for qq_analysis metric")
+
                 selected_data.append(data_for_channel)
                 labels.append(runs[run_id].get("label", run_id))
                 run_ids.append(run_id)
 
             if selected_data:
-                _logger.info(
-                    f"Creating Q-Q plot for {metric} - {region} - {stream} - {ch}."
-                )
+                _logger.info(f"Creating Q-Q plot for {metric} - {region} - {stream} - {ch}.")
 
                 name = create_filename(
                     prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
