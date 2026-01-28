@@ -212,7 +212,7 @@ Located under `training_config.forecast:`:
 
 | Parameter | Type | Default | Options | Description |
 |-----------|------|---------|---------|-------------|
-| `time_step` | timedelta | `06:00:00` | | Time step between forecast steps |
+| `time_step` | timedelta | `06:00:00` | | Time interval (fixed) between consecutive forecast steps |
 | `num_steps` | int | `2` | | Number of autoregressive forecast steps |
 | `policy` | string | `"fixed"` | `fixed`, `null` | Forecast policy |
 
