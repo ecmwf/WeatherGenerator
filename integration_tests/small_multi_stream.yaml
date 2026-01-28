@@ -202,8 +202,6 @@ validation_config:
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
-  write_num_samples: 0
-
-test_config: 
-  
-  write_num_samples: 2
+test_config:
+  output:
+    num_samples: 2
