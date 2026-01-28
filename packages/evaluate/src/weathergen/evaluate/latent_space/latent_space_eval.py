@@ -241,7 +241,7 @@ def load_scores(eval_cfg, run_id):
 
 ############## MAIN #################
 
-if __name__ == "__main__":
+def latent_space_analysis():
     parser = argparse.ArgumentParser(description="Run multi-stream latent space evaluation")
     parser.add_argument(
         "--run-id", type=str, required=True, help="Run identifier for the model to evaluate"
