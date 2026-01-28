@@ -132,7 +132,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 128
+  num_mini_epochs: 256
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -158,7 +158,7 @@ training_config:
 
   optimizer:
     grad_clip: 1.0
-    weight_decay: 0.05
+    weight_decay: 0.1
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
@@ -182,7 +182,7 @@ training_config:
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
+      num_steps: 3
       policy: "fixed"
 
 
@@ -229,13 +229,13 @@ wgtags:
   # Github issues are the central point when running experiment and contain 
   # links to hedgedocs, code branches, pull requests etc.
   # It is recommended to associate a run with a Github issue.
-  issue: 1495
+  issue: 1124
   # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
   # This is expected to be the primary tag for comparing experiments in MLFlow, along with the
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: "rollout_params"
+  exp: "forecast_release_model"
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
