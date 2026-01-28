@@ -71,7 +71,7 @@ def write_output(
                 targets_all[-1] += [np.zeros((0, num_channels), dtype=np.float32)]
                 targets_coords_all[-1] += [np.zeros((0, 2), dtype=np.float32)]
                 targets_times_all[-1] += [np.array([], dtype="datetime64[ns]")]
-                targets_lens[-1] += [[0 for _ in range(batch_size)]]
+                targets_lens[-1][-1] = [0 for _ in range(batch_size)]
                 continue
 
             for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
