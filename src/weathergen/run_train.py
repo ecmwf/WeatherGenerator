@@ -191,12 +191,12 @@ def train_with_args(argl: list[str], stream_dir: str | None):
 
 
 if __name__ == "__main__":
-    try:
-        stage = os.environ.get("WEATHERGEN_STAGE")
-    except KeyError as e:
-        msg = "missing environment variable 'WEATHERGEN_STAGE'"
-        raise ValueError(msg) from e
-
+    # try:
+    #     stage = os.environ.get("WEATHERGEN_STAGE")
+    # except KeyError as e:
+    #     msg = "missing environment variable 'WEATHERGEN_STAGE'"
+    #     raise ValueError(msg) from e
+    stage = "train"
     if stage == "train":
         # Entry point for slurm script.
         # Check whether --from-run-id passed as argument.
