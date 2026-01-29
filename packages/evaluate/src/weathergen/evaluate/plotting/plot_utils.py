@@ -344,11 +344,6 @@ def score_card_metric_region(
             sc_plotter._logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
-        else:
-            sc_plotter._logger.info(
-                f"Only one run_id for ({region}) region under stream : {stream}. "
-                "Creating bar plot is skipped..."
-            )
 
 
 def bar_plot_metric_region(
@@ -390,12 +385,6 @@ def bar_plot_metric_region(
             br_plotter._logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
-        else:
-            br_plotter._logger.info(
-                f"Only one run_id for ({region}) region under stream : {stream}. "
-                "Creating bar plot is skipped..."
-            )
-
 
 class DefaultMarkerSize:
     """

@@ -296,7 +296,6 @@ def evaluate_from_config(
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     use_parallel = cfg.evaluation.get("num_processes", 0)
-
     verbose = cfg.evaluation.get("verbose", True)
     default_streams = cfg.get("default_streams", {})
 

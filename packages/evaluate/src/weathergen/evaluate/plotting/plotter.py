@@ -982,26 +982,16 @@ class LinePlots:
 
         data_list, label_list = self._check_lengths(data, labels)
 
-        baseline_name = self.baseline
-        baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
-
         if len(data_list) < 2:
             baseline = xr.full_like(data_list[0], 1.0)
             baseline_name = "ones"
             descr = "scores"
-            self._logger.warning("Ratio plot requires at least two datasets to compare. Skipping.")
-            return
-        
-        if baseline_idx is not None:
-            self._logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
-            baseline = data_list[baseline_idx]
-
         else:
             descr = "ratio_plot"
             baseline_name = self.baseline
             baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
             if baseline_idx is not None:
-                self._logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
+                _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
                 baseline = data_list[baseline_idx]
 
             else:

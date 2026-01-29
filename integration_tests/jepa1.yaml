@@ -11,6 +11,12 @@ lr_steps_warmup: 2
 lr_steps_cooldown: 2
 loader_num_workers: 8
 
+sslpred_num_blocks: 12
+sslpred_num_heads: 12
+sslpred_dropout_rate: 0.1
+sslpred_with_qk_lnorm: True 
+sslpred_intermediate_dim: 384
+
 train_log:
   log_interval: 1
 ### Example validation and training config for student-teacher with JEPA
