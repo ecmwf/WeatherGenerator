@@ -89,7 +89,6 @@ class Reader:
         )  # base directory where results will be stored
 
         self._logger = logging.getLogger(__name__)
-
         logger_level = logging.INFO if verbose else logging.CRITICAL + 1
         self._logger.setLevel(logger_level)
 

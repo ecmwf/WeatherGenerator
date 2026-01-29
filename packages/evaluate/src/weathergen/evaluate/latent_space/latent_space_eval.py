@@ -61,15 +61,16 @@ def infer_multi_stream(run_id):
             "--samples",
             "10",
             "--options",
-            "forecast_offset=0",
+            # "training_config.forecast.offset=0",
+            # "training_config.forecast.num_steps=0"
             "zarr_store=zip",
         ]
         + ["--from-run-id", run_id, "--run-id", new_run_id, "--streams-output"]
         + streams
-        + [
-            "--config",
-            "./config/evaluate/latent_space_eval_config.yaml",
-        ]
+        # + [
+        #     "--config",
+        #     "./config/evaluate/latent_space_eval_config.yaml",
+        # ]
     )
     return new_run_id
 
@@ -223,8 +224,9 @@ def load_scores(eval_cfg, run_id):
 
     metrics = list(eval_cfg.evaluation.get("metrics"))
     regions = list(eval_cfg.evaluation.get("regions"))
+    verbose = eval_cfg.get("verbose", False)
 
-    reader = WeatherGenJSONReader(run_cfg, run_id, None, regions, metrics)
+    reader = WeatherGenJSONReader(run_cfg, run_id, None, regions, metrics, verbose=verbose)
     scores = {}
 
     for stream_name in streams:
