@@ -19,13 +19,12 @@ import zarr
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    DTRange,
     NDArray,
-    ReaderData,
     TimeWindowHandler,
     TIndex,
     t_epsilon,
 )
+from weathergen.common.data import DTRange, ReaderData
 
 _logger = logging.getLogger(__name__)
 

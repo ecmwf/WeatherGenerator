@@ -20,11 +20,11 @@ import zarr
 from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    ReaderData,
     TimeWindowHandler,
     TIndex,
-    check_reader_data,
 )
+from weathergen.common.data import ReaderData, check_reader_data
+
 
 _logger = logging.getLogger(__name__)
 

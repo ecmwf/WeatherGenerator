@@ -27,6 +27,8 @@ from tqdm import tqdm
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
+from weathergen.common.data import ReaderData
+
 # experimental value, should be inferred more intelligently
 SHARDING_ENABLED = True
 SHARD_N_SAMPLES = 40320
@@ -117,79 +119,6 @@ class TimeRange:
         assert forecast_dt_hours > 0 and fstep >= 0
         offset = np.timedelta64(forecast_dt_hours * fstep, "h")
         return TimeRange(self.start + offset, self.end + offset)
-
-
-@dataclasses.dataclass
-class IOReaderData:
-    """
-    Equivalent to data_reader_base.ReaderData
-
-    This class needs to exist since otherwise the common package would
-    have a dependecy on the core model. Ultimately a unified data model
-    should be implemented in the common package.
-    """
-
-    coords: NDArray[DType]
-    geoinfos: NDArray[DType]
-    data: NDArray[DType]
-    datetimes: NDArray[NPDT64]
-    is_spoof: bool = False
-
-    def is_empty(self):
-        """
-        Test if data object is empty
-        """
-        return len(self.data) == 0
-
-    @classmethod
-    def create(cls, other: typing.Any) -> "IOReaderData":
-        """
-        Create an instance from data_reader_base.ReaderData instance.
-
-        other should be such an instance.
-        """
-        coords = np.asarray(other.coords)
-        geoinfos = np.asarray(other.geoinfos)
-        data = np.asarray(other.data)
-        datetimes = np.asarray(other.datetimes)
-
-        n_datapoints = len(data)
-
-        assert coords.shape == (n_datapoints, 2), "number of datapoints do not match data"
-        assert geoinfos.shape[0] == n_datapoints, "number of datapoints do not match data"
-        assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
-
-        return cls(**dataclasses.asdict(other))
-
-    @classmethod
-    def combine(cls, others: list["IOReaderData"]) -> "IOReaderData":
-        """
-        Create an instance from data_reader_base.ReaderData instance by combining mulitple ones.
-
-        others is list of ReaderData instances.
-        """
-        assert len(others) > 0, len(others)
-
-        other = others[0]
-        coords = np.zeros((0, other.coords.shape[1]), dtype=other.coords.dtype)
-        geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
-        data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
-        datetimes = np.array([], dtype=other.datetimes.dtype)
-        is_spoof = True
-
-        for other in others:
-            n_datapoints = len(other.data)
-            assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
-            assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
-            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
-
-            coords = np.concatenate([coords, other.coords])
-            geoinfos = np.concatenate([geoinfos, other.geoinfos])
-            data = np.concatenate([data, other.data])
-            datetimes = np.concatenate([datetimes, other.datetimes])
-            is_spoof = is_spoof and other.is_spoof
-
-        return cls(coords, geoinfos, data, datetimes, is_spoof)
 
 
 @dataclasses.dataclass
@@ -555,7 +484,7 @@ class OutputBatchData:
 
     # sample, stream, tensor(datapoint, channel+coords)
     # => datapoints is accross all datasets per stream
-    sources: list[list[IOReaderData]]
+    sources: list[list[ReaderData]]
 
     # sample
     source_intervals: list[TimeRange]
@@ -743,7 +672,7 @@ class OutputBatchData:
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
-        source: IOReaderData = self.sources[sample][stream_idx]
+        source: ReaderData = self.sources[sample][stream_idx]
 
         assert source.data.shape[1] == len(channels), (
             f"Number of source channel names {len(channels)} does not align with source data."

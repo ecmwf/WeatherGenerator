@@ -17,10 +17,9 @@ import zarr
 
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
-    ReaderData,
     TimeWindowHandler,
-    check_reader_data,
 )
+from weathergen.common.data import ReaderData, check_reader_data
 
 _logger = logging.getLogger(__name__)
 
