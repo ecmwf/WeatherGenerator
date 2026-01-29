@@ -19,10 +19,6 @@ import xarray as xr
 # Local application / package
 from weathergen.evaluate.io.io_reader import Reader
 
-# _logger = logging.getLogger(__name__)
-# _logger.setLevel(logging.INFO)
-
-
 class CsvReader(Reader):
     """
     Reader class to read evaluation data from CSV files and convert to xarray DataArray.
