@@ -672,6 +672,9 @@ class Model(torch.nn.Module):
 
             if len(t_coords) == 0:
                 continue
+            
+            if stream_name not in self.embed_target_coords.keys():
+                continue
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
