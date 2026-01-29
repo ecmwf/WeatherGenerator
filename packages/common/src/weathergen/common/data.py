@@ -1,6 +1,10 @@
-from dataclasses import dataclass
+import dataclasses
+import logging
+from typing import Any
 
 import numpy as np
+from numpy import datetime64
+from numpy.typing import NDArray
 
 type DType = np.float32
 type NPDT64 = datetime64
@@ -10,7 +14,7 @@ _logger = logging.getLogger(__name__)
 _DT_ZERO = np.datetime64("1850-01-01T00:00")
 
 
-@dataclass
+@dataclasses.dataclass
 class DTRange:
     """
     Defines a time window for indexing into datasets.
@@ -26,6 +30,7 @@ class DTRange:
         assert self.start > _DT_ZERO, "start time must be after 1850-01-01T00:00"
 
 
+@dataclasses.dataclass
 class ReaderData:
     """
     Wrapper for return values from DataReader.get_source and DataReader.get_target.
@@ -37,30 +42,7 @@ class ReaderData:
     datetimes: NDArray[NPDT64]
     is_spoof: bool = False
 
-    def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
-        """
-        Create an empty ReaderData object
-
-        Returns
-        -------
-        ReaderData
-            Empty ReaderData object
-        """
-        return ReaderData(
-            coords=np.zeros((0, 2), dtype=np.float32),
-            geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
-            data=np.zeros((0, num_data_fields), dtype=np.float32),
-            datetimes=np.zeros((0,), dtype=np.datetime64),
-            is_spoof=False,
-        )
-
-    def is_empty(self):
-        """
-        Test if data object is empty
-        """
-        return len(self) == 0
-
-    def __len__():
+    def __len__(self):
         return len(self.data)
 
     @classmethod
@@ -94,7 +76,7 @@ class ReaderData:
         return cls(coords, geoinfos, data, datetimes, is_spoof)
 
     @classmethod
-    def create(cls, other: typing.Any) -> "ReaderData":
+    def create(cls, other: Any) -> "ReaderData":
         """
         Create an instance from data_reader_base.ReaderData instance.
 
@@ -112,6 +94,30 @@ class ReaderData:
         assert datetimes.shape[0] == n_datapoints, "number of datapoints do not match data"
 
         return cls(**dataclasses.asdict(other))
+
+    @staticmethod
+    def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
+        """
+        Create an empty ReaderData object
+
+        Returns
+        -------
+        ReaderData
+            Empty ReaderData object
+        """
+        return ReaderData(
+            coords=np.zeros((0, 2), dtype=np.float32),
+            geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
+            data=np.zeros((0, num_data_fields), dtype=np.float32),
+            datetimes=np.zeros((0,), dtype=np.datetime64),
+            is_spoof=False,
+        )
+
+    def is_empty(self):
+        """
+        Test if data object is empty
+        """
+        return len(self) == 0
 
     def remove_nan_coords(self) -> "ReaderData":
         """
