@@ -11,7 +11,6 @@
 
 import itertools
 import logging
-import re
 from pathlib import Path
 
 import omegaconf
@@ -33,10 +32,7 @@ from weathergen.model.attention import (
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import (
-    freeze_weights,
-    apply_fct_to_blocks
-)
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
