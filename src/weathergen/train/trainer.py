@@ -69,6 +69,7 @@ class Trainer(TrainerBase):
         self.perf_mem = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
+        self.target_and_aux_calculators_val = None
         self.validate_with_ema_cfg = None
         self.validate_with_ema: bool = False
         self.batch_size_per_gpu = -1
@@ -121,7 +122,12 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = get_batch_size_from_config(self.validation_cfg)
         self.batch_size_test_per_gpu = get_batch_size_from_config(self.test_cfg)
 
-        # config.validate_forecast_policy_and_steps(cf=cf)
+        for mode, mode_cfg in zip(
+            ["training_config", "validation_config", "test_config"],
+            [self.training_cfg, self.validation_cfg, self.test_cfg],
+            strict=True,
+        ):
+            config.validate_forecast_policy_and_steps(mode_cfg.get("forecast", {}), mode)
 
         self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 
@@ -202,7 +208,7 @@ class Trainer(TrainerBase):
         )
 
         # get target_aux calculators for different loss terms
-        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
+        self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.test_cfg)
 
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
@@ -277,7 +283,11 @@ class Trainer(TrainerBase):
 
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
+<<<<<<< HEAD
         # self.validate_with_ema_cfg = self.get_target_aux_calculators(self.validation_cfg)
+=======
+        self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
+>>>>>>> origin/develop
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
@@ -420,7 +430,6 @@ class Trainer(TrainerBase):
                 preds = self.model(
                     self.model_params,
                     batch.get_source_samples(),
-                    self.training_cfg.window_offset_prediction,
                 )
 
                 targets_and_auxs = {}
@@ -433,7 +442,6 @@ class Trainer(TrainerBase):
                         batch.get_target_samples(target_idxs),
                         self.model_params,
                         self.model,
-                        self.training_cfg.window_offset_prediction,
                     )
 
             loss = self.loss_calculator.compute_loss(
@@ -452,6 +460,13 @@ class Trainer(TrainerBase):
                 target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
             ]
+<<<<<<< HEAD
+=======
+            [
+                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators_val.items()
+            ]
+>>>>>>> origin/develop
 
             # backward pass
             self.optimizer.zero_grad()
@@ -479,10 +494,19 @@ class Trainer(TrainerBase):
 
             batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
             step = batch_size_total * self.cf.general.istep
+
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
             ]
+<<<<<<< HEAD
+=======
+            [
+                target_aux.update_state_post_opt_step(step, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators_val.items()
+            ]
+
+>>>>>>> origin/develop
             # EMA update
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
@@ -513,6 +537,8 @@ class Trainer(TrainerBase):
 
         dataset_val_iter = iter(self.data_loader_validation)
 
+        num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
@@ -533,24 +559,26 @@ class Trainer(TrainerBase):
                             preds = self.model(
                                 self.model_params,
                                 batch.get_source_samples(),
-                                mode_cfg.window_offset_prediction,
                             )
                         else:
                             preds = self.ema_model.forward_eval(
                                 self.model_params,
                                 batch.get_source_samples(),
-                                mode_cfg.window_offset_prediction,
                             )
 
                         targets_and_auxs = {}
+<<<<<<< HEAD
                         for loss_name, target_aux in self.target_and_aux_calculators.items():
                             target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+=======
+                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
+>>>>>>> origin/develop
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
                                 batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
-                                mode_cfg.window_offset_prediction,
                             )
 
                     _ = self.loss_calculator_val.compute_loss(
@@ -560,16 +588,21 @@ class Trainer(TrainerBase):
                     )
 
                     # log output
-                    num_samples = mode_cfg.get("write_num_samples", 0) * batch_size
-                    if bidx < num_samples:
-                        dn_data = self.dataset_val.denormalize_target_channels
+                    if bidx < num_samples_write:
+                        # denormalization function for data
+                        denormalize_data_fct = (
+                            (lambda x0, x1: x1)
+                            if mode_cfg.get("output", {}).get("normalized_samples", False)
+                            else self.dataset_val.denormalize_target_channels
+                        )
+                        # write output
                         write_output(
                             self.cf,
                             mode_cfg,
                             batch_size,
                             mini_epoch,
                             bidx,
-                            dn_data,
+                            denormalize_data_fct,
                             batch,
                             preds,
                             targets_and_auxs,

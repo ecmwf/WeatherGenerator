@@ -147,8 +147,6 @@ training_config:
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
-
-  window_offset_prediction : 1
   
   learning_rate_scheduling :
     lr_start: 1e-6
@@ -190,7 +188,8 @@ training_config:
 
   forecast :
       time_step: 06:00:00
-      num_steps: 1
+      num_steps: 2
+      offset: 1
       policy: "fixed"
 
 
@@ -209,10 +208,15 @@ validation_config:
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
-  # number of validation samples that are written to disk
-  write_num_samples: 0
-  # output streams to write; default all
-  output_streams: null
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 0,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
 
   # run validation before training starts (mainly for model development)
   validate_before_training: False

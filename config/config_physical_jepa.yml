@@ -91,8 +91,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/era5_nppatms_synop/"
 streams: ???
 
 general:
@@ -212,7 +211,7 @@ training_config:
     "input_physical" : {
       # masking strategy: "random", "forecast"
       masking_strategy: "random",
-      num_samples: 1,
+      num_samples: 2,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
@@ -267,13 +266,18 @@ validation_config:
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
-  # number of validation samples that are written to disk
-  write_num_samples: 0
-  # output streams to write; default all
-  output_streams: null
-
   # run validation before training starts (mainly for model development)
   validate_before_training: 8
+
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 8,
+    # write samples in normalized model space
+    normalized_samples: True,
+    # output streams to write; default all
+    streams: null,
+    }
   
   losses: {
     "physical": {
