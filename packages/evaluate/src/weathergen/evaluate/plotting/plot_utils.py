@@ -12,8 +12,6 @@ from collections.abc import Iterable, Sequence
 import numpy as np
 import xarray as xr
 
-# _logger = logging.getLogger(__name__)
-
 
 def collect_streams(runs: dict):
     """Get all unique streams across runs, sorted.
