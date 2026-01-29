@@ -29,10 +29,6 @@ from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
-# _logger = logging.getLogger(__name__)
-# _logger.setLevel(logging.INFO)
-
-
 class WeatherGenReader(Reader):
     def __init__(
         self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True
