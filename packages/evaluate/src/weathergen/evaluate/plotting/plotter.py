@@ -991,7 +991,7 @@ class LinePlots:
             baseline_name = self.baseline
             baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
             if baseline_idx is not None:
-                _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
+                self._logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
                 baseline = data_list[baseline_idx]
 
             else:
