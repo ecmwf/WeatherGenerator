@@ -15,13 +15,13 @@ import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
 
+from weathergen.common.data import ReaderData, check_reader_data
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     TimeWindowHandler,
     TIndex,
     str_to_timedelta,
 )
-from weathergen.common.data import ReaderData, check_reader_data
 
 _logger = logging.getLogger(__name__)
 

@@ -6,13 +6,13 @@ from typing import override
 import numpy as np
 import xarray as xr
 
+from weathergen.common.data import ReaderData, check_reader_data
 from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     TimeWindowHandler,
     TIndex,
 )
-from weathergen.common.data import ReaderData, check_reader_data
 
 ############################################################################
 

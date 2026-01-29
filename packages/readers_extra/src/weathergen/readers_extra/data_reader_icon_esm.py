@@ -17,14 +17,13 @@ import numpy as np
 import xarray as xr
 import zarr
 
+from weathergen.common.data import ReaderData, check_reader_data
 from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     TimeWindowHandler,
     TIndex,
 )
-from weathergen.common.data import ReaderData, check_reader_data
-
 
 _logger = logging.getLogger(__name__)
 

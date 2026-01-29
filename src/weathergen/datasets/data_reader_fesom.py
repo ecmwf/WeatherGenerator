@@ -17,6 +17,7 @@ import dask.array as da
 import numpy as np
 import zarr
 
+from weathergen.common.data import DTRange, ReaderData
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     NDArray,
@@ -24,7 +25,6 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     t_epsilon,
 )
-from weathergen.common.data import DTRange, ReaderData
 
 _logger = logging.getLogger(__name__)
 

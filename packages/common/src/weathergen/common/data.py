@@ -1,5 +1,6 @@
-import numpy as np
 from dataclasses import dataclass
+
+import numpy as np
 
 type DType = np.float32
 type NPDT64 = datetime64
@@ -7,6 +8,7 @@ type NPDT64 = datetime64
 _logger = logging.getLogger(__name__)
 
 _DT_ZERO = np.datetime64("1850-01-01T00:00")
+
 
 @dataclass
 class DTRange:

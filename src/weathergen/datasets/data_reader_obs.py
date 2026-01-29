@@ -15,11 +15,11 @@ from typing import override
 import numpy as np
 import zarr
 
+from weathergen.common.data import ReaderData, check_reader_data
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
 )
-from weathergen.common.data import ReaderData, check_reader_data
 
 _logger = logging.getLogger(__name__)
 

@@ -693,7 +693,7 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
             a_sorted = a_sorted.expand_dims(sample=[i])
 
         aligned.append(a_sorted)
-    
+
     return xr.concat(aligned, dim="sample").assign_coords({"sample": samples})
 
 
