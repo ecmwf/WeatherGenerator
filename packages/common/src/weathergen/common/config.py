@@ -235,10 +235,6 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
             path = Path(model_path) / run_id
 
         fname = path / _get_model_config_file_read_name(run_id, mini_epoch)
-        if not fname.exists():
-            # Fallback for old naming convention
-            # TODO remove compatibility
-            fname = path / _get_model_config_file_read_name(run_id, mini_epoch, use_old_name=True)
         assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
             fname,
@@ -266,14 +262,12 @@ def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
     return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None, use_old_name=False):
+def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
     """Generate the filename for reading a model config file."""
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
         mini_epoch_str = "_latest"
-    elif use_old_name:
-        mini_epoch_str = f"_epoch{mini_epoch:05d}"  # TODO remove compatibility
     else:
         mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
@@ -287,13 +281,10 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
     for ext in StoreType.extensions():
-        zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
-        zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.{ext}"
+        zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
-        if zarr_path_new.exists() or zarr_path_new.is_dir():
-            return zarr_path_new
-        elif zarr_path_old.exists() or zarr_path_old.is_dir():
-            return zarr_path_old
+        if zarr_path.exists() or zarr_path.is_dir():
+            return zarr_path
     raise FileNotFoundError(
         f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
         f"exist or is not a directory."
@@ -389,10 +380,6 @@ def load_merge_configs(
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
 
-    # Ensure the config has mini-epoch notation
-    if hasattr(c, "samples_per_epoch"):
-        c.samples_per_mini_epoch = c.samples_per_epoch
-        c.num_mini_epochs = c.num_epochs
     return c
 
 

@@ -311,21 +311,15 @@ class WeatherGenZarrReader(WeatherGenReader):
         zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
         # for backwards compatibility assume zarr store is local i.e. .zarr format
 
-        fname_zarr_new = self.results_dir.joinpath(
+        fname_zarr = self.results_dir.joinpath(
             f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
         )
-        fname_zarr_old = self.results_dir.joinpath(
-            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
-        )
-        if fname_zarr_new.exists():
-            if (zarr_ext == "zarr" and fname_zarr_new.is_dir()) or (
-                zarr_ext == "zip" and fname_zarr_new.is_file()
+        if fname_zarr.exists():
+            if (zarr_ext == "zarr" and fname_zarr.is_dir()) or (
+                zarr_ext == "zip" and fname_zarr.is_file()
             ):
-                self.fname_zarr = fname_zarr_new
+                self.fname_zarr = fname_zarr
         else:
-            self.fname_zarr = fname_zarr_old
-
-        if not self.fname_zarr.exists():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
             raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
 
