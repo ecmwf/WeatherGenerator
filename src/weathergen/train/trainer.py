@@ -10,7 +10,6 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
-import re
 import time
 
 import numpy as np
@@ -29,6 +28,7 @@ from weathergen.model.model_interface import (
     get_target_aux_calculator,
     init_model_and_shard,
 )
+from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -406,14 +406,7 @@ class Trainer(TrainerBase):
         cf = self.cf
         self.model.train()
 
-        # TODO: ablate this vs. just using no_grad
-        for name, module in self.model.named_modules():
-            name = module.name if hasattr(module, "name") else name
-            # avoid the whole model element which has name ''
-            if name == "":
-                continue
-            if re.fullmatch(cf.freeze_modules, name) is not None:
-                module.eval()
+        apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
 
         dataset_iter = iter(self.data_loader)
 
