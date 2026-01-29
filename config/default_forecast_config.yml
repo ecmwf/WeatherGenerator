@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/cerra_era5/"
+streams_directory: "./config/streams/era5_1deg/"
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"
@@ -50,7 +50,7 @@ pred_mlp_adaln: True
 # one is training an auto-encoder
 forecast_offset : 1
 forecast_delta: 00:00:00
-forecast_steps: 4
+forecast_steps: 4f
 forecast_policy: "fixed"
 forecast_freeze_model: False
 forecast_att_dense_rate: 1.0
