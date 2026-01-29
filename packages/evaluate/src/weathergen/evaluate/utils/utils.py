@@ -156,7 +156,6 @@ def calc_scores_per_stream(
                 _logger.debug(
                     f"Applying bounding box mask for region '{region}' to targets and predictions."
                 )
-            # breakpoint()
             tars, preds, tars_next, preds_next = [
                 bbox.apply_mask(x) if x is not None else None
                 for x in (tars, preds, tars_next, preds_next)
