@@ -384,6 +384,7 @@ def bar_plot_metric_region(
             name = "_".join([metric, region, stream])
             br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
 
+
 class DefaultMarkerSize:
     """
     Utility class for managing default configuration values, such as marker sizes

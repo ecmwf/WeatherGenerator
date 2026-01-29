@@ -354,7 +354,6 @@ def evaluate_from_config(
             processes=num_processes,
             initializer=setup_worker_logger,
             initargs=(log_queue, verbose),
-
         ) as pool:
             results = pool.map(
                 _process_stream_wrapper,

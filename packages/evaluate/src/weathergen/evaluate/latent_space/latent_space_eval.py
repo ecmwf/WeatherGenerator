@@ -13,7 +13,7 @@ This test must run on a GPU machine.
 It performs training and inference with multiple data sources including gridded and obs data.
 
 Command:
-uv run --offline packages/evaluate/src/weathergen/evaluate/latent_space/latent_space_eval.py --run-id j2dkivn8
+uv run --offline latent_space_eval --run-id j2dkivn8
 """
 
 import argparse
@@ -92,8 +92,8 @@ def get_evaluation_config(run_id, verbose=False):
                 "summary_dir": f"./results/{run_id}/plots/summary/",
                 "print_summary": False,
                 "verbose": verbose,
-                "ratio_plots": True, 
-                "bar_plots": True, 
+                "ratio_plots": True,
+                "bar_plots": True,
             },
             "run_ids": {
                 run_id: {
@@ -240,6 +240,7 @@ def load_scores(eval_cfg, run_id):
 
 
 ############## MAIN #################
+
 
 def latent_space_analysis():
     parser = argparse.ArgumentParser(description="Run multi-stream latent space evaluation")

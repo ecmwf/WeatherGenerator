@@ -19,11 +19,11 @@ import xarray as xr
 # Local application / package
 from weathergen.evaluate.io.io_reader import Reader
 
+
 class CsvReader(Reader):
     """
     Reader class to read evaluation data from CSV files and convert to xarray DataArray.
     """
-
 
     def __init__(
         self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True

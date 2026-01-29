@@ -29,6 +29,7 @@ from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
+
 class WeatherGenReader(Reader):
     def __init__(
         self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True
@@ -306,7 +307,9 @@ class WeatherGenJSONReader(WeatherGenReader):
 
 
 class WeatherGenZarrReader(WeatherGenReader):
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True):
+    def __init__(
+        self, eval_cfg: dict, run_id: str, private_paths: dict | None = None, verbose=True
+    ):
         """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
         super().__init__(eval_cfg, run_id, private_paths, verbose)
 
@@ -322,9 +325,6 @@ class WeatherGenZarrReader(WeatherGenReader):
             ):
                 self.fname_zarr = fname_zarr
         else:
-            self.fname_zarr = fname_zarr_old
-
-        if not self.fname_zarr.exists():
             self._logger.error(f"Zarr file {self.fname_zarr} does not exist.")
             raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
 
