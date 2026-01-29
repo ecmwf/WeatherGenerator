@@ -195,3 +195,24 @@ def gamma_decay(forecast_steps, gamma):
     fsteps = np.arange(forecast_steps)
     weights = gamma**fsteps
     return weights * (len(fsteps) / np.sum(weights))
+
+
+def spike_function(forecast_steps, spike_type):
+    fstep = np.arange(forecast_steps)
+    weights = np.zeros_like(fstep, dtype=float)
+    if spike_type["type"] == "last":
+        weights[-1] = 1.0
+    elif spike_type["type"] == "probability":
+        steps_probs = spike_type["values"]
+        fs_steps = list(steps_probs.keys())
+        fs_steps = [int(x) for x in fs_steps]
+        assert max(fs_steps) <= forecast_steps, (
+            f"Max step {max(fs_steps)} > forecast_steps {forecast_steps}"
+        )
+        fs_probs = list(steps_probs.values())
+        assert np.isclose(np.array(fs_probs).sum(), 1.0)
+        fs_selected = np.random.choice(fs_steps, p=fs_probs)
+        weights[fs_selected] = 1.0
+    else:
+        raise ValueError(f"Spike type {spike_type} is not defined")
+    return weights

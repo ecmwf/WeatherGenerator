@@ -80,7 +80,12 @@ loss_fcts_val:
   -
     - "mse"
     - 1.0
-
+timestep_weight: [spike_function,
+                  {"type":"probability",
+                   "values":{ 4 : 0.6,
+                              6 : 0.2,
+                              8 : 0.1,
+                              10 : 0.1} ] 
 batch_size_per_gpu: 1
 batch_size_validation_per_gpu: 1
 
