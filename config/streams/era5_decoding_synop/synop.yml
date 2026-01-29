@@ -6,7 +6,7 @@
 SurfaceCombined :
   type : obs
   stream_id : 2
-  # source: []
+  source: []
   is_diagnostic: True
   filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
   loss_weight : 1.0
