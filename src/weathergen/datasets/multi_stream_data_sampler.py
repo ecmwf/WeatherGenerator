@@ -50,10 +50,10 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
 
     rdatas = []
 
-    # number of points to sub-sample
-    num_subset = -1
-
     for ds in stream_datasets:
+        # number of points to sub-sample
+        num_subset = -1
+
         if type == "source":
             get_reader_data = ds.get_source
             normalize_channels = ds.normalize_source_channels
