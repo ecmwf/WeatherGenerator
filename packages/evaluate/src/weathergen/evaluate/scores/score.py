@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 import inspect
+import json
 import logging
 from dataclasses import dataclass
 
@@ -16,7 +17,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.scores.score_utils import to_list
+from weathergen.evaluate.scores.score_utils import arr_to_float, arr_to_list, to_list
 
 # from common.io import MockIO
 
@@ -190,7 +191,7 @@ class Scores:
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
-            "qq_analysis": self.calc_qq_analysis,
+            "qq_analysis": self.calc_quantiles,
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
@@ -1497,7 +1498,7 @@ class Scores:
 
         return var_diff_amplitude
 
-    def calc_qq_analysis(
+    def calc_quantiles(
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
@@ -1505,6 +1506,7 @@ class Scores:
         quantile_method: str = "linear",
         focus_extremes: bool = True,
         extreme_percentiles: tuple[float, float] = (5.0, 95.0),
+        iqr_percentiles: tuple[float, float] = (25.0, 75.0),
     ) -> xr.DataArray:
         """
         Calculate quantile-quantile (Q-Q) analysis metric for extreme value evaluation.
@@ -1535,6 +1537,10 @@ class Scores:
             Lower and upper percentile thresholds to define extremes.
             Default is (5.0, 95.0), meaning values below 5th and above 95th percentile
             are considered extremes.
+        iqr_percentiles: tuple[float, float]
+            Lower and upper percentile thresholds for interquartile range (IQR) calculation.
+            Default is (25.0, 75.0), meaning IQR is computed as difference between 75th and
+            25th percentiles.
 
         Returns
         -------
@@ -1575,10 +1581,10 @@ class Scores:
             p_flat = p.stack({"_agg_points": self._agg_dims})
             gt_flat = gt.stack({"_agg_points": self._agg_dims})
         else:
-            # If all dimensions are aggregated, add a dummy dimension
-            p_flat = p.stack({"_agg_points": self._agg_dims}).expand_dims("dummy")
-            gt_flat = gt.stack({"_agg_points": self._agg_dims}).expand_dims("dummy")
-            keep_dims = ["dummy"]
+            # If all dimensions are aggregated, add a scalar dimension
+            p_flat = p.stack({"_agg_points": self._agg_dims}).expand_dims("scalar")
+            gt_flat = gt.stack({"_agg_points": self._agg_dims}).expand_dims("scalar")
+            keep_dims = ["scalar"]
 
         # Remove NaN values before quantile calculation
         p_flat = p_flat.dropna(dim="_agg_points", how="all")
@@ -1592,9 +1598,9 @@ class Scores:
         qq_deviation = np.abs(p_quantiles - gt_quantiles)
 
         # Calculate normalized deviation (relative to interquartile range of ground truth)
-        gt_q25 = gt_flat.quantile(0.25, dim="_agg_points")
-        gt_q75 = gt_flat.quantile(0.75, dim="_agg_points")
-        iqr = gt_q75 - gt_q25
+        gt_q_low = gt_flat.quantile(iqr_percentiles[0] / 100, dim="_agg_points")
+        gt_q_high = gt_flat.quantile(iqr_percentiles[1] / 100, dim="_agg_points")
+        iqr = gt_q_high - gt_q_low
         # Avoid division by zero
         iqr = iqr.where(iqr > 1e-10, 1.0)
 
@@ -1618,8 +1624,6 @@ class Scores:
 
         # Store Q-Q data as a non-scalar coordinate with matching dimensions
         # This ensures each channel/sample/ens combination gets its own Q-Q data
-        import json
-
         # Create separate JSON strings for each position in the multi-dimensional array
         qq_data_coord_array = np.empty(overall_qq_score.shape, dtype=object)
 
@@ -1627,24 +1631,12 @@ class Scores:
         for idx in np.ndindex(overall_qq_score.shape):
             qq_full_data = {
                 "quantile_levels": quantile_levels.tolist(),
-                "p_quantiles": p_quantiles.values[(...,) + idx].tolist()
-                if p_quantiles.ndim > 1
-                else p_quantiles.values.tolist(),
-                "gt_quantiles": gt_quantiles.values[(...,) + idx].tolist()
-                if gt_quantiles.ndim > 1
-                else gt_quantiles.values.tolist(),
-                "qq_deviation": qq_deviation.values[(...,) + idx].tolist()
-                if qq_deviation.ndim > 1
-                else qq_deviation.values.tolist(),
-                "qq_deviation_normalized": qq_deviation_normalized.values[(...,) + idx].tolist()
-                if qq_deviation_normalized.ndim > 1
-                else qq_deviation_normalized.values.tolist(),
-                "extreme_low_mse": float(extreme_low_mse.values[idx])
-                if extreme_low_mse.ndim > 0
-                else float(extreme_low_mse.values),
-                "extreme_high_mse": float(extreme_high_mse.values[idx])
-                if extreme_high_mse.ndim > 0
-                else float(extreme_high_mse.values),
+                "p_quantiles": arr_to_list(p_quantiles, idx),
+                "gt_quantiles": arr_to_list(gt_quantiles, idx),
+                "qq_deviation": arr_to_list(qq_deviation, idx),
+                "qq_deviation_normalized": arr_to_list(qq_deviation_normalized, idx),
+                "extreme_low_mse": arr_to_float(extreme_low_mse, idx),
+                "extreme_high_mse": arr_to_float(extreme_high_mse, idx),
             }
             qq_data_coord_array[idx] = json.dumps(qq_full_data)
 
@@ -1656,8 +1648,8 @@ class Scores:
         )
         overall_qq_score = overall_qq_score.assign_coords({"qq_full_data": qq_data_coord})
 
-        # Remove dummy dimension if it was added
-        if "dummy" in overall_qq_score.dims:
-            overall_qq_score = overall_qq_score.squeeze("dummy", drop=True)
+        # Remove scalar dimension if it was added
+        if "scalar" in overall_qq_score.dims:
+            overall_qq_score = overall_qq_score.squeeze("scalar", drop=True)
 
         return overall_qq_score

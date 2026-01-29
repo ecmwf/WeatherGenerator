@@ -1137,12 +1137,74 @@ class LinePlots:
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
 
+
+class QuantilePlots:
+
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        """
+        Initialize the QuantilePlots class.
+
+        Parameters
+        ----------
+        plotter_cfg:
+            Configuration dictionary containing basic information for plotting.
+            Expected keys are:
+                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+                - dpi_val: DPI value for the saved images
+                - fig_size: Size of the figure (width, height) in inches
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
+        """
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
+        self.out_plot_dir = Path(output_basedir) / "quantile_plots"
+        
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
+
+        _logger.info(f"Saving quantile plots to: {self.out_plot_dir}")
+
+    def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
+        """
+        Check if the lengths of data and labels match.
+
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        labels:
+            Label or list of labels for each dataset
+
+        Returns
+        -------
+            data_list, label_list - lists of data and labels
+        """
+        assert isinstance(data, xr.DataArray | list), (
+            "QuantilePlots::_check_lengths - Data should be of type xr.DataArray or list"
+        )
+        assert isinstance(labels, str | list), (
+            "QuantilePlots::_check_lengths - Labels should be of type str or list"
+        )
+
+        data_list = [data] if isinstance(data, xr.DataArray) else data
+        label_list = [labels] if isinstance(labels, str) else labels
+
+        assert len(data_list) == len(label_list), (
+            "QuantilePlots::_check_lengths - Data and Labels do not match"
+        )
+
+        return data_list, label_list
+
     def qq_plot(
         self,
         qq_data: list[xr.Dataset],
         labels: str | list,
         tag: str = "",
         metric: str = "qq_analysis",
+        extreme_percentiles: tuple[float, float] = (5.0, 95.0),
     ) -> None:
         """
         Create quantile-quantile (Q-Q) plots for extreme value analysis.
@@ -1167,6 +1229,8 @@ class LinePlots:
             Tag to be added to the plot title and filename
         metric:
             Name of the metric (default: 'qq_analysis')
+        extreme_percentiles:
+            Lower and upper percentile thresholds for extreme regions.
 
         Returns
         -------
@@ -1233,9 +1297,9 @@ class LinePlots:
             ds_ref = data_list[0]
             quantile_levels = ds_ref["quantile_levels"].values
 
-            # Find extreme regions (typically below 5% and above 95%)
-            lower_extreme_idx = quantile_levels < 0.05
-            upper_extreme_idx = quantile_levels > 0.95
+            # Find extreme regions using configurable thresholds
+            lower_extreme_idx = quantile_levels < (extreme_percentiles[0] / 100)
+            upper_extreme_idx = quantile_levels > (extreme_percentiles[1] / 100)
 
             if np.any(lower_extreme_idx):
                 lower_q = ds_ref["gt_quantiles"].values[lower_extreme_idx]
@@ -1268,8 +1332,10 @@ class LinePlots:
         ax_dev.grid(True, linestyle="--", alpha=0.3)
 
         # Highlight extreme regions in deviation plot
-        ax_dev.axvspan(0.0, 0.05, alpha=0.1, color="blue")
-        ax_dev.axvspan(0.95, 1.0, alpha=0.1, color="red")
+        lower_threshold = extreme_percentiles[0] / 100
+        upper_threshold = extreme_percentiles[1] / 100
+        ax_dev.axvspan(0.0, lower_threshold, alpha=0.1, color="blue")
+        ax_dev.axvspan(upper_threshold, 1.0, alpha=0.1, color="red")
 
         plt.tight_layout()
 

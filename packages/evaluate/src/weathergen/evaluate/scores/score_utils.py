@@ -36,3 +36,41 @@ def to_list(obj: Any) -> list:
     elif not isinstance(obj, list):
         obj = [obj]
     return obj
+
+
+def arr_to_list(arr, idx):
+    """
+    Convert array values at specific index to a Python list for JSON serialization.
+
+    Parameters
+    ----------
+    arr : xr.DataArray or np.ndarray
+        Array containing values to convert.
+    idx : tuple
+        Index tuple for accessing multi-dimensional array.
+
+    Returns
+    -------
+    list
+        Python list of values at the specified index.
+    """
+    return arr.values[(...,) + idx].tolist() if arr.ndim > 1 else arr.values.tolist()
+
+
+def arr_to_float(arr, idx):
+    """
+    Convert array value at specific index to a Python float for JSON serialization.
+
+    Parameters
+    ----------
+    arr : xr.DataArray or np.ndarray
+        Array containing the value to convert.
+    idx : tuple
+        Index for accessing the array.
+
+    Returns
+    -------
+    float
+        Python float value at the specified index.
+    """
+    return float(arr.values[idx]) if arr.ndim > 0 else float(arr.values)

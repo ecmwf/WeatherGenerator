@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import json
 import logging
 from collections.abc import Iterable, Sequence
 
@@ -14,6 +15,24 @@ import numpy as np
 import xarray as xr
 
 _logger = logging.getLogger(__name__)
+
+
+def _flatten_or_average(arr: np.ndarray) -> np.ndarray:
+    """Flatten array or average across non-quantile dimensions.
+    
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array, possibly multi-dimensional.
+    
+    Returns
+    -------
+    np.ndarray
+        Flattened 1D array, averaged across extra dimensions if needed.
+    """
+    if arr.ndim > 1:
+        return np.mean(arr, axis=tuple(range(1, arr.ndim))).flatten()
+    return arr
 
 
 def collect_streams(runs: dict):
@@ -409,7 +428,7 @@ class DefaultMarkerSize:
         return list(cls._marker_size_stream.keys())
 
 
-def qq_plot_metric_region(
+def quantile_plot_metric_region(
     metric: str,
     region: str,
     runs: dict,
@@ -475,75 +494,16 @@ def qq_plot_metric_region(
 
                         qq_data = json.loads(qq_data_str)
 
-                        # Convert lists back to numpy arrays for plotting
-                        quantile_levels = np.array(qq_data["quantile_levels"])
-                        p_quantiles = np.array(qq_data["p_quantiles"])
-                        gt_quantiles = np.array(qq_data["gt_quantiles"])
-                        qq_deviation = np.array(qq_data["qq_deviation"])
-                        qq_deviation_normalized = np.array(
-                            qq_data.get("qq_deviation_normalized", qq_deviation)
-                        )
-                        extreme_low_mse = np.array(qq_data.get("extreme_low_mse", 0.0))
-                        extreme_high_mse = np.array(qq_data.get("extreme_high_mse", 0.0))
-
-                        # All quantile data is replicated across sample/ens dimensions
-                        # Take the first sample's data (they're all identical)
-                        quantile_levels_1d = (
-                            quantile_levels.flatten()
-                            if quantile_levels.ndim > 1
-                            else quantile_levels
-                        )
-
-                        # For p_quantiles and gt_quantiles, average across samples
-                        # Shape: (n_quantiles, n_samples, n_ens)
-                        # Average across samples (axis 1) and ens (axis 2)
-                        if p_quantiles.ndim > 1:
-                            # Average across all axes except the first (quantile axis)
-                            p_quantiles_1d = np.mean(
-                                p_quantiles, axis=tuple(range(1, p_quantiles.ndim))
-                            ).flatten()
-                        else:
-                            p_quantiles_1d = p_quantiles
-
-                        if gt_quantiles.ndim > 1:
-                            gt_quantiles_1d = np.mean(
-                                gt_quantiles, axis=tuple(range(1, gt_quantiles.ndim))
-                            ).flatten()
-                        else:
-                            gt_quantiles_1d = gt_quantiles
-
-                        if qq_deviation.ndim > 1:
-                            qq_deviation_1d = np.mean(
-                                qq_deviation, axis=tuple(range(1, qq_deviation.ndim))
-                            ).flatten()
-                        else:
-                            qq_deviation_1d = qq_deviation
-
-                        if qq_deviation_normalized.ndim > 1:
-                            qq_deviation_normalized_1d = np.mean(
-                                qq_deviation_normalized,
-                                axis=tuple(range(1, qq_deviation_normalized.ndim)),
-                            ).flatten()
-                        else:
-                            qq_deviation_normalized_1d = qq_deviation_normalized
-
-                        # Handle scalar MSE values
-                        extreme_low_mse_scalar = float(np.mean(extreme_low_mse))
-                        extreme_high_mse_scalar = float(np.mean(extreme_high_mse))
-
-                        # Create Dataset with proper dimensions
+                        # Convert and process all arrays
                         qq_dataset = xr.Dataset(
                             {
-                                "quantile_levels": (["quantile"], quantile_levels_1d),
-                                "p_quantiles": (["quantile"], p_quantiles_1d),
-                                "gt_quantiles": (["quantile"], gt_quantiles_1d),
-                                "qq_deviation": (["quantile"], qq_deviation_1d),
-                                "qq_deviation_normalized": (
-                                    ["quantile"],
-                                    qq_deviation_normalized_1d,
-                                ),
-                                "extreme_low_mse": ([], extreme_low_mse_scalar),
-                                "extreme_high_mse": ([], extreme_high_mse_scalar),
+                                "quantile_levels": (["quantile"], _flatten_or_average(np.array(qq_data["quantile_levels"]))),
+                                "p_quantiles": (["quantile"], _flatten_or_average(np.array(qq_data["p_quantiles"]))),
+                                "gt_quantiles": (["quantile"], _flatten_or_average(np.array(qq_data["gt_quantiles"]))),
+                                "qq_deviation": (["quantile"], _flatten_or_average(np.array(qq_data["qq_deviation"]))),
+                                "qq_deviation_normalized": (["quantile"], _flatten_or_average(np.array(qq_data.get("qq_deviation_normalized", qq_data["qq_deviation"])))),
+                                "extreme_low_mse": ([], float(np.mean(qq_data.get("extreme_low_mse", 0.0)))),
+                                "extreme_high_mse": ([], float(np.mean(qq_data.get("extreme_high_mse", 0.0)))),
                             }
                         )
                         qq_full_data.append(qq_dataset)

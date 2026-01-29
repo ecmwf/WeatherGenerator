@@ -25,11 +25,11 @@ from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     heat_maps_metric_region,
     plot_metric_region,
-    qq_plot_metric_region,
+    quantile_plot_metric_region,
     ratio_plot_metric_region,
     score_card_metric_region,
 )
-from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, ScoreCards
+from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, QuantilePlots, ScoreCards
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.clim_utils import get_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
@@ -185,7 +185,7 @@ def calc_scores_per_stream(
             if not valid_scores:
                 continue
 
-            # Concatenate all metrics; use "different" for metric-specific coords
+            # Concatenate all metrics using "different" to allow metric-specific coords
             combined_metrics = xr.concat(
                 valid_scores,
                 dim="metric",
@@ -210,25 +210,31 @@ def calc_scores_per_stream(
 
             metric_stream.loc[criteria] = combined_metrics
 
-            # Preserve metric-specific coordinates that loc assignment may drop
-            if "qq_full_data" in combined_metrics.coords:
-                if "qq_full_data" not in metric_stream.coords:
-                    # Initialize coordinate array on first encounter
-                    metric_stream = metric_stream.assign_coords(
-                        {
-                            "qq_full_data": xr.DataArray(
-                                np.full(metric_stream.shape, "", dtype=object),
-                                dims=metric_stream.dims,
-                                coords={
-                                    dim: metric_stream.coords[dim] for dim in metric_stream.dims
-                                },
-                            )
-                        }
-                    )
-                # Copy coordinate values for this slice
-                metric_stream.coords["qq_full_data"].loc[criteria] = combined_metrics.coords[
-                    "qq_full_data"
-                ]
+            # Preserve non-dimensional coordinates that .loc assignment drops
+            for coord in combined_metrics.coords:
+                # Skip dimensional coordinates and index variables
+                if coord in combined_metrics.dims or coord in metric_stream.dims:
+                    continue
+
+                # Check if coordinate dimensions are compatible with metric_stream
+                coord_dims = combined_metrics.coords[coord].dims
+                if not all(dim in metric_stream.dims for dim in coord_dims):
+                    continue
+
+                # Initialize new coordinate with proper dimensions if needed
+                if coord not in metric_stream.coords:
+                    coord_shape = tuple(len(metric_stream.coords[dim]) for dim in coord_dims)
+                    metric_stream = metric_stream.assign_coords({
+                        coord: xr.DataArray(
+                            np.full(coord_shape, "", dtype=object),
+                            dims=coord_dims,
+                            coords={dim: metric_stream.coords[dim] for dim in coord_dims},
+                        )
+                    })
+
+                # Assign coordinate values using filtered criteria
+                coord_criteria = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
+                metric_stream.coords[coord].loc[coord_criteria] = combined_metrics.coords[coord]
 
             lead_time_map[fstep] = (
                 np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
@@ -562,11 +568,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     plotter = LinePlots(plot_cfg, summary_dir)
     sc_plotter = ScoreCards(plot_cfg, summary_dir)
     br_plotter = BarPlots(plot_cfg, summary_dir)
+    quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
     for region in regions:
         for metric in metrics:
             # Special handling for Q-Q analysis metric
             if metric == "qq_analysis":
-                qq_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
             elif eval_opt.get("summary_plots", True):
                 plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("ratio_plots", False):
