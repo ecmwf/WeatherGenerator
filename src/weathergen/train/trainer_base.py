@@ -24,8 +24,6 @@ PORT = 1345
 
 class TrainerBase:
     def __init__(self):
-        self.device_handles = []
-        self.device_names = []
         self.cf: Config | None = None
 
     @staticmethod
