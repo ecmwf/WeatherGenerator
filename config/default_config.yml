@@ -180,9 +180,7 @@ training_config:
   model_input: {
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
-      masking_strategy: "random",
-      num_samples: 2,
-      masking_strategy_config: { rate: 0.5, rate_sampling: False }
+      masking_strategy: "forecast",
       },
     }
 

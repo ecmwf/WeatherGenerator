@@ -187,10 +187,6 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     )
     filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
-    if not (path_run / filename).exists():
-        mini_epoch_id = f"epoch{mini_epoch:05d}"
-        filename = f"{run_id}_{mini_epoch_id}.chkpt"
-
     params = torch.load(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
