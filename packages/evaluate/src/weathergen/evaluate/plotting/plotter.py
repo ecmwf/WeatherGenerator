@@ -1139,7 +1139,6 @@ class LinePlots:
 
 
 class QuantilePlots:
-
     def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
         """
         Initialize the QuantilePlots class.
@@ -1160,7 +1159,7 @@ class QuantilePlots:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.out_plot_dir = Path(output_basedir) / "quantile_plots"
-        
+
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)

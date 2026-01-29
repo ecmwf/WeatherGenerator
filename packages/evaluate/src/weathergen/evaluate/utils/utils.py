@@ -29,7 +29,13 @@ from weathergen.evaluate.plotting.plot_utils import (
     ratio_plot_metric_region,
     score_card_metric_region,
 )
-from weathergen.evaluate.plotting.plotter import BarPlots, LinePlots, Plotter, QuantilePlots, ScoreCards
+from weathergen.evaluate.plotting.plotter import (
+    BarPlots,
+    LinePlots,
+    Plotter,
+    QuantilePlots,
+    ScoreCards,
+)
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.clim_utils import get_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
@@ -185,11 +191,11 @@ def calc_scores_per_stream(
             if not valid_scores:
                 continue
 
-            # Concatenate all metrics using "different" to allow metric-specific coords
+            # Concatenate all metrics using "minimal" to handle metrics with different coords
             combined_metrics = xr.concat(
                 valid_scores,
                 dim="metric",
-                coords="different",
+                coords="minimal",
                 combine_attrs="no_conflicts",
             )
 
@@ -210,31 +216,39 @@ def calc_scores_per_stream(
 
             metric_stream.loc[criteria] = combined_metrics
 
-            # Preserve non-dimensional coordinates that .loc assignment drops
-            for coord in combined_metrics.coords:
-                # Skip dimensional coordinates and index variables
-                if coord in combined_metrics.dims or coord in metric_stream.dims:
+            # Restore metric-specific coordinates that were dropped by coords="minimal"
+            # (e.g., quantiles, extreme_percentiles for qq_analysis)
+            for coord_name in combined_metrics.coords:
+                # Skip coordinates that are already dimensions (no need to restore)
+                if coord_name in combined_metrics.dims or coord_name in metric_stream.dims:
                     continue
 
-                # Check if coordinate dimensions are compatible with metric_stream
-                coord_dims = combined_metrics.coords[coord].dims
+                # Only restore coordinates whose dimensions exist in metric_stream
+                # (e.g., skip coords with 'quantile' dim if metric_stream doesn't have it)
+                coord_dims = combined_metrics.coords[coord_name].dims
                 if not all(dim in metric_stream.dims for dim in coord_dims):
+                    _logger.debug(
+                        f"Skipping coordinate '{coord_name}' with incompatible "
+                        f"dimensions {coord_dims} (metric_stream has {metric_stream.dims})"
+                    )
                     continue
 
-                # Initialize new coordinate with proper dimensions if needed
-                if coord not in metric_stream.coords:
+                # Initialize coordinate in metric_stream if it doesn't exist yet
+                if coord_name not in metric_stream.coords:
                     coord_shape = tuple(len(metric_stream.coords[dim]) for dim in coord_dims)
-                    metric_stream = metric_stream.assign_coords({
-                        coord: xr.DataArray(
-                            np.full(coord_shape, "", dtype=object),
-                            dims=coord_dims,
-                            coords={dim: metric_stream.coords[dim] for dim in coord_dims},
-                        )
-                    })
+                    metric_stream = metric_stream.assign_coords(
+                        {
+                            coord_name: xr.DataArray(
+                                np.full(coord_shape, "", dtype=object),
+                                dims=coord_dims,
+                                coords={dim: metric_stream.coords[dim] for dim in coord_dims},
+                            )
+                        }
+                    )
 
-                # Assign coordinate values using filtered criteria
-                coord_criteria = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
-                metric_stream.coords[coord].loc[coord_criteria] = combined_metrics.coords[coord]
+                # Build indexers to select the right location in metric_stream
+                indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
+                metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[coord_name]
 
             lead_time_map[fstep] = (
                 np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))

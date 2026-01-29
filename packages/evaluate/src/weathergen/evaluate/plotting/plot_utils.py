@@ -13,18 +13,19 @@ from collections.abc import Iterable, Sequence
 
 import numpy as np
 import xarray as xr
+from numpy.typing import NDArray
 
 _logger = logging.getLogger(__name__)
 
 
-def _flatten_or_average(arr: np.ndarray) -> np.ndarray:
+def _flatten_or_average(arr: NDArray) -> NDArray:
     """Flatten array or average across non-quantile dimensions.
-    
+
     Parameters
     ----------
     arr : np.ndarray
         Input array, possibly multi-dimensional.
-    
+
     Returns
     -------
     np.ndarray
@@ -475,8 +476,6 @@ def quantile_plot_metric_region(
                 # For qq_analysis, extract full Q-Q data from coordinate
                 if metric == "qq_analysis":
                     if "qq_full_data" in data_for_channel.coords:
-                        import json
-
                         # Get the qq_full_data - it may be 0-d (scalar) or multi-d
                         qq_coord = data_for_channel.coords["qq_full_data"]
 
@@ -494,18 +493,39 @@ def quantile_plot_metric_region(
 
                         qq_data = json.loads(qq_data_str)
 
-                        # Convert and process all arrays
-                        qq_dataset = xr.Dataset(
-                            {
-                                "quantile_levels": (["quantile"], _flatten_or_average(np.array(qq_data["quantile_levels"]))),
-                                "p_quantiles": (["quantile"], _flatten_or_average(np.array(qq_data["p_quantiles"]))),
-                                "gt_quantiles": (["quantile"], _flatten_or_average(np.array(qq_data["gt_quantiles"]))),
-                                "qq_deviation": (["quantile"], _flatten_or_average(np.array(qq_data["qq_deviation"]))),
-                                "qq_deviation_normalized": (["quantile"], _flatten_or_average(np.array(qq_data.get("qq_deviation_normalized", qq_data["qq_deviation"])))),
-                                "extreme_low_mse": ([], float(np.mean(qq_data.get("extreme_low_mse", 0.0)))),
-                                "extreme_high_mse": ([], float(np.mean(qq_data.get("extreme_high_mse", 0.0)))),
-                            }
+                        # Build dataset with quantile-based and scalar variables
+                        quantile_vars = [
+                            "quantile_levels",
+                            "p_quantiles",
+                            "gt_quantiles",
+                            "qq_deviation",
+                        ]
+                        dataset_dict = {
+                            var: (["quantile"], _flatten_or_average(np.array(qq_data[var])))
+                            for var in quantile_vars
+                        }
+
+                        # Add normalized deviation (with fallback)
+                        dataset_dict["qq_deviation_normalized"] = (
+                            ["quantile"],
+                            _flatten_or_average(
+                                np.array(
+                                    qq_data.get("qq_deviation_normalized", qq_data["qq_deviation"])
+                                )
+                            ),
                         )
+
+                        # Add scalar MSE values
+                        dataset_dict["extreme_low_mse"] = (
+                            [],
+                            float(np.mean(qq_data.get("extreme_low_mse", 0.0))),
+                        )
+                        dataset_dict["extreme_high_mse"] = (
+                            [],
+                            float(np.mean(qq_data.get("extreme_high_mse", 0.0))),
+                        )
+
+                        qq_dataset = xr.Dataset(dataset_dict)
                         qq_full_data.append(qq_dataset)
                     else:
                         _logger.warning("qq_full_data not found in coords for qq_analysis metric")
