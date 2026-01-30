@@ -84,7 +84,6 @@ case "$1" in
   unit-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv sync --extra cpu 
       uv run --extra cpu pytest src/
     )
     ;;
