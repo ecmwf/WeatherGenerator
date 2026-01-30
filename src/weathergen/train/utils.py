@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import json
 
 import torch
@@ -153,11 +154,13 @@ def filter_config_by_enabled(cfg, keys):
     Filtered disabled entries from config
     """
 
+    cfg_out = copy.deepcopy(cfg)
+
     for key in keys:
         filtered = {}
-        for k, v in cfg.get(key, {}).items():
+        for k, v in cfg_out.get(key, {}).items():
             if v.get("enabled", True):
                 filtered[k] = v
-        cfg[key] = filtered
+        cfg_out[key] = filtered
 
-    return cfg
+    return cfg_out
