@@ -11,7 +11,6 @@
 
 import itertools
 import logging
-import re
 from pathlib import Path
 
 import omegaconf
@@ -33,7 +32,7 @@ from weathergen.model.attention import (
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import freeze_weights
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
@@ -62,14 +61,7 @@ def init_model_and_shard(
         model = get_model(cf, training_mode, dataset, overrides)
 
     # freeze request model part
-    for name, module in model.named_modules():
-        name = module.name if hasattr(module, "name") else name
-        # avoid the whole model element which has name ''
-        if name == "":
-            continue
-        if re.fullmatch(cf.freeze_modules, name) is not None:
-            logger.info(f"Froze weights {name}")
-            freeze_weights(module)
+    apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
 
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:

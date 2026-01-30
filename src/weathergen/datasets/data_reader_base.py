@@ -208,6 +208,42 @@ class ReaderData:
             self.datetimes[idx_valid],
         )
 
+    def shuffle(self, rng, shuffle: bool, num_subset: int) -> "ReaderData":
+        """
+        Drop a random subset of points as specified by num_subset
+        num_subset = -1 indicates no points to be dropped
+
+        Returns
+        -------
+        self
+        """
+
+        # nothing to be done
+        if num_subset < 0 and shuffle is False:
+            return self
+
+        num_datapoints = self.coords.shape[0]
+        if (num_datapoints == 0) or (num_datapoints < num_subset and shuffle is False):
+            return self
+
+        # only shuffling
+        if num_subset == -1 and shuffle is True:
+            num_subset = num_datapoints
+
+        # ensure num_subset <= num_datapoints
+        num_subset = min(num_subset, num_datapoints)
+
+        idxs_subset = rng.choice(num_datapoints, num_subset, replace=False)
+        if shuffle is False:
+            idxs_subset = np.sort(idxs_subset)
+
+        self.coords = self.coords[idxs_subset]
+        self.geoinfos = self.geoinfos[idxs_subset]
+        self.data = self.data[idxs_subset]
+        self.datetimes = self.datetimes[idxs_subset]
+
+        return self
+
 
 def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     """
