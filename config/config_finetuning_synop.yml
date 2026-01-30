@@ -45,7 +45,7 @@ ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
-decoder_type: Linear # CrossAttentionAdaNormConditioning
+decoder_type: PerceiverIOCoordConditioning #Linear # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
@@ -70,7 +70,7 @@ healpix_level: 5
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: True
+with_fsdp: False
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -132,7 +132,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 16
+  num_mini_epochs: 4
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -171,14 +171,26 @@ training_config:
         type: LossPhysical,
         loss_fcts: { "mse": { }, },
         },
+    "student-teacher":{
+      enabled: False
+    }
     }
   
   model_input: {
+    "random_easy" : { enabled : False},
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       },
     }
+  target_input: {
+  "forecasting_target" : {
+    masking_strategy: "forecast"  
+  },
+  "random_easy_target" : {
+    enabled: False
+  }
+}
 
   forecast :
       time_step: 00:00:00
@@ -298,4 +310,3 @@ wgtags:
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null
-
