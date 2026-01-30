@@ -1,13 +1,3 @@
-The ``WeatherGenerator-FastEvaluation`` package
-===============================================
-
-A modular evaluation and visualization package for verifying forecast
-data and model outputs in the WeatherGenerator project. This package
-reads the output of the inference stage from the WeatherGenerator and
-provides statistics or exports to other tools.
-
---------------
-
 Overview
 --------
 
@@ -77,21 +67,6 @@ The package is functionally stable, and its core evaluation workflows
 are used in active development. However, documentation is currently
 internal: design notes, detailed examples, and workflow guides remain
 private and will be opened gradually as they are consolidated.
-
-Quick Start — Running the Evaluation Workflow
----------------------------------------------
-
-After the inference step you can run evaluation (on CPUs) as:
-
-::
-
-   uv run evaluate --config <path to config file>
-
-The default config file is at:
-``WeatherGenerator/configs/evaluate/eval_config.yml``
-
-More instructions can be found here:
-https://gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private/-/wikis/home/Common-workflows/fast-evaluation
 
 --------------
 

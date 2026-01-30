@@ -1,33 +1,21 @@
 Usage
 =====
 
-.. _installation:
-
-Installation
+Prerequisites
 ------------
 
-To use fasteval, first install it using uv:
+To use the FastEvaluation package you must first run inference. 
 
-.. code-block:: console
 
-   (.venv) $ pip install lumache
+Command Line Usage
+------------------
 
-Creating recipes
-----------------
+Evaluation can be run on CPUs with:
 
-To retrieve a list of random ingredients,
-you can use the ``lumache.get_random_ingredients()`` function:
+>>> uv run evaluate --config <path to config file>
 
-.. autofunction:: lumache.get_random_ingredients
+The default config file is at:
+``WeatherGenerator/configs/evaluate/eval_config.yml``
 
-The ``kind`` parameter should be either ``"meat"``, ``"fish"``,
-or ``"veggies"``. Otherwise, :py:func:`lumache.get_random_ingredients`
-will raise an exception.
-
-.. autoexception:: lumache.InvalidKindError
-
-For example:
-
->>> import lumache
->>> lumache.get_random_ingredients()
-['shells', 'gorgonzola', 'parsley']
+More instructions can be found here:
+https://gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private/-/wikis/home/Common-workflows/fast-evaluation

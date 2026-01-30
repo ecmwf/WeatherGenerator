@@ -13,17 +13,20 @@
 # import os
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
+import datetime
 
 
 # -- Project information -----------------------------------------------------
 
-project = "WeatherGenerator"
-copyright = "...."
-author = "...."
+project = "WeatherGenerator-FastEvaluation"
+author = "......"
+
+year = datetime.datetime.now().year
+years = "2026-%s" % (year,)
+copyright = "%s, ......." % (years,)
 
 
 # -- General configuration ---------------------------------------------------
-# -- General configuration
 
 extensions = [
     "sphinx.ext.duration",
@@ -32,6 +35,9 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.intersphinx",
 ]
+
+# Path to GitHub repo {group}/{project}  (note that `group` is the GitHub user or organization)
+issues_github_path = "ecmwf/WeatherGenerator/packages/evaluate"
 
 intersphinx_mapping = {
     "rtd": ("https://docs.readthedocs.io/en/stable/", None),
