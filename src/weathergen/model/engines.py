@@ -306,11 +306,11 @@ class QueryAggregationEngine(torch.nn.Module):
 
     def forward(self, tokens, batch_lens, use_reentrant, coords=None):
         for block in self.ae_aggregation_blocks:
-            ada_ln_aux = None
+            aux_info = None
             if isinstance(block, MultiSelfAttentionHeadVarlen):
                 tokens = block(tokens, x_lens=batch_lens)
             else:
-                tokens = block(tokens, coords, ada_ln_aux)
+                tokens = block(tokens, coords, aux_info)
         return tokens
 
 
