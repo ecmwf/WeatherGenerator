@@ -168,8 +168,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             f"stream '{stream_info['name']}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
-                    
-                    filename = filenames[0] # arbitrarly choose first existing path
+
+                    filename = filenames[0]  # arbitrarly choose first existing path
 
                 ds_type = stream_info["type"]
                 if is_root():

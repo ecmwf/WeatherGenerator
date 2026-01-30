@@ -1,9 +1,3 @@
-from collections.abc import Callable
-from dataclasses import dataclass
-
-from weathergen.common.config import Config
-
-
 def get_extra_reader(stream_type: str) -> object | None:
     """Get an extra reader by stream_type name."""
     # Uses lazy imports to avoid circular dependencies and to not load all the readers at start.

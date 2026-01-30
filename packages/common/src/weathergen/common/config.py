@@ -310,17 +310,17 @@ def _check_datasets(config: Config) -> Config:
     Collect dataset pathes under legacy keys.
     """
     config = config.copy()
-    if config.get("data_pathes") is None: # TODO remove this for next version
+    if config.get("data_pathes") is None:  # TODO remove this for next version
         legacy_keys = [
             "data_path_anmoi",
             "data_path_obs",
             "data_path_eobs",
             "data_path_fesom",
-            "data_path_icon"
+            "data_path_icon",
         ]
         pathes = [config.get(key) for key in legacy_keys]
         config.data_pathes = [path for path in pathes if path is not None]
-    
+
     return config
 
 
@@ -545,8 +545,8 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
-    
-    private_cf = _check_datasets(private_cf) # TODO: remove temp backward compatibility fix
+
+    private_cf = _check_datasets(private_cf)  # TODO: remove temp backward compatibility fix
 
     assert isinstance(private_cf, DictConfig)
     return private_cf
