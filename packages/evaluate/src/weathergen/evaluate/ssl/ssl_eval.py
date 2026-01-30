@@ -8,9 +8,11 @@
 # nor does it submit to any jurisdiction.
 
 """
-Script to run Inference and evaluation for the Weather Generator with multiple streams and observations.
+Script to run Inference and evaluation for the Weather Generator with
+multiple streams and observations.
 This script must run on a GPU machine.
-It performs a standardised routine of inference and evaluation over multiple data sources including gridded and obs data.
+It performs a standardised routine of inference and evaluation
+over multiple data sources including gridded and obs data.
 
 Command:
 uv run --offline ssl_analysis --run-id j2dkivn8
