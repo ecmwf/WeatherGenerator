@@ -12,6 +12,8 @@ Visualize masked source/target samples using the training data pipeline.
 
 This script loads a config, builds a MultiStreamDataSampler, extracts one batch,
 and plots a single variable for source and target with masking/cropping applied.
+This script can run on a cpu or logging node without GPUs. 
+Please activate your .venv before running.
 
 Usage:
   python -m weathergen.utils.visualize_masking -c config/config_jepa.yml
@@ -34,17 +36,17 @@ import torch
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import astropy.units as u  # noqa: E402
-import astropy_healpix as hp  # noqa: E402
-import cartopy.crs as ccrs  # noqa: E402
-import cartopy.feature as cfeature  # noqa: E402
-from omegaconf import OmegaConf, open_dict  # noqa: E402
+import matplotlib.pyplot as plt  
+import astropy.units as u  
+import astropy_healpix as hp  
+import cartopy.crs as ccrs  
+import cartopy.feature as cfeature  
+from omegaconf import OmegaConf, open_dict  
 
-import weathergen.common.config as wg_config  # noqa: E402
-from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler  # noqa: E402
-from weathergen.train.utils import filter_config_by_enabled  # noqa: E402
-from weathergen.utils.train_logger import TRAIN, VAL  # noqa: E402
+import weathergen.common.config as wg_config  
+from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler  
+from weathergen.train.utils import filter_config_by_enabled  
+from weathergen.utils.train_logger import TRAIN, VAL  
 
 logger = logging.getLogger(__name__)
 
@@ -202,11 +204,52 @@ def get_parser() -> argparse.ArgumentParser:
         default=True,
         help="Include a full-data panel in each plot (default: True).",
     )
+    parser.add_argument(
+        "--cmap",
+        type=str,
+        default="coolwarm",
+        help="Colormap for data visualization (default: coolwarm).",
+    )
+    parser.add_argument(
+        "--point-size",
+        type=float,
+        default=2.0,
+        help="Scatter point size (default: 2.0).",
+    )
+    parser.add_argument(
+        "--shared-colorbar",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use a single shared colorbar below all panels instead of per-panel colorbars (default: False).",
+    )
 
     return parser
 
 
 def _select_stream(streams: list, preferred_name: str | None) -> Any:
+    """Select a stream from the available streams.
+
+    If a preferred name is provided, returns that stream. Otherwise, prefers
+    streams containing 'era1', 'era5', or 'era' in their name (in that order).
+    Falls back to the first available stream.
+
+    Parameters
+    ----------
+    streams : list
+        List of stream configuration objects.
+    preferred_name : str or None
+        Specific stream name to select. If None, uses automatic selection.
+
+    Returns
+    -------
+    Any
+        The selected stream configuration object.
+
+    Raises
+    ------
+    ValueError
+        If no streams are available or if the preferred stream is not found.
+    """
     if not streams:
         raise ValueError("No streams found in configuration.")
 
@@ -276,6 +319,26 @@ def _format_mask_params(params: dict) -> str:
 def _map_points_visible(
     lats: np.ndarray, lons: np.ndarray, mask: np.ndarray, healpix_level: int
 ) -> np.ndarray:
+    """Determine which data points are visible given a HEALPix cell mask.
+
+    Maps each (lat, lon) coordinate to its corresponding HEALPix cell and
+    returns a boolean array indicating whether that cell is visible (True)
+    or masked out (False).
+
+    Parameters
+    ----------
+    lats, lons : np.ndarray
+        Latitude and longitude coordinates in degrees.
+    mask : np.ndarray
+        Boolean mask over HEALPix cells (True = visible).
+    healpix_level : int
+        HEALPix resolution level (nside = 2^level).
+
+    Returns
+    -------
+    np.ndarray
+        Boolean array of same length as lats/lons indicating visibility.
+    """
     if len(lats) == 0:
         return np.array([], dtype=bool)
     nside = 2**healpix_level
@@ -289,6 +352,25 @@ def _map_points_visible(
 def _resolve_var_idx(
     channels: list[str], var_name: str | None, label: str, strict: bool
 ) -> tuple[int, str]:
+    """Resolve a variable name to its index in the channel list.
+
+    Parameters
+    ----------
+    channels : list[str]
+        Available channel/variable names.
+    var_name : str or None
+        Requested variable name. If None, returns the first channel.
+    label : str
+        Label for error messages (e.g., "source", "target").
+    strict : bool
+        If True, raise an error when var_name is not found.
+        If False, log a warning and fall back to the first channel.
+
+    Returns
+    -------
+    tuple[int, str]
+        The index and resolved variable name.
+    """
     if not channels:
         raise ValueError(f"No channels available for {label}.")
     if var_name is None:
@@ -315,6 +397,35 @@ def _masked_points_from_source_view(
     var_idx: int,
     denorm: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract visible data points from a source sample after tokenization and masking.
+
+    This function replicates the training pipeline's tokenization and masking logic
+    to determine which data points are visible in the source (student) view.
+
+    Parameters
+    ----------
+    dataset : MultiStreamDataSampler
+        The data sampler containing tokenizer and normalization info.
+    stream_info
+        Stream configuration object.
+    stream_name : str
+        Name of the stream.
+    stream_data
+        Stream data object containing source_raw.
+    mask : array-like
+        Token-level mask (True = visible).
+    step : int
+        Time step index within the source sequence.
+    var_idx : int
+        Variable index to extract.
+    denorm : bool
+        Whether to denormalize the values.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+        Latitude, longitude, and value arrays for visible points.
+    """
     rdata = stream_data.source_raw[step]
     if rdata is None or rdata.data is None or len(rdata.data) == 0:
         return np.array([]), np.array([]), np.array([])
@@ -356,6 +467,28 @@ def _full_points_from_source(
     var_idx: int,
     denorm: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract all data points from a source sample (no masking applied).
+
+    Parameters
+    ----------
+    dataset : MultiStreamDataSampler
+        The data sampler containing normalization info.
+    stream_name : str
+        Name of the stream.
+    stream_data
+        Stream data object containing source_raw.
+    step : int
+        Time step index within the source sequence.
+    var_idx : int
+        Variable index to extract.
+    denorm : bool
+        Whether to denormalize the values.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+        Latitude, longitude, and value arrays for all points.
+    """
     rdata = stream_data.source_raw[step]
     if rdata is None or rdata.data is None or len(rdata.data) == 0:
         return np.array([]), np.array([]), np.array([])
@@ -377,6 +510,31 @@ def _masked_points_from_target_values(
     var_idx: int,
     denorm: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract visible data points from a target sample using target tokens.
+
+    Uses the pre-computed target_tokens and target_coords_raw which contain
+    only the visible (non-masked) target points.
+
+    Parameters
+    ----------
+    dataset : MultiStreamDataSampler
+        The data sampler containing normalization info.
+    stream_name : str
+        Name of the stream.
+    stream_data
+        Stream data object containing target_tokens and target_coords_raw.
+    step : int
+        Forecast step index.
+    var_idx : int
+        Variable index to extract.
+    denorm : bool
+        Whether to denormalize the values.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+        Latitude, longitude, and value arrays for visible target points.
+    """
     if step >= len(stream_data.target_tokens):
         return np.array([]), np.array([]), np.array([])
 
@@ -401,6 +559,23 @@ def _downsample(
     vals: np.ndarray,
     max_points: int | None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Randomly downsample points if they exceed the maximum limit.
+
+    Parameters
+    ----------
+    rng : np.random.Generator
+        Random number generator for reproducible sampling.
+    lats, lons, vals : np.ndarray
+        Coordinate and value arrays to downsample.
+    max_points : int or None
+        Maximum number of points to keep. If None or if data is already
+        smaller, returns the original arrays unchanged.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+        Downsampled latitude, longitude, and value arrays.
+    """
     if max_points is None or len(vals) <= max_points:
         return lats, lons, vals
     idxs = rng.choice(len(vals), size=max_points, replace=False)
@@ -426,11 +601,52 @@ def _plot_cartopy_three_panel(
     dpi: int,
     vmin: float | None = None,
     vmax: float | None = None,
+    cmap: str = "coolwarm",
+    point_size: float = 2.0,
+    shared_colorbar: bool = False,
 ) -> None:
+    """Create a 2 or 3 panel visualization of masked source/target data.
+
+    Generates a figure with Robinson projection showing:
+    - Panel 1 (optional): Full unmasked data
+    - Panel 2: Source/Student view with mask applied
+    - Panel 3: Target/Teacher view with mask applied
+
+    Masked-out regions are shown as light gray background points.
+
+    Parameters
+    ----------
+    lats_full, lons_full, vals_full : np.ndarray
+        Coordinates and values for the full (unmasked) data. If empty, the full
+        panel is omitted and a 2-panel layout is used.
+    src_visible, tgt_visible : np.ndarray
+        Boolean arrays indicating which full-data points are visible in source/target.
+    lats_src, lons_src, vals_src : np.ndarray
+        Coordinates and values for the masked source view.
+    lats_tgt, lons_tgt, vals_tgt : np.ndarray
+        Coordinates and values for the masked target view.
+    title : str
+        Overall figure title.
+    src_label, tgt_label : str
+        Labels for source and target panels.
+    out_path : Path
+        Output file path for the saved figure.
+    dpi : int
+        Output image resolution.
+    vmin, vmax : float, optional
+        Color scale limits. If None, computed from 2nd-98th percentile of data.
+    cmap : str
+        Matplotlib colormap name.
+    point_size : float
+        Scatter point size.
+    shared_colorbar : bool
+        If True, use a single colorbar below all panels instead of per-panel colorbars.
+    """
     if len(vals_full) == 0 and len(vals_src) == 0 and len(vals_tgt) == 0:
         raise ValueError("No data points to plot after masking.")
 
     include_full = len(vals_full) > 0
+    ncols = 3 if include_full else 2
 
     if vmin is None or vmax is None:
         vals_ref = vals_full
@@ -440,7 +656,10 @@ def _plot_cartopy_three_panel(
         vmax = np.nanpercentile(vals_ref, 98)
 
     proj = ccrs.Robinson()
-    fig = plt.figure(figsize=(24, 7.5), dpi=dpi)
+    fig = plt.figure(figsize=(8 * ncols, 7.5), dpi=dpi)
+
+    # Size for masked-out background points
+    bg_point_size = max(1.0, point_size * 0.5)
 
     def _setup_axis(ax, title_text: str):
         ax.set_global()
@@ -448,33 +667,39 @@ def _plot_cartopy_three_panel(
         ax.add_feature(cfeature.BORDERS, linewidth=0.3, alpha=0.5)
         ax.set_title(title_text, fontsize=11, fontweight="bold")
 
+    axes = []
+    scatters = []
+
     # Panel 1: Full data
     if include_full:
-        ax1 = fig.add_subplot(1, 3, 1, projection=proj)
+        ax1 = fig.add_subplot(1, ncols, 1, projection=proj)
         _setup_axis(ax1, "Full Data (No Masking)")
         sc1 = ax1.scatter(
             lons_full,
             lats_full,
             c=vals_full,
-            s=2,
-            cmap="coolwarm",
+            s=point_size,
+            cmap=cmap,
             alpha=0.8,
             vmin=vmin,
             vmax=vmax,
             transform=ccrs.PlateCarree(),
             rasterized=True,
         )
-        plt.colorbar(sc1, ax=ax1, fraction=0.04, pad=0.02, orientation="horizontal")
+        axes.append(ax1)
+        scatters.append(sc1)
+        if not shared_colorbar:
+            plt.colorbar(sc1, ax=ax1, fraction=0.04, pad=0.02, orientation="horizontal")
 
     # Panel 2: Source
-    ax2 = fig.add_subplot(1, 3 if include_full else 2, 2 if include_full else 1, projection=proj)
+    ax2 = fig.add_subplot(1, ncols, 2 if include_full else 1, projection=proj)
     _setup_axis(ax2, src_label)
     if len(lats_full) and len(src_visible):
         ax2.scatter(
             lons_full[~src_visible],
             lats_full[~src_visible],
             c="#d3d3d3",
-            s=1,
+            s=bg_point_size,
             alpha=0.3,
             transform=ccrs.PlateCarree(),
             rasterized=True,
@@ -483,25 +708,28 @@ def _plot_cartopy_three_panel(
         lons_src,
         lats_src,
         c=vals_src,
-        s=2,
-        cmap="coolwarm",
+        s=point_size,
+        cmap=cmap,
         alpha=0.8,
         vmin=vmin,
         vmax=vmax,
         transform=ccrs.PlateCarree(),
         rasterized=True,
     )
-    plt.colorbar(sc2, ax=ax2, fraction=0.04, pad=0.02, orientation="horizontal")
+    axes.append(ax2)
+    scatters.append(sc2)
+    if not shared_colorbar:
+        plt.colorbar(sc2, ax=ax2, fraction=0.04, pad=0.02, orientation="horizontal")
 
     # Panel 3: Target
-    ax3 = fig.add_subplot(1, 3 if include_full else 2, 3 if include_full else 2, projection=proj)
+    ax3 = fig.add_subplot(1, ncols, 3 if include_full else 2, projection=proj)
     _setup_axis(ax3, tgt_label)
     if len(lats_full) and len(tgt_visible):
         ax3.scatter(
             lons_full[~tgt_visible],
             lats_full[~tgt_visible],
             c="#d3d3d3",
-            s=1,
+            s=bg_point_size,
             alpha=0.3,
             transform=ccrs.PlateCarree(),
             rasterized=True,
@@ -511,8 +739,8 @@ def _plot_cartopy_three_panel(
             lons_tgt,
             lats_tgt,
             c=vals_tgt,
-            s=2,
-            cmap="coolwarm",
+            s=point_size,
+            cmap=cmap,
             alpha=0.8,
             vmin=vmin,
             vmax=vmax,
@@ -524,26 +752,34 @@ def _plot_cartopy_three_panel(
             lons_full[tgt_visible],
             lats_full[tgt_visible],
             c=vals_full[tgt_visible],
-            s=2,
-            cmap="coolwarm",
+            s=point_size,
+            cmap=cmap,
             alpha=0.8,
             vmin=vmin,
             vmax=vmax,
             transform=ccrs.PlateCarree(),
             rasterized=True,
         )
-    plt.colorbar(sc3, ax=ax3, fraction=0.04, pad=0.02, orientation="horizontal")
+    axes.append(ax3)
+    scatters.append(sc3)
+    if not shared_colorbar:
+        plt.colorbar(sc3, ax=ax3, fraction=0.04, pad=0.02, orientation="horizontal")
 
     fig.suptitle(title, fontsize=14, fontweight="bold", y=0.99)
-    fig.subplots_adjust(top=0.96, bottom=0.08, wspace=0.06)
+
+    if shared_colorbar:
+        # Add a single shared colorbar below all panels
+        fig.subplots_adjust(top=0.92, bottom=0.18, wspace=0.06)
+        cbar_ax = fig.add_axes([0.15, 0.08, 0.7, 0.03])
+        fig.colorbar(scatters[0], cax=cbar_ax, orientation="horizontal")
+    else:
+        fig.subplots_adjust(top=0.96, bottom=0.08, wspace=0.06)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
 
 
-def _plot_cartopy_grid(*args, **kwargs):
-    raise NotImplementedError("Combined grid plotting removed; use separate plots per pair.")
 
 
 def main(args=None) -> int:
@@ -809,6 +1045,9 @@ def main(args=None) -> int:
                 p["tgt_label"],
                 out_path,
                 parsed.dpi,
+                cmap=parsed.cmap,
+                point_size=parsed.point_size,
+                shared_colorbar=parsed.shared_colorbar,
             )
         else:
             # Reuse three-panel plotter but feed empty full panel data to skip it visually.
@@ -829,6 +1068,9 @@ def main(args=None) -> int:
                 p["tgt_label"],
                 out_path,
                 parsed.dpi,
+                cmap=parsed.cmap,
+                point_size=parsed.point_size,
+                shared_colorbar=parsed.shared_colorbar,
             )
         outputs.append(out_path)
 
