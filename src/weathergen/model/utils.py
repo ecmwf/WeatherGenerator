@@ -7,8 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
+import logging
+import re
+
 import torch
 import torch.nn as nn
+
+logger = logging.getLogger(__name__)
 
 
 #########################################
@@ -19,8 +25,34 @@ def get_num_parameters(block):
 
 #########################################
 def freeze_weights(block):
+    if hasattr(block, "name"):
+        logger.info(f"Freeze block {block.name}")
     for p in block.parameters():
         p.requires_grad = False
+
+
+#########################################
+def set_to_eval(block):
+    if hasattr(block, "name"):
+        logger.info(f"Set block {block.name} to eval mode")
+    block.eval()
+
+
+#########################################
+def apply_fct_to_blocks(model, blocks, fct):
+    """
+    Apply a function to specific blocks of a model.
+    Args:
+        model : model instance with attribute named_modules
+        blocks : regex pattern to match block names
+        fct : function to apply to matching blocks
+    """
+
+    for name, module in model.named_modules():
+        name = module.name if hasattr(module, "name") else name
+        # avoid the whole model element which has name ''
+        if (re.fullmatch(blocks, name) is not None) and (name != ""):
+            fct(module)
 
 
 #########################################

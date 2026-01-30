@@ -41,25 +41,33 @@ type StreamName = str
 logger = logging.getLogger(__name__)
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str) -> IOReaderData:
+def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
     """
     Utility function to collect all sources / targets from streams list
+
+    rng and num_subset are used to drop data
     """
 
     rdatas = []
 
     for ds in stream_datasets:
+        # number of points to sub-sample
+        num_subset = -1
+
         if type == "source":
             get_reader_data = ds.get_source
             normalize_channels = ds.normalize_source_channels
+            shuffle = ds.stream_info.get("shuffle_source", False)
         elif type == "target":
             get_reader_data = ds.get_target
             normalize_channels = ds.normalize_target_channels
+            num_subset = ds.stream_info.get("max_num_targets", -1)
+            shuffle = ds.stream_info.get("shuffle_target", False)
         else:
             assert False, "invalid value for argument `type`"
 
         # get source (of potentially multi-step length)
-        rdata = get_reader_data(idx).remove_nan_coords()
+        rdata = get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords()
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
@@ -528,7 +536,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for idx in range(base_idx - num_steps_input_max, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
-            rdata = collect_datasources(stream_ds, idx, "source")
+            rdata = collect_datasources(stream_ds, idx, "source", self.rng)
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
@@ -550,7 +558,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for timestep_idx in range(self.output_offset, num_output_steps):
             step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
-            rdata = collect_datasources(stream_ds, step_forecast_dt, "target")
+            rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719

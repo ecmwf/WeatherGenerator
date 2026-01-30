@@ -28,6 +28,7 @@ from weathergen.model.model_interface import (
     get_target_aux_calculator,
     init_model_and_shard,
 )
+from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -404,6 +405,8 @@ class Trainer(TrainerBase):
 
         cf = self.cf
         self.model.train()
+
+        apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
 
         dataset_iter = iter(self.data_loader)
 
