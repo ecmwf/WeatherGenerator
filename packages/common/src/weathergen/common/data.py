@@ -9,7 +9,6 @@
 
 import dataclasses
 import logging
-from typing import Any
 
 import numpy as np
 from numpy import datetime64
@@ -35,8 +34,10 @@ class DTRange:
     end: NPDT64
 
     def __post_init__(self):
-        assert self.start < self.end, "start time must be before end time"
-        assert self.start > _DT_ZERO, "start time must be after 1850-01-01T00:00"
+        if self.start >= self.end:
+            raise ValueError("start time must be before end time")
+        if self.start <= _DT_ZERO:
+            raise ValueError("start time must be after 1850-01-01T00:00")
 
 
 @dataclasses.dataclass
@@ -55,42 +56,26 @@ class ReaderData:
         return len(self.data)
 
     @classmethod
-    def combine(cls, others: list["ReaderData"]) -> "ReaderData":
+    def create(cls, other: "ReaderData") -> "ReaderData":
         """
-        Create an instance from data_reader_base.ReaderData instance by combining mulitple ones.
+        Create an instance from another ReaderData instance.
 
-        others is list of ReaderData instances.
+        Parameters
+        ------
+            other: ReaderData
+                Input data.
+
+        Returns
+        ------
+            ReaderData:
+                Has the same underlying data as `other`.
         """
-        assert len(others) > 0, len(others)
+        if other is None:
+            raise TypeError("Input cannot be None.")
 
-        other = others[0]
-        coords = np.zeros((0, other.coords.shape[1]), dtype=other.coords.dtype)
-        geoinfos = np.zeros((0, other.geoinfos.shape[1]), dtype=other.geoinfos.dtype)
-        data = np.zeros((0, other.data.shape[1]), dtype=other.data.dtype)
-        datetimes = np.array([], dtype=other.datetimes.dtype)
-        is_spoof = True
+        if not isinstance(other, ReaderData):
+            raise TypeError(f"Expected input of type ReaderData. Got {type(other)}")
 
-        for other in others:
-            n_datapoints = len(other.data)
-            assert other.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
-            assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
-            assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
-
-            coords = np.concatenate([coords, other.coords])
-            geoinfos = np.concatenate([geoinfos, other.geoinfos])
-            data = np.concatenate([data, other.data])
-            datetimes = np.concatenate([datetimes, other.datetimes])
-            is_spoof = is_spoof and other.is_spoof
-
-        return cls(coords, geoinfos, data, datetimes, is_spoof)
-
-    @classmethod
-    def create(cls, other: Any) -> "ReaderData":
-        """
-        Create an instance from data_reader_base.ReaderData instance.
-
-        other should be such an instance.
-        """
         coords = np.asarray(other.coords)
         geoinfos = np.asarray(other.geoinfos)
         data = np.asarray(other.data)
@@ -104,10 +89,61 @@ class ReaderData:
 
         return cls(**dataclasses.asdict(other))
 
+    @classmethod
+    def combine(cls, others: list["ReaderData"]) -> "ReaderData":
+        """
+        Create an instance from ReaderData instance by combining multiple ones.
+
+        Parameters
+        ------
+            others: list[ReaderData]
+                A list of input datas to combine.
+
+        Returns
+        ------
+            ReaderData
+                Instance with concatenated input data.
+        """
+        if others is None:
+            raise TypeError("Input cannot be None.")
+
+        if not isinstance(others, list):
+            raise TypeError(f"Input must be a List. Got {type(others)}")
+
+        assert len(others) > 0, len(others)
+
+        first = others[0]
+        coords = np.zeros((0, first.coords.shape[1]), dtype=first.coords.dtype)
+        geoinfos = np.zeros((0, first.geoinfos.shape[1]), dtype=first.geoinfos.dtype)
+        data = np.zeros((0, first.data.shape[1]), dtype=first.data.dtype)
+        datetimes = np.array([], dtype=first.datetimes.dtype)
+        is_spoof = True
+
+        for item in others:
+            n_datapoints = len(item.data)
+            assert item.coords.shape == (n_datapoints, 2), "number of datapoints do not match"
+            assert item.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
+            assert item.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
+
+            coords = np.concatenate([coords, item.coords])
+            geoinfos = np.concatenate([geoinfos, item.geoinfos])
+            data = np.concatenate([data, item.data])
+            datetimes = np.concatenate([datetimes, item.datetimes])
+            is_spoof = is_spoof and item.is_spoof
+
+        return cls(coords, geoinfos, data, datetimes, is_spoof)
+
     @staticmethod
     def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
         """
         Create an empty ReaderData object
+
+        Parameters
+        ------
+            num_data_fields: int
+                Number of data fields.
+            num_geo_fields:
+                Number of geo fields.
 
         Returns
         -------
@@ -134,18 +170,18 @@ class ReaderData:
 
         Returns
         -------
-        self
+        ReaderData
         """
-        idx_valid = ~np.isnan(self.coords)
-        # filter should be if any (of the two) coords is NaN
-        idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
+        # Identify valid coordinates (where both lat/lon are not NaN)
+        idx_valid = ~np.isnan(self.coords).any(axis=1)
 
-        # apply
+        # Apply filtering
         return ReaderData(
             self.coords[idx_valid],
             self.geoinfos[idx_valid],
             self.data[idx_valid],
             self.datetimes[idx_valid],
+            self.is_spoof,
         )
 
 
@@ -165,6 +201,7 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     None
     """
 
+    # Validate dimensions
     assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
     assert rdata.coords.shape[1] == 2, (
         f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
@@ -173,8 +210,10 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
     assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
     assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
 
-    assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
-    assert rdata.geoinfos.shape[0] == rdata.data.shape[0], "geoinfos and data must have same length"
+    # Validate consistency of lengths
+    n_points = rdata.coords.shape[0]
+    assert n_points == rdata.data.shape[0], "coords and data must have same length"
+    assert n_points == rdata.geoinfos.shape[0], "geoinfos and data must have same length"
 
     # Check that all fields have the same length
     assert (
@@ -188,6 +227,7 @@ def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
         f"{rdata.datetimes.shape[0]}"
     )
 
+    # Check that all datetimes fall within the specified range
     assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
         f"datetimes for data points violate window {dtr}."
     )

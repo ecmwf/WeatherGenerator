@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from weathergen.common.config import Config
-from weathergen.common.io import ReaderData
+from weathergen.common.data import ReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
