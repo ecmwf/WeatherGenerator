@@ -399,8 +399,28 @@ class ForecastingEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
-
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
+        fe_aux_encoding_type = cf.get("fe_aux_encoding_type", "fstep")
+        if fe_aux_encoding_type == "fstep":
+            self.fstep_embedder = nn.Identity()
+            dim_aux = 1
+        elif fe_aux_encoding_type == "None":
+            self.fstep_embedder = nn.Identity()
+            dim_aux = None
+        elif fe_aux_encoding_type == "positional":
+            dim_aux = cf.get("fe_aux_channels", 64)
+            self.fstep_embedder = PositionalEmbedding(dim_aux)
+        elif fe_aux_encoding_type == "fourier":
+            dim_aux = cf.get("fe_aux_channels", 64)
+            self.fstep_embedder = FourierEmbedding(dim_aux)
+        elif fe_aux_encoding_type == "learnable":
+            dim_aux = cf.get("fe_aux_channels", 64)
+            self.fstep_embedder = LearnableEmbedding(dim_aux)
+        else:
+            raise NotImplementedError(
+                f"{fe_aux_encoding_type} is not known, options are ",
+                "identity, zero, positional, fourier or learnable",
+            )
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
@@ -462,18 +482,17 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
+        fstep_embed = self.fstep_embedder(torch.tensor([fstep], device=tokens.device))
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
-
-        aux_info = None
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             else:
-                tokens = block(tokens, aux_info)
+                tokens = block(tokens, fstep_embed)
         return tokens
 
 
