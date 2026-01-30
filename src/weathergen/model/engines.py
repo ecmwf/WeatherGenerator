@@ -27,12 +27,12 @@ from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
 )
-from weathergen.model.positional_encoding import (
-        PositionalEmbedding,
-        FourierEmbedding,
-        LearnableEmbedding
-)
 from weathergen.model.layers import MLP
+from weathergen.model.positional_encoding import (
+    FourierEmbedding,
+    LearnableEmbedding,
+    PositionalEmbedding,
+)
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
