@@ -75,7 +75,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
-        s = [x.shape[0], self.num_heads, -1]
+        s = [x.shape[0], self.num_heads, x.shape[-1] // self.num_heads]
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s)

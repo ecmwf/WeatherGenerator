@@ -11,7 +11,6 @@
 
 import itertools
 import logging
-import re
 from pathlib import Path
 
 import omegaconf
@@ -33,7 +32,7 @@ from weathergen.model.attention import (
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import freeze_weights
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
@@ -47,37 +46,38 @@ type TrainingMode = str
 
 
 def init_model_and_shard(
-    cf, dataset, run_id_contd, mini_epoch_contd, training_mode, device, overrides={}
+    cf,
+    dataset,
+    run_id_contd,
+    mini_epoch_contd,
+    training_mode,
+    device,
+    with_ddp,
+    with_fsdp,
+    overrides={},
 ):
-    model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
+    model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
     # freeze request model part
-    for name, module in model.named_modules():
-        name = module.name if hasattr(module, "name") else name
-        # avoid the whole model element which has name ''
-        if name == "":
-            continue
-        if re.fullmatch(cf.freeze_modules, name) is not None:
-            logger.info(f"Froze weights {name}")
-            freeze_weights(module)
-        
+    apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
+
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
 
-    if cf.with_ddp and not cf.with_fsdp:
+    if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             broadcast_buffers=True,
-            find_unused_parameters=True,
+            find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
         )
 
-    elif cf.with_ddp and cf.with_fsdp:
+    elif with_ddp and with_fsdp:
         # with DDP *and() FSDP
         fsdp_kwargs = {
             "mp_policy": (
@@ -114,6 +114,10 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
+        for module in model.latent_heads.modules():
+            if isinstance(module, modules_to_shard):
+                fully_shard(module, **fsdp_kwargs)
+
         full_precision_fsdp_kwargs = {
             "mp_policy": (
                 MixedPrecisionPolicy(
@@ -129,7 +133,7 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
-    if cf.with_ddp and cf.with_fsdp:
+    if with_ddp and with_fsdp:
         fully_shard(model)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
@@ -145,9 +149,9 @@ def init_model_and_shard(
 
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is None:
-        if cf.with_ddp and cf.with_fsdp:
+        if with_ddp and with_fsdp:
             model.to_empty(device="cuda")
-            if cf.with_fsdp:
+            if with_fsdp:
                 model.reset_parameters()
     else:
         if is_root():
@@ -174,10 +178,6 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
     )
     filename = f"{run_id}_{mini_epoch_id}.chkpt"
-
-    if not (path_run / filename).exists():
-        mini_epoch_id = f"epoch{mini_epoch:05d}"
-        filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
     params = torch.load(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
@@ -285,6 +285,9 @@ def get_target_aux_calculator(
         target_aux = PhysicalTargetAndAux(loss_cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
+        # work around for problems with FSDP2
+        assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"
+
         meta_ema_model, _ = init_model_and_shard(
             cf,
             dataset,
@@ -292,6 +295,8 @@ def get_target_aux_calculator(
             None,
             "student",
             device,
+            with_ddp=False,
+            with_fsdp=False,
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
         ema_model = EMAModel(
