@@ -121,6 +121,10 @@ class TokenizerMasking(Tokenizer):
     ):
         stream_id = stream_info["stream_id"]
         is_diagnostic = stream_info.get("diagnostic", False)
+        is_diagnostic = is_diagnostic or (
+            len(stream_info.train_source_channels) == 0
+            and len(stream_info.val_source_channels) == 0
+        )
 
         # return empty if there is no data or we are in diagnostic mode
         if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
@@ -159,6 +163,18 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         cell_mask,
     ):
+
+        is_forcing = stream_info.get("forcing", False)
+        is_forcing = is_forcing or (
+            len(stream_info.train_target_channels) == 0
+            and len(stream_info.val_target_channels) == 0
+        )
+
+        if is_forcing:
+            coords_local = torch.zeros((0, 105))
+            coords_per_cell = torch.zeros((self.masker.num_healpix_cells), dtype=torch.int)
+            return (coords_local, coords_per_cell)
+
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
@@ -192,6 +208,20 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         cell_mask,
     ):
+
+        is_forcing = stream_info.get("forcing", False)
+        is_forcing = is_forcing or (
+            len(stream_info.train_target_channels) == 0
+            and len(stream_info.val_target_channels) == 0
+        )
+
+        if is_forcing:
+            data = torch.tensor([])
+            datetimes = np.array([], dtype="datetime64[s]")
+            coords = torch.tensor((0, 2))
+            idxs_ord_inv = None
+            return (data, datetimes, coords, idxs_ord_inv)
+            
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
