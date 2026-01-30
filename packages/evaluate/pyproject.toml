@@ -29,7 +29,7 @@ dev = [
 ]
 
 [project.scripts]
-latent_space_eval= "weathergen.evaluate.latent_space.latent_space_eval:latent_space_analysis"
+ssl_analysis= "weathergen.evaluate.ssl.ssl_eval:ssl_analysis"
 evaluation = "weathergen.evaluate.run_evaluation:evaluate"
 export = "weathergen.evaluate.export.export_inference:export"
 

@@ -8,12 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 """
-Integration test for the Weather Generator with multiple streams and observations.
-This test must run on a GPU machine.
-It performs training and inference with multiple data sources including gridded and obs data.
+Script to run Inference and evaluation for the Weather Generator with multiple streams and observations.
+This script must run on a GPU machine.
+It performs a standardised routine of inference and evaluation over multiple data sources including gridded and obs data.
 
 Command:
-uv run --offline latent_space_eval --run-id j2dkivn8
+uv run --offline ssl_analysis --run-id j2dkivn8
 """
 
 import argparse
@@ -244,8 +244,8 @@ def load_scores(eval_cfg, run_id):
 ############## MAIN #################
 
 
-def latent_space_analysis():
-    parser = argparse.ArgumentParser(description="Run multi-stream latent space evaluation")
+def ssl_analysis():
+    parser = argparse.ArgumentParser(description="Run multi-stream SSL evaluation")
     parser.add_argument(
         "--run-id", type=str, required=True, help="Run identifier for the model to evaluate"
     )

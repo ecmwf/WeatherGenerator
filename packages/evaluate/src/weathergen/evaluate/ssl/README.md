@@ -1,4 +1,4 @@
-# Multi-Stream Latent Space Inference & Evaluation
+# Multi-Stream Self Supervised Learning Inference & Evaluation
 
 This script runs **inference and evaluation for a multi-stream weather generation model** and produces quantitative metrics and diagnostic plots for each stream.
 
@@ -95,9 +95,6 @@ The script assumes the following directory layout:
 
 ```
 .
-├── config/
-│   └── evaluate/
-│       └── latent_space_eval_config.yaml
 ├── models/
 │   └── <run_id>
 │       ├── <run_id>_latest.chkpt  
@@ -116,13 +113,13 @@ The script assumes the following directory layout:
 ### Command Line
 
 ```bash
-uv run --offline latent_space_analysis --run-id <TRAIN_RUN_ID>
+uv run --offline ssl_analysis --run-id <TRAIN_RUN_ID>
 ```
 
 Optional verbose mode:
 
 ```bash
-uv run --offline latent_space_analysis --run_id <TRAIN_RUN_ID> --run-id <TRAIN_RUN_ID> --verbose
+uv run --offline ssl_analysis --run_id <TRAIN_RUN_ID> --run-id <TRAIN_RUN_ID> --verbose
 ```
 
 ---
