@@ -1,6 +1,7 @@
 import copy
 import logging
 import warnings
+from dataclasses import dataclass, field
 
 import astropy_healpix as hp
 import numpy as np
@@ -11,6 +12,333 @@ from numpy.typing import NDArray
 from weathergen.datasets.batch import SampleMetaData
 
 logger = logging.getLogger(__name__)
+
+# Earth radius in km (used for correlation length calculations)
+EARTH_RADIUS_KM = 6371.0
+
+
+@dataclass
+class ChannelMaskingConfig:
+    """
+    Configuration for per-channel spatial masking based on autocorrelation.
+
+    Attributes
+    ----------
+    autocorr : dict[str, dict]
+        Per-channel autocorrelation info. Each entry maps channel name to
+        {"space_km": float, "time_h": float} (spatial/temporal correlation scales).
+    multiplier : float
+        Scale factor for mapping correlation length to mask size (default: 1.0).
+    hl_mask_min : int
+        Minimum HEALPix level (prevents hemisphere-scale masks).
+    hl_mask_max : int
+        Maximum HEALPix level (prevents sub-grid masks).
+    default_hl_mask : int
+        Default HEALPix level for channels not in autocorr dict.
+    enabled : bool
+        Whether per-channel masking is enabled.
+
+    Examples
+    --------
+    >>> config = ChannelMaskingConfig(
+    ...     autocorr={
+    ...         "z_500": {"space_km": 4000},
+    ...         "tp": {"space_km": 177},
+    ...     },
+    ...     enabled=True,
+    ... )
+    >>> config.get_hl_mask("z_500")  # Large-scale variable
+    1
+    >>> config.get_hl_mask("tp")     # Small-scale variable
+    5
+    """
+
+    autocorr: dict = field(default_factory=dict)
+    multiplier: float = 1.0
+    hl_mask_min: int = 1
+    hl_mask_max: int = 5
+    default_hl_mask: int = 3
+    enabled: bool = False
+
+    def get_hl_mask(self, channel_name: str) -> int:
+        """
+        Get HEALPix masking level for a channel.
+
+        Parameters
+        ----------
+        channel_name : str
+            Name of the channel (e.g., "z_500", "tp").
+
+        Returns
+        -------
+        int
+            HEALPix level for masking this channel.
+        """
+        if not self.enabled or channel_name not in self.autocorr:
+            return self.default_hl_mask
+
+        ch_info = self.autocorr[channel_name]
+        l_corr_km = ch_info.get("space_km", None)
+
+        if l_corr_km is None:
+            return self.default_hl_mask
+
+        return correlation_length_to_hl_mask(
+            l_corr_km,
+            multiplier=self.multiplier,
+            hl_min=self.hl_mask_min,
+            hl_max=self.hl_mask_max,
+        )
+
+    @classmethod
+    def from_config(cls, cfg: dict | None) -> "ChannelMaskingConfig":
+        """
+        Create from a config dict (e.g., from YAML).
+
+        Parameters
+        ----------
+        cfg : dict | None
+            Config dict with optional keys: enabled, autocorr, multiplier, etc.
+
+        Returns
+        -------
+        ChannelMaskingConfig
+            Configured instance.
+        """
+        if cfg is None:
+            return cls()
+
+        # Handle OmegaConf -> dict conversion
+        if hasattr(cfg, "to_container"):
+            cfg = omegaconf.OmegaConf.to_container(cfg, resolve=True)
+
+        return cls(
+            autocorr=cfg.get("autocorr", {}),
+            multiplier=cfg.get("multiplier", 1.0),
+            hl_mask_min=cfg.get("hl_mask_min", 1),
+            hl_mask_max=cfg.get("hl_mask_max", 5),
+            default_hl_mask=cfg.get("default_hl_mask", 3),
+            enabled=cfg.get("enabled", False),
+        )
+
+
+def correlation_length_to_hl_mask(
+    l_corr_km: float,
+    multiplier: float = 1.0,
+    hl_min: int = 1,
+    hl_max: int = 5,
+) -> int:
+    """
+    Map spatial correlation length to HEALPix masking level.
+
+    Finds the finest HEALPix level where the cell size is still larger
+    than the correlation length scaled by the multiplier. This ensures
+    mask regions are large enough to prevent trivial interpolation
+    based on the variable's spatial autocorrelation structure.
+
+    Parameters
+    ----------
+    l_corr_km : float
+        Spatial correlation length in km (e-folding distance).
+        Typically computed from analysis of the variable's spatial
+        autocorrelation function using scripts/compute_autocorr.py.
+    multiplier : float
+        Scale factor applied to correlation length (default: 1.0).
+        With multiplier=1.0, mask cell size >= correlation length.
+        Higher values create coarser masks (larger cells).
+    hl_min : int
+        Minimum HEALPix level (default: 1, prevents hemisphere-scale masks).
+        Level 1 has 48 cells (~3260 km each).
+    hl_max : int
+        Maximum HEALPix level (default: 5, prevents sub-grid masks).
+        Level 5 has 12288 cells (~204 km each).
+
+    Returns
+    -------
+    int
+        HEALPix level for masking. Lower levels = larger masks.
+
+    Examples
+    --------
+    >>> correlation_length_to_hl_mask(4000)  # z_500 (L_corr ~ 4000 km)
+    1
+    >>> correlation_length_to_hl_mask(1200)  # 10u wind (L_corr ~ 1200 km)
+    2
+    >>> correlation_length_to_hl_mask(177)   # precipitation (L_corr ~ 177 km)
+    5
+
+    Notes
+    -----
+    HEALPix cell sizes (approximate):
+        Level 0: ~6520 km
+        Level 1: ~3260 km
+        Level 2: ~1630 km
+        Level 3: ~815 km
+        Level 4: ~408 km
+        Level 5: ~204 km
+        Level 6: ~102 km
+
+    Reference correlation lengths from ERA5 O96 analysis:
+        z_500:  ~4000 km -> Level 1
+        t_850:  ~4000 km -> Level 1
+        2t:     ~3770 km -> Level 1
+        u_50:   ~3160 km -> Level 1
+        q_850:  ~3100 km -> Level 1
+        v_50:   ~1280 km -> Level 2
+        u_1000: ~1220 km -> Level 2
+        10u:    ~1200 km -> Level 2
+        10v:    ~750 km  -> Level 3
+        tp:     ~180 km  -> Level 5
+    """
+    target_size = l_corr_km * multiplier
+
+    # Find finest level (highest number) where cell_size > target_size
+    for hl in range(hl_max, hl_min - 1, -1):
+        cell_size = _healpix_cell_size_km(hl)
+        if cell_size > target_size:
+            return hl
+
+    # If no level is fine enough, return the minimum (coarsest allowed)
+    return hl_min
+
+
+def _healpix_cell_size_km(healpix_level: int) -> float:
+    """
+    Compute approximate HEALPix cell size in km.
+
+    Parameters
+    ----------
+    healpix_level : int
+        HEALPix level (nside = 2^level).
+
+    Returns
+    -------
+    float
+        Approximate cell diameter in km.
+    """
+    n_cells = 12 * (4**healpix_level)
+    cell_area_km2 = (4 * np.pi * EARTH_RADIUS_KM**2) / n_cells
+    # Approximate cell size as sqrt of area (diameter of equivalent circle)
+    return np.sqrt(cell_area_km2)
+
+
+def time_corr_to_block_size(
+    t_corr_hours: float,
+    period_hours: float,
+    multiplier: float = 1.5,
+    min_block: int = 1,
+    max_block: int = 8,
+) -> int:
+    """
+    Map temporal correlation scale to time blocking size for tube masking.
+
+    Computes the number of time steps to mask as a contiguous block
+    to prevent trivial temporal interpolation.
+
+    Parameters
+    ----------
+    t_corr_hours : float
+        Temporal correlation scale in hours (e-folding time).
+    period_hours : float
+        Time step between samples in hours (e.g., 6 for 6-hourly data).
+    multiplier : float
+        Scale factor for decorrelation (default: 1.5).
+    min_block : int
+        Minimum block size in time steps.
+    max_block : int
+        Maximum block size in time steps.
+
+    Returns
+    -------
+    int
+        Number of time steps to mask as a block.
+
+    Examples
+    --------
+    >>> time_corr_to_block_size(48, 6)  # 48h correlation, 6h data
+    2
+    >>> time_corr_to_block_size(12, 6)  # 12h correlation, 6h data
+    1
+    """
+    t_mask_hours = multiplier * t_corr_hours
+    block_size = int(np.ceil(t_mask_hours / period_hours))
+    return max(min_block, min(max_block, block_size))
+
+
+def generate_tube_mask(
+    spatial_mask: np.ndarray | torch.Tensor,
+    num_timesteps: int,
+) -> np.ndarray:
+    """
+    Generate a tube mask by replicating the same spatial mask across all timesteps.
+
+    Tube masking ensures that the same spatial regions are masked/kept across
+    all timesteps in a window, preventing the model from using temporal
+    interpolation to "cheat" on the prediction task.
+
+    Parameters
+    ----------
+    spatial_mask : np.ndarray | torch.Tensor
+        1D boolean mask of shape [num_cells] where True = keep, False = mask.
+    num_timesteps : int
+        Number of timesteps in the time window.
+
+    Returns
+    -------
+    np.ndarray
+        2D boolean mask of shape [num_timesteps, num_cells].
+
+    Examples
+    --------
+    >>> spatial_mask = np.array([True, False, True, False])
+    >>> tube_mask = generate_tube_mask(spatial_mask, 3)
+    >>> tube_mask.shape
+    (3, 4)
+    >>> np.all(tube_mask[0] == tube_mask[1])  # Same mask at all times
+    True
+    """
+    if isinstance(spatial_mask, torch.Tensor):
+        spatial_mask = spatial_mask.numpy()
+
+    # Replicate spatial mask across all timesteps
+    return np.tile(spatial_mask, (num_timesteps, 1))
+
+
+def apply_tube_mask_to_obs(
+    spatial_mask: np.ndarray | torch.Tensor,
+    obs_cell_indices: np.ndarray,
+) -> np.ndarray:
+    """
+    Apply tube masking to irregular observations.
+
+    For irregular observation data (e.g., from DataReaderObs), each observation
+    belongs to a specific HEALPix cell. This function applies the spatial mask
+    to observations based on which cell they belong to.
+
+    Parameters
+    ----------
+    spatial_mask : np.ndarray | torch.Tensor
+        1D boolean mask of shape [num_cells] where True = keep, False = mask.
+    obs_cell_indices : np.ndarray
+        1D array of shape [num_obs] containing the cell index for each observation.
+
+    Returns
+    -------
+    np.ndarray
+        1D boolean mask of shape [num_obs] where True = keep observation.
+
+    Examples
+    --------
+    >>> spatial_mask = np.array([True, False, True])  # Keep cells 0 and 2
+    >>> obs_cells = np.array([0, 0, 1, 2, 1, 2])  # 6 observations in 3 cells
+    >>> obs_mask = apply_tube_mask_to_obs(spatial_mask, obs_cells)
+    >>> obs_mask
+    array([ True,  True, False,  True, False,  True])
+    """
+    if isinstance(spatial_mask, torch.Tensor):
+        spatial_mask = spatial_mask.numpy()
+
+    return spatial_mask[obs_cell_indices]
 
 
 class MaskData:
@@ -24,23 +352,87 @@ class MaskData:
     def __len__(self):
         return len(self.masks)
 
-    def add_mask(self, mask, params, cfg, losses, idx, correspondence, relationship):
+    def add_mask(
+        self,
+        mask,
+        params,
+        cfg,
+        losses,
+        idx,
+        correspondence,
+        relationship,
+        temporal_strategy: str | None = None,
+        channel_masks: dict[str, np.ndarray] | None = None,
+    ):
+        """
+        Add a mask with associated metadata.
+
+        Parameters
+        ----------
+        mask : np.ndarray | torch.Tensor
+            Boolean mask of shape [num_cells] where True = keep.
+        params : dict
+            Additional parameters describing the mask.
+        cfg : dict
+            Configuration used to generate the mask.
+        losses : list
+            Loss functions associated with this mask.
+        idx : int
+            Index of this mask in the collection.
+        correspondence : list
+            Source-target correspondence information.
+        relationship : str | None
+            Relationship type (e.g., "complement", "subset").
+        temporal_strategy : str | None
+            Temporal masking strategy. Options:
+            - None: No temporal consistency (independent masks per timestep)
+            - "tube": Same spatial mask applied to all timesteps
+            - "block": Block masking in time (future extension)
+        channel_masks : dict[str, np.ndarray] | None
+            Per-channel spatial masks. Keys are channel names, values are
+            boolean masks of shape [num_cells]. If provided, these override
+            the uniform spatial mask for per-variable masking.
+        """
+        global_params = {
+            "idx": idx,
+            "correspondence": correspondence,
+            "loss": losses,
+            "relationship": relationship,
+        }
+
+        # Add temporal masking info if specified
+        if temporal_strategy is not None:
+            global_params["temporal_strategy"] = temporal_strategy
+
+        # Add per-channel masks if specified
+        if channel_masks:
+            global_params["channel_masks"] = channel_masks
+
         self.masks += [mask]
         self.metadata += [
             SampleMetaData(
                 params={**cfg, **params},
                 mask=mask,
-                global_params={
-                    "idx": idx,
-                    "correspondence": correspondence,
-                    "loss": losses,
-                    "relationship": relationship,
-                },
+                global_params=global_params,
             )
         ]
 
     def get_mask(self, idx: int) -> np.typing.NDArray:
         return self.masks[idx]
+
+    def get_channel_masks(self, idx: int) -> dict[str, np.ndarray] | None:
+        """Get the per-channel masks for a given mask index."""
+        global_params = self.metadata[idx].global_params
+        if global_params is None:
+            return None
+        return global_params.get("channel_masks", None)
+
+    def get_temporal_strategy(self, idx: int) -> str | None:
+        """Get the temporal masking strategy for a given mask index."""
+        global_params = self.metadata[idx].global_params
+        if global_params is None:
+            return None
+        return global_params.get("temporal_strategy", None)
 
 
 def get_num_samples(config) -> np.typing.NDArray:
@@ -250,12 +642,50 @@ class Masker:
         return corr_dict
 
     def build_samples_for_stream(
-        self, training_mode: str, num_cells: int, stage_cfg: dict
+        self,
+        training_mode: str,
+        num_cells: int,
+        stage_cfg: dict,
+        channel_list: list[str] | None = None,
+        channel_masking_config: ChannelMaskingConfig | None = None,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
-        SampleMetaData is currently just a dict with the masking params used.
+
+        Parameters
+        ----------
+        training_mode : str
+            Training mode identifier.
+        num_cells : int
+            Number of HEALPix cells at data level.
+        stage_cfg : dict
+            Stage configuration with target_input, model_input, losses, etc.
+        channel_list : list[str] | None
+            Optional list of channel names for per-channel masking.
+        channel_masking_config : ChannelMaskingConfig | None
+            Optional per-channel masking configuration.
+
+        Returns
+        -------
+        tuple
+            (target_masks, source_masks, source_target_mapping)
         """
+
+        # Generate per-channel masks if config provided
+        channel_masks = {}
+        if channel_list is not None and channel_masking_config is not None:
+            # Get keep_rate from first source config (or default)
+            source_cfgs = stage_cfg.get("model_input", {})
+            keep_rate = 0.5
+            for _, src_cfg in source_cfgs.items():
+                strat_cfg = src_cfg.get("masking_strategy_config", {})
+                if "rate" in strat_cfg:
+                    keep_rate = strat_cfg["rate"]
+                    break
+
+            channel_masks = self.generate_channel_masks(
+                channel_list, channel_masking_config, keep_rate
+            )
 
         # target and source configs
         target_cfgs = stage_cfg.get("target_input", [])
@@ -290,9 +720,22 @@ class Masker:
                 # skip items that do not appear in loss
                 if len(corr) == 0:
                     continue
+
+                # Extract temporal strategy from config (default: "tube" for temporal consistency)
+                masking_strategy_config = target_cfg.get("masking_strategy_config", {})
+                temporal_strategy = masking_strategy_config.get("temporal_strategy", None)
+
                 # add
                 target_masks.add_mask(
-                    target_mask, mask_params, target_cfg, losses, i_target, corr, None
+                    target_mask,
+                    mask_params,
+                    target_cfg,
+                    losses,
+                    i_target,
+                    corr,
+                    None,
+                    temporal_strategy=temporal_strategy,
+                    channel_masks=channel_masks if channel_masks else None,
                 )
                 i_target += 1
 
@@ -330,8 +773,20 @@ class Masker:
                     target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                 )
                 corr = target_idx
+
+                # Extract temporal strategy from config
+                temporal_strategy = masking_config.get("temporal_strategy", None)
+
                 source_masks.add_mask(
-                    source_mask, mask_params, source_cfg, losses, i_source, corr, relationship
+                    source_mask,
+                    mask_params,
+                    source_cfg,
+                    losses,
+                    i_source,
+                    corr,
+                    relationship,
+                    temporal_strategy=temporal_strategy,
+                    channel_masks=channel_masks if channel_masks else None,
                 )
 
                 source_target_mapping += [target_idx]
@@ -684,3 +1139,78 @@ class Masker:
         num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
 
         return hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep
+
+    def generate_channel_masks(
+        self,
+        channel_list: list[str],
+        channel_masking_config: ChannelMaskingConfig,
+        keep_rate: float = 0.5,
+    ) -> dict[str, np.ndarray]:
+        """
+        Generate per-channel spatial masks based on autocorrelation.
+
+        Each channel gets a mask at the HEALPix level appropriate for its
+        spatial correlation length. Channels with the same hl_mask share
+        the same spatial mask pattern.
+
+        Parameters
+        ----------
+        channel_list : list[str]
+            List of channel names in order (e.g., ["z_500", "t_850", "tp"]).
+        channel_masking_config : ChannelMaskingConfig
+            Configuration specifying autocorrelation and mapping parameters.
+        keep_rate : float
+            Fraction of cells to keep unmasked (0 to 1).
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Mapping from channel name to boolean mask [num_cells].
+            True = keep, False = mask.
+
+        Examples
+        --------
+        >>> config = ChannelMaskingConfig(
+        ...     autocorr={"z_500": {"space_km": 4000}, "tp": {"space_km": 177}},
+        ...     enabled=True,
+        ... )
+        >>> masks = masker.generate_channel_masks(["z_500", "tp"], config, keep_rate=0.5)
+        >>> masks["z_500"].shape  # Coarser mask (level 1)
+        (num_cells,)
+        >>> masks["tp"].shape     # Finer mask (level 5)
+        (num_cells,)
+        """
+        if not channel_masking_config.enabled:
+            # Return empty dict if not enabled - caller uses default spatial mask
+            return {}
+
+        num_cells = self.num_healpix_cells
+
+        # Group channels by their HEALPix masking level
+        hl_to_channels: dict[int, list[str]] = {}
+        for ch in channel_list:
+            hl = channel_masking_config.get_hl_mask(ch)
+            if hl not in hl_to_channels:
+                hl_to_channels[hl] = []
+            hl_to_channels[hl].append(ch)
+
+        # Generate one mask per unique hl_mask level
+        hl_masks: dict[int, np.ndarray] = {}
+        for hl in hl_to_channels:
+            mask, _ = self._generate_cell_mask(
+                num_cells,
+                strategy="healpix",
+                masking_strategy_config={"hl_mask": hl, "rate": keep_rate},
+            )
+            # Convert to numpy if torch
+            if isinstance(mask, torch.Tensor):
+                mask = mask.numpy()
+            hl_masks[hl] = mask
+
+        # Map each channel to its mask
+        channel_masks = {}
+        for ch in channel_list:
+            hl = channel_masking_config.get_hl_mask(ch)
+            channel_masks[ch] = hl_masks[hl]
+
+        return channel_masks
