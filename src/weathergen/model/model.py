@@ -108,11 +108,15 @@ class ModelParams(torch.nn.Module):
         ### ROPE COORDS ###
         self.rope_2D = cf.get("rope_2D", False)
         if self.rope_2D:
+            self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
+            total_tokens = (
+                self.num_healpix_cells + self.num_extra_tokens
+            ) * cf.ae_local_num_queries
             self.register_buffer(
                 "rope_coords",
                 torch.zeros(
                     cf.batch_size_per_gpu,
-                    self.num_healpix_cells * cf.ae_local_num_queries,
+                    total_tokens,
                     2,
                     dtype=self.dtype,
                 ),
@@ -186,7 +190,9 @@ class ModelParams(torch.nn.Module):
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
             coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(bs, 1, 1)
-            self.rope_coords.data.copy_(coords_flat)
+            offset = self.num_extra_tokens * cf.ae_local_num_queries
+            self.rope_coords.data.fill_(0.0)
+            self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
 
             # Clear pe_global when using 2D RoPE
             self.pe_global.data.fill_(0.0)
