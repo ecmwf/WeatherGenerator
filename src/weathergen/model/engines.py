@@ -410,7 +410,7 @@ class ForecastingEngine(torch.nn.Module):
             self.fstep_embedder = nn.Identity()
             dim_aux = 1
         elif fe_aux_encoding_type == "None":
-            self.fstep_embedder = nn.Identity()
+            self.fstep_embedder = lambda x: None
             dim_aux = None
         elif fe_aux_encoding_type == "positional":
             dim_aux = cf.get("fe_aux_channels", 64)
@@ -424,7 +424,7 @@ class ForecastingEngine(torch.nn.Module):
         else:
             raise NotImplementedError(
                 f"{fe_aux_encoding_type} is not known, options are ",
-                "identity, zero, positional, fourier or learnable",
+                "fstep, None, positional, fourier or learnable",
             )
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
@@ -487,7 +487,7 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
-        fstep_embed = self.fstep_embedder(torch.tensor([fstep], device=tokens.device))
+        fstep_embed = self.fstep_embedder(torch.tensor([fstep], device=tokens.device, dtype=get_dtype(self.cf.attention_dtype)))
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
