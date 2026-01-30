@@ -70,7 +70,6 @@ healpix_level: 5
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
 rope_2D: False
-rope_learnable_freq: False
 
 with_mixed_precision: True
 with_flash_attention: True
