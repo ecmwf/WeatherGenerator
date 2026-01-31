@@ -304,6 +304,7 @@ def tokenize_apply_mask_source(
 
 
 def tokenize_apply_mask_target(
+    stream_id,
     hl,
     idxs_cells,
     idxs_cells_lens,
@@ -367,6 +368,7 @@ def tokenize_apply_mask_target(
     # compute encoding of target coordinates used in prediction network
     if torch.tensor(idxs_lens).sum() > 0:
         coords_local = get_target_coords_local(
+            stream_id,
             hl,
             masked_points_per_cell,
             coords,
@@ -408,6 +410,7 @@ def get_source_coords_local(
 
 
 def get_target_coords_local(
+    stream_id,
     hlc,
     masked_points_per_cell,
     coords,
@@ -439,7 +442,7 @@ def get_target_coords_local(
             1 + target_geoinfos.shape[1] + target_times.shape[1] + 5 * (3 * 5) + 3 * 8,
         ]
     )
-    # TODO: properly set stream_id, implicitly zero at the moment
+    a[0] = stream_id
     geoinfo_offset = 1
     a[..., geoinfo_offset : geoinfo_offset + target_times.shape[1]] = target_times
     geoinfo_offset += target_times.shape[1]
