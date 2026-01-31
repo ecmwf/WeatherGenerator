@@ -70,8 +70,6 @@ healpix_level: 5
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
 rope_2D: False
-batch_size_per_gpu: 1
-batch_size_validation_per_gpu: 1
 
 with_mixed_precision: True
 with_flash_attention: True
