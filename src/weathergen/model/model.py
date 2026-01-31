@@ -36,6 +36,7 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
+from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
@@ -112,10 +113,11 @@ class ModelParams(torch.nn.Module):
             total_tokens = (
                 self.num_healpix_cells + self.num_extra_tokens
             ) * cf.ae_local_num_queries
+            batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
             self.register_buffer(
                 "rope_coords",
                 torch.zeros(
-                    cf.batch_size_per_gpu,
+                    batch_size_per_gpu,
                     total_tokens,
                     2,
                     dtype=self.dtype,
@@ -169,7 +171,7 @@ class ModelParams(torch.nn.Module):
 
         # positional encodings
 
-        bs = cf.batch_size_per_gpu
+        bs = get_batch_size_from_config(cf.training_config)
         dim_embed = cf.ae_local_dim_embed
         len_token_seq = 1024
         self.pe_embed.data.fill_(0.0)
