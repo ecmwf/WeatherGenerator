@@ -17,13 +17,11 @@ import torch.nn as nn
 logger = logging.getLogger(__name__)
 
 
-#########################################
 def get_num_parameters(block):
     nps = filter(lambda p: p.requires_grad, block.parameters())
     return sum([torch.prod(torch.tensor(p.size())) for p in nps])
 
 
-#########################################
 def freeze_weights(block):
     if hasattr(block, "name"):
         logger.info(f"Freeze block {block.name}")
@@ -31,14 +29,12 @@ def freeze_weights(block):
         p.requires_grad = False
 
 
-#########################################
 def set_to_eval(block):
     if hasattr(block, "name"):
         logger.info(f"Set block {block.name} to eval mode")
     block.eval()
 
 
-#########################################
 def apply_fct_to_blocks(model, blocks, fct):
     """
     Apply a function to specific blocks of a model.
@@ -55,7 +51,6 @@ def apply_fct_to_blocks(model, blocks, fct):
             fct(module)
 
 
-#########################################
 class ActivationFactory:
     _registry = {
         "identity": nn.Identity,
