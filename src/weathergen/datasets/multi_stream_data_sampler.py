@@ -246,7 +246,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             else cf.data_loading.rng_seed * 97
         )
 
-        self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level))
+        self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level, stage))
 
         self.mini_epoch = 0
 
@@ -585,7 +585,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for stream_info in self.streams:
             # Build source and target sample masks
             masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
-                training_mode, self.num_healpix_cells, self.mode_cfg
+                training_mode,
+                self.num_healpix_cells,
+                self.mode_cfg,
+                stream_info,
             )
             # identical for all streams
             num_target_samples = len(masks[stream_info["name"]][0])

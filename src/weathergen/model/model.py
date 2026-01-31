@@ -36,7 +36,7 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import get_dtype, is_stream_forcing
 
 logger = logging.getLogger(__name__)
 
@@ -347,10 +347,7 @@ class Model(torch.nn.Module):
                 stream_name = self.stream_names[i_stream]
 
                 # skip decoder if channels are empty
-                if (
-                    len(si.get("train_target_channels", [])) == 0
-                    and len(si.get("val_target_channels", [])) == 0
-                ):
+                if is_stream_forcing(si):
                     continue
 
                 # extract and setup relevant parameters
