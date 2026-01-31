@@ -111,7 +111,7 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim=-1)
 
 
-def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
     """Applies Rotary Position Embedding to the query and key tensors.
 
     Args:
@@ -119,7 +119,6 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
         k: Key tensor.
         cos: Cosine embedding tensor.
         sin: Sine embedding tensor.
-        position_ids: Deprecated and unused; present for API compatibility.
         unsqueeze_dim: Dimension along which to unsqueeze cos/sin for broadcasting.
     """
 
@@ -144,11 +143,13 @@ def rotary_embedding_2d(coords, dim, base=10000.0):
         Tuple of (cos, sin) tensors with shape (..., dim).
     """
 
-    if coords.shape[-1] != 2:
-        raise ValueError(f"coords last dimension must be 2 (lat, lon); got {coords.shape[-1]}")
-    if dim % 4 != 0:
-        raise ValueError(f"2D rotary embeddings require dim to be divisible by 4; got {dim}")
-
+    assert coords.shape[-1] == 2, (
+        f"coords last dimension must be 2 (lat, lon); got {coords.shape[-1]}"
+    )
+    assert dim % 4 == 0, (
+        f"2D rotary embeddings require dim to be divisible by 4; got {dim}"
+    )
+    
     # Split the rotary frequencies evenly between latitude and longitude to stay local to each cell.
     half_dim = dim // 2
     inv_freq = 1.0 / (
