@@ -499,6 +499,9 @@ class Model(torch.nn.Module):
             self.encoder.ae_aggregation_engine.ae_aggregation_blocks
         )
 
+        num_params_latent_heads = get_num_parameters(self.latent_heads)
+        num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
+
         num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         mdict = self.embed_target_coords
@@ -530,6 +533,7 @@ class Model(torch.nn.Module):
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
+        print(f" Latent prediction heads and pre-norm: {num_params_latent_heads:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
