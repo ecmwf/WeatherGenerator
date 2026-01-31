@@ -91,6 +91,7 @@ class ModelParams(torch.nn.Module):
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
+        self.batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
 
         ### POSITIONAL EMBEDDINGS ###
         len_token_seq = 1024
@@ -113,11 +114,10 @@ class ModelParams(torch.nn.Module):
             total_tokens = (
                 self.num_healpix_cells + self.num_extra_tokens
             ) * cf.ae_local_num_queries
-            batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
             self.register_buffer(
                 "rope_coords",
                 torch.zeros(
-                    batch_size_per_gpu,
+                    self.batch_size_per_gpu,
                     total_tokens,
                     2,
                     dtype=self.dtype,
@@ -171,7 +171,6 @@ class ModelParams(torch.nn.Module):
 
         # positional encodings
 
-        bs = get_batch_size_from_config(cf.training_config)
         dim_embed = cf.ae_local_dim_embed
         len_token_seq = 1024
         self.pe_embed.data.fill_(0.0)
@@ -191,7 +190,7 @@ class ModelParams(torch.nn.Module):
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
-            coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(bs, 1, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(self.batch_size_per_gpu, 1, 1)
             offset = self.num_extra_tokens * cf.ae_local_num_queries
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
