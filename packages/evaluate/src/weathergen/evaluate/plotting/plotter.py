@@ -697,7 +697,9 @@ class LinePlots:
                 label = line.get_label()
                 _logger.info(f"Summary for {label} plot:")
                 for xi, yi in zip(xdata, ydata, strict=False):
-                    _logger.info(f"  x: {xi:.3f}, y: {yi:.3f}")
+                    xi = xi if isinstance(xi, str) else f"{float(xi):.3f}"
+                    yi = yi if isinstance(yi, str) else f"{float(yi):.3f}"
+                    _logger.info(f"  x: {xi}, y: {yi}")
                 _logger.info("--------------------------")
         return
 
@@ -1525,7 +1527,6 @@ class BarPlots:
             squeeze=False,
         )
         ax = ax.flatten()
-
         if self.baseline and self.baseline in runs:
             baseline_idx = runs.index(self.baseline)
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
@@ -1539,21 +1540,17 @@ class BarPlots:
             data = [ones_array] + data
 
         for run_index in range(1, len(runs)):
-            ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
-                data, channels, run_index
-            )
-            if len(ratio_score) > 0:
+            score, channels_per_comparison = self.calc_ratio_per_run_id(data, channels, run_index)
+            if len(score) > 0:
                 ax[run_index - 1].barh(
-                    np.arange(len(ratio_score)),
-                    ratio_score,
-                    color=self.colors(ratio_score, metric),
+                    np.arange(len(score)),
+                    score,
+                    color=self.colors(score, metric),
                     align="center",
                     edgecolor="black",
                     linewidth=0.5,
                 )
-                ax[run_index - 1].set_yticks(
-                    np.arange(len(ratio_score)), labels=channels_per_comparison
-                )
+                ax[run_index - 1].set_yticks(np.arange(len(score)), labels=channels_per_comparison)
                 ax[run_index - 1].invert_yaxis()
 
                 xlabel = (
@@ -1634,7 +1631,11 @@ class BarPlots:
 
             ratio_score.append(model_score / baseline_score)
 
-        ratio_score = np.array(ratio_score) - 1
+        if np.allclose(baseline_score, 1.0, atol=1e-6):
+            ratio_score = np.array(ratio_score)
+        else:
+            ratio_score = np.array(ratio_score) - 1
+
         return ratio_score, channels_per_comparison
 
     def colors(self, ratio_score: np.array, metric: str) -> list[tuple]:

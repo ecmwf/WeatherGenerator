@@ -48,7 +48,7 @@ def inference_from_args(argl: list[str]):
             start_date=args.start_date,
             end_date=args.end_date,
             samples_per_mini_epoch=args.samples,
-            output=dict(write_num_samples=args.samples if args.save_samples else 0),
+            output=dict(num_samples=args.samples if args.save_samples else 0),
             streams_output=args.streams_output,
         )
     }
@@ -199,8 +199,8 @@ if __name__ == "__main__":
 
     if stage == "train":
         # Entry point for slurm script.
-        # Check whether --from_run_id passed as argument.
-        if any("--from_run_id" in arg for arg in sys.argv):
+        # Check whether --from-run-id passed as argument.
+        if any("--from-run-id" in arg for arg in sys.argv):
             train_continue()
         else:
             train()
