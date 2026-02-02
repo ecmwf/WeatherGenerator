@@ -33,7 +33,7 @@ from weathergen.datasets.utils import (
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import Stage
+from weathergen.utils.train_logger import TRAIN, Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -538,7 +538,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
 
-            if rdata.is_empty():
+            if rdata.is_empty() and self._stage == TRAIN:
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
@@ -560,7 +560,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
-            if rdata.is_empty():
+            if rdata.is_empty() and self._stage == TRAIN:
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(timestep_idx)
@@ -694,9 +694,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # for t_idx, mask in enumerate(source_masks):
             for tidx, target_mask in enumerate(target_masks.masks):
-                # Note: for EMATeacher we the the streamdata obj
-                # to have the target mask applied to the inputs!
-                # Hence the target mask is also the source mask here!!
+                # depending on the mode, the the streamdata obj to have the target mask applied to
+                # the inputs. Hence the target mask is also the source mask here.
                 sdata = self._build_stream_data(
                     target_select,
                     tidx,
@@ -760,7 +759,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if not batch.is_empty():
                     break
                 else:
-                    logger.warning("Skipping empty batch.")
+                    logger.warning(f"Skipping empty batch with idx={idx}.")
 
             yield batch
 
