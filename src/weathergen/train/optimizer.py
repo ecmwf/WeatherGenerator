@@ -326,13 +326,25 @@ class CompositeOptimizer(Optimizer):
         # This avoids the param_groups setup that would conflict with our combined groups
         from collections import OrderedDict, defaultdict
 
-        self.defaults = {}
+        # Set defaults with betas for LR scheduler compatibility (OneCycleLR checks this)
+        # Use AdamW's betas since that's the more common scheduler interaction
+        adamw_betas = adamw_optimizer.defaults.get("betas", (0.9, 0.999))
+        self.defaults = {
+            "betas": adamw_betas,
+            "momentum": muon_optimizer.defaults.get("momentum", 0.95),
+        }
         self._optimizer_step_pre_hooks = OrderedDict()
         self._optimizer_step_post_hooks = OrderedDict()
         self._optimizer_state_dict_pre_hooks = OrderedDict()
         self._optimizer_state_dict_post_hooks = OrderedDict()
         self._optimizer_load_state_dict_pre_hooks = OrderedDict()
         self._optimizer_load_state_dict_post_hooks = OrderedDict()
+
+        # Ensure all param groups have betas for OneCycleLR compatibility
+        # OneCycleLR with cycle_momentum=True tries to modify betas on ALL groups
+        for group in muon_optimizer.param_groups:
+            if "betas" not in group:
+                group["betas"] = adamw_betas
 
         # Combined param_groups from both optimizers
         self.param_groups = muon_optimizer.param_groups + adamw_optimizer.param_groups

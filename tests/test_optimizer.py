@@ -431,13 +431,13 @@ class TestLRSchedulerCompatibility:
         optimizer_cfg.type = "muon_adamw"
         optimizer = create_optimizer(simple_model, optimizer_cfg, lr_cfg, batch_size_total=4)
 
-        # This should not raise TypeError (isinstance check)
-        # cycle_momentum=False since CompositeOptimizer has mixed defaults
+        # This should not raise TypeError (isinstance check) or ValueError (momentum check)
+        # CompositeOptimizer now has proper defaults with betas and momentum
         scheduler = OneCycleLR(
             optimizer,
             max_lr=0.01,
             total_steps=100,
-            cycle_momentum=False,
+            cycle_momentum=True,  # Default - requires betas or momentum in defaults
         )
 
         # Take a few steps
