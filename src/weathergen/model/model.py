@@ -586,7 +586,7 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = checkpoint(self.forecast_engine, tokens, step)
+                tokens = checkpoint(self.forecast_engine, tokens, step, use_reentrant=False)
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
