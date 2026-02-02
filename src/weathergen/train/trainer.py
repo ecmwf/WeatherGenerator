@@ -47,24 +47,6 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< Updated upstream
-=======
-DEBUG = False
-if DEBUG:
-
-    def debug_barrier(name, rank):
-        """Simple checkpoint function - call at key points in training loop"""
-        _debug_start_time = time.time()
-        torch.cuda.synchronize()
-        elapsed = time.time() - _debug_start_time
-        print(f"[{elapsed:8.2f}s] [Rank {rank}] CHECKPOINT: {name}", flush=True)
-else:
-
-    def debug_barrier(name, rank):
-        return
-
-
->>>>>>> Stashed changes
 class Trainer(TrainerBase):
     def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)

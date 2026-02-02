@@ -153,34 +153,6 @@ class EncoderModule(torch.nn.Module):
         # combined cell lens for all tokens in batch across all input steps
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
 
-<<<<<<< Updated upstream
-        # subdivision factor for required splitting
-=======
-        # Identify non-empty cells (sorted indices from torch.where)
-        non_empty_mask = cell_lens > 0
-        num_non_empty = non_empty_mask.sum().item()
-        non_empty_indices = torch.where(non_empty_mask)[0]
-
-        if num_non_empty == 0:
-            assert False, "No non-empty cells found - cannot process empty input"
-
-        # Gather cell_lens and tokens_global for non-empty cells only
-        # non_empty_indices is sorted, so output will be in original cell order
-        cell_lens_non_empty = cell_lens[non_empty_indices]
-        tokens_global_non_empty = tokens_global[non_empty_indices]
-
-        # Reorder tokens: gather tokens for non-empty cells in their original order
-        cumsum_orig = torch.cat([zero_pad, cell_lens.cumsum(0)])
-        token_indices = torch.cat(
-            [
-                torch.arange(cumsum_orig[idx], cumsum_orig[idx + 1], device=tokens.device)
-                for idx in non_empty_indices
-            ]
-        )
-        tokens_reordered = tokens[token_indices]
-
-        # Fixed number of chunks based on healpix cells (same for all ranks)
->>>>>>> Stashed changes
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_unmasked = []
         posteriors = []
