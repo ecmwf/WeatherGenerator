@@ -234,7 +234,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     if len(mkeys) > 0:
         logger.warning(f"Missing keys when loading model: {mkeys}")
     if len(ukeys) > 0:
-        logger.warning(f"Unused keys when loading model: {mkeys}")
+        logger.warning(f"Unused keys when loading model: {ukeys}")
 
     return model
 
