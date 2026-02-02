@@ -30,7 +30,7 @@ from weathergen.common.io import StoreType
 _REPO_ROOT = Path(
     __file__
 ).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
-_DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
+DEFAULT_CONFIG = _REPO_ROOT / "config" / "default_config.yml"
 
 _DATETIME_TYPE_NAME = "datetime"  # Names for custom resolvers used in Omegaconf
 _TIMEDELTA_TYPE_NAME = "timedelta"
@@ -344,7 +344,7 @@ def load_merge_configs(
         *overwrites: Additional overwrites from different sources
 
     Note: The order of precedence for merging the final config is in ascending order:
-        - base config (either default config or loaded from previous run)
+        - base config (either `base` or loaded from previous run)
         - private config
         - overwrites (also in ascending order)
 
@@ -530,8 +530,8 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     return private_cf
 
 
-def _load_base_conf(base: Path | Config | None) -> Config:
-    """Return the base configuration"""
+def _load_base_conf(base: Path | Config) -> Config:
+    """Deserialize base config into a proper config instance."""
     match base:
         case Path():
             _logger.info(f"Loading specified base config from file: {base}.")
@@ -540,8 +540,9 @@ def _load_base_conf(base: Path | Config | None) -> Config:
             _logger.info(f"Using existing config as base: {base}.")
             conf = base
         case _:
-            _logger.info("Deserialize default configuration.")
-            conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
+            msg = f"Cannot load base config: {base}"
+            raise ValueError(msg)
+
     assert isinstance(conf, Config)
     return conf
 
