@@ -160,7 +160,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # check if fname is a valid path to allow for simple overwriting
                     filename = fname
                 else:
-                    filenames = [pathlib.Path(path) / fname for path in cf.data_pathes]
+                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
                     if not any(filename.exists() for filename in filenames):  # see above
                         msg = (
