@@ -31,6 +31,7 @@ from weathergen.model.model_interface import (
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.optimizer import CompositeOptimizer, create_optimizer
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     extract_batch_metadata,
@@ -46,6 +47,24 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< Updated upstream
+=======
+DEBUG = False
+if DEBUG:
+
+    def debug_barrier(name, rank):
+        """Simple checkpoint function - call at key points in training loop"""
+        _debug_start_time = time.time()
+        torch.cuda.synchronize()
+        elapsed = time.time() - _debug_start_time
+        print(f"[{elapsed:8.2f}s] [Rank {rank}] CHECKPOINT: {name}", flush=True)
+else:
+
+    def debug_barrier(name, rank):
+        return
+
+
+>>>>>>> Stashed changes
 class Trainer(TrainerBase):
     def __init__(self, train_log_freq: Config):
         TrainerBase.__init__(self)
@@ -292,22 +311,14 @@ class Trainer(TrainerBase):
                 logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
             # self.model.print_num_parameters()
 
-        # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
-        # https://arxiv.org/pdf/2111.06377
-        kappa = self.get_batch_size_total(self.batch_size_per_gpu)
-        # aiming for beta1 = 0.9 at one node, ie kappa=B=4
-        beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
-        # aiming for beta2 = 0.95 at one node, ie B=4
-        beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
-        eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
-
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=self.training_cfg.learning_rate_scheduling.lr_start,
-            weight_decay=self.training_cfg.optimizer.weight_decay,
-            betas=(beta1, beta2),
-            eps=eps,
+        # Create optimizer using factory function
+        # Supports both standard AdamW and hybrid Muon+AdamW configurations
+        # See: https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
+        self.optimizer = create_optimizer(
+            model=self.model,
+            optimizer_cfg=self.training_cfg.optimizer,
+            lr_cfg=self.training_cfg.learning_rate_scheduling,
+            batch_size_total=self.get_batch_size_total(self.batch_size_per_gpu),
         )
         self.grad_scaler = torch.amp.GradScaler("cuda")
 
@@ -625,6 +636,12 @@ class Trainer(TrainerBase):
 
     def _get_full_optimizer_state_dict(self):
         is_rank_zero = is_root()
+
+        # Handle CompositeOptimizer (Muon+AdamW) separately
+        if isinstance(self.optimizer, CompositeOptimizer):
+            return self._get_full_composite_optimizer_state_dict(is_rank_zero)
+
+        # Standard optimizer (AdamW) handling
         sharded_sd = self.optimizer.state_dict()
         sharded_state = sharded_sd["state"]
         full_state = {}
@@ -649,6 +666,50 @@ class Trainer(TrainerBase):
             return {
                 "param_groups": sharded_sd["param_groups"],
                 "state": full_state,
+            }
+        else:
+            return {}
+
+    def _get_full_composite_optimizer_state_dict(self, is_rank_zero: bool):
+        """
+        Get full optimizer state dict for CompositeOptimizer (Muon+AdamW).
+
+        Handles DTensor consolidation for both sub-optimizers.
+        """
+
+        def consolidate_optimizer_state(optimizer):
+            """Consolidate sharded state from a single optimizer."""
+            sharded_sd = optimizer.state_dict()
+            sharded_state = sharded_sd["state"]
+            full_state = {}
+            for group_id, sharded_group in sharded_state.items():
+                group_state = {}
+                for attr, sharded_tensor in sharded_group.items():
+                    if isinstance(sharded_tensor, DTensor):
+                        full_tensor = sharded_tensor.full_tensor()
+                    else:
+                        full_tensor = sharded_tensor
+                    if is_rank_zero:
+                        group_state[attr] = full_tensor.cpu()
+                    else:
+                        del full_tensor
+                if is_rank_zero:
+                    full_state[group_id] = group_state
+                else:
+                    del group_state
+            if is_rank_zero:
+                return {
+                    "param_groups": sharded_sd["param_groups"],
+                    "state": full_state,
+                }
+            return {}
+
+        if is_rank_zero:
+            return {
+                "optimizer_type": "composite_muon_adamw",
+                "muon": consolidate_optimizer_state(self.optimizer.muon_optimizer),
+                "adamw": consolidate_optimizer_state(self.optimizer.adamw_optimizer),
+                "muon_lr_multiplier": self.optimizer.muon_lr_multiplier,
             }
         else:
             return {}

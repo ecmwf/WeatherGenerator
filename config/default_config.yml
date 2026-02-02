@@ -161,14 +161,25 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
+    # Optimizer type: "adamw" (default) or "muon_adamw" (Muon for hidden weights, AdamW for embeddings/heads)
+    type: "adamw"
     grad_clip: 1.0
     weight_decay: 0.1
     log_grad_norms: False
-    adamw :
+    adamw:
       # parameters are scaled by number of DDP workers
-      beta1 : 0.975
-      beta2 : 0.9875
-      eps : 2e-08
+      beta1: 0.975
+      beta2: 0.9875
+      eps: 2e-08
+    muon:
+      # Learning rate multiplier for Muon relative to base LR (muon_lr = base_lr * lr_multiplier)
+      lr_multiplier: 20.0
+      # Momentum factor for Muon SGD
+      momentum: 0.95
+      # Use Nesterov momentum
+      nesterov: true
+      # Weight decay for Muon parameters (uses optimizer.weight_decay if not specified)
+      weight_decay: 0.1
 
   losses : {
     "physical": {

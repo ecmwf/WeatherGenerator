@@ -208,18 +208,18 @@ class LearningRateScheduler:
                 if self.i_step > 0
                 else self.lr_max_scaled
             )
-            for g in self.optimizer.param_groups:
-                g["lr"] = self.lr
+            self._set_param_group_lrs(self.lr)
         elif self.policy_decay == "constant" and phase_decay:
             cur_lr = self.lr
             self.lr = self.lr_max_scaled
             # make sure lr_max_scaled rate is used if warm-up end is not lr_max_scaled
             if cur_lr < self.lr:
-                for g in self.optimizer.param_groups:
-                    g["lr"] = self.lr
+                self._set_param_group_lrs(self.lr)
         else:
             self.cur_scheduler.step()
             self.lr = self.cur_scheduler.get_last_lr()[0]
+            # Apply per-group LR multipliers after scheduler step
+            self._apply_lr_multipliers()
 
         # switch scheduler when learning rate regime completed
         if self.i_step == self.n_steps_warmup:
@@ -236,6 +236,33 @@ class LearningRateScheduler:
         self.i_step += 1
 
         return self.lr
+
+    def _set_param_group_lrs(self, base_lr: float):
+        """
+        Set learning rates for all parameter groups, applying per-group multipliers.
+
+        For Muon+AdamW composite optimizers, Muon parameter groups have an lr_multiplier
+        that scales their learning rate relative to the base LR.
+
+        Args:
+            base_lr: The base learning rate to set.
+        """
+        for g in self.optimizer.param_groups:
+            lr_multiplier = g.get("lr_multiplier", 1.0)
+            g["lr"] = base_lr * lr_multiplier
+
+    def _apply_lr_multipliers(self):
+        """
+        Apply per-group LR multipliers after a scheduler step.
+
+        The scheduler sets the same LR for all groups, so we need to scale
+        Muon groups by their lr_multiplier afterwards.
+        """
+        for g in self.optimizer.param_groups:
+            if g.get("is_muon", False):
+                lr_multiplier = g.get("lr_multiplier", 1.0)
+                # Scale Muon groups relative to base LR
+                g["lr"] = self.lr * lr_multiplier
 
     def get_lr(self):
         return self.lr
