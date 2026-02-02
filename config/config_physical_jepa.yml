@@ -267,12 +267,12 @@ validation_config:
     ema_halflife_in_thousands: 1e-3
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: 8
+  validate_before_training: 0
 
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 8,
+    num_samples: 0,
     # write samples in normalized model space
     normalized_samples: True,
     # output streams to write; default all
