@@ -294,15 +294,14 @@ def _create_muon_optimizer(
         )
 
 
-class CompositeOptimizer:
+class CompositeOptimizer(Optimizer):
     """
     Composite optimizer that combines Muon and AdamW for different parameter groups.
 
     Muon is used for 2D hidden layer weights, AdamW for embeddings and heads.
     This class wraps both optimizers and provides a unified interface.
 
-    Note: This class does not inherit from torch.optim.Optimizer to avoid
-    conflicts with state management. It provides the same interface.
+    Inherits from Optimizer for compatibility with PyTorch LR schedulers.
     """
 
     def __init__(
@@ -323,18 +322,23 @@ class CompositeOptimizer:
         self.adamw_optimizer = adamw_optimizer
         self.muon_lr_multiplier = muon_lr_multiplier
 
-        # Combine param_groups from both optimizers for unified interface
-        self._param_groups = muon_optimizer.param_groups + adamw_optimizer.param_groups
+        # Manually initialize Optimizer base class attributes without calling __init__
+        # This avoids the param_groups setup that would conflict with our combined groups
+        from collections import OrderedDict, defaultdict
 
-    @property
-    def param_groups(self) -> list:
-        """Return combined param groups from both optimizers."""
-        return self._param_groups
+        self.defaults = {}
+        self._optimizer_step_pre_hooks = OrderedDict()
+        self._optimizer_step_post_hooks = OrderedDict()
+        self._optimizer_state_dict_pre_hooks = OrderedDict()
+        self._optimizer_state_dict_post_hooks = OrderedDict()
+        self._optimizer_load_state_dict_pre_hooks = OrderedDict()
+        self._optimizer_load_state_dict_post_hooks = OrderedDict()
 
-    @param_groups.setter
-    def param_groups(self, value):
-        """Set param groups (needed for lr_scheduler compatibility)."""
-        self._param_groups = value
+        # Combined param_groups from both optimizers
+        self.param_groups = muon_optimizer.param_groups + adamw_optimizer.param_groups
+
+        # State is a combined view (we override the property below)
+        self._state = defaultdict(dict)
 
     def step(self, closure=None):
         """
@@ -408,13 +412,18 @@ class CompositeOptimizer:
     def state(self) -> dict:
         """
         Return combined state from both optimizers.
+
+        This provides a unified view of optimizer state for checkpointing.
         """
-        combined_state = {}
-        muon_state = self.muon_optimizer.state
-        adamw_state = self.adamw_optimizer.state
-        combined_state.update(muon_state)
-        combined_state.update(adamw_state)
+        combined_state = dict(self._state)
+        combined_state.update(self.muon_optimizer.state)
+        combined_state.update(self.adamw_optimizer.state)
         return combined_state
+
+    @state.setter
+    def state(self, value):
+        """Set state (needed for Optimizer base class compatibility)."""
+        self._state = value
 
 
 class MuonCustom(Optimizer):

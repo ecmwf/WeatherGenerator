@@ -421,6 +421,58 @@ class TestMuonCustom:
         assert not torch.allclose(param1, param2)
 
 
+class TestLRSchedulerCompatibility:
+    """Tests for LR scheduler compatibility with CompositeOptimizer."""
+
+    def test_works_with_onecyclelr(self, simple_model, optimizer_cfg, lr_cfg):
+        """Test that CompositeOptimizer works with OneCycleLR scheduler."""
+        from torch.optim.lr_scheduler import OneCycleLR
+
+        optimizer_cfg.type = "muon_adamw"
+        optimizer = create_optimizer(simple_model, optimizer_cfg, lr_cfg, batch_size_total=4)
+
+        # This should not raise TypeError (isinstance check)
+        # cycle_momentum=False since CompositeOptimizer has mixed defaults
+        scheduler = OneCycleLR(
+            optimizer,
+            max_lr=0.01,
+            total_steps=100,
+            cycle_momentum=False,
+        )
+
+        # Take a few steps
+        for _ in range(5):
+            x = torch.randn(4, 10)
+            loss = simple_model(x).sum()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+
+    def test_works_with_linearlr(self, simple_model, optimizer_cfg, lr_cfg):
+        """Test that CompositeOptimizer works with LinearLR scheduler."""
+        from torch.optim.lr_scheduler import LinearLR
+
+        optimizer_cfg.type = "muon_adamw"
+        optimizer = create_optimizer(simple_model, optimizer_cfg, lr_cfg, batch_size_total=4)
+
+        # This should not raise TypeError
+        scheduler = LinearLR(
+            optimizer,
+            start_factor=0.1,
+            total_iters=100,
+        )
+
+        # Take a few steps
+        for _ in range(5):
+            x = torch.randn(4, 10)
+            loss = simple_model(x).sum()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad()
+
+
 class TestAdamWPatterns:
     """Tests for the ADAMW_PATTERNS constant."""
 
