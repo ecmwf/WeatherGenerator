@@ -307,10 +307,10 @@ def _apply_fixes(config: Config) -> Config:
 
 def _check_datasets(config: Config) -> Config:
     """
-    Collect dataset pathes under legacy keys.
+    Collect dataset paths under legacy keys.
     """
     config = config.copy()
-    if config.get("data_pathes") is None:  # TODO remove this for next version
+    if config.get("data_paths") is None:  # TODO remove this for next version
         legacy_keys = [
             "data_path_anmoi",
             "data_path_obs",
@@ -318,8 +318,8 @@ def _check_datasets(config: Config) -> Config:
             "data_path_fesom",
             "data_path_icon",
         ]
-        pathes = [config.get(key) for key in legacy_keys]
-        config.data_pathes = [path for path in pathes if path is not None]
+        paths = [config.get(key) for key in legacy_keys]
+        config.data_paths = [path for path in paths if path is not None]
 
     return config
 
