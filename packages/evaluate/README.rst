@@ -64,9 +64,8 @@ Stability and documentation
 ---------------------------
 
 The package is functionally stable, and its core evaluation workflows
-are used in active development. However, documentation is currently
-internal: design notes, detailed examples, and workflow guides remain
-private and will be opened gradually as they are consolidated.
+are used in active development. Design notes, detailed examples, and workflow guides remain
+private and will be added gradually to this documentation as it is consolidated.
 
 --------------
 
