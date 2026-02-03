@@ -438,14 +438,104 @@ class CompositeOptimizer(Optimizer):
         self._state = value
 
 
+def _zeropower_via_newtonschulz5(grad: torch.Tensor, steps: int) -> torch.Tensor:
+    """
+    Newton-Schulz iteration to compute the zeroth power / orthogonalization of grad.
+
+    Uses quintic iteration with coefficients selected to maximize the slope at zero.
+    This produces something like US'V^T where S' is diagonal with S_{ii}' ~ Uniform(0.5, 1.5),
+    rather than exact UV^T, but this doesn't hurt model performance.
+
+    Reference: https://github.com/KellerJordan/Muon
+
+    Args:
+        grad: Gradient tensor (must be at least 2D).
+        steps: Number of Newton-Schulz iterations.
+
+    Returns:
+        Orthogonalized gradient tensor.
+    """
+    assert grad.ndim >= 2
+    coef_a, coef_b, coef_c = (3.4445, -4.7750, 2.0315)
+    x = grad.bfloat16()
+
+    # Transpose if more rows than columns (NS works better on wide matrices)
+    if grad.size(-2) > grad.size(-1):
+        x = x.mT
+
+    # Normalize by spectral norm (approximated by Frobenius norm for stability)
+    x = x / (x.norm(dim=(-2, -1), keepdim=True) + 1e-7)
+
+    # Perform Newton-Schulz iterations with quintic coefficients
+    for _ in range(steps):
+        xxt = x @ x.mT
+        poly = coef_b * xxt + coef_c * xxt @ xxt
+        x = coef_a * x + poly @ x
+
+    # Restore original orientation
+    if grad.size(-2) > grad.size(-1):
+        x = x.mT
+
+    return x
+
+
+def _muon_update(
+    grad: torch.Tensor,
+    momentum_buffer: torch.Tensor,
+    beta: float = 0.95,
+    ns_steps: int = 5,
+    nesterov: bool = True,
+) -> torch.Tensor:
+    """
+    Compute Muon update: momentum + orthogonalization + scaling.
+
+    Args:
+        grad: Parameter gradient.
+        momentum_buffer: Momentum buffer (modified in-place).
+        beta: Momentum coefficient.
+        ns_steps: Number of Newton-Schulz iterations.
+        nesterov: Whether to use Nesterov momentum.
+
+    Returns:
+        The update to apply to parameters.
+    """
+    # Momentum accumulation using lerp for numerical stability
+    momentum_buffer.lerp_(grad, 1 - beta)
+
+    # Compute update (Nesterov or standard momentum)
+    if nesterov:
+        update = grad.lerp(momentum_buffer, beta)
+    else:
+        update = momentum_buffer.clone()
+
+    # Reshape for orthogonalization if needed (e.g., conv filters)
+    original_shape = update.shape
+    if update.ndim == 4:
+        update = update.view(len(update), -1)
+
+    # Apply Newton-Schulz orthogonalization
+    update = _zeropower_via_newtonschulz5(update, steps=ns_steps)
+
+    # Scale by sqrt(max(1, rows/cols)) to preserve gradient magnitude
+    update = update * max(1, update.size(-2) / update.size(-1)) ** 0.5
+
+    # Restore original shape and dtype
+    return update.to(grad.dtype).view(original_shape)
+
+
 class MuonCustom(Optimizer):
     """
-    Custom Muon optimizer implementation for PyTorch versions without torch.optim.Muon.
+    Custom Muon optimizer implementation based on Keller Jordan's reference.
 
-    Muon applies Newton-Schulz orthogonalization to gradients before the SGD update,
-    which helps with optimization of transformer hidden layer weights.
+    Muon (MomentUm Orthogonalized by Newton-schulz) internally runs standard SGD-momentum,
+    then performs an orthogonalization post-processing step where each 2D parameter's update
+    is replaced with the nearest orthogonal matrix via Newton-Schulz iteration.
 
-    Reference: https://arxiv.org/abs/2407.01490
+    Reference: https://github.com/KellerJordan/Muon
+               https://kellerjordan.github.io/posts/muon/
+
+    Note: Muon should only be used for hidden weight layers. Embeddings, output heads,
+    biases, and layer norms should use AdamW.
     """
 
     def __init__(
@@ -462,10 +552,10 @@ class MuonCustom(Optimizer):
 
         Args:
             params: Iterable of parameters to optimize or dicts defining param groups.
-            lr: Learning rate.
-            momentum: Momentum factor.
+            lr: Learning rate (in units of spectral norm per update).
+            momentum: Momentum factor (0.95 is typically good).
             nesterov: Whether to use Nesterov momentum.
-            weight_decay: Weight decay (L2 penalty).
+            weight_decay: Decoupled weight decay (like AdamW).
             ns_steps: Number of Newton-Schulz iterations for orthogonalization.
         """
         if lr < 0.0:
@@ -511,75 +601,25 @@ class MuonCustom(Optimizer):
                 if p.grad is None:
                     continue
 
-                grad = p.grad
-
-                # Apply weight decay
-                if weight_decay != 0:
-                    grad = grad.add(p, alpha=weight_decay)
-
-                # Apply Newton-Schulz orthogonalization for 2D+ tensors
-                if p.ndim >= 2:
-                    grad = self._newton_schulz_orthogonalize(grad, ns_steps)
-
-                # Get or initialize momentum buffer
+                # Initialize momentum buffer if needed
                 state = self.state[p]
                 if len(state) == 0:
                     state["momentum_buffer"] = torch.zeros_like(p)
 
-                buf = state["momentum_buffer"]
-                buf.mul_(momentum).add_(grad)
+                # Compute Muon update
+                update = _muon_update(
+                    p.grad,
+                    state["momentum_buffer"],
+                    beta=momentum,
+                    ns_steps=ns_steps,
+                    nesterov=nesterov,
+                )
 
-                if nesterov:
-                    grad = grad.add(buf, alpha=momentum)
-                else:
-                    grad = buf
+                # Apply decoupled weight decay FIRST (like AdamW)
+                if weight_decay != 0:
+                    p.mul_(1 - lr * weight_decay)
 
-                # Apply update
-                p.add_(grad, alpha=-lr)
+                # Apply the orthogonalized update
+                p.add_(update.view(p.shape), alpha=-lr)
 
         return loss
-
-    def _newton_schulz_orthogonalize(self, grad: torch.Tensor, ns_steps: int) -> torch.Tensor:
-        """
-        Apply Newton-Schulz iteration to orthogonalize the gradient.
-
-        This projects the gradient onto the manifold of orthogonal matrices,
-        which helps with optimization stability for large matrices.
-
-        Args:
-            grad: Gradient tensor to orthogonalize.
-            ns_steps: Number of Newton-Schulz iterations.
-
-        Returns:
-            Orthogonalized gradient tensor.
-        """
-        # Reshape to 2D if needed
-        original_shape = grad.shape
-        if grad.ndim > 2:
-            grad = grad.view(grad.shape[0], -1)
-
-        # Transpose if needed to ensure we have more rows than columns
-        transposed = False
-        if grad.shape[0] < grad.shape[1]:
-            grad = grad.T
-            transposed = True
-
-        # Normalize
-        grad = grad / (grad.norm() + 1e-7)
-
-        # Newton-Schulz iteration: X_{k+1} = X_k (3I - X_k^T X_k) / 2
-        # This converges to an orthogonal matrix
-        for _ in range(ns_steps):
-            grad = grad @ (
-                1.5 * torch.eye(grad.shape[1], device=grad.device, dtype=grad.dtype)
-                - 0.5 * grad.T @ grad
-            )
-
-        # Restore original orientation
-        if transposed:
-            grad = grad.T
-
-        # Reshape back to original
-        grad = grad.view(original_shape)
-
-        return grad
