@@ -64,7 +64,6 @@ def test_train_multi_stream(setup, test_run_id):
             "--run-id",
             test_run_id,
         ],
-        f"{WEATHERGEN_HOME}/integration_tests/streams_multi/",
     )
 
     infer_multi_stream(test_run_id)

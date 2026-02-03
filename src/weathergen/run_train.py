@@ -139,10 +139,10 @@ def run_continue(args):
 
 def train() -> None:
     """Entry point for calling the training code from the command line."""
-    train_with_args(sys.argv[1:], None)
+    train_with_args(sys.argv[1:])
 
 
-def train_with_args(argl: list[str], stream_dir: str | None):
+def train_with_args(argl: list[str]):
     parser = cli.get_train_parser()
     args = parser.parse_args(argl)
     run_train(args)

@@ -55,7 +55,6 @@ def test_train(setup, test_run_id):
             "--run-id",
             test_run_id,
         ],
-        f"{WEATHERGEN_HOME}/config/streams/streams_test/",
     )
 
     assert_missing_metrics_file(test_run_id)
