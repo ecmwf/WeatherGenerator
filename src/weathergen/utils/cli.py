@@ -4,6 +4,28 @@ from pathlib import Path
 import pandas as pd
 
 
+def get_main_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    train_parser = parser.add_subparsers(
+        "train", "Train a WeatherGenerator configuration from the ground up.", dest="stage"
+    )
+    _add_train_args(train_parser)
+    continue_parser = parser.add_subparsers(
+        "continue",
+        "Resume training from a pretrained WeatherGenerator configuration.",
+        dest="stage",
+    )
+    _add_continue_args(continue_parser)
+    inference_parser = parser.add_subparsers(
+        "inference",
+        "Run infernce on a trained WeatherGenerator configuration",
+        "stage"
+    )
+    _add_inference_args(inference_parser)
+
+    return parser
+
+
 def get_train_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     _add_train_args(parser)
