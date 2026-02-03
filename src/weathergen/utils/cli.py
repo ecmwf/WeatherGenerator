@@ -6,14 +6,30 @@ import pandas as pd
 
 def get_train_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
-    _add_general_arguments(parser)
+    _add_train_args(parser)
 
     return parser
 
 
 def get_continue_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
+    _add_continue_args(parser)
 
+    return parser
+
+
+def get_inference_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    _add_inference_args(parser)
+
+    return parser
+
+
+def _add_train_args(parser: argparse.ArgumentParser):
+    _add_general_arguments(parser)
+
+
+def _add_continue_args(parser: argparse.ArgumentParser):
     _add_general_arguments(parser)
     _add_model_loading_params(parser)
 
@@ -26,12 +42,8 @@ def get_continue_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    return parser
 
-
-def get_inference_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False)
-
+def _add_inference_args(parser: argparse.ArgumentParser):
     _add_model_loading_params(parser)
     _add_general_arguments(parser)
 
@@ -63,8 +75,6 @@ def get_inference_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="Output streams during inference.",
     )
-
-    return parser
 
 
 def _format_date(date: str) -> str:
