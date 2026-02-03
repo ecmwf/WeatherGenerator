@@ -18,7 +18,6 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
@@ -586,7 +585,7 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = checkpoint(self.forecast_engine, tokens, step, use_reentrant=False)
+                tokens = self.forecast_engine(tokens, step)
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
