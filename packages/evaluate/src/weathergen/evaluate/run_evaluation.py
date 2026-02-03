@@ -280,6 +280,8 @@ def evaluate_from_config(
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     use_parallel = cfg.evaluation.get("num_processes", 0)
+    default_streams = cfg.get("default_streams", {})
+
     if use_parallel == "auto":
         num_processes = mp.cpu_count()
     elif isinstance(use_parallel, int):
@@ -302,9 +304,14 @@ def evaluate_from_config(
     # Build tasks per stream
     for run_id, run in runs.items():
         type_ = run.get("type", "zarr")
-        reader = get_reader(
-            type_, run, run_id, private_paths, cfg.evaluation.regions, cfg.evaluation.metrics
-        )
+
+        if "streams" not in run:
+            run["streams"] = default_streams
+
+        regions = cfg.evaluation.regions
+        metrics = cfg.evaluation.metrics
+
+        reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
         for stream in reader.streams:
             tasks.append(

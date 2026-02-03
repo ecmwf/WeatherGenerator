@@ -60,7 +60,8 @@ healpix_level: 5
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: True
+with_fsdp: False
+ddp_find_unused_parameters: False
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -122,13 +123,13 @@ data_loading :
 training_config:
   
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["masking", "student_teacher"]
+  training_mode: ["student_teacher"]
 
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 1979-01-01T00:00
+  start_date: 1999-01-01T00:00
   end_date: 2022-12-31T00:00
 
   time_window_step: 06:00:00
@@ -158,48 +159,9 @@ training_config:
       beta2 : 0.9875
       eps : 2e-08
 
-  # losses : {
-  #   "physical": {
-  #       type: LossPhysical,
-  #       loss_fcts: {
-  #         "mse": { },
-  #       },
-  #     },
-  #   }
-  
-  # model_input: {
-  #   "forecasting" : {
-  #     masking_strategy: "forecast",
-  #   }
-  # }
-
   losses : {
-    # target_relationship: "independent", "subset", "disjoint", "identity"
-    # "physical": {
-    #     type: LossPhysical,
-    #     weight: 0.7,
-    #     target_source_correspondence: { 0 : { 0 : "independent"}, 1 : { 1 : "independent"} },
-    #     loss_fcts: {
-    #       "mse": {
-    #         weight: 0.8,
-    #       },
-    #     },
-    #     target_and_aux_calc: "Physical",
-    #     },
-    # "student-teacher": {
-    #     enabled: False,
-    #     type: LossLatentSSLStudentTeacher,
-    #     weight: 1.0,
-    #     target_source_correspondence: {1 : {1 : "subset"} },
-    #     loss_fcts : {
-    #       "JEPA": {
-    #         'weight': 5, "loss_extra_args": {}, "out_dim": 2048,
-    #       }
-    #     },
-    #     target_and_aux_calc: "EMATeacher",
-    #     }
     "student-teacher": {
-        enabled: False,
+        enabled: True,
         type: LossLatentSSLStudentTeacher,
         weight: 1.0,
         loss_fcts : {
@@ -210,7 +172,10 @@ training_config:
             out_dim: 4096, # 16384, 
             teacher_temp: 0.1,
             teacher_style: "softmax_center",
-            center_momentum: 0.9
+            center_momentum: 0.9,
+            head: "mlp",
+            num_layers: 2,
+            hidden_factor: 2,
           }, 
           "DINO": {
             weight: 0.25, 
@@ -219,7 +184,10 @@ training_config:
             out_dim: 4096, # 16384, 
             teacher_temp: 0.1,
             teacher_style: "softmax_center",
-            center_momentum: 0.9
+            center_momentum: 0.9,
+            head: "mlp",
+            num_layers: 2,
+            hidden_factor: 2,
           },
         },
         target_and_aux_calc: "EMATeacher",
@@ -230,43 +198,43 @@ training_config:
     "strategy1" : {
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "random",
-      enabled: False,
+      enabled: True,
       num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
         rate : 0.5,
-        # randomly sample the rate
         rate_sampling: False
       },
     },
     "strategy2" : {
       masking_strategy: "healpix",
+      enabled: True,
       num_samples: 2,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
         rate : 0.5,
         hl_mask: 1,
-        # randomly sample the rate
         rate_sampling: False
       },
     },
     "strategy3" : {
       masking_strategy: "healpix",
+      enabled: True,
       num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
         hl_mask: 0,
         # randomly sample the rate
-        rate_sampling: False
+        rate_sampling: False,
+        rate: 0.0
       },
     },
     "strategy4" : {
-      # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "random",
-      enabled: False,
+      enabled: True,
       num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
@@ -278,6 +246,7 @@ training_config:
     },
     "strategy5" : {
       masking_strategy: "healpix",
+      enabled: True,
       num_samples: 2,
       num_steps_input: 1,
       masking_strategy_config : { 
@@ -290,11 +259,13 @@ training_config:
     },
     "strategy6" : {
       masking_strategy: "healpix",
+      enabled: True,
       num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
         hl_mask: 0,
+        rate: 0.0,
         # randomly sample the rate
         rate_sampling: False
       },

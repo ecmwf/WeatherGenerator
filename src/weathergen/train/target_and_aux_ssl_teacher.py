@@ -56,11 +56,9 @@ class EMATeacher(TargetAndAuxModuleBase):
             self.ema_model.ema_model.reshard()
         self.ema_model.update(istep, self.batch_size)
 
-    def compute(self, bidx, batch, model_params, model, forecast_offset) -> tuple[Any, Any]:
+    def compute(self, bidx, batch, model_params, model) -> tuple[Any, Any]:
         with torch.no_grad():
-            outputs = self.ema_model.forward_eval(
-                model_params, batch, forecast_offset
-            ).get_latent_prediction(0)
+            outputs = self.ema_model.forward_eval(model_params, batch).get_latent_prediction(0)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
@@ -68,7 +66,11 @@ class EMATeacher(TargetAndAuxModuleBase):
             # collect target meta-information for selected samples
             aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
 
-            return TargetAuxOutput(0, physical={}, latent=targets, aux_outputs=aux_outputs)
+            targets_out = TargetAuxOutput(batch.get_output_len(), batch.get_output_idxs())
+            targets_out.latent = targets
+            targets_out.aux_outputs = aux_outputs
+
+            return targets_out
 
     def to_device(self, device) -> EMATeacher:
         for _, module in self.postprocess_targets.items():

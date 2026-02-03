@@ -51,14 +51,25 @@ class StreamData:
     for one stream.
     """
 
-    def __init__(self, idx: int, input_steps: int, forecast_steps: int, healpix_cells: int) -> None:
+    def __init__(
+        self,
+        idx: int,
+        input_steps: int,
+        output_steps: int,
+        healpix_cells: int,
+    ) -> None:
         """
         StreamData object
 
         Parameters
         ----------
-        forecast_steps : int
-            Number of forecast steps
+        idx: int
+            Time index for this sample
+        input_steps : int
+            Number of input steps
+        output_steps : int
+            Number of output steps
+            Note -- Last input step and first output step always overlap.
         healpix_cells : int
             Number of healpix cells for source
 
@@ -70,7 +81,7 @@ class StreamData:
         self.mask_value = 0.0
 
         self.input_steps = input_steps
-        self.forecast_steps = forecast_steps
+        self.output_steps = output_steps
         self.healpix_cells = healpix_cells
 
         self.source_is_spoof = False
@@ -78,20 +89,18 @@ class StreamData:
 
         # initialize empty members
         self.sample_idx = idx
-        self.target_coords = [torch.tensor([]) for _ in range(forecast_steps + 1)]
-        self.target_coords_raw = [[] for _ in range(forecast_steps + 1)]
-        self.target_times_raw = [
-            np.array([], dtype="datetime64[ns]") for _ in range(forecast_steps + 1)
-        ]
+        self.target_coords = [torch.tensor([]) for _ in range(output_steps)]
+        self.target_coords_raw = [[] for _ in range(output_steps)]
+        self.target_times_raw = [np.array([], dtype="datetime64[ns]") for _ in range(output_steps)]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [
-            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
+            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
         ]
-        self.target_tokens = [torch.tensor([]) for _ in range(forecast_steps + 1)]
+        self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
         self.target_tokens_lens = [
-            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
+            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
         ]
-        self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(forecast_steps + 1)]
+        self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
 
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
@@ -366,12 +375,6 @@ class StreamData:
         Either source or target is spoof
         """
         return self.source_is_spoof or self.target_is_spoof
-
-    def get_forecast_steps(self) -> int:
-        """
-        Get number of forecast steps
-        """
-        return self.forecast_steps
 
 
 def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:
