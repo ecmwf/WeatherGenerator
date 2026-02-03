@@ -65,14 +65,7 @@ def _fix_argl(argl):  # TODO remove this fix after grace period
 
 def inference():
     """Entry point for calling the inference code from the command line."""
-    inference_from_args(sys.argv[1:])
-
-
-def inference_from_args(argl: list[str]):
-    """Provide arguments during integration tests directly"""
-    parser = cli.get_inference_parser()
-    args = parser.parse_args(argl)
-    run_inference(**args)
+    main(["inference"] + sys.argv[1:])
 
 
 def run_inference(args):
@@ -125,13 +118,7 @@ def run_inference(args):
 
 def train_continue() -> None:
     """Entry point for calling train_continue from the command line."""
-    train_continue_from_args(sys.argv[1:])
-
-
-def train_continue_from_args(argl: list[str]):
-    parser = cli.get_continue_parser()
-    args = parser.parse_args(argl)
-    run_continue(args)
+    main(["continue"] + sys.argv[1:])
 
 
 def run_continue(args):
@@ -175,13 +162,7 @@ def run_continue(args):
 
 def train() -> None:
     """Entry point for calling the training code from the command line."""
-    train_with_args(sys.argv[1:])
-
-
-def train_with_args(argl: list[str]):
-    parser = cli.get_train_parser()
-    args = parser.parse_args(argl)
-    run_train(args)
+    main(["train"] + sys.argv[1:])
 
 
 def run_train(args):
