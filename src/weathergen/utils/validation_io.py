@@ -62,33 +62,20 @@ def write_output(
 
             # handle forcing streams or if sample is empty
             if preds is None:
-                targets_lens[-1][-1] += [0]
-                # use targets to ensure correct number of channels
-                assert targets[0].shape[0] == 0
-                preds_all[-1] += [np.copy(targets[0].shape[0])]
-                targets_all[-1] += [np.copy(targets[0].shape[0])]
-                targets_coords_all[-1] += [np.zeros((0, 2))]
-                targets_times_all[-1] += [np.array([], dtype=np.datetime64)]
-
-                continue
+                # preds are empty so create copy of target and add ensemble dimension
+                assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
+                preds = [targets[0].clone().unsqueeze(0)]
 
             for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
-                pred, target = pred.to(fp32), target.to(fp32)
-
-                if not (target.shape[0] > 0 and pred.shape[0] > 0):
-                    continue
-
                 # extract data/coords and remove token dimension if it exists
                 pred = pred.reshape([pred.shape[0], *target.shape])
-                assert pred.shape[1] > 0
 
-                preds_s += [dn_data(sname, pred).detach().cpu().numpy()]
-                targets_s += [dn_data(sname, target).detach().cpu().numpy()]
+                preds_s += [dn_data(sname, pred).detach().to(fp32).cpu().numpy()]
+                targets_s += [dn_data(sname, target).detach().to(fp32).cpu().numpy()]
 
-                key = "target_coords"
-                t_coords_s += [target_aux_out.physical[t_idx][sname][key][i_batch].cpu().numpy()]
-                key = "target_times"
-                t_times_s += [target_aux_out.physical[t_idx][sname][key][i_batch]]
+                target_data = target_aux_out.physical[t_idx][sname]
+                t_coords_s += [target_data["target_coords"][i_batch].cpu().numpy()]
+                t_times_s += [target_data["target_times"][i_batch]]
 
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
 
