@@ -28,20 +28,23 @@ logger = logging.getLogger(__name__)
 
 
 def inference():
-    # By default, arguments from the command line are read.
+    """Entry point for calling the inference code from the command line."""
     inference_from_args(sys.argv[1:])
 
 
 def inference_from_args(argl: list[str]):
-    """
-    Inference function for WeatherGenerator model.
-    Entry point for calling the inference code from the command line.
-
-    When running integration tests, the arguments are directly provided.
-    """
+    """Provide arguments during integration tests directly"""
     parser = cli.get_inference_parser()
     args = parser.parse_args(argl)
+    run_inference(**args)
 
+
+def run_inference(args):
+    """
+    Inference function for WeatherGenerator model.
+
+    Note: Additional configuration for inference (`test_config`) is set in the function.
+    """
     inference_overwrite = {
         "test_config": dict(
             shuffle=False,
@@ -84,24 +87,23 @@ def inference_from_args(argl: list[str]):
             pdb.post_mortem(tb)
 
 
-####################################################################################################
 def train_continue() -> None:
-    """
-    Function to continue training for WeatherGenerator model.
-    Entry point for calling train_continue from the command line.
-    Configurations are set in the function body.
-
-    Args:
-      from_run_id (str): Run/model id of pretrained WeatherGenerator model to
-        continue training. Defaults to None.
-    Note: All model configurations are set in the function body.
-    """
+    """Entry point for calling train_continue from the command line."""
     train_continue_from_args(sys.argv[1:])
 
 
 def train_continue_from_args(argl: list[str]):
     parser = cli.get_continue_parser()
     args = parser.parse_args(argl)
+    run_continue(args)
+
+
+def run_continue(args):
+    """
+    Function to continue training for WeatherGenerator model.
+
+    Note: All model configurations are set in the function body.
+    """
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
@@ -135,26 +137,23 @@ def train_continue_from_args(argl: list[str]):
             pdb.post_mortem(tb)
 
 
-####################################################################################################
 def train() -> None:
-    """
-    Training function for WeatherGenerator model.
-    Entry point for calling the training code from the command line.
-    Configurations are set in the function body.
-
-    Args:
-      run_id (str, optional): Run/model id of pretrained WeatherGenerator model to
-        continue training. Defaults to None.
-    Note: All model configurations are set in the function body.
-    """
+    """Entry point for calling the training code from the command line."""
     train_with_args(sys.argv[1:], None)
 
 
 def train_with_args(argl: list[str], stream_dir: str | None):
-    """
-    Training function for WeatherGenerator model."""
     parser = cli.get_train_parser()
     args = parser.parse_args(argl)
+    run_train(args)
+
+
+def run_train(args):
+    """
+    Training function for WeatherGenerator model.
+
+    Note: All model configurations are set in the function body.
+    """
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
