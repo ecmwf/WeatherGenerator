@@ -393,7 +393,7 @@ class Plotter:
                             f"dropping NAs. Skipping this plot."
                         )
                         continue
-                        
+
                     name = self.scatter_plot(
                         da_t,
                         map_output_dir,
