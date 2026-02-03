@@ -86,7 +86,8 @@ def infer_multi_stream(run_id):
             "-end",
             "2022-10-11",
             "--samples", "10",
-            "--mini-epoch", "0"
+            "--mini-epoch",
+            "0",
             "--from-run-id",
             run_id,
             "--run-id",
