@@ -752,6 +752,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             while True:
                 idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
                 idx_raw += 1
+                # idx=53
 
                 batch = self._get_batch(idx, num_forecast_steps)
 
