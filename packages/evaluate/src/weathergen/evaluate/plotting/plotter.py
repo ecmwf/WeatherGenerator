@@ -39,6 +39,12 @@ _logger.setLevel(logging.INFO)
 _logger.debug(f"Taking cartopy paths from {work_dir}")
 
 
+from weathergen.evaluate.plotting.image_sort import (
+    _extract_valid_time_and_fstep_from_filename,
+    _image_sort_key,
+)
+
+
 class Plotter:
     """
     Contains all basic plotting functions.
@@ -575,6 +581,9 @@ class Plotter:
         # Convert FPS to duration in milliseconds
         duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
 
+        # Collected created animation filenames to return
+        created_animations: list[str] = []
+
         for region in self.regions:
             for _, sa in enumerate(samples):
                 for _, var in enumerate(variables):
@@ -602,19 +611,27 @@ class Plotter:
                         image_paths += names
 
                     if image_paths:
+                        # Ensure deterministic ordering of frames. For ERA5 1h there can be
+                        # multiple valid_time stamps; sort by valid_time (if present),
+                        # then by fstep number to guarantee chronological order.
+                        image_paths = sorted(image_paths, key=_image_sort_key)
+
                         images = [Image.open(path) for path in image_paths]
+                        anim_fname = f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif"
                         images[0].save(
-                            f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",
+                            anim_fname,
                             save_all=True,
                             append_images=images[1:],
                             duration=duration_ms,
                             loop=0,
                         )
 
+                        created_animations.append(anim_fname)
+
                     else:
                         _logger.warning(f"No images found for animation {var} sample {sa}")
 
-        return image_paths
+        return created_animations
 
     def get_map_output_dir(self, tag):
         return self.out_plot_basedir / self.stream / "maps" / tag
