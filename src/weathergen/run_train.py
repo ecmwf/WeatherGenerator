@@ -27,6 +27,21 @@ from weathergen.train.trainer import Trainer
 logger = logging.getLogger(__name__)
 
 
+def train() -> None:
+    """Entry point for calling the training code from the command line."""
+    main(["train"] + sys.argv[1:])
+
+
+def train_continue() -> None:
+    """Entry point for calling train_continue from the command line."""
+    main(["continue"] + sys.argv[1:])
+
+
+def inference():
+    """Entry point for calling the inference code from the command line."""
+    main(["inference"] + sys.argv[1:])
+
+
 def main(argl: list[str]):
     try:
         argl = _fix_argl(argl)
@@ -61,11 +76,6 @@ def _fix_argl(argl):  # TODO remove this fix after grace period
         argl = [stage] + argl
 
     return argl
-
-
-def inference():
-    """Entry point for calling the inference code from the command line."""
-    main(["inference"] + sys.argv[1:])
 
 
 def run_inference(args):
@@ -116,11 +126,6 @@ def run_inference(args):
             pdb.post_mortem(tb)
 
 
-def train_continue() -> None:
-    """Entry point for calling train_continue from the command line."""
-    main(["continue"] + sys.argv[1:])
-
-
 def run_continue(args):
     """
     Function to continue training for WeatherGenerator model.
@@ -158,11 +163,6 @@ def run_continue(args):
         traceback.print_exc()
         if cf.world_size == 1:
             pdb.post_mortem(tb)
-
-
-def train() -> None:
-    """Entry point for calling the training code from the command line."""
-    main(["train"] + sys.argv[1:])
 
 
 def run_train(args):
