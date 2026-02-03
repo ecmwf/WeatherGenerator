@@ -28,6 +28,7 @@ from weathergen.model.model_interface import (
     get_target_aux_calculator,
     init_model_and_shard,
 )
+from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -287,9 +288,9 @@ class Trainer(TrainerBase):
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
-            if cf.with_fsdp:
-                logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
-            # self.model.print_num_parameters()
+            # ddp-wrapped model does not expose this function
+            if not cf.with_ddp:
+                self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
@@ -404,6 +405,8 @@ class Trainer(TrainerBase):
 
         cf = self.cf
         self.model.train()
+
+        apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
 
         dataset_iter = iter(self.data_loader)
 

@@ -60,6 +60,18 @@ def write_output(
             preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
             targets_lens[-1] += [[]]
 
+            # handle forcing streams or if sample is empty
+            if preds is None:
+                targets_lens[-1][-1] += [0]
+                # use targets to ensure correct number of channels
+                assert targets[0].shape[0] == 0
+                preds_all[-1] += [np.copy(targets[0].shape[0])]
+                targets_all[-1] += [np.copy(targets[0].shape[0])]
+                targets_coords_all[-1] += [np.zeros((0, 2))]
+                targets_times_all[-1] += [np.array([], dtype=np.datetime64)]
+
+                continue
+
             for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
                 pred, target = pred.to(fp32), target.to(fp32)
 
@@ -114,7 +126,7 @@ def write_output(
     # output stream names to be written, use specified ones or all if nothing specified
     stream_names = [stream.name for stream in cf.streams]
     if val_cfg.get("output").get("streams") is not None:
-        output_stream_names = val_cfg.streams_output
+        output_stream_names = val_cfg.output.streams
     else:
         output_stream_names = stream_names
 
