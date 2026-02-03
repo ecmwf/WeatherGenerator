@@ -38,7 +38,7 @@ from weathergen.train.utils import (
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
 )
-from weathergen.utils.distributed import ddp_average, is_root
+from weathergen.utils.distributed import is_root
 from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -66,8 +66,6 @@ class Trainer(TrainerBase):
         self.model = None
         self.model_params = None
         self.optimizer: torch.optim.Optimizer | None = None
-        self.perf_gpu = None
-        self.perf_mem = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
         self.target_and_aux_calculators_val = None
@@ -146,7 +144,6 @@ class Trainer(TrainerBase):
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
-        self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
     def get_target_aux_calculators(self, mode_cfg):
@@ -504,10 +501,6 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
-            perf_gpu, perf_mem = self.get_perf()
-            self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
-            self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
-
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
@@ -715,8 +708,6 @@ class Trainer(TrainerBase):
                     stddev_all,
                     avg_loss=avg_loss,
                     lr=self.lr_scheduler.get_lr(),
-                    perf_gpu=self.perf_gpu,
-                    perf_mem=self.perf_mem,
                 )
 
         loss_calculator.loss_hist = []
