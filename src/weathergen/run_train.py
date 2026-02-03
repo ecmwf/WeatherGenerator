@@ -27,6 +27,42 @@ from weathergen.train.trainer import Trainer
 logger = logging.getLogger(__name__)
 
 
+def main(argl: list[str]):
+    try:
+        argl = _fix_argl(argl)
+    except ValueError as e:
+        logger.error(str(e))
+
+    parser = cli.get_main_parser()
+    args = parser.parse_args(argl)
+    match args.stage:
+        case "train":
+            run_train(args)
+        case "continue":
+            run_continue(args)
+        case "inference":
+            run_inference(args)
+        case _:
+            logger.error("No stage was found.")
+
+
+def _fix_argl(argl):  # TODO remove this fix after grace period
+    """Ensure `stage` positional argument is in arglist."""
+    if argl[0] not in ("train", "continue", "inference"):
+        try:
+            stage = os.environ.get("WEATHERGEN_STAGE")
+        except KeyError as e:
+            msg = (
+                "`stage` postional argument and environment variable 'WEATHERGEN_STAGE' missing.",
+                "Provide either one or the other.",
+            )
+            raise ValueError(msg) from e
+
+        argl = [stage] + argl
+
+    return argl
+
+
 def inference():
     """Entry point for calling the inference code from the command line."""
     inference_from_args(sys.argv[1:])
@@ -190,20 +226,4 @@ def run_train(args):
 
 
 if __name__ == "__main__":
-    try:
-        stage = os.environ.get("WEATHERGEN_STAGE")
-    except KeyError as e:
-        msg = "missing environment variable 'WEATHERGEN_STAGE'"
-        raise ValueError(msg) from e
-
-    if stage == "train":
-        # Entry point for slurm script.
-        # Check whether --from-run-id passed as argument.
-        if any("--from-run-id" in arg for arg in sys.argv):
-            train_continue()
-        else:
-            train()
-    elif stage == "inference":
-        inference()
-    else:
-        logger.error("No stage was found.")
+    main(sys.argv[1:])
