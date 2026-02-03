@@ -107,6 +107,7 @@ def get_score(
     group_by_coord: str | None = None,
     ens_dim: str = "ens",
     compute: bool = False,
+    parameters: dict = {},
     **kwargs,
 ) -> xr.DataArray:
     """
@@ -136,8 +137,7 @@ def get_score(
         Calculated score as an xarray DataArray.
     """
     sc = Scores(agg_dims=agg_dims, ens_dim=ens_dim)
-
-    score_data = sc.get_score(data, score_name, group_by_coord, **kwargs)
+    score_data = sc.get_score(data, score_name, group_by_coord, parameters=parameters, **kwargs)
     if compute:
         # If compute is True, compute the score immediately
         return score_data.compute()
@@ -204,6 +204,7 @@ class Scores:
         score_name: str,
         group_by_coord: str | None = None,
         compute: bool = False,
+        parameters: dict = {},
         **kwargs,
     ):
         """
@@ -309,14 +310,14 @@ class Scores:
                 group_slice = {
                     k: (v[name] if v is not None else v) for k, v in grouped_args.items()
                 }
-                res = f(**group_slice)
+                res = f(**group_slice, **parameters)
                 # Add coordinate for concatenation
                 res = res.expand_dims({group_by_coord: [name]})
                 results.append(res)
             result = xr.concat(results, dim=group_by_coord)
         else:
             # No grouping: just call the function
-            result = f(**args)
+            result = f(**args, **parameters)
 
         if compute:
             return result.compute()

@@ -60,6 +60,7 @@ def calc_scores_per_stream(
     regions: list[str],
     metrics_dict: dict,
     plot_score_maps: bool = False,
+    metric_parameters: dict[str, object] = {},
 ):
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -170,8 +171,9 @@ def calc_scores_per_stream(
             valid_scores = []
 
             for metric in metrics:
+                parameters = metric_parameters.get(metric, {})
                 score = get_score(
-                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
+                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord, parameters=parameters
                 )
                 if score is not None:
                     valid_scores.append(score)
@@ -228,9 +230,10 @@ def calc_scores_per_stream(
 
         # Build local dictionary for this region
         for metric in metrics:
+            metric_data = metric_stream.sel({"metric": metric}).assign_attrs( metric_parameters.get(metric,{}) )
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
                 reader.run_id
-            ] = metric_stream.sel({"metric": metric})
+            ] = metric_data
 
     return local_scores
 
@@ -452,6 +455,7 @@ def metric_list_to_json(
     stream: str,
     metrics_dict: list[xr.DataArray],
     regions: list[str],
+    metric_parameters: dict,
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -480,6 +484,7 @@ def metric_list_to_json(
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
 
     for metric, metric_stream in metrics_dict.items():
+        parameters = metric_parameters.get(metric, {})
         for region in regions:
             metric_now = metric_stream[region][stream]
             for run_id in metric_now.keys():
@@ -490,10 +495,25 @@ def metric_list_to_json(
                     reader.metrics_dir
                     / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
                 )
-
-                _logger.info(f"Saving results to {save_path}")
+                if save_path.exists():
+                    _logger.info(f"{save_path} already present")
+                    with save_path.open("r") as f: 
+                        data_dict = json.load(f)
+                        if not "scores" in data_dict:
+                            data_dict = { "scores": [data_dict] }
+                        for i,score_version in enumerate(data_dict["scores"]):
+                            if score_version["attrs"] == parameters:
+                                _logger.warning(f"metric with same parameters found, replacing")
+                                data_dict["scores"][i] = metric_now.to_dict()
+                                break
+                        else:
+                            data_dict["scores"].append(metric_now.to_dict())
+                            _logger.info(f"Appending results to {save_path}")
+                else:
+                    data_dict = {"scores":[metric_now.to_dict()]}
+                    _logger.info(f"Saving results to new file {save_path}")
                 with open(save_path, "w") as f:
-                    json.dump(metric_now.to_dict(), f, indent=4)
+                    json.dump(data_dict, f, indent=4)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "
