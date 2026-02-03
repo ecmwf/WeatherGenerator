@@ -89,16 +89,18 @@ norm_type: "LayerNorm"
 # Options: null (disabled), 0.0 (ReZero), 1e-5 (LayerScale default)
 # LayerScale applies per-channel learned scaling before residual addition
 # ReZero initializes scaling to 0 for gradual signal introduction
-layer_scale_init: null
+# LayerScale - small init for stable gradients                                                           
+layer_scale_init: 1e-5                                                                                   
 
 # Stochastic Depth rates per component (0.0 = disabled)
 # Randomly drops entire residual paths during training for regularization
 # Rates increase linearly with depth: 0.0 for early layers, up to specified rate for deeper layers
-stochastic_depth:
-  ae_local: 0.0
-  ae_global: 0.0
-  ae_aggregation: 0.0
-  forecasting: 0.0
+# Stochastic Depth - light regularization                                                                
+stochastic_depth:                                                                                        
+  ae_local: 0.0       # Keep local attention stable                                                      
+  ae_global: 0.1      # Light dropout on global                                                          
+  ae_aggregation: 0.05                                                                                   
+  forecasting: 0.1  
 
 #####################################
 
