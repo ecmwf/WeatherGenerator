@@ -74,7 +74,7 @@ def write_output(
                 # extract original target coords and times from target data
                 target_data = target_aux_out.physical[t_idx][sname]
                 t_coords_s += [target_data["target_coords"][i_batch].cpu().numpy()]
-                t_times_s += [target_data["target_times"][i_batch]]
+                t_times_s += [target_data["target_times"][i_batch].astype("datetime64[ns]")]
 
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
 
