@@ -67,12 +67,11 @@ def write_output(
                 preds = [targets[0].clone().unsqueeze(0)]
 
             for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
-                # extract data/coords and remove token dimension if it exists
-                pred = pred.reshape([pred.shape[0], *target.shape])
-
+                # denormalize data if requested and map to storage format
                 preds_s += [dn_data(sname, pred).detach().to(fp32).cpu().numpy()]
                 targets_s += [dn_data(sname, target).detach().to(fp32).cpu().numpy()]
 
+                # extract original target coords and times from target data
                 target_data = target_aux_out.physical[t_idx][sname]
                 t_coords_s += [target_data["target_coords"][i_batch].cpu().numpy()]
                 t_times_s += [target_data["target_times"][i_batch]]
