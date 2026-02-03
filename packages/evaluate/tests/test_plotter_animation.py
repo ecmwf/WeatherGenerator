@@ -8,7 +8,10 @@ src_dir = os.path.abspath(os.path.join(tests_dir, os.pardir, "src"))
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
-from weathergen.evaluate.plotting.image_sort import _extract_valid_time_and_fstep_from_filename, _image_sort_key
+from weathergen.evaluate.plotting.image_sort import (
+    _extract_valid_time_and_fstep_from_filename,
+    _image_sort_key,
+)
 
 
 def test_extract_valid_time_and_fstep_from_filename():
