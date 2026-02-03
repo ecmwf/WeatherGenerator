@@ -138,7 +138,16 @@ class LocalAssimilationEngine(torch.nn.Module):
         self.cf = cf
         self.ae_local_blocks = torch.nn.ModuleList()
 
-        for _ in range(self.cf.ae_local_num_blocks):
+        # Get LayerScale and StochasticDepth config
+        layer_scale_init = cf.get("layer_scale_init", None)
+        stochastic_depth_cfg = cf.get("stochastic_depth", {})
+        max_drop_rate = stochastic_depth_cfg.get("ae_local", 0.0) if stochastic_depth_cfg else 0.0
+        num_blocks = self.cf.ae_local_num_blocks
+
+        for i in range(num_blocks):
+            # Linear scaling of drop rate with depth
+            drop_rate = max_drop_rate * (i / max(num_blocks - 1, 1)) if num_blocks > 1 else 0.0
+
             self.ae_local_blocks.append(
                 MultiSelfAttentionHeadVarlen(
                     self.cf.ae_local_dim_embed,
@@ -149,6 +158,8 @@ class LocalAssimilationEngine(torch.nn.Module):
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
+                    layer_scale_init=layer_scale_init,
+                    stochastic_depth_rate=drop_rate,
                 )
             )
             self.ae_local_blocks.append(
@@ -159,6 +170,8 @@ class LocalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_local_dropout_rate,
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
+                    layer_scale_init=layer_scale_init,
+                    stochastic_depth_rate=drop_rate,
                 )
             )
 
@@ -181,6 +194,15 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
         self.cf = cf
         self.ae_adapter = torch.nn.ModuleList()
 
+        # Get LayerScale and StochasticDepth config
+        layer_scale_init = cf.get("layer_scale_init", None)
+        stochastic_depth_cfg = cf.get("stochastic_depth", {})
+        # Use ae_local rate for adapter (transition layer)
+        max_drop_rate = stochastic_depth_cfg.get("ae_local", 0.0) if stochastic_depth_cfg else 0.0
+        ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
+
+        # First block
+        drop_rate = 0.0 if ae_adapter_num_blocks <= 1 else 0.0
         self.ae_adapter.append(
             MultiCrossAttentionHeadVarlenSlicedQ(
                 self.cf.ae_global_dim_embed,
@@ -195,11 +217,19 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 norm_type=self.cf.norm_type,
                 norm_eps=self.cf.norm_eps,
                 attention_dtype=get_dtype(self.cf.attention_dtype),
+                layer_scale_init=layer_scale_init,
+                stochastic_depth_rate=drop_rate,
             )
         )
 
-        ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
-        for _ in range(ae_adapter_num_blocks - 1):
+        for i in range(ae_adapter_num_blocks - 1):
+            # Linear scaling of drop rate with depth
+            drop_rate = (
+                max_drop_rate * ((i + 1) / max(ae_adapter_num_blocks - 1, 1))
+                if ae_adapter_num_blocks > 1
+                else 0.0
+            )
+
             self.ae_adapter.append(
                 MLP(
                     self.cf.ae_global_dim_embed,
@@ -208,6 +238,8 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_adapter_dropout_rate,
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
+                    layer_scale_init=layer_scale_init,
+                    stochastic_depth_rate=drop_rate,
                 )
             )
             self.ae_adapter.append(
@@ -224,6 +256,8 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
+                    layer_scale_init=layer_scale_init,
+                    stochastic_depth_rate=drop_rate,
                 )
             )
 
@@ -257,12 +291,23 @@ class QueryAggregationEngine(torch.nn.Module):
 
         self.ae_aggregation_blocks = torch.nn.ModuleList()
 
+        # Get LayerScale and StochasticDepth config
+        layer_scale_init = cf.get("layer_scale_init", None)
+        stochastic_depth_cfg = cf.get("stochastic_depth", {})
+        max_drop_rate = (
+            stochastic_depth_cfg.get("ae_aggregation", 0.0) if stochastic_depth_cfg else 0.0
+        )
+        num_blocks = self.cf.ae_aggregation_num_blocks
+
         global_rate = int(1 / self.cf.ae_aggregation_att_dense_rate)
-        for i in range(self.cf.ae_aggregation_num_blocks):
+        for i in range(num_blocks):
+            # Linear scaling of drop rate with depth
+            drop_rate = max_drop_rate * (i / max(num_blocks - 1, 1)) if num_blocks > 1 else 0.0
+
             ## Alternate between local and global attention
             #  as controlled by cf.ae_dense_local_att_dense_rate
             # Last block is always global attention
-            if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
+            if i % global_rate == 0 or i + 1 == num_blocks:
                 self.ae_aggregation_blocks.append(
                     MultiSelfAttentionHeadVarlen(
                         self.cf.ae_global_dim_embed,
@@ -273,6 +318,8 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        layer_scale_init=layer_scale_init,
+                        stochastic_depth_rate=drop_rate,
                     )
                 )
             else:
@@ -289,6 +336,8 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        layer_scale_init=layer_scale_init,
+                        stochastic_depth_rate=drop_rate,
                     )
                 )
             # MLP block
@@ -301,6 +350,8 @@ class QueryAggregationEngine(torch.nn.Module):
                     hidden_factor=self.cf.ae_aggregation_mlp_hidden_factor,
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
+                    layer_scale_init=layer_scale_init,
+                    stochastic_depth_rate=drop_rate,
                 )
             )
 
@@ -329,12 +380,21 @@ class GlobalAssimilationEngine(torch.nn.Module):
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
+        # Get LayerScale and StochasticDepth config
+        layer_scale_init = cf.get("layer_scale_init", None)
+        stochastic_depth_cfg = cf.get("stochastic_depth", {})
+        max_drop_rate = stochastic_depth_cfg.get("ae_global", 0.0) if stochastic_depth_cfg else 0.0
+        num_blocks = self.cf.ae_global_num_blocks
+
         global_rate = int(1 / self.cf.ae_global_att_dense_rate)
-        for i in range(self.cf.ae_global_num_blocks):
+        for i in range(num_blocks):
+            # Linear scaling of drop rate with depth
+            drop_rate = max_drop_rate * (i / max(num_blocks - 1, 1)) if num_blocks > 1 else 0.0
+
             ## Alternate between local and global attention
             #  as controlled by cf.ae_global_att_dense_rate
             # Last block is always global attention
-            if i % global_rate == 0 or i + 1 == self.cf.ae_global_num_blocks:
+            if i % global_rate == 0 or i + 1 == num_blocks:
                 self.ae_global_blocks.append(
                     MultiSelfAttentionHead(
                         self.cf.ae_global_dim_embed,
@@ -345,6 +405,8 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        layer_scale_init=layer_scale_init,
+                        stochastic_depth_rate=drop_rate,
                     )
                 )
             else:
@@ -360,6 +422,8 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        layer_scale_init=layer_scale_init,
+                        stochastic_depth_rate=drop_rate,
                     )
                 )
             # MLP block
@@ -372,6 +436,8 @@ class GlobalAssimilationEngine(torch.nn.Module):
                     hidden_factor=self.cf.ae_global_mlp_hidden_factor,
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
+                    layer_scale_init=layer_scale_init,
+                    stochastic_depth_rate=drop_rate,
                 )
             )
         if self.cf.get("ae_global_trailing_layer_norm", False):
@@ -400,9 +466,20 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
+        # Get LayerScale and StochasticDepth config
+        layer_scale_init = cf.get("layer_scale_init", None)
+        stochastic_depth_cfg = cf.get("stochastic_depth", {})
+        max_drop_rate = (
+            stochastic_depth_cfg.get("forecasting", 0.0) if stochastic_depth_cfg else 0.0
+        )
+        num_blocks = self.cf.fe_num_blocks
+
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
-            for i in range(self.cf.fe_num_blocks):
+            for i in range(num_blocks):
+                # Linear scaling of drop rate with depth
+                drop_rate = max_drop_rate * (i / max(num_blocks - 1, 1)) if num_blocks > 1 else 0.0
+
                 # Alternate between global and local attention
                 if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
                     self.fe_blocks.append(
@@ -416,6 +493,8 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            layer_scale_init=layer_scale_init,
+                            stochastic_depth_rate=drop_rate,
                         )
                     )
                 else:
@@ -432,6 +511,8 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            layer_scale_init=layer_scale_init,
+                            stochastic_depth_rate=drop_rate,
                         )
                     )
                 # Add MLP block
@@ -444,6 +525,8 @@ class ForecastingEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
+                        layer_scale_init=layer_scale_init,
+                        stochastic_depth_rate=drop_rate,
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
