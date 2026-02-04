@@ -123,22 +123,7 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         cell_mask: torch.Tensor,
     ):
-<<<<<<< HEAD
-        stream_id = stream_info["stream_id"]
-        is_diagnostic = stream_info.get("diagnostic", False)
-        is_diagnostic = is_diagnostic or (
-            len(stream_info.train_source_channels) == 0
-            and len(stream_info.val_source_channels) == 0
-        )
-
-        # return empty if there is no data or we are in diagnostic mode
-        if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
-            source_tokens_cells = [torch.tensor([])]
-            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-            return (source_tokens_cells, source_tokens_lens)
-
-=======
->>>>>>> origin/develop
+        
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
 
