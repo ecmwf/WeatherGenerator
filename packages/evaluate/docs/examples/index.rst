@@ -8,5 +8,5 @@ Here is are some example workflows to illustrate how to use the FastEvaluation p
 Producing histograms
 ++++++++++++++++++++
 
-!include images here
+!include images/example configs here
 

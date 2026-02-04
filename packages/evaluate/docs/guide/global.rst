@@ -1,8 +1,8 @@
 Global Plotting Options
 =======================
 
-.. code-block::json
-
+.. code-block::
+    
     global_plotting_options:
       regions: ["belgium", "global"]
       image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..

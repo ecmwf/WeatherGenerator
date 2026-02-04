@@ -27,3 +27,4 @@ Check out the :doc:`Documentation` section for further information, including ho
 
    guide/config
    guide/export
+   guide/quaver
