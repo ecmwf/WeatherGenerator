@@ -77,6 +77,26 @@ class EMATeacher(TargetAndAuxModuleBase):
             module.to(device)
         return self
 
+    def get_current_beta(self, cur_step: int) -> float:
+        """
+        Get current EMA beta value for monitoring.
+
+        The beta value determines how much the teacher model is updated towards
+        the student model at each step. Higher beta means slower teacher updates.
+
+        Args:
+            cur_step: Current training step (typically istep * batch_size).
+
+        Returns:
+            Current EMA beta value.
+        """
+        halflife_steps = self.ema_model.halflife_steps
+        rampup_ratio = self.ema_model.rampup_ratio
+        if rampup_ratio is not None:
+            halflife_steps = min(halflife_steps, cur_step / 1e3 * rampup_ratio)
+        beta = 0.5 ** (self.batch_size / max(halflife_steps * 1e3, 1e-6))
+        return beta
+
 
 def get_target_postprocessing(target_losses: list[str], training_cfg, **kwargs):
     return_dict = {}
