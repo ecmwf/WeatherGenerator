@@ -23,7 +23,7 @@ author = "......"
 
 year = datetime.datetime.now().year
 years = "2026-%s" % (year,)
-copyright = "%s, ......." % (years,)
+copyright = "%s, WeatherGenerator contributors." % (years,)
 
 
 # -- General configuration ---------------------------------------------------
