@@ -1,0 +1,182 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# Test config for per-variable channel masking based on autocorrelation.
+# Uses a small model for quick testing.
+
+embed_orientation: "channels"
+embed_unembed_mode: "block"
+embed_dropout_rate: 0.1
+
+# Small model for testing
+ae_local_dim_embed: 64
+ae_local_num_blocks: 1
+ae_local_num_heads: 4
+ae_local_dropout_rate: 0.1
+ae_local_with_qk_lnorm: True
+
+ae_local_num_queries: 1
+ae_local_queries_per_cell: False
+ae_adapter_num_heads: 4
+ae_adapter_embed: 32
+ae_adapter_with_qk_lnorm: True
+ae_adapter_with_residual: True
+ae_adapter_dropout_rate: 0.1
+
+ae_global_dim_embed: 64
+ae_global_num_blocks: 1
+ae_global_num_heads: 4
+ae_global_dropout_rate: 0.1
+ae_global_with_qk_lnorm: True
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: False
+
+ae_aggregation_num_blocks: 1
+ae_aggregation_num_heads: 4
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: True
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
+decoder_type: PerceiverIOCoordConditioning
+pred_adapter_kv: False
+pred_self_attention: True
+pred_dyadic_dims: False
+pred_mlp_adaln: True
+num_class_tokens: 1
+num_register_tokens: 7
+
+fe_num_blocks: 2
+fe_num_heads: 4
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+fe_layer_norm_after_blocks: []
+fe_impute_latent_noise_std: 0.0
+forecast_att_dense_rate: 1.0
+
+# Use level 4 for faster testing
+healpix_level: 4
+
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: False
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
+
+latent_noise_kl_weight: 0.0
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5 
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True
+
+freeze_modules: ""
+norm_type: "LayerNorm"
+zarr_store: "zip"
+
+#####################################
+
+# Use the channel masking stream config
+streams_directory: "./config/streams/era5_1deg/"
+streams: ["era5_channel_masking.yml"]
+
+general:
+  istep: 0
+  rank: ???
+  world_size: ???
+  multiprocessing_method: "fork"
+  desc: "channel_masking_test"
+  run_id: ???
+  run_history: []
+
+train_log_freq:
+  terminal: 1
+  metrics: 5
+  checkpoint: 100
+
+data_loading:
+  num_workers: 4
+  rng_seed: ???
+  repeat_data_in_mini_epoch: False
+  memory_pinning: True
+
+training_config:
+  training_mode: ["masking"]
+  
+  # Small run for testing
+  num_mini_epochs: 2
+  samples_per_mini_epoch: 32
+  shuffle: True
+
+  start_date: 2020-01-01T00:00
+  end_date: 2020-01-31T00:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+  window_offset_prediction: 1
+  
+  learning_rate_scheduling:
+    lr_start: 1e-6
+    lr_max: 1e-4
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 8
+    num_steps_cooldown: 8
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw:
+      beta1: 0.975
+      beta2: 0.9875
+      eps: 2e-08
+
+  losses: {
+    "physical": {
+        type: LossPhysical,
+        loss_fcts: { "mse": { }, },
+        },
+    }
+  
+  model_input: {
+    "masking": {
+      masking_strategy: "healpix",
+      num_samples: 1,
+      masking_strategy_config: { rate: 0.5, hl_mask: 2, rate_sampling: False }
+      },
+    }
+
+  forecast:
+    time_step: 06:00:00
+    num_steps: 1
+    policy: "fixed"
+
+validation_config: 
+  samples_per_mini_epoch: 16
+  shuffle: False
+  start_date: 2020-02-01T00:00
+  end_date: 2020-02-07T00:00
+  
+  validate_with_ema: 
+    enabled: False
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 1e-3
+
+  write_num_samples: 0
+  output_streams: null
+  validate_before_training: False
+
+wgtags:
+  org: null
+  issue: null
+  exp: "channel_masking_test"
+  grid: null

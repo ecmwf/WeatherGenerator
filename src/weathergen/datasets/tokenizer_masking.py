@@ -74,15 +74,44 @@ class TokenizerMasking(Tokenizer):
         return tokens
 
     def build_samples_for_stream(
-        self, training_mode: str, num_cells: int, training_cfg: dict
+        self,
+        training_mode: str,
+        num_cells: int,
+        training_cfg: dict,
+        channel_list: list[str] | None = None,
+        channel_masking_config=None,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
-        Create masks for samples
+        Create masks for samples.
+
+        Parameters
+        ----------
+        training_mode : str
+            Training mode identifier.
+        num_cells : int
+            Number of HEALPix cells at data level.
+        training_cfg : dict
+            Training stage configuration.
+        channel_list : list[str] | None
+            Optional list of channel names for per-channel masking.
+        channel_masking_config : ChannelMaskingConfig | None
+            Optional per-channel masking configuration.
+
+        Returns
+        -------
+        tuple
+            (target_masks, source_masks, source_target_mapping)
         """
-        return self.masker.build_samples_for_stream(training_mode, num_cells, training_cfg)
+        return self.masker.build_samples_for_stream(
+            training_mode,
+            num_cells,
+            training_cfg,
+            channel_list=channel_list,
+            channel_masking_config=channel_masking_config,
+        )
 
     def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
-        """ """
+        """Convert cell-level mask to token-level mask."""
 
         mask_tokens, mask_channels = None, None
         num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()

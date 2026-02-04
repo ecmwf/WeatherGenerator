@@ -1185,11 +1185,14 @@ class Masker:
             return {}
 
         num_cells = self.num_healpix_cells
+        hl_data = self.healpix_level_data
 
         # Group channels by their HEALPix masking level
         hl_to_channels: dict[int, list[str]] = {}
         for ch in channel_list:
             hl = channel_masking_config.get_hl_mask(ch)
+            # Cap hl_mask at data level - 1 (required by _prepare_healpix_based_masking)
+            hl = min(hl, hl_data - 1)
             if hl not in hl_to_channels:
                 hl_to_channels[hl] = []
             hl_to_channels[hl].append(ch)
@@ -1211,6 +1214,8 @@ class Masker:
         channel_masks = {}
         for ch in channel_list:
             hl = channel_masking_config.get_hl_mask(ch)
+            # Cap hl_mask at data level - 1 (must match grouping above)
+            hl = min(hl, hl_data - 1)
             channel_masks[ch] = hl_masks[hl]
 
         return channel_masks

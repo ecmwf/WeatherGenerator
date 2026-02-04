@@ -24,7 +24,7 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
-from weathergen.datasets.masking import Masker
+from weathergen.datasets.masking import ChannelMaskingConfig, Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
@@ -557,14 +557,30 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     def _get_source_target_masks(self, training_mode):
         """
-        Generate source and target masks for all streams
+        Generate source and target masks for all streams.
+
+        If channel_masking config is provided in stream config, per-channel
+        masks will be generated based on each variable's autocorrelation.
         """
 
         masks = {}
         for stream_info in self.streams:
+            # Get channel list and channel masking config if available
+            channel_list = stream_info.get(f"{self._stage}_source_channels", None)
+            channel_masking_cfg = stream_info.get("channel_masking", None)
+
+            # Create ChannelMaskingConfig if config dict is provided
+            channel_masking_config = None
+            if channel_masking_cfg is not None:
+                channel_masking_config = ChannelMaskingConfig.from_config(channel_masking_cfg)
+
             # Build source and target sample masks
             masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
-                training_mode, self.num_healpix_cells, self.mode_cfg
+                training_mode,
+                self.num_healpix_cells,
+                self.mode_cfg,
+                channel_list=channel_list,
+                channel_masking_config=channel_masking_config,
             )
             # identical for all streams
             num_target_samples = len(masks[stream_info["name"]][0])

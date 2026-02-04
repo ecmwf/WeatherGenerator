@@ -275,9 +275,20 @@ def tokenize_apply_mask_source(
         coords = coords_padded[idxs_data]
         data = data_padded[idxs_data]
 
+    # Apply per-channel masking if provided
+    # mask_channels is a 2D tensor [num_cells, num_channels] where True = keep
+    # We need to apply it to the data after spatial indexing
     if mask_channels is not None:
-        assert False, "to be implemented"
-        # data = data_padded[ : channel_mask]
+        # mask_channels should be [num_points, num_channels] after cell->point expansion
+        # or [num_channels] if uniform across points
+        if mask_channels.dim() == 1:
+            # Broadcast across points: [num_channels] -> [1, num_channels]
+            channel_mask = mask_channels.unsqueeze(0)
+        else:
+            # Already [num_points, num_channels]
+            channel_mask = mask_channels
+        # Zero out masked channels (where mask is False)
+        data = data * channel_mask.to(data.dtype)
 
     # local coords
     num_tokens_per_cell = [len(idxs) for idxs in idxs_cells_lens]
@@ -351,9 +362,20 @@ def tokenize_apply_mask_target(
         coords = rdata.coords[idxs_data]
         data = rdata.data[idxs_data]
 
+    # Apply per-channel masking if provided
+    # mask_channels is a 2D tensor [num_cells, num_channels] where True = keep
+    # We need to apply it to the data after spatial indexing
     if mask_channels is not None:
-        assert False, "to be implemented"
-        # data = data_padded[ : channel_mask]
+        # mask_channels should be [num_points, num_channels] after cell->point expansion
+        # or [num_channels] if uniform across points
+        if mask_channels.dim() == 1:
+            # Broadcast across points: [num_channels] -> [1, num_channels]
+            channel_mask = mask_channels.unsqueeze(0)
+        else:
+            # Already [num_points, num_channels]
+            channel_mask = mask_channels
+        # Zero out masked channels (where mask is False)
+        data = data * channel_mask.to(data.dtype)
 
     num_tokens_per_cell = [len(idxs) for idxs in idxs_cells_lens]
     mask_tokens_per_cell = torch.split(torch.from_numpy(mask_tokens), num_tokens_per_cell)

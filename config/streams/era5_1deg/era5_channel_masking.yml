@@ -1,0 +1,79 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# Example stream config with per-variable masking based on autocorrelation.
+# This file demonstrates how to configure channel_masking for variable-specific
+# mask sizes based on each variable's spatial correlation length.
+
+ERA5_CHANNEL_MASKING :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  stream_id : 0
+  source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
+  target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
+  loss_weight : 1.
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 8
+  tokenize_spacetime : True
+  max_num_targets: -1 
+
+  # Per-variable masking configuration based on autocorrelation
+  # Variables with larger spatial correlation get coarser masks (lower hl_mask)
+  # Variables with smaller spatial correlation get finer masks (higher hl_mask)
+  channel_masking:
+    enabled: true
+    
+    # Spatial correlation lengths computed with scripts/compute_autocorr.py
+    # or scripts/verify_corr_extended.py on ERA5 O96 data
+    autocorr:
+      # Large-scale variables (L_corr ~ 4000 km) -> Level 1
+      z_500:  {space_km: 4000}
+      t_850:  {space_km: 4009}
+      2t:     {space_km: 3771}
+      
+      # Upper-troposphere/stratosphere (L_corr ~ 3100 km) -> Level 1
+      u_50:   {space_km: 3163}
+      q_850:  {space_km: 3107}
+      
+      # Mesoscale winds (L_corr ~ 1200 km) -> Level 2
+      v_50:   {space_km: 1277}
+      u_1000: {space_km: 1218}
+      10u:    {space_km: 1200}
+      
+      # Surface winds (L_corr ~ 750 km) -> Level 3
+      10v:    {space_km: 746}
+      
+      # Precipitation (L_corr ~ 180 km) -> Level 5 (or data level)
+      # Note: Will be capped at (healpix_level - 1) if too fine
+      tp:     {space_km: 177}
+    
+    # Mapping parameters
+    multiplier: 1.0       # L_mask = multiplier * L_corr
+    hl_mask_min: 1        # Minimum HEALPix level (prevents hemisphere-scale)
+    hl_mask_max: 5        # Maximum HEALPix level (prevents sub-grid scale)
+    default_hl_mask: 3    # Default for variables not in autocorr dict
+
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    type : 'obs_value'
+    num_layers : 2
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1
