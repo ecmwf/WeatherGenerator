@@ -179,16 +179,18 @@ training_config:
 
   model_input: {
     "random_easy" : {enabled : False},
+    "forecasting" : {enabled : False},
     "forecasting_input" : {
       masking_strategy: "forecast",
       },
   }
 
   target_input: {
+    "random_easy_target" : {enabled: False},
     "forecasting_target" : {
       masking_strategy: "forecast"  
     },
-    "random_easy_target" : {enabled: False}
+    
   }
 
   forecast :
