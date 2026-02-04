@@ -38,19 +38,19 @@ Once you have the grib templates with the correct grid type for your data, you n
 this can take a while for long runs, use a screen or a tmux session and you can leave ``{level_type}`` empty, i.e., using ``aifs_{}_o96_data.grib``, to process both pressure levels (pl) and surface fields (sfc) simultaneously.
 
 .. note::
+
     Quaver scores are computed at valid times: 00:00 and 12:00, so you just need to convert the steps with those valid times. The others will not have Pangu/AIFS/GraphCast counterparts. 
 
-Note on exp_ver
-+++++++++++++++
+.. note::
+    
+    ``exp_ver`` label is an internal id that quaver uses to store the scores on the database. We can't arbitrarily choose it but we should generate one through ``prep ml``. 
 
-The ``exp_ver`` label is an internal id that quaver uses to store the scores on the database. We can't arbitrarily choose it but we should generate one through ``prep ml``. 
+    .. code-block::
 
-.. code-block::
+        ml prepml
+        prepml expver --create
 
-    ml prepml
-    prepml expver --create
-
-until we clarify how to properly do it, you can use the existing exp_ver (`iuoo`) **no need to change it** in the code. 
+    until we clarify how to properly do it, you can use the existing exp_ver (`iuoo`) **no need to change it** in the code. 
 
 Compute scores
 ++++++++++++++
