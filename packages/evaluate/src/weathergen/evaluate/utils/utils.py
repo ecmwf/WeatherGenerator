@@ -147,6 +147,9 @@ def calc_scores_per_stream(
         )
 
         lead_time_map = {}
+        # Store metric-specific attributes that get lost during concat
+        # Key: (fstep, metric) -> attrs dict
+        all_metric_attrs = {}
 
         for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
             if preds.ipoint.size == 0:
@@ -173,8 +176,9 @@ def calc_scores_per_stream(
             # Build up computation graphs for all metrics
             _logger.debug(f"Build computation graphs for metrics for stream {stream}...")
 
-            # Add it only if it is not None
+            # Calculate scores and filter out None values
             valid_scores = []
+            valid_metric_names = []
 
             for metric in metrics:
                 score = get_score(
@@ -182,21 +186,29 @@ def calc_scores_per_stream(
                 )
                 if score is not None:
                     valid_scores.append(score)
+                    valid_metric_names.append(metric)
+                else:
+                    _logger.warning(f"Metric {metric} returned None, skipping")
 
-            valid_metric_names = [
-                metric
-                for metric, score in zip(metrics, valid_scores, strict=False)
-                if score is not None
-            ]
             if not valid_scores:
                 continue
 
             # Concatenate all metrics using "minimal" to handle metrics with different coords
+            # Preserve attributes from individual metrics (e.g., Q-Q analysis data)
+            # Store attributes before concat as they may be lost
+            for metric, score in zip(valid_metric_names, valid_scores, strict=False):
+                if score.attrs:
+                    # Store with key (fstep, metric) for later restoration
+                    all_metric_attrs[(int(fstep), metric)] = score.attrs.copy()
+                    _logger.debug(
+                        f"Stored {len(score.attrs)} attrs for fstep={fstep}, metric={metric}"
+                    )
+
             combined_metrics = xr.concat(
                 valid_scores,
                 dim="metric",
                 coords="minimal",
-                combine_attrs="no_conflicts",
+                combine_attrs="drop_conflicts",
             )
 
             combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
@@ -273,12 +285,22 @@ def calc_scores_per_stream(
                 )
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
+        _logger.debug(f"all_metric_attrs keys: {list(all_metric_attrs.keys())}")
 
         # Build local dictionary for this region
         for metric in metrics:
+            metric_data = metric_stream.sel({"metric": metric})
+            # Restore metric-specific attributes from all forecast steps
+            # Attributes are the same across forecast steps for a given metric
+            for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
+                if stored_metric == metric and attrs:
+                    _logger.debug(f"Restoring {len(attrs)} attributes for {metric}")
+                    metric_data.attrs.update(attrs)
+                    break
+
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
                 reader.run_id
-            ] = metric_stream.sel({"metric": metric})
+            ] = metric_data
 
     return local_scores
 
@@ -529,10 +551,7 @@ def metric_list_to_json(
 
     for metric, metric_stream in metrics_dict.items():
         for region in regions:
-            metric_now = metric_stream[region][stream]
-            for run_id in metric_now.keys():
-                metric_now = metric_now[run_id]
-
+            for run_id, metric_data in metric_stream[region][stream].items():
                 # Match the expected filename pattern
                 save_path = (
                     reader.metrics_dir
@@ -541,7 +560,7 @@ def metric_list_to_json(
 
                 _logger.info(f"Saving results to {save_path}")
                 with open(save_path, "w") as f:
-                    json.dump(metric_now.to_dict(), f, indent=4)
+                    json.dump(metric_data.to_dict(), f, indent=4)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "

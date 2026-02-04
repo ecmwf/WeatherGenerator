@@ -1203,7 +1203,7 @@ class QuantilePlots:
         labels: str | list,
         tag: str = "",
         metric: str = "qq_analysis",
-        extreme_percentiles: tuple[float, float] = (5.0, 95.0),
+        extreme_percentiles: tuple[float, float] | None = None,
     ) -> None:
         """
         Create quantile-quantile (Q-Q) plots for extreme value analysis.
@@ -1236,6 +1236,10 @@ class QuantilePlots:
             None
         """
         data_list, label_list = self._check_lengths(qq_data, labels)
+
+        # Use extreme_percentiles from data if not explicitly provided
+        if extreme_percentiles is None:
+            extreme_percentiles = tuple(data_list[0].attrs.get("extreme_percentiles", (5.0, 95.0)))
 
         # Create figure with subplots
         fig = plt.figure(figsize=(16, 6), dpi=self.dpi_val)

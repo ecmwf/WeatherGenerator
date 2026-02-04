@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 import inspect
-import json
 import logging
 from dataclasses import dataclass
 
@@ -17,7 +16,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.scores.score_utils import arr_to_float, arr_to_list, to_list
+from weathergen.evaluate.scores.score_utils import to_list
 
 # from common.io import MockIO
 
@@ -243,6 +242,7 @@ class Scores:
         """
         if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
+            _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
             assert self.ens_dim in data.prediction.dims, (
                 f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
@@ -1505,7 +1505,7 @@ class Scores:
         n_quantiles: int = 100,
         quantile_method: str = "linear",
         focus_extremes: bool = True,
-        extreme_percentiles: tuple[float, float] = (5.0, 95.0),
+        extreme_percentiles: tuple[float, float] = (5.0, 95.0),  # 5th and 95th percentiles
         iqr_percentiles: tuple[float, float] = (25.0, 75.0),
     ) -> xr.DataArray:
         """
@@ -1560,6 +1560,8 @@ class Scores:
                 "Cannot calculate Q-Q analysis without aggregation dimensions (agg_dims=None)."
             )
 
+        _logger.info(f"Starting Q-Q analysis with {n_quantiles} quantiles")
+
         # Generate quantile levels
         if focus_extremes:
             # Add more resolution in the tails for extreme value analysis
@@ -1572,19 +1574,9 @@ class Scores:
         else:
             quantile_levels = np.linspace(0.001, 0.999, n_quantiles)
 
-        # Flatten the data across aggregation dimensions while preserving other dimensions
-        # Determine which dimensions to keep (not in agg_dims)
-        keep_dims = [dim for dim in p.dims if dim not in self._agg_dims]
-
-        if keep_dims:
-            # Stack aggregation dimensions into a single dimension
-            p_flat = p.stack({"_agg_points": self._agg_dims})
-            gt_flat = gt.stack({"_agg_points": self._agg_dims})
-        else:
-            # If all dimensions are aggregated, add a scalar dimension
-            p_flat = p.stack({"_agg_points": self._agg_dims}).expand_dims("scalar")
-            gt_flat = gt.stack({"_agg_points": self._agg_dims}).expand_dims("scalar")
-            keep_dims = ["scalar"]
+        # Stack aggregation dimensions into a single dimension
+        p_flat = p.stack({"_agg_points": self._agg_dims})
+        gt_flat = gt.stack({"_agg_points": self._agg_dims})
 
         # Remove NaN values before quantile calculation
         p_flat = p_flat.dropna(dim="_agg_points", how="all")
@@ -1622,34 +1614,21 @@ class Scores:
         # Calculate overall Q-Q score (mean absolute deviation across all quantiles)
         overall_qq_score = qq_deviation.mean(dim="quantile")
 
-        # Store Q-Q data as a non-scalar coordinate with matching dimensions
-        # This ensures each channel/sample/ens combination gets its own Q-Q data
-        # Create separate JSON strings for each position in the multi-dimensional array
-        qq_data_coord_array = np.empty(overall_qq_score.shape, dtype=object)
-
-        # Iterate over all positions and create individual JSON strings
-        for idx in np.ndindex(overall_qq_score.shape):
-            qq_full_data = {
+        # Store Q-Q data as xarray attributes for automatic JSON serialization
+        overall_qq_score.attrs.update(
+            {
+                "p_quantiles": p_quantiles.values.tolist(),
+                "gt_quantiles": gt_quantiles.values.tolist(),
+                "qq_deviation": qq_deviation.values.tolist(),
+                "qq_deviation_normalized": qq_deviation_normalized.values.tolist(),
+                "extreme_low_mse": extreme_low_mse.values.tolist(),
+                "extreme_high_mse": extreme_high_mse.values.tolist(),
                 "quantile_levels": quantile_levels.tolist(),
-                "p_quantiles": arr_to_list(p_quantiles, idx),
-                "gt_quantiles": arr_to_list(gt_quantiles, idx),
-                "qq_deviation": arr_to_list(qq_deviation, idx),
-                "qq_deviation_normalized": arr_to_list(qq_deviation_normalized, idx),
-                "extreme_low_mse": arr_to_float(extreme_low_mse, idx),
-                "extreme_high_mse": arr_to_float(extreme_high_mse, idx),
+                "extreme_percentiles": list(extreme_percentiles),
+                "iqr_percentiles": list(iqr_percentiles),
             }
-            qq_data_coord_array[idx] = json.dumps(qq_full_data)
-
-        qq_data_coord = xr.DataArray(
-            qq_data_coord_array,
-            dims=overall_qq_score.dims,
-            coords={dim: overall_qq_score.coords[dim] for dim in overall_qq_score.dims},
-            attrs={"description": "Full Q-Q analysis data for plotting"},
         )
-        overall_qq_score = overall_qq_score.assign_coords({"qq_full_data": qq_data_coord})
 
-        # Remove scalar dimension if it was added
-        if "scalar" in overall_qq_score.dims:
-            overall_qq_score = overall_qq_score.squeeze("scalar", drop=True)
+        _logger.info(f"Q-Q analysis completed with {len(overall_qq_score.attrs)} attributes")
 
         return overall_qq_score

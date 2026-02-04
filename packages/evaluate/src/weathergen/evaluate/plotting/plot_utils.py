@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import json
 import logging
 from collections.abc import Iterable, Sequence
 
@@ -473,62 +472,35 @@ def quantile_plot_metric_region(
                 if data_for_channel.isnull().all():
                     continue
 
-                # For qq_analysis, extract full Q-Q data from coordinate
-                if metric == "qq_analysis":
-                    if "qq_full_data" in data_for_channel.coords:
-                        # Get the qq_full_data - it may be 0-d (scalar) or multi-d
-                        qq_coord = data_for_channel.coords["qq_full_data"]
+                # For qq_analysis, extract Q-Q data from attributes
+                if metric == "qq_analysis" and "p_quantiles" in data_for_channel.attrs:
+                    attrs = data_for_channel.attrs
+                    # Convert to numpy arrays once
+                    p_quantiles_arr = np.array(attrs["p_quantiles"])
+                    gt_quantiles_arr = np.array(attrs["gt_quantiles"])
+                    qq_deviation_arr = np.array(attrs["qq_deviation"])
+                    qq_deviation_norm_arr = np.array(attrs["qq_deviation_normalized"])
+                    quantile_levels = np.array(attrs["quantile_levels"])
+                    extreme_low_mse = float(np.mean(np.array(attrs["extreme_low_mse"])))
+                    extreme_high_mse = float(np.mean(np.array(attrs["extreme_high_mse"])))
 
-                        # Extract the first non-empty JSON string
-                        if qq_coord.ndim == 0:
-                            qq_data_str = qq_coord.item()
-                        else:
-                            # Flatten and get first non-empty value
-                            qq_values = qq_coord.values.flatten()
-                            qq_data_str = next((v for v in qq_values if v and v != ""), None)
-
-                        if not qq_data_str:
-                            _logger.warning(f"Empty qq_full_data for channel {ch}")
-                            continue
-
-                        qq_data = json.loads(qq_data_str)
-
-                        # Build dataset with quantile-based and scalar variables
-                        quantile_vars = [
-                            "quantile_levels",
-                            "p_quantiles",
-                            "gt_quantiles",
-                            "qq_deviation",
-                        ]
-                        dataset_dict = {
-                            var: (["quantile"], _flatten_or_average(np.array(qq_data[var])))
-                            for var in quantile_vars
-                        }
-
-                        # Add normalized deviation (with fallback)
-                        dataset_dict["qq_deviation_normalized"] = (
-                            ["quantile"],
-                            _flatten_or_average(
-                                np.array(
-                                    qq_data.get("qq_deviation_normalized", qq_data["qq_deviation"])
-                                )
+                    qq_dataset = xr.Dataset(
+                        {
+                            "quantile_levels": (["quantile"], quantile_levels),
+                            "p_quantiles": (["quantile"], _flatten_or_average(p_quantiles_arr)),
+                            "gt_quantiles": (["quantile"], _flatten_or_average(gt_quantiles_arr)),
+                            "qq_deviation": (["quantile"], _flatten_or_average(qq_deviation_arr)),
+                            "qq_deviation_normalized": (
+                                ["quantile"],
+                                _flatten_or_average(qq_deviation_norm_arr),
                             ),
-                        )
-
-                        # Add scalar MSE values
-                        dataset_dict["extreme_low_mse"] = (
-                            [],
-                            float(np.mean(qq_data.get("extreme_low_mse", 0.0))),
-                        )
-                        dataset_dict["extreme_high_mse"] = (
-                            [],
-                            float(np.mean(qq_data.get("extreme_high_mse", 0.0))),
-                        )
-
-                        qq_dataset = xr.Dataset(dataset_dict)
-                        qq_full_data.append(qq_dataset)
-                    else:
-                        _logger.warning("qq_full_data not found in coords for qq_analysis metric")
+                            "extreme_low_mse": ([], extreme_low_mse),
+                            "extreme_high_mse": ([], extreme_high_mse),
+                        }
+                    )
+                    # Store extreme percentiles for plotting
+                    qq_dataset.attrs["extreme_percentiles"] = tuple(attrs["extreme_percentiles"])
+                    qq_full_data.append(qq_dataset)
 
                 selected_data.append(data_for_channel)
                 labels.append(runs[run_id].get("label", run_id))
@@ -541,28 +513,23 @@ def quantile_plot_metric_region(
                     prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
                 )
 
-                # Check if plotter has qq_plot method
+                # Check if plotter has qq_plot method and Q-Q data is available
                 if hasattr(plotter, "qq_plot") and qq_full_data:
                     _logger.info(f"Creating Q-Q plot with {len(qq_full_data)} dataset(s).")
+                    # Extract extreme_percentiles from dataset
+                    extreme_pct = qq_full_data[0].attrs["extreme_percentiles"]
                     plotter.qq_plot(
                         qq_full_data,
                         labels,
                         tag=name,
                         metric=metric,
+                        extreme_percentiles=extreme_pct,
                     )
                 else:
-                    # Fallback to standard plot if qq_plot not available
+                    # Skip plotting if no Q-Q data available
                     _logger.warning(
-                        f"Plotter does not have qq_plot method or no full Q-Q data available. "
-                        f"Falling back to standard plot for {metric}."
-                    )
-                    selected_data, time_dim = _assign_time_coord(selected_data)
-                    plotter.plot(
-                        selected_data,
-                        labels,
-                        tag=name,
-                        x_dim=time_dim,
-                        y_dim=metric,
+                        f"Q-Q data not available for {metric} - {region} - {stream} - {ch}. "
+                        f"Skipping plot generation."
                     )
 
 
