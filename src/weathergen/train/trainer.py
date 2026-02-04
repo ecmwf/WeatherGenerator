@@ -811,8 +811,14 @@ class Trainer(TrainerBase):
         for _loss_name, target_aux in targets_and_auxs.items():
             # Check if this is an EMATeacher-based loss
             if hasattr(target_aux, "latent") and target_aux.latent:
-                # Get the first timestep's latent dict
-                target_latent_dict = target_aux.latent[0] if target_aux.latent else {}
+                # Handle both cases:
+                # 1. latent is a list[dict] (as per TargetAuxOutput dataclass)
+                # 2. latent is a dict (as set directly by EMATeacher)
+                if isinstance(target_aux.latent, list):
+                    target_latent_dict = target_aux.latent[0] if target_aux.latent else {}
+                else:
+                    # EMATeacher sets latent directly as a dict
+                    target_latent_dict = target_aux.latent
 
                 # Determine the SSL loss type (JEPA, DINO, iBOT)
                 for ssl_type in ["JEPA", "DINO", "iBOT"]:
