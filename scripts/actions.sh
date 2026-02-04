@@ -20,7 +20,9 @@ case "$1" in
     (
       echo "LINTING WORKFLOW STARTING..."
       
-      echo "lint-fix"
+      echo "lint-check..."
+      ./scripts/actions.sh lint-check
+      echo "lint-fix..."
       ./scripts/actions.sh lint-fix
       echo "toml-checking..."
       ./scripts/actions.sh toml-check
@@ -48,15 +50,8 @@ case "$1" in
   lint-fix)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
-        src/ scripts/ packages/ \
-        && \
-      uv run --no-project --with "ruff==0.12.2" \
-        ruff check --target-version py312 \
-        --fix  \
-        src/ scripts/ packages/ \
-      && \
-      uv run --no-project python scripts/check_badfunctions.py
+      uv run --no-project --with "ruff==0.12.2" ruff check --target-version py312 \
+      --fix  src/ scripts/ packages/
     )
     ;;
   type-check)
@@ -187,9 +182,11 @@ case "$1" in
     )
     ;;
   *)
-    # Automatically extract all options from the case statement
-    options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
-    echo "Usage: $0 {$options}"
-    exit 1
+    (
+      # Automatically extract all options from the case statement
+      options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
+      echo "Usage: $0 {$options}"
+      exit 1
+    )
     ;;
 esac
