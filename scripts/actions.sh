@@ -140,16 +140,21 @@ case "$1" in
       # Ensure the working directory ends with a slash
       if [[ "$working_dir" != */ ]]; then
         working_dir="$working_dir/"
+        echo "$working_dir/"
       fi
       echo "Working directory: $working_dir"
       # Create all the links
       for d in "logs" "models" "output" "plots" "results"
       do
-        # If the link already exists, do nothing
-        # If a file with the same name exists, skip it
+        # If the link already exists and points to the correct shared directory, do nothing
         if [ -e "$d" ]; then
-          echo "'$d' already exists, skipping. The results in $d will not be linked to the shared working directory."
-          continue
+          if [ -L "$d" ] && [ "$(readlink "$d")" = "$working_dir$d" ]; then
+            echo "'$d' already correctly linked to $working_dir$d, skipping."
+            continue
+          else
+            echo "'$d' exists BUT IS NOT correctly linked to $working_dir$d, PLEASE REMOVE IT MANUALLY."
+            continue
+          fi
         fi
         echo "$d -> $working_dir$d"
         ln -s "$working_dir$d" "$d"
