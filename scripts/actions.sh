@@ -19,10 +19,8 @@ case "$1" in
   lint)
     (
       echo "LINTING WORKFLOW STARTING..."
-
-      echo "lint-check..."
-      ./scripts/actions.sh lint-check
-      echo "lint-check"
+      
+      echo "lint-fix"
       ./scripts/actions.sh lint-fix
       echo "toml-checking..."
       ./scripts/actions.sh toml-check
@@ -35,16 +33,16 @@ case "$1" in
   lint-check)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
-        -n \
-        src/ scripts/ packages/ \
+      uv run --no-project --with "ruff==0.12.2" \
+      ruff format --target-version py312 -n src/ scripts/ packages/ \
         && \
       uv run --no-project --with "ruff==0.12.2" \
-       ruff check  --target-version py312  \
-       src/ scripts/ packages/ \
+      ruff check  --target-version py312 src/ scripts/ packages/ \
         && \
       uv run --no-project --with "pylint==4.0.3" \
-       pylint src/ packages/
+      pylint src/ packages/ \
+       && \
+      uv run --no-project python scripts/check_badfunctions.py
     )
     ;;
   lint-fix)
@@ -56,7 +54,9 @@ case "$1" in
       uv run --no-project --with "ruff==0.12.2" \
         ruff check --target-version py312 \
         --fix  \
-        src/ scripts/ packages/
+        src/ scripts/ packages/ \
+      && \
+      uv run --no-project python scripts/check_badfunctions.py
     )
     ;;
   type-check)
