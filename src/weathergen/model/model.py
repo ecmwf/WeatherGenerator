@@ -37,7 +37,7 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import get_dtype, is_stream_forcing
 
 logger = logging.getLogger(__name__)
 
@@ -348,10 +348,7 @@ class Model(torch.nn.Module):
                 stream_name = self.stream_names[i_stream]
 
                 # skip decoder if channels are empty
-                if (
-                    len(si.get("train_target_channels", [])) == 0
-                    and len(si.get("val_target_channels", [])) == 0
-                ):
+                if is_stream_forcing(si):
                     continue
 
                 # extract and setup relevant parameters
@@ -503,6 +500,9 @@ class Model(torch.nn.Module):
             self.encoder.ae_aggregation_engine.ae_aggregation_blocks
         )
 
+        num_params_latent_heads = get_num_parameters(self.latent_heads)
+        num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
+
         num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         mdict = self.embed_target_coords
@@ -534,6 +534,7 @@ class Model(torch.nn.Module):
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
+        print(f" Latent prediction heads and pre-norm: {num_params_latent_heads:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
@@ -586,7 +587,7 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = checkpoint(self.forecast_engine, tokens, step)
+                tokens = checkpoint(self.forecast_engine, tokens, step, use_reentrant=False)
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)

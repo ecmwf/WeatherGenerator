@@ -220,11 +220,22 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
                 module_to_init.reset_parameters()
 
     else:
-        if not cf.with_ddp:
+        # fix mismatch between state_dict keys that can occur between interactive/non-interactive
+        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
+        params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
+        if model_has_prefix_module and not params_has_prefix_module:
+            # add "module." prefix
+            params_temp = {}
+            for k in params.keys():
+                params_temp["module." + k] = params[k]
+            params = params_temp
+        elif not model_has_prefix_module and params_has_prefix_module:
+            # remove "module." prefix
             params_temp = {}
             for k in params.keys():
                 params_temp[k.replace("module.", "")] = params[k]
             params = params_temp
+        # load checkpoint
         mkeys, ukeys = model.load_state_dict(params, strict=False)
         model = model.to(device)
 
