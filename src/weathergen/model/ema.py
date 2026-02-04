@@ -55,16 +55,32 @@ class EMAModel:
         for p in self.ema_model.parameters():
             p.requires_grad = flag
 
+    def get_current_beta(self, cur_step: int) -> float:
+        """
+        Get current EMA beta value for monitoring.
+
+        The beta value determines how much the teacher model is updated towards
+        the student model at each step. Higher beta means slower teacher updates.
+
+        Args:
+            cur_step: Current training step (typically istep * batch_size).
+
+        Returns:
+            Current EMA beta value.
+        """
+        halflife_steps = self.ema_model.halflife_steps
+        if self.rampup_ratio is not None:
+            halflife_steps = min(halflife_steps, cur_step / self.rampup_ratio)
+        beta = 0.5 ** (self.batch_size / max(halflife_steps, 1e-6))
+        return beta
+
     @torch.no_grad()
     def update(self, cur_step, batch_size):
         # ensure model remains sharded
         if self.is_model_sharded:
             self.ema_model.reshard()
         # determine correct interpolation params
-        halflife_steps = self.halflife_steps
-        if self.rampup_ratio is not None:
-            halflife_steps = min(halflife_steps, cur_step / self.rampup_ratio)
-        beta = 0.5 ** (batch_size / max(halflife_steps, 1e-6))
+        beta = self.get_current_beta(cur_step)
 
         for name, p_ema in self.ema_model.named_parameters():
             p_src = self.src_params.get(name, None)
