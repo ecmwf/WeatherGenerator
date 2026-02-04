@@ -860,6 +860,19 @@ class Trainer(TrainerBase):
                 ema_beta = calculator.get_current_beta(step)
                 break
 
+        # Debug logging for tensor extraction
+        if student_latent is not None:
+            shape = student_latent.shape if isinstance(student_latent, torch.Tensor) else "N/A"
+            logger.debug(f"Collapse monitor - student: type={type(student_latent)}, shape={shape}")
+        else:
+            logger.debug("Collapse monitor - student_latent is None")
+
+        if teacher_latent is not None:
+            shape = teacher_latent.shape if isinstance(teacher_latent, torch.Tensor) else "N/A"
+            logger.debug(f"Collapse monitor - teacher: type={type(teacher_latent)}, shape={shape}")
+        else:
+            logger.debug("Collapse monitor - teacher_latent is None")
+
         # Ensure tensors are properly formatted
         if student_latent is not None and isinstance(student_latent, torch.Tensor):
             self.collapse_monitor.compute_metrics(
@@ -868,6 +881,11 @@ class Trainer(TrainerBase):
                 prototype_probs=prototype_probs,
                 ema_beta=ema_beta,
                 loss_type=loss_type,
+            )
+        else:
+            logger.debug(
+                f"Collapse monitor - skipping compute_metrics: "
+                f"student_latent is {'None' if student_latent is None else type(student_latent)}"
             )
 
     def _log_collapse_metrics(self, stage: Stage) -> None:

@@ -199,6 +199,10 @@ class CollapseMonitor:
         Returns:
             Tensor of shape [B*N, D] or [B, D].
         """
+        # Convert to float32 for SVD compatibility (bfloat16/float16 can fail)
+        if z.dtype in (torch.bfloat16, torch.float16):
+            z = z.float()
+
         if z.ndim == 3:
             return z.reshape(-1, z.shape[-1])
         return z
@@ -237,15 +241,26 @@ class CollapseMonitor:
         z = self._flatten_to_samples(z.detach())
         z = self._sample_rows(z, sample_size)
 
+        # Validate tensor before SVD
+        if z.numel() == 0:
+            logger.warning("Empty tensor in effective rank computation")
+            return 0.0
+        if torch.isnan(z).any() or torch.isinf(z).any():
+            logger.warning("NaN/Inf values in tensor for effective rank computation")
+            return 0.0
+        if z.shape[0] < 2 or z.shape[1] < 2:
+            logger.warning(f"Tensor too small for SVD: shape={z.shape}")
+            return 0.0
+
         # Center the data
         z_centered = z - z.mean(dim=0, keepdim=True)
 
         # Compute SVD
         try:
             _, s, _ = torch.linalg.svd(z_centered, full_matrices=False)
-        except RuntimeError:
+        except RuntimeError as e:
             # SVD can fail on degenerate matrices
-            logger.warning("SVD failed in effective rank computation")
+            logger.warning(f"SVD failed in effective rank computation: {e}, shape={z.shape}")
             return 0.0
 
         # Normalize singular values to get a probability distribution
@@ -280,14 +295,25 @@ class CollapseMonitor:
         z = self._flatten_to_samples(z.detach())
         z = self._sample_rows(z, sample_size)
 
+        # Validate tensor before SVD
+        if z.numel() == 0:
+            logger.warning("Empty tensor in singular value computation")
+            return {}
+        if torch.isnan(z).any() or torch.isinf(z).any():
+            logger.warning("NaN/Inf values in tensor for singular value computation")
+            return {}
+        if z.shape[0] < 2 or z.shape[1] < 2:
+            logger.warning(f"Tensor too small for SVD: shape={z.shape}")
+            return {}
+
         # Center the data
         z_centered = z - z.mean(dim=0, keepdim=True)
 
         # Compute SVD
         try:
             _, s, _ = torch.linalg.svd(z_centered, full_matrices=False)
-        except RuntimeError:
-            logger.warning("SVD failed in singular value computation")
+        except RuntimeError as e:
+            logger.warning(f"SVD failed in singular value computation: {e}, shape={z.shape}")
             return {}
 
         metrics: dict[str, float] = {}
