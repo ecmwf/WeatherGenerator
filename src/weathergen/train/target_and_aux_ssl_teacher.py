@@ -78,7 +78,8 @@ class EMATeacher(TargetAndAuxModuleBase):
         return self
 
     def get_current_beta(self, cur_step: int) -> float:
-        return self.ema_model.get_current_beta(cur_step)
+        beta = self.ema_model.get_current_beta(cur_step)
+        return beta
 
 
 def get_target_postprocessing(target_losses: list[str], training_cfg, **kwargs):

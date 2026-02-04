@@ -30,6 +30,7 @@ class EMAModel:
         self.rampup_ratio = rampup_ratio
         self.ema_model = empty_model
         self.is_model_sharded = is_model_sharded
+        self.batch_size = 1
         # Build a name → param map once
         self.src_params = dict(self.original_model.named_parameters())
 
@@ -68,7 +69,7 @@ class EMAModel:
         Returns:
             Current EMA beta value.
         """
-        halflife_steps = self.ema_model.halflife_steps
+        halflife_steps = self.halflife_steps
         if self.rampup_ratio is not None:
             halflife_steps = min(halflife_steps, cur_step / self.rampup_ratio)
         beta = 0.5 ** (self.batch_size / max(halflife_steps, 1e-6))
@@ -80,6 +81,7 @@ class EMAModel:
         if self.is_model_sharded:
             self.ema_model.reshard()
         # determine correct interpolation params
+        self.batch_size = batch_size
         beta = self.get_current_beta(cur_step)
 
         for name, p_ema in self.ema_model.named_parameters():
