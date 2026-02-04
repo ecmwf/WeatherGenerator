@@ -20,6 +20,7 @@ ERA5 :
   token_size : 8
   tokenize_spacetime : True
   max_num_targets: -1 
+  forcing: True
   embed : 
     net : transformer
     num_tokens : 1
