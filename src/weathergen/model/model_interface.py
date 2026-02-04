@@ -15,12 +15,12 @@ import logging
 import omegaconf
 import torch
 from torch.distributed.fsdp import (
-    MixedPrecisionPolicy,
     fully_shard,
+    MixedPrecisionPolicy,
 )
 from torch.distributed.tensor import distribute_tensor
 
-from weathergen.common.config import Config, merge_configs, _get_shared_wg_path
+from weathergen.common.config import _get_shared_wg_path, Config, merge_configs
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
