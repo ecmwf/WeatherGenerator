@@ -1,5 +1,5 @@
 Welcome to `WeatherGenerator-FastEvaluation`'s documentation!
-===================================
+=============================================================
 
 **WeatherGenerator-FastEvaluation** is a modular evaluation and visualization package for verifying forecast
 data and model outputs in the WeatherGenerator project. This package
