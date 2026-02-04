@@ -30,7 +30,6 @@ def default_config():
             },
             "singular_values": {
                 "enabled": True,
-                "top_k": 10,
                 "tensor_source": "both",
                 "sample_size": 2048,
             },
@@ -152,22 +151,23 @@ class TestEffectiveRank:
 class TestSingularValues:
     """Test singular value spectrum computation."""
 
-    def test_top_k_singular_values(self, monitor):
-        """Test that top-k singular values are correctly computed."""
+    def test_singular_value_statistics(self, monitor):
+        """Test that singular value statistics are correctly computed."""
         torch.manual_seed(42)
         num_samples, dim = 128, 64
         z = torch.randn(num_samples, dim)
 
-        sv_metrics = monitor._compute_singular_values(z, top_k=5, sample_size=0)
+        sv_metrics = monitor._compute_singular_values(z, sample_size=0)
 
-        # Check that we got top-5 singular values
-        assert "singular_value_0" in sv_metrics
-        assert "singular_value_4" in sv_metrics
-        assert "singular_value_5" not in sv_metrics
+        # Check that we got min, max, mean statistics
+        assert "sv_min" in sv_metrics
+        assert "sv_max" in sv_metrics
+        assert "sv_mean" in sv_metrics
+        assert "sv_concentration" in sv_metrics
 
-        # Singular values should be in descending order
-        for i in range(4):
-            assert sv_metrics[f"singular_value_{i}"] >= sv_metrics[f"singular_value_{i + 1}"]
+        # Max should be >= mean >= min
+        assert sv_metrics["sv_max"] >= sv_metrics["sv_mean"]
+        assert sv_metrics["sv_mean"] >= sv_metrics["sv_min"]
 
     def test_concentration_ratio(self, monitor):
         """Test singular value concentration ratio."""
@@ -179,24 +179,31 @@ class TestSingularValues:
         v_vec = torch.randn(1, dim)
         z = u_vec @ v_vec * 10 + torch.randn(num_samples, dim) * 0.01  # Strong rank-1 component
 
-        sv_metrics = monitor._compute_singular_values(z, top_k=5, sample_size=0)
+        sv_metrics = monitor._compute_singular_values(z, sample_size=0)
 
         # Concentration should be high when one SV dominates
         assert "sv_concentration" in sv_metrics
         assert sv_metrics["sv_concentration"] > 0.8  # First SV dominates strongly
 
+        # Max should be much larger than min for rank-1 dominated matrix
+        assert sv_metrics["sv_max"] > sv_metrics["sv_min"] * 10
+
     def test_uniform_singular_values(self, monitor):
-        """Test with approximately uniform singular values."""
+        """Test with random matrix (spread singular values)."""
         torch.manual_seed(42)
-        # Create orthogonal matrix with equal singular values
-        dim = 64
-        q, _ = torch.linalg.qr(torch.randn(dim, dim))
-        z = q * 10  # Scale uniformly
+        # Random matrix will have spread singular values
+        num_samples, dim = 128, 64
+        z = torch.randn(num_samples, dim)
 
-        sv_metrics = monitor._compute_singular_values(z, top_k=5, sample_size=0)
+        sv_metrics = monitor._compute_singular_values(z, sample_size=0)
 
-        # Concentration should be low (close to 1/D)
-        assert sv_metrics["sv_concentration"] < 0.1
+        # Concentration should be relatively low for random matrix
+        assert sv_metrics["sv_concentration"] < 0.2
+
+        # All statistics should be positive
+        assert sv_metrics["sv_min"] > 0
+        assert sv_metrics["sv_max"] > 0
+        assert sv_metrics["sv_mean"] > 0
 
 
 class TestDimensionVariance:
@@ -379,7 +386,7 @@ class TestIntegration:
         # Only dimension variance should be computed
         assert "collapse.student.var_min" in metrics
         assert "collapse.student.effective_rank" not in metrics
-        assert "collapse.student.singular_value_0" not in metrics
+        assert "collapse.student.sv_max" not in metrics
 
 
 class TestSampling:

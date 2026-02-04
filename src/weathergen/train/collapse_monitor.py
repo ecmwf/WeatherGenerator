@@ -132,13 +132,12 @@ class CollapseMonitor:
 
         # Compute singular value spectrum
         if self.singular_values_config.get("enabled", True):
-            top_k = self.singular_values_config.get("top_k", 10)
             sample_size = self.singular_values_config.get("sample_size", 2048)
             for name, tensor in tensors_to_monitor.items():
                 if tensor is not None:
                     source = self.singular_values_config.get("tensor_source", "both")
                     if source == "both" or source == name:
-                        sv_metrics = self._compute_singular_values(tensor, top_k, sample_size)
+                        sv_metrics = self._compute_singular_values(tensor, sample_size)
                         for key, value in sv_metrics.items():
                             metrics[f"collapse.{name}.{key}"] = value
 
@@ -275,10 +274,10 @@ class CollapseMonitor:
         return effective_rank.item()
 
     def _compute_singular_values(
-        self, z: torch.Tensor, top_k: int = 10, sample_size: int = 2048
+        self, z: torch.Tensor, sample_size: int = 2048
     ) -> dict[str, float]:
         """
-        Compute top-k singular values and concentration ratio.
+        Compute singular value statistics and concentration ratio.
 
         The concentration ratio (top SV / sum of all SVs) indicates how much
         variance is captured by the largest singular value. High concentration
@@ -286,11 +285,10 @@ class CollapseMonitor:
 
         Args:
             z: Latent representations [B, N, D] or [B, D].
-            top_k: Number of top singular values to return.
             sample_size: Maximum samples for SVD computation.
 
         Returns:
-            Dictionary with top-k singular values and concentration ratio.
+            Dictionary with sv_min, sv_max, sv_mean, and sv_concentration.
         """
         z = self._flatten_to_samples(z.detach())
         z = self._sample_rows(z, sample_size)
@@ -318,9 +316,10 @@ class CollapseMonitor:
 
         metrics: dict[str, float] = {}
 
-        # Top-k singular values
-        for i in range(min(top_k, len(s))):
-            metrics[f"singular_value_{i}"] = s[i].item()
+        # Singular value statistics
+        metrics["sv_min"] = s.min().item()
+        metrics["sv_max"] = s.max().item()
+        metrics["sv_mean"] = s.mean().item()
 
         # Concentration ratio (top SV / sum)
         s_sum = s.sum() + 1e-8

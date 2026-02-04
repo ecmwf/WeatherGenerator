@@ -147,7 +147,6 @@ training_config:
         sample_size: 2048      # max samples for SVD (0 = no sampling)
       singular_values:
         enabled: true
-        top_k: 10
         tensor_source: "both"
         sample_size: 2048
       dimension_variance:
