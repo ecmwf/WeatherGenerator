@@ -342,6 +342,10 @@ class Masker:
                 # target is specified)
                 target_idx += i_sample % target_num_samples[target_cfg_idx].item()
 
+
+                # Get target metadata for relationships that need geometric info
+                target_metadata = target_masks.get_params(target_idx)
+                
                 # determine if forcing dataset => mask is empty
                 if is_stream_diagnostic(stream_cfg, self.stage):
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
