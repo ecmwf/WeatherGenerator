@@ -1,6 +1,6 @@
 .. _guide:
 
-Configuration file:
+Configuration File
 ===================
 
 The config file drives the evaluation workflow. There is a default version 
@@ -8,7 +8,7 @@ provided inisde the main WeatherGenerator repository `here`_.
 
 .. _here: https://github.com/ecmwf/WeatherGenerator/blob/main/config/evaluate/eval_config.yml
 
-The following is not an exhaustive list (there are more features being added, for a preview check out the `develop` branch).
+The following is not an exhaustive list (there are more features being added, for a preview check out the ``develop`` branch).
 
 .. code-block::
 
@@ -167,6 +167,7 @@ Further details on config options can be found:
     :maxdepth: 1
 
     global
+    regions
     metrics
     csv
     plotting

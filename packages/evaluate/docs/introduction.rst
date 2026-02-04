@@ -1,6 +1,0 @@
-Introduction
-============
-
-Github Repository
-----------------------------
-

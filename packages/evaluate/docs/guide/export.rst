@@ -1,10 +1,11 @@
 Exporting WeatherGenerator outputs
 ==================================
 
-If the scores/evaluation metrics you require are not found above, you can use the `export` functionality of the package to convert the native WeatherGenerator output to NetCDF or GRIB (for quaver).
+If the scores/evaluation metrics you require are not found above, you can use the ``export`` functionality of the package to convert the native WeatherGenerator output to NetCDF or GRIB (for quaver).
 This is a command line utility. Use:
 
 .. code-block:: console
+
     uv run export --run-id <INFERENCE_ID> --stream ERA5 --output-dir ../output_nc --format netcdf --regrid-degree 1 --regrid-type regular_ll
 
 Required Arguments
@@ -29,15 +30,15 @@ Optional Arguments
 Quaver arguments
 ++++++++++++++++
 
-if ``--format`` set to `quaver` the additional parameters are needed
+if ``--format`` set to ``quaver`` the additional parameters are needed
 -  ``--quaver-template-folder``: Path to the GRIB template file
 -  ``--quaver-template-grid-type``: Grid type to include in the output file name e.g. O96 or N320. Defaults to O96
 -  ``--expver``: Expver to include in output file name i.e. "iuoo"
 
-A more comprehensive look at running Quaver can be found :ref:`_quaver`.
+A more comprehensive look at running Quaver can be found under :ref:`quaver`.
 
 Regridding arguments
 ++++++++++++++++++++
 
-- ``--regrid-type``: ``regular_ll`` for a regular latitude- longitude grid ,`O` for octahedral reduced Gaussian or`N` for reduced Gaussian grid
+- ``--regrid-type``: ``regular_ll`` for a regular latitude- longitude grid ,``O`` for octahedral reduced Gaussian or``N`` for reduced Gaussian grid
 - ``--regrid-degree``: Float number that defines the degree to regrid the data to for a regular lat/lon grid (e.g. 0.25 for 0.25x0.25 degree grid) or O/N Gaussian grid (e.g., 63 for N63 grid), depending on the input of ``regrid_type``

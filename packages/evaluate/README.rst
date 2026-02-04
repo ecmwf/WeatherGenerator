@@ -30,11 +30,13 @@ features:
 
 - compute performance metrics and diagnostics for forecast or model
   outputs
-- produce maps, time‑series, and other visualizations for qualitative &
+- produce maps, time-series, and other visualizations for qualitative &
   quantitative evaluation
 - handle gridded and non gridded data (observations / reanalysis)
-- export the WeatherGenerator output into grib/netCDF files suitable to
-  be used by the project partners.
+- handles comparisons across different runs using the WeatherGenerator zarr files in both .zarr and .zip format.
+- handles comparisons across runs with different masking strategies (e.g. MTM vs forecasting even if they have different forecasting steps).
+- export the WeatherGenerator output into grib/netCDF files suitable to be used by the project partners.
+
 
 --------------
 
@@ -53,7 +55,9 @@ inputs:
   0,t,925,0,mef,0 days 12:00:00,2022-10-01 00:00:00,n.hem,0.031371469251538386
   1,t,925,0,mef,0 days 12:00:00,2022-10-01 12:00:00,n.hem,-0.010387031341104752
   2,t,925,0,mef,0 days 12:00:00,2022-10-02 00:00:00,n.hem,0.030255780718550083
-  3,t,925
+  3,t,925,0,mef,0 days 12:00:00,2022-10-02 12:00:00,n.hem,-0.028894746338016246
+
+
 --------------
 
 Stability and documentation
