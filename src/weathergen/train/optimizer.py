@@ -284,7 +284,10 @@ def _create_muon_optimizer(
             weight_decay=weight_decay,
         )
     else:
-        logger.info("Using custom Muon implementation (torch.optim.Muon not available)")
+        logger.warning(
+            "Using custom Muon implementation (torch.optim.Muon not available). "
+            "NOTE: This implementation does NOT support FSDP2. Use DDP or single-GPU training."
+        )
         return MuonCustom(
             param_groups,
             lr=lr,
@@ -536,6 +539,12 @@ class MuonCustom(Optimizer):
 
     Note: Muon should only be used for hidden weight layers. Embeddings, output heads,
     biases, and layer norms should use AdamW.
+
+    WARNING: This implementation does NOT support FSDP2 (Fully Sharded Data Parallel).
+    The Newton-Schulz orthogonalization requires the FULL gradient matrix, but FSDP2
+    shards gradients across GPUs. Computing `X @ X.T` on a sharded gradient gives
+    mathematically incorrect results. For FSDP2 support, see the distributed version
+    in the reference implementation: https://github.com/KellerJordan/Muon/blob/master/muon.py
     """
 
     def __init__(
@@ -589,6 +598,22 @@ class MuonCustom(Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
+
+        # Check for FSDP2 on first step (DTensor indicates sharded parameters)
+        if not hasattr(self, "_fsdp_checked"):
+            self._fsdp_checked = True
+            for group in self.param_groups:
+                for p in group["params"]:
+                    # FSDP2 uses DTensor for sharding
+                    is_fsdp2 = hasattr(p, "_local_tensor") or type(p).__name__ == "DTensor"
+                    assert not is_fsdp2, (
+                        "MuonCustom does not support FSDP2 (Fully Sharded Data Parallel). "
+                        "The Newton-Schulz orthogonalization requires full gradients, but "
+                        "FSDP2 shards gradients across GPUs, leading to incorrect results. "
+                        "Options: (1) Use DDP instead of FSDP, (2) Use AdamW optimizer, "
+                        "(3) Use torch.optim.Muon (PyTorch >= 2.9) if it supports FSDP. "
+                        "Reference FSDP impl: github.com/KellerJordan/Muon/blob/master/muon.py"
+                    )
 
         for group in self.param_groups:
             momentum = group["momentum"]
