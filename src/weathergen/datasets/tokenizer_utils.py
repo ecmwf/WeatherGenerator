@@ -241,23 +241,24 @@ def tokenize_apply_mask_source(
 
     """
 
+    def return_empty(rdata, idxs_cells_lens):
+        tokens_cells = [torch.tensor([])]
+        tokens_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
+        return tokens_cells, tokens_per_cell
+
     # convert to token level, forgetting about cells
     idxs_tokens = [i for t in idxs_cells for i in t]
     idxs_lens = [i for t in idxs_cells_lens for i in t]
 
     # apply spatial masking on a per token level
     if mask_tokens is None:
-        tokens_cells = [torch.tensor([])]
-        tokens_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
-        return tokens_cells, tokens_per_cell
+        return return_empty(rdata, idxs_cells_lens)
 
     # filter tokens using mask to obtain flat per data point index list
     idxs_data = [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
 
     if len(idxs_data) == 0:
-        tokens_cells = [torch.tensor([])]
-        tokens_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
-        return tokens_cells, tokens_per_cell
+        return return_empty(rdata, idxs_cells_lens)
 
     idxs_data = torch.cat(idxs_data)
     # filter list of token lens using mask and obtain flat list for splitting
@@ -330,29 +331,27 @@ def tokenize_apply_mask_target(
 
     """
 
+    def return_empty(rdata, idxs_cells_lens):
+        do = torch.zeros([0, rdata.data.shape[-1]])
+        coords = torch.zeros([0, rdata.coords.shape[-1]])
+        dt = np.array([], dtype=np.datetime64)
+        masked_points_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
+        # data, datetimes, coords, coords_local, masked_points_per_cell
+        return do, dt, coords, coords, masked_points_per_cell
+
     # convert to token level, forgetting about cells
     idxs_tokens = [i for t in idxs_cells for i in t]
     idxs_lens = [i for t in idxs_cells_lens for i in t]
 
     # apply spatial masking on a per token level
     if mask_tokens is None:
-        do = torch.zeros([0, rdata.data.shape[-1]])
-        coords = torch.zeros([0, rdata.coords.shape[-1]])
-        dt = np.array([], dtype=np.datetime64)
-        masked_points_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
-        # data, datetimes, coords, coords_local, masked_points_per_cell
-        return do, dt, coords, coords, masked_points_per_cell
+        return return_empty(rdata, idxs_cells_lens)
 
     # filter tokens using mask to obtain flat per data point index list
     idxs_data = [t for t, m in zip(idxs_tokens, mask_tokens, strict=True) if m]
 
     if len(idxs_data) == 0:
-        do = torch.zeros([0, rdata.data.shape[-1]])
-        coords = torch.zeros([0, rdata.coords.shape[-1]])
-        dt = np.array([], dtype=np.datetime64)
-        masked_points_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
-        # data, datetimes, coords, coords_local, masked_points_per_cell
-        return do, dt, coords, coords, masked_points_per_cell
+        return return_empty(rdata, idxs_cells_lens)
 
     idxs_data = torch.cat(idxs_data)
 
