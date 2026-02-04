@@ -3,7 +3,10 @@
 Examples
 ============
 
-Here is a list of example workflows to illustrate how to use the FastEvaluation pipeline
+Here is are some example workflows to illustrate how to use the FastEvaluation pipeline
 
-Producing histograms for RMSE
-++++++++++++++++++++++++++++
+Producing histograms
+++++++++++++++++++++
+
+!include images here
+

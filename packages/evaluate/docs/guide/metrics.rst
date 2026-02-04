@@ -1,5 +1,5 @@
 Supported Metrics
-~~~~~~~~~~~~~~~~~
+=======================
 
 Check
 `score.py <https://github.com/ecmwf/WeatherGenerator/blob/main/packages/evaluate/src/weathergen/evaluate/scores/score.py>`__
@@ -28,27 +28,33 @@ found on the develop branch
 - ``seeps`` — Stable Equitable Error in Probability Space see `Rodwell
   et al.,
   2011 <https://journals.ametsoc.org/view/journals/mwre/140/8/mwr-d-11-00301.1.pdf>`__
-  > Please note many of these scores use default hard coded threshold
-  values; see the code
-  `here <https://github.com/ecmwf/WeatherGenerator/blob/develop/packages/evaluate/src/weathergen/evaluate/scores/score.py>`__.
 
-**Requires next step and alignment** \* ``froct`` — Forecast Rate of
-Change over Time \* ``troct`` — Target Rate of Change over Time
+.. note::
+    Please note many of these scores use default hard coded threshold
+    values; see the code
+    `here <https://github.com/ecmwf/WeatherGenerator/blob/develop/packages/evaluate/src/weathergen/evaluate/scores/score.py>`__.
 
-**Requires climatology** \* ``acc`` — Anomaly Correlation Coefficient \*
-``fact`` — Forecast Activity \* ``tact`` — Target Activity as standard
-deviation of target anomaly
+**Requires next step and alignment** 
 
-**Probability metrics** \* ``ssr`` - Spread-Skill Ratio of the forecast
-ensemble data w.r.t. reference data \* ``crps`` - Wrapper around
-CRPS-methods (Continuous ranked probability score) provided by
-xskillscore-package. See
-`here <https://xskillscore.readthedocs.io/en/stable/search.html?q=crps&check_keywords=yes&area=default>`__
-\* ``rank_histogram`` - Rank Histogram of the forecast data w.r.t
-reference data \* ``spread`` - Ensemble Spread of the forecast
+- ``froct`` — Forecast Rate of Change over Time 
+- ``troct`` — Target Rate of Change over Time
 
+**Requires climatology**
+
+- ``acc`` — Anomaly Correlation Coefficient
+- ``fact`` — Forecast Activity 
+- ``tact`` — Target Activity as standard deviation of target anomaly
+
+**Probability metrics**
+
+- ``ssr`` — Spread-Skill Ratio of the forecast ensemble data w.r.t. reference data 
+- ``crps`` — Wrapper around CRPS-methods (Continuous ranked probability score) provided by xskillscore-package. See `here <https://xskillscore.readthedocs.io/en/stable/search.html?q=crps&check_keywords=yes&area=default>`__
+- ``rank_histogram`` — Rank Histogram of the forecast data w.r.t reference datasets
+- ``spread`` — Ensemble Spread of the forecast
+
+.. note::
    One needs to be cautious when computing scores that need alignment
-   between steps or climatology. One can not: \* compute ``froct`` or
+   between steps or climatology. One can not: compute ``froct`` or
    ``troct`` for datasets where coordinates change between forecast
-   steps (shuffled is fine) \* compute ``acc``, ``fact``, ``tact`` for
+   steps (shuffled is fine) compute ``acc``, ``fact``, ``tact`` for
    datasets that do not have a precomputed climatology available

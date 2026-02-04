@@ -1,0 +1,173 @@
+.. _guide:
+
+Configuration file:
+===================
+
+The config file drives the evaluation workflow. There is a default version 
+provided inisde the main WeatherGenerator repository `here`_.
+
+.. _here: https://github.com/ecmwf/WeatherGenerator/blob/main/config/evaluate/eval_config.yml
+
+The following is not an exhaustive list (there are more features being added, for a preview check out the `develop` branch).
+
+.. code-block::
+
+    #optional: if commented out all is taken care of by the default settings
+    # NB. global options apply to all run_ids 
+    #global_plotting_options:
+    #  regions: ["belgium", "global"]
+    #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+    #  dpi_val : 300  # resolution of saved images in DPI
+    #  fps: 2 #Frames Per Second, for creating a .gif file from the images; used if "plot_animations: True"
+    #  ERA5:
+    #    marker_size: 2
+    #    scale_marker_size: 1
+    #    marker: "o"
+    #    # alpha: 0.5
+    #    2t: 
+    #      vmin: 250
+    #      vmax: 300
+    #    10u:
+    #      vmin: -40
+    #      vmax: 40
+
+    evaluation:
+    metrics  : ["rmse", "mae"] #list of metrics you want to computed (see below)
+    regions: ["global", "nhem"] # see below for supported regions
+    summary_plots : true
+    ratio_plots : false
+    heat_maps : false
+    summary_dir: "./plots/"
+    plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+    plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+    print_summary: false #print out score values on screen. it can be verbose
+    log_scale: false
+    add_grid: false
+    score_cards: false
+    bar_plots: false
+    num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
+    # baseline: "ar40mckx"
+
+    run_ids :
+    ar40mckx:
+        label: "pretrained model ar40mckx"
+        results_base_dir : "./results/"
+        mini_epoch: 0
+        rank: 0
+        streams:
+        ERA5:
+            channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+            evaluation:
+            forecast_step: "all"
+            sample: "all"
+            ensemble: "all" #supported: "all", "mean", [0,1,2]
+            plotting:
+            sample: [1, 3]
+            forecast_step: [1,3, 2] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+            ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
+            plot_maps: true
+            plot_target: false
+            plot_histograms: true
+            plot_animations: true
+        CERRA:
+            channels: ["z_500", "t_850", "u_850"] #, "blah"]
+            evaluation:
+            forecast_step: "all"
+            sample: "all"
+            plotting:
+            sample: [2, 3, 0]
+            forecast_step: [1,3, 4, 5]
+            plot_maps: true
+            plot_target: false
+            plot_histograms: true
+            plot_animations: true
+        
+    c8g5katp:
+        label: "2 steps window"
+        results_base_dir : "./results/"
+        mini_epoch: 0
+        rank: 0
+        streams:
+        ERA5:
+            #climatology_path: "<path>/aifs-ea-an-oper-0001-mars-o96-1980-2020-6h-v6_climatology.zarr"
+            channels: ["2t", "10u", "10v"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+            evaluation:
+            forecast_step: "all"
+            sample: "all"
+            ensemble: "mean" 
+            plotting:
+            sample: [1, 3]
+            forecast_step: [1,3, 2]
+            ensemble: "mean" 
+            plot_maps: true
+            plot_target: false
+            plot_histograms: true
+            plot_animations: true
+
+    #Example of syntax to stack multiple runs over the ensemble dimension  
+    merge_test: <------ This is the new run_id name of the merged dataset. NB. you always need to specify one
+        type: "merge" <------- VERY IMPORTANT
+        merge_run_ids:
+        - so67dku4
+        - c9cg8ql3
+        metrics_dir: "./merge_test/metrics/" <------- VERY IMPORTANT
+        label: "Merged Results"
+        results_base_dir : "./results/"
+        epoch: 0
+        rank: 0
+        streams:
+        ERA5:
+            channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
+            evaluation:
+            forecast_step: [2,4,6] 
+            sample: [0, 1, 2, 3]
+            ensemble: "all" 
+
+    #Example of syntax to run over pre-computed scores when the .zarr output is not available anymore
+    so67dku1:
+        type: "json"
+        label: "WeatherGenerator"
+        results_base_dir : "./results/"
+        epoch: 0
+        rank: 0
+        streams:
+        ERA5:
+            channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
+            evaluation:
+            forecast_step: [2,4,6] 
+            sample: [0, 1, 2, 3]
+            ensemble: "all" #supported
+
+    #ADVANCED (please handle with care): example of how to use the csv reader to Plot PanguWeather scores computed with quaver
+    pangu:
+        type: "csv"
+        label: "Pangu-Weather"
+        metrics_dir: "<path to folder>"
+        streams: 
+        ERA5: 
+            channels: ["2t", "q_850", "t_850", "z_500"]
+            evaluation: 
+            forecast_step: "all"
+            sample: "all"
+    
+    graphcast:
+        type: "csv"
+        label: "GraphCast"
+        metrics_dir: "<path to folder>"
+        streams: 
+        ERA5: 
+            channels: ["2t", "q_850", "t_850", "z_500"]
+            evaluation: 
+            forecast_step: "all"
+            sample: "all"
+    
+Further details on config options can be found:
+
+.. toctree::
+    :maxdepth: 1
+
+    global
+    metrics
+    csv
+    plotting
+

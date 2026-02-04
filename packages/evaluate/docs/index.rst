@@ -9,7 +9,7 @@ provides statistics or exports to other tools.
 .. include:: ../README.rst
 
 
-Check out the :doc:`usage` section for further information, including
+Check out the :doc:`Documentation` section for further information, including how to use the config files to generate plots and scores.
 
 .. note::
 
@@ -25,5 +25,5 @@ Check out the :doc:`usage` section for further information, including
    :maxdepth: 1
    :caption: Documentation
 
-   guide/metrics
-   guide/global
+   guide/config
+   guide/export
