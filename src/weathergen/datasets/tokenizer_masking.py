@@ -74,12 +74,16 @@ class TokenizerMasking(Tokenizer):
         return tokens
 
     def build_samples_for_stream(
-        self, training_mode: str, num_cells: int, training_cfg: dict
+        self,
+        training_mode: str,
+        num_cells: int,
+        stage_cfg: dict,
+        stream_cfg: dict,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Create masks for samples
         """
-        return self.masker.build_samples_for_stream(training_mode, num_cells, training_cfg)
+        return self.masker.build_samples_for_stream(training_mode, num_cells, stage_cfg, stream_cfg)
 
     def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
         """ """
@@ -119,15 +123,6 @@ class TokenizerMasking(Tokenizer):
         time_win: tuple,
         cell_mask: torch.Tensor,
     ):
-        stream_id = stream_info["stream_id"]
-        is_diagnostic = stream_info.get("diagnostic", False)
-
-        # return empty if there is no data or we are in diagnostic mode
-        if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
-            source_tokens_cells = [torch.tensor([])]
-            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-            return (source_tokens_cells, source_tokens_lens)
-
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
 
@@ -142,7 +137,7 @@ class TokenizerMasking(Tokenizer):
             idxs_cells_lens,
             mask_tokens,
             mask_channels,
-            stream_id,
+            stream_info["stream_id"],
             rdata,
             time_win,
             self.hpy_verts_rots_source[-1],
@@ -168,6 +163,7 @@ class TokenizerMasking(Tokenizer):
 
         # TODO: split up
         _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+            stream_info["stream_id"],
             self.hl_target,
             idxs_cells,
             idxs_cells_lens,
@@ -181,7 +177,6 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        # pass the selection back for use in get_target_values
         return (coords_local, coords_per_cell)
 
     def get_target_values(
@@ -200,6 +195,7 @@ class TokenizerMasking(Tokenizer):
         )
 
         data, datetimes, coords, _, _ = tokenize_apply_mask_target(
+            stream_info["stream_id"],
             self.hl_target,
             idxs_cells,
             idxs_cells_lens,
