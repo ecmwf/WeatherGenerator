@@ -63,8 +63,8 @@ class EMAModel:
         # determine correct interpolation params
         halflife_steps = self.halflife_steps
         if self.rampup_ratio is not None:
-            halflife_steps = min(halflife_steps, cur_step / 1e3 * self.rampup_ratio)
-        beta = 0.5 ** (batch_size / max(halflife_steps * 1e3, 1e-6))
+            halflife_steps = min(halflife_steps, cur_step / self.rampup_ratio)
+        beta = 0.5 ** (batch_size / max(halflife_steps, 1e-6))
 
         for name, p_ema in self.ema_model.named_parameters():
             p_src = self.src_params.get(name, None)
