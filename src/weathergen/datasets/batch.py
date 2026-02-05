@@ -36,6 +36,24 @@ class Sample:
         for stream_info in streams:
             self.streams_data[stream_info["name"]] = None
 
+    @property
+    def sample_idx(self) -> int:
+        if not self.is_empty():
+            # choose 'first' streams stream_data
+            stream_data = next(iter(self.streams_data.values()))
+            # TODO check: is reliable sinsce?
+            # since set with tidx and not idx in MultiStreamDataSampler
+            idx = stream_data.sample_idx
+
+            assert all(
+                stream_data.sample_idx == idx for stream_data in self.streams_data.values()
+            ), "sample_idx should be identical for all streams within one sample."
+
+            return idx
+        else:
+            msg = "Cannot infer sample_idx without any streams added."
+            raise RuntimeError(msg)
+
     def pin_memory(self):
         """Pin all tensors in this Sample to CPU pinned memory"""
 
@@ -129,6 +147,10 @@ class BatchSamples:
 
         return self
 
+    @property
+    def sample_idxs(self) -> list[int]:
+        return [sample.sample_idx for sample in self.samples]
+
     def get_samples(self) -> list[Sample]:
         return self.samples
 
@@ -144,6 +166,7 @@ class BatchSamples:
             bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
+    # unused
     def get_num_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
@@ -155,24 +178,28 @@ class BatchSamples:
 
         return min(lens)
 
+    # unused
     def get_output_idxs(self) -> int:
         """
         Get forecast indices
         """
         return self.output_idxs
 
+    # unused
     def get_output_len(self) -> int:
         """
         Get length of output
         """
         return self.output_steps
 
+    # unused
     def get_device(self) -> str | torch.device:
         """
         Get device of tensors in the batch
         """
         return self.device
 
+    # unused
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
 
@@ -274,6 +301,7 @@ class ModelBatch:
 
         return self
 
+    # used once in MultiStreamDataSampler
     def add_source_stream(
         self,
         source_sample_idx: int,
@@ -293,6 +321,7 @@ class ModelBatch:
         assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
         self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
 
+    # used once in MultiStreamDataSampler
     def add_target_stream(
         self,
         target_sample_idx: int,
@@ -319,6 +348,7 @@ class ModelBatch:
             )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
+    # used once in MultiStreamDataSampler
     def is_empty(self):
         """
         Check if batch is empty
@@ -331,72 +361,84 @@ class ModelBatch:
         )
         return source_empty or target_empty
 
+    # unused
     def len_sources(self) -> int:
         """
         Number of source samples
         """
         return len(self.source_samples)
 
+    # unused
     def len_targets(self) -> int:
         """
         Number of target samples
         """
         return len(self.target_samples)
 
+    # unused
     def get_source_sample(self, idx: int) -> Sample:
         """
         Get a source sample
         """
         return self.source_samples.samples[idx]
 
+    # used in validation_io only
     def get_source_samples(self, subset: list | None = None) -> BatchSamples:
         """
         Get source samples
         """
         return self.source_samples.get_subset(subset)
 
+    # unused
     def get_target_sample(self, idx: int) -> Sample:
         """
         Get a target sample
         """
         return self.target_samples.samples[idx]
 
+    # unused
     def get_target_samples(self, subset: list | None = None) -> BatchSamples:
         """
         Get target samples
         """
         return self.target_samples.get_subset(subset)
 
+    # unsused
     def get_source_idx_for_target(self, target_idx: int) -> int:
         """
         Get index of source sample for a given target sample index
         """
         return int(self.target2source_matching_idxs[target_idx])
 
+    # unused
     def get_target_idx_for_source(self, source_idx: int) -> int:
         """
         Get index of target sample for a given source sample index
         """
         return int(self.source2target_matching_idxs[source_idx])
 
+    # unused
     def get_output_idxs(self) -> int:
         """
         Get valid output steps
         """
         return self.output_idxs
 
+    # unused
     def get_output_len(self) -> int:
         """
         Get length of output
         """
         return self.output_steps
 
+    # unused
     def get_device(self) -> str | torch.device:
         """
         Get device of tensors in the batch
         """
         return self.device
 
+    # unused
     def get_num_source_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
@@ -409,6 +451,7 @@ class ModelBatch:
 
         return min(lens)
 
+    # unused
     def get_num_target_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
