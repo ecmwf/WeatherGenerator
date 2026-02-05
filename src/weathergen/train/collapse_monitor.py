@@ -17,6 +17,11 @@ This module implements metrics to detect representation collapse during self-sup
 - Prototype Entropy: Normalized entropy of DINO prototype assignments
 - EMA Beta: Current teacher momentum value
 
+For forecasting, the monitor supports sequences of latents (one per time step) and computes:
+- Per-step metrics (e.g., effective_rank.step_0, step_1, ...)
+- Aggregate metrics (mean, min across steps)
+- Degradation ratio (final step / initial step)
+
 References:
 - RankMe (ICML 2023): https://arxiv.org/abs/2210.02885
 - C-JEPA (NeurIPS 2024): https://arxiv.org/abs/2410.19560
@@ -26,11 +31,18 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Any
 
 import torch
 
 logger = logging.getLogger(__name__)
+
+# Valid values for tensor_source config option
+VALID_TENSOR_SOURCES = frozenset({"student", "teacher", "both"})
+
+# Valid values for forecast_aggregation config option
+VALID_FORECAST_AGGREGATIONS = frozenset({"all", "aggregate_only", "per_step_only"})
 
 
 class CollapseMonitor:
@@ -39,6 +51,8 @@ class CollapseMonitor:
 
     Computes and caches various collapse indicators that can be logged
     at configurable intervals to minimize computational overhead.
+
+    Supports both single latent tensors and sequences of latents for forecasting.
     """
 
     def __init__(self, config: dict[str, Any], device: torch.device) -> None:
@@ -47,12 +61,21 @@ class CollapseMonitor:
 
         Args:
             config: Configuration dictionary with collapse_monitoring settings.
-            device: Device to use for computations.
+            device: Device to use for computations (currently unused, tensors
+                    are processed on their original device).
+
+        Raises:
+            ValueError: If config contains invalid values.
         """
-        self.device = device
         self.enabled = config.get("enabled", False)
         self.compute_frequency = config.get("compute_frequency", 100)
         self.log_frequency = config.get("log_frequency", 100)
+
+        # Validate frequencies
+        if self.compute_frequency <= 0:
+            raise ValueError(f"compute_frequency must be positive, got {self.compute_frequency}")
+        if self.log_frequency <= 0:
+            raise ValueError(f"log_frequency must be positive, got {self.log_frequency}")
 
         # Metric configurations
         metrics_config = config.get("metrics", {})
@@ -63,8 +86,38 @@ class CollapseMonitor:
         self.prototype_entropy_config = metrics_config.get("prototype_entropy", {})
         self.ema_beta_config = metrics_config.get("ema_beta", {})
 
+        # Validate tensor_source values
+        self._validate_tensor_source(self.effective_rank_config, "effective_rank")
+        self._validate_tensor_source(self.singular_values_config, "singular_values")
+        self._validate_tensor_source(self.dimension_variance_config, "dimension_variance")
+
+        # Validate forecast_aggregation values
+        self._validate_forecast_aggregation(self.effective_rank_config, "effective_rank")
+        self._validate_forecast_aggregation(self.singular_values_config, "singular_values")
+        self._validate_forecast_aggregation(self.dimension_variance_config, "dimension_variance")
+
         # Cache for accumulating metrics between log intervals
-        self._metrics_cache: dict[str, list[float]] = defaultdict(list)
+        self._metrics_cache: defaultdict[str, list[float]] = defaultdict(list)
+
+    def _validate_tensor_source(self, metric_config: dict[str, Any], metric_name: str) -> None:
+        """Validate tensor_source config value."""
+        source = metric_config.get("tensor_source", "both")
+        if source not in VALID_TENSOR_SOURCES:
+            raise ValueError(
+                f"Invalid tensor_source '{source}' for {metric_name}. "
+                f"Must be one of: {sorted(VALID_TENSOR_SOURCES)}"
+            )
+
+    def _validate_forecast_aggregation(
+        self, metric_config: dict[str, Any], metric_name: str
+    ) -> None:
+        """Validate forecast_aggregation config value."""
+        aggregation = metric_config.get("forecast_aggregation", "all")
+        if aggregation not in VALID_FORECAST_AGGREGATIONS:
+            raise ValueError(
+                f"Invalid forecast_aggregation '{aggregation}' for {metric_name}. "
+                f"Must be one of: {sorted(VALID_FORECAST_AGGREGATIONS)}"
+            )
 
     def should_compute(self, step: int) -> bool:
         """Check if metrics should be computed at this step."""
@@ -74,10 +127,140 @@ class CollapseMonitor:
         """Check if metrics should be logged at this step."""
         return self.enabled and step % self.log_frequency == 0
 
+    def _get_tensors_to_monitor(
+        self,
+        student_latent: torch.Tensor | list[torch.Tensor] | None,
+        teacher_latent: torch.Tensor | list[torch.Tensor] | None,
+        metric_config: dict[str, Any],
+    ) -> dict[str, torch.Tensor | list[torch.Tensor] | None]:
+        """
+        Get tensors to monitor based on metric config's tensor_source.
+
+        Args:
+            student_latent: Student latent(s).
+            teacher_latent: Teacher latent(s).
+            metric_config: Config dict with tensor_source key.
+
+        Returns:
+            Dict mapping "student"/"teacher" to their tensors (if requested).
+        """
+        source = metric_config.get("tensor_source", "both")
+        result: dict[str, torch.Tensor | list[torch.Tensor] | None] = {}
+
+        if source in ("student", "both"):
+            result["student"] = student_latent
+        if source in ("teacher", "both"):
+            result["teacher"] = teacher_latent
+
+        return result
+
+    def _compute_sequence_metrics(
+        self,
+        latents: list[torch.Tensor],
+        compute_fn: Callable[..., float],
+        metric_name: str,
+        aggregation: str,
+        **kwargs: Any,
+    ) -> dict[str, float]:
+        """
+        Compute metrics for a sequence of latents (forecasting).
+
+        Args:
+            latents: List of latent tensors, one per time step.
+            compute_fn: Function to compute metric for a single tensor.
+            metric_name: Base name for the metric (e.g., "effective_rank").
+            aggregation: One of "all", "aggregate_only", "per_step_only".
+            **kwargs: Additional arguments passed to compute_fn.
+
+        Returns:
+            Dictionary of metrics with per-step and/or aggregate values.
+        """
+        metrics: dict[str, float] = {}
+
+        if not latents:
+            return metrics
+
+        # Compute per-step metrics
+        step_values: list[float] = []
+        for step_idx, latent in enumerate(latents):
+            value = compute_fn(latent, **kwargs)
+            step_values.append(value)
+
+            if aggregation in ("all", "per_step_only"):
+                metrics[f"{metric_name}.step_{step_idx}"] = value
+
+        # Compute aggregate metrics
+        if aggregation in ("all", "aggregate_only") and step_values:
+            # Filter out invalid values (0.0 indicates computation failure)
+            valid_values = [v for v in step_values if v > 0]
+
+            if valid_values:
+                metrics[f"{metric_name}.mean"] = sum(valid_values) / len(valid_values)
+                metrics[f"{metric_name}.min"] = min(valid_values)
+                metrics[f"{metric_name}.max"] = max(valid_values)
+
+                # Degradation: ratio of last step to first step
+                # Values > 1 mean rank increased, < 1 means degradation
+                if step_values[0] > 0 and step_values[-1] > 0:
+                    metrics[f"{metric_name}.degradation"] = step_values[-1] / step_values[0]
+
+        return metrics
+
+    def _compute_sequence_dict_metrics(
+        self,
+        latents: list[torch.Tensor],
+        compute_fn: Callable[..., dict[str, float]],
+        base_prefix: str,
+        aggregation: str,
+        **kwargs: Any,
+    ) -> dict[str, float]:
+        """
+        Compute dict-returning metrics for a sequence of latents.
+
+        For metrics like singular_values that return multiple values per tensor.
+
+        Args:
+            latents: List of latent tensors.
+            compute_fn: Function returning dict of metrics for single tensor.
+            base_prefix: Prefix for metric names (e.g., "collapse.student").
+            aggregation: One of "all", "aggregate_only", "per_step_only".
+            **kwargs: Additional arguments passed to compute_fn.
+
+        Returns:
+            Dictionary of metrics.
+        """
+        metrics: dict[str, float] = {}
+
+        if not latents:
+            return metrics
+
+        # Collect per-step values for each sub-metric
+        step_metrics: dict[str, list[float]] = defaultdict(list)
+
+        for step_idx, latent in enumerate(latents):
+            step_result = compute_fn(latent, **kwargs)
+
+            for key, value in step_result.items():
+                step_metrics[key].append(value)
+
+                if aggregation in ("all", "per_step_only"):
+                    metrics[f"{base_prefix}.{key}.step_{step_idx}"] = value
+
+        # Compute aggregates for each sub-metric
+        if aggregation in ("all", "aggregate_only"):
+            for key, values in step_metrics.items():
+                valid_values = [v for v in values if v > 0 or key.startswith("var_")]
+                if valid_values:
+                    metrics[f"{base_prefix}.{key}.mean"] = sum(valid_values) / len(valid_values)
+                    metrics[f"{base_prefix}.{key}.min"] = min(valid_values)
+                    metrics[f"{base_prefix}.{key}.max"] = max(valid_values)
+
+        return metrics
+
     def compute_metrics(
         self,
-        student_latent: torch.Tensor | None = None,
-        teacher_latent: torch.Tensor | None = None,
+        student_latent: torch.Tensor | list[torch.Tensor] | None = None,
+        teacher_latent: torch.Tensor | list[torch.Tensor] | None = None,
         prototype_probs: torch.Tensor | None = None,
         ema_beta: float | None = None,
         loss_type: str | None = None,
@@ -85,9 +268,14 @@ class CollapseMonitor:
         """
         Compute all enabled collapse monitoring metrics.
 
+        Supports both single tensors and sequences of tensors (for forecasting).
+        For sequences, computes per-step metrics and aggregates based on config.
+
         Args:
-            student_latent: Student model latent representations [B, N, D] or [B, D].
-            teacher_latent: Teacher model latent representations [B, N, D] or [B, D].
+            student_latent: Student model latent representations.
+                Single tensor [B, N, D] or [B, D], or list of tensors for forecasting.
+            teacher_latent: Teacher model latent representations.
+                Single tensor [B, N, D] or [B, D], or list of tensors for forecasting.
             prototype_probs: Post-softmax prototype assignment probabilities [B, K] (DINO only).
             ema_beta: Current EMA momentum value.
             loss_type: Type of SSL loss ("JEPA" or "DINO").
@@ -100,56 +288,80 @@ class CollapseMonitor:
 
         metrics: dict[str, float] = {}
 
-        # Determine which tensors to monitor based on config
-        tensors_to_monitor: dict[str, torch.Tensor | None] = {}
-
-        effective_rank_source = self.effective_rank_config.get("tensor_source", "both")
-        sv_source = self.singular_values_config.get("tensor_source", "both")
-        var_source = self.dimension_variance_config.get("tensor_source", "both")
-
-        # Build tensor dict based on what's requested
-        if effective_rank_source in ("student", "both") or sv_source in (
-            "student",
-            "both",
-        ) or var_source in ("student", "both"):
-            tensors_to_monitor["student"] = student_latent
-
-        if effective_rank_source in ("teacher", "both") or sv_source in (
-            "teacher",
-            "both",
-        ) or var_source in ("teacher", "both"):
-            tensors_to_monitor["teacher"] = teacher_latent
-
         # Compute effective rank
         if self.effective_rank_config.get("enabled", True):
             sample_size = self.effective_rank_config.get("sample_size", 2048)
-            for name, tensor in tensors_to_monitor.items():
-                if tensor is not None:
-                    source = self.effective_rank_config.get("tensor_source", "both")
-                    if source == "both" or source == name:
-                        eff_rank = self._compute_effective_rank(tensor, sample_size)
-                        metrics[f"collapse.{name}.effective_rank"] = eff_rank
+            aggregation = self.effective_rank_config.get("forecast_aggregation", "all")
+            tensors = self._get_tensors_to_monitor(
+                student_latent, teacher_latent, self.effective_rank_config
+            )
+
+            for name, tensor in tensors.items():
+                if tensor is None:
+                    continue
+
+                if isinstance(tensor, list):
+                    seq_metrics = self._compute_sequence_metrics(
+                        tensor,
+                        self._compute_effective_rank,
+                        f"collapse.{name}.effective_rank",
+                        aggregation,
+                        sample_size=sample_size,
+                    )
+                    metrics.update(seq_metrics)
+                else:
+                    eff_rank = self._compute_effective_rank(tensor, sample_size)
+                    metrics[f"collapse.{name}.effective_rank"] = eff_rank
 
         # Compute singular value spectrum
         if self.singular_values_config.get("enabled", True):
             sample_size = self.singular_values_config.get("sample_size", 2048)
-            for name, tensor in tensors_to_monitor.items():
-                if tensor is not None:
-                    source = self.singular_values_config.get("tensor_source", "both")
-                    if source == "both" or source == name:
-                        sv_metrics = self._compute_singular_values(tensor, sample_size)
-                        for key, value in sv_metrics.items():
-                            metrics[f"collapse.{name}.{key}"] = value
+            aggregation = self.singular_values_config.get("forecast_aggregation", "all")
+            tensors = self._get_tensors_to_monitor(
+                student_latent, teacher_latent, self.singular_values_config
+            )
+
+            for name, tensor in tensors.items():
+                if tensor is None:
+                    continue
+
+                if isinstance(tensor, list):
+                    seq_metrics = self._compute_sequence_dict_metrics(
+                        tensor,
+                        self._compute_singular_values,
+                        f"collapse.{name}",
+                        aggregation,
+                        sample_size=sample_size,
+                    )
+                    metrics.update(seq_metrics)
+                else:
+                    sv_metrics = self._compute_singular_values(tensor, sample_size)
+                    for key, value in sv_metrics.items():
+                        metrics[f"collapse.{name}.{key}"] = value
 
         # Compute per-dimension variance
         if self.dimension_variance_config.get("enabled", True):
-            for name, tensor in tensors_to_monitor.items():
-                if tensor is not None:
-                    source = self.dimension_variance_config.get("tensor_source", "both")
-                    if source == "both" or source == name:
-                        var_metrics = self._compute_dimension_variance(tensor)
-                        for key, value in var_metrics.items():
-                            metrics[f"collapse.{name}.{key}"] = value
+            aggregation = self.dimension_variance_config.get("forecast_aggregation", "all")
+            tensors = self._get_tensors_to_monitor(
+                student_latent, teacher_latent, self.dimension_variance_config
+            )
+
+            for name, tensor in tensors.items():
+                if tensor is None:
+                    continue
+
+                if isinstance(tensor, list):
+                    seq_metrics = self._compute_sequence_dict_metrics(
+                        tensor,
+                        self._compute_dimension_variance,
+                        f"collapse.{name}",
+                        aggregation,
+                    )
+                    metrics.update(seq_metrics)
+                else:
+                    var_metrics = self._compute_dimension_variance(tensor)
+                    for key, value in var_metrics.items():
+                        metrics[f"collapse.{name}.{key}"] = value
 
         # Compute prototype entropy (DINO only)
         if (
@@ -338,9 +550,20 @@ class CollapseMonitor:
             z: Latent representations [B, N, D] or [B, D].
 
         Returns:
-            Dictionary with var_min, var_mean, var_max.
+            Dictionary with var_min, var_mean, var_max. Empty dict if tensor is invalid.
         """
         z = self._flatten_to_samples(z.detach())
+
+        # Validate tensor
+        if z.numel() == 0:
+            logger.warning("Empty tensor in dimension variance computation")
+            return {}
+        if torch.isnan(z).any() or torch.isinf(z).any():
+            logger.warning("NaN/Inf values in tensor for dimension variance computation")
+            return {}
+        if z.shape[0] < 2:
+            logger.warning(f"Need at least 2 samples to compute variance: shape={z.shape}")
+            return {}
 
         # Compute variance along sample dimension
         var_per_dim = z.var(dim=0)
