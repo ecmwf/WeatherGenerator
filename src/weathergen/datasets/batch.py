@@ -27,12 +27,13 @@ class SampleMetaData:
 
 
 class Sample:
-    # keys: stream name, values: SampleMetaData
-    meta_info: dict[str | SampleMetaData]
 
-    # data for all streams
-    # keys: stream_name, values: StreamData
-    streams_data: dict[str, StreamData | None]
+    def __init__(self, streams: dict) -> None:
+        self.meta_info: dict[str, SampleMetaData] = {}        
+        self.streams_data: dict[str, StreamData | None] = {}
+
+        for stream_info in streams:
+            self.streams_data[stream_info["name"]] = None
 
     def pin_memory(self):
         """Pin all tensors in this Sample to CPU pinned memory"""
@@ -52,13 +53,6 @@ class Sample:
                         meta_data.mask = meta_data.mask.pin_memory()
 
         return self
-
-    def __init__(self, streams: dict) -> None:
-        self.meta_info = {}
-
-        self.streams_data = {}
-        for stream_info in streams:
-            self.streams_data[stream_info["name"]] = None
 
     def to_device(self, device) -> None:
         for key in self.meta_info.keys():
