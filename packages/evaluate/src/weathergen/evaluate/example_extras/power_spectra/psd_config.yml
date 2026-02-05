@@ -1,0 +1,18 @@
+variables: ['u'] # , 'dew_point_temperature']
+regions: ['ShortGlobe'] #, 'N-Mid-Lats', 'S-Mid-Lats', 'Tropics']
+pressure_levels: [250]
+forecast_steps : [6, 12] # choose the forecast stpes (must be common to all the datasets)
+output_dir: "~/WeatherGen/test_output"
+prefix: "comparison_gn3gotvh"
+# define prefix for images
+comparisons: 
+  wg_bhwuev7l:
+    netcdf_paths: ['/p/home/jusers/owens1/juwels/WeatherGen/output_nc_bhwuev7l/pred*']
+  wg_gn3gotvh_prediction:
+    netcdf_paths: ['/p/home/jusers/owens1/juwels/WeatherGen/gn3gotvh/pred*']
+    # if directory all paths chosen, or use wildcard, or specify single path
+  wg_target:
+    netcdf_paths: ['/p/home/jusers/owens1/juwels/WeatherGen/gn3gotvh/targ*']
+
+## it will produce powerspectra and average across all the samples 
+# available then plot the fsteps as single plots
