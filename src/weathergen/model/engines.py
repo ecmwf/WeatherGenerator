@@ -164,7 +164,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+            tokens_c = block(tokens_c, cell_lens_c)
         return tokens_c
 
 
@@ -227,15 +227,13 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
-            tokens_global_c = checkpoint(
-                block,
+            tokens_global_c = block(
                 tokens_global_c,
                 tokens_c,
                 q_cells_lens_c,
                 cell_lens_c,
-                use_reentrant=use_reentrant,
             )
         return tokens_global_c
 
@@ -266,7 +264,7 @@ class QueryAggregationEngine(torch.nn.Module):
             # Last block is always global attention
             if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
                 self.ae_aggregation_blocks.append(
-                    MultiSelfAttentionHead(
+                    MultiSelfAttentionHeadVarlen(
                         self.cf.ae_global_dim_embed,
                         num_heads=self.cf.ae_aggregation_num_heads,
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
@@ -278,6 +276,7 @@ class QueryAggregationEngine(torch.nn.Module):
                     )
                 )
             else:
+                assert False, "Incompatible with batchsize > 1 here"
                 self.ae_aggregation_blocks.append(
                     MultiSelfAttentionHeadLocal(
                         self.cf.ae_global_dim_embed,
@@ -305,9 +304,12 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens, batch_lens, use_reentrant):
         for block in self.ae_aggregation_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            if isinstance(block, MultiSelfAttentionHeadVarlen):
+                tokens = block(tokens, x_lens=batch_lens)
+            else:
+                tokens = block(tokens)
         return tokens
 
 
@@ -377,9 +379,9 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens):
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            tokens = block(tokens)
         return tokens
 
 
@@ -460,12 +462,18 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
+        if self.training:
+            # Impute noise to the latent state
+            noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
+            if noise_std > 0.0:
+                tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+
         aux_info = None
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             else:
-                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+                tokens = block(tokens, aux_info)
         return tokens
 
 
@@ -615,16 +623,14 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
+                tc_tokens = block(tc_tokens, tcs_lens, tcs_aux)
             else:
-                tc_tokens = checkpoint(
-                    block,
+                tc_tokens = block(
                     tc_tokens,
                     tokens_stream,
                     tcs_lens,
                     tokens_lens,
                     tcs_aux,
-                    use_reentrant=False,
                 )
         return tc_tokens
 
@@ -823,23 +829,123 @@ class LatentState:
     z_pre_norm: torch.Tensor
 
 
-class LatentPredictionHead(nn.Module):
-    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
+class LatentPredictionHeadTransformer(nn.Module):
+    def __init__(
+        self,
+        cf: Config,
+        name: str,
+        in_dim: int,
+        loss_conf,
+        use_class_token: bool,
+        use_patch_token: bool,
+    ):
         super().__init__()
 
         self.name = name
-        self.class_token = class_token
-        self.patch_token = patch_token
-        # For now this is a Linear Layer TBD what this architecture should be
-        self.layer = nn.Linear(in_dim, out_dim, bias=False)
+
+        out_dim, num_blocks, num_heads, with_qk_lnorm, intermediate_dim, dropout_rate = (
+            loss_conf["out_dim"],
+            loss_conf["num_blocks"],
+            loss_conf["num_heads"],
+            loss_conf["with_qk_lnorm"],
+            loss_conf["intermediate_dim"],
+            loss_conf["dropout_rate"],
+        )
+
+        self.global_cf = cf
+        self.use_class_token = use_class_token
+        self.use_patch_token = use_patch_token
+
+        self.blocks = nn.ModuleList()
+
+        # first map to intermediate_dim to introduce a bottleneck
+        self.blocks.append(nn.Linear(in_dim, intermediate_dim, bias=False))
+
+        for _ in range(num_blocks):
+            self.blocks.append(
+                MultiSelfAttentionHead(
+                    intermediate_dim,
+                    num_heads=num_heads,
+                    dropout_rate=dropout_rate,
+                    with_qk_lnorm=with_qk_lnorm,
+                    with_flash=self.global_cf.with_flash_attention,
+                    norm_type=self.global_cf.norm_type,
+                    # dim_aux=dim_aux,
+                    norm_eps=self.global_cf.norm_eps,
+                    attention_dtype=get_dtype(self.global_cf.attention_dtype),
+                )
+            )
+            # Add MLP block
+            self.blocks.append(
+                MLP(
+                    intermediate_dim,
+                    intermediate_dim,
+                    hidden_factor=4,
+                    with_residual=True,
+                    dropout_rate=dropout_rate,
+                    norm_type=self.global_cf.norm_type,
+                    # dim_aux=dim_aux,
+                    norm_eps=self.global_cf.mlp_norm_eps,
+                )
+            )
+
+        # finally map from intermediate_dim to the out_dim
+        self.blocks.append(nn.Linear(intermediate_dim, out_dim, bias=False))
+
+    def forward(self, x: LatentState):
+        # we concatenate the patch and class tokens to process them together
+        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        patch_class_tokens = []
+        if self.use_class_token:
+            patch_class_tokens.append(x.class_token)
+        if self.use_patch_token:
+            patch_class_tokens.append(x.patch_tokens)
+        patch_class_tokens = torch.cat(patch_class_tokens, dim=1)
+
+        for _b_idx, block in enumerate(self.blocks):
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                patch_class_tokens = block(patch_class_tokens)
+            else:
+                patch_class_tokens = checkpoint(block, patch_class_tokens, use_reentrant=False)
+        return patch_class_tokens
+
+
+class LatentPredictionHeadIdentity(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def reset_parameters(self):
+        return
+
+    def forward(self, x: LatentState):
+        return x.patch_tokens
+
+
+class LatentPredictionHeadMLP(nn.Module):
+    def __init__(self, name, in_dim: int, loss_conf, use_class_token: bool, use_patch_token: bool):
+        super().__init__()
+
+        self.name = name
+
+        out_dim, num_layers, hidden_factor = (
+            loss_conf["out_dim"],
+            loss_conf["num_layers"],
+            loss_conf["hidden_factor"],
+        )
+
+        self.use_class_token = use_class_token
+        self.use_patch_token = use_patch_token
+
+        # Create an MLP block
+        self.blocks = MLP(in_dim, out_dim, num_layers, hidden_factor)
 
     def forward(self, x: LatentState):
         outputs = []
-        if self.class_token:
-            outputs.append(self.layer(x.class_token))
-        if self.patch_token:
-            outputs.append(self.layer(x.patch_tokens))
-        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        if self.use_class_token:
+            outputs.append(self.blocks(x.class_token))
+        if self.use_patch_token:
+            outputs.append(self.blocks(x.patch_tokens))
+
         return torch.cat(outputs, dim=1)
 
 

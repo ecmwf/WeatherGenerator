@@ -311,21 +311,15 @@ class WeatherGenZarrReader(WeatherGenReader):
         zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
         # for backwards compatibility assume zarr store is local i.e. .zarr format
 
-        fname_zarr_new = self.results_dir.joinpath(
+        fname_zarr = self.results_dir.joinpath(
             f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
         )
-        fname_zarr_old = self.results_dir.joinpath(
-            f"validation_epoch{self.mini_epoch:05d}_rank{self.rank:04d}.zarr"
-        )
-        if fname_zarr_new.exists():
-            if (zarr_ext == "zarr" and fname_zarr_new.is_dir()) or (
-                zarr_ext == "zip" and fname_zarr_new.is_file()
+        if fname_zarr.exists():
+            if (zarr_ext == "zarr" and fname_zarr.is_dir()) or (
+                zarr_ext == "zip" and fname_zarr.is_file()
             ):
-                self.fname_zarr = fname_zarr_new
+                self.fname_zarr = fname_zarr
         else:
-            self.fname_zarr = fname_zarr_old
-
-        if not self.fname_zarr.exists():
             _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
             raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
 
@@ -464,15 +458,10 @@ class WeatherGenZarrReader(WeatherGenReader):
                     # add lead time coordinate
                     da_tars_fs = self.add_lead_time_coord(da_tars_fs)
                     da_preds_fs = self.add_lead_time_coord(da_preds_fs)
-
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
-
-                # apply z scaling if needed
-                da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
-                da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
 
                 if len(samples) == 1:
                     _logger.debug("Repeating sample coordinate for single-sample case.")
@@ -496,6 +485,10 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                     da_tars_fs = da_tars_fs.sel(channel=channels)
                     da_preds_fs = da_preds_fs.sel(channel=channels)
+
+                # apply z scaling if needed
+                da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
+                da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
 
                 da_tars.append(da_tars_fs)
                 da_preds.append(da_preds_fs)
@@ -554,17 +547,17 @@ class WeatherGenZarrReader(WeatherGenReader):
         -------
             Returns a Dataset where channels have been scaled if needed
         """
+        if stream not in ["ERA5"]:
+            return data
 
         channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
-        data_scaled = data.copy()
         factor = 9.80665
 
-        if channels_z and stream == "ERA5":
-            data_scaled.loc[dict(channel=channels_z)] = data_scaled.sel(channel=channels_z) / factor
-        else:
-            data_scaled = data
-
-        return data_scaled
+        if channels_z:
+            channels = data.channel.astype(str)
+            mask = channels.str.startswith("z_")
+            data = data.where(~mask, data / factor)
+        return data
 
     def get_stream(self, stream: str):
         """

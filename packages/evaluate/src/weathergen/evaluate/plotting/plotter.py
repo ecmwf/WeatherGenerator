@@ -387,7 +387,12 @@ class Plotter:
                         _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
                     da_t = da_t.dropna(dim="ipoint")
-                    assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+                    if da_t.size == 0:
+                        _logger.warning(
+                            f"Data array for {var} at valid_time {valid_time} is empty after "
+                            f"dropping NAs. Skipping this plot."
+                        )
+                        continue
 
                     name = self.scatter_plot(
                         da_t,
@@ -602,6 +607,7 @@ class Plotter:
                         image_paths += names
 
                     if image_paths:
+                        image_paths=sorted(image_paths)
                         images = [Image.open(path) for path in image_paths]
                         images[0].save(
                             f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",

@@ -59,7 +59,7 @@ def test_train_multi_stream(setup, test_run_id):
     logger.info(f"test_train_multi_stream with run_id {test_run_id} {WEATHERGEN_HOME}")
 
     train_with_args(
-        f"--config={WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml".split()
+        f"--base-config={WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml".split()
         + [
             "--run-id",
             test_run_id,
