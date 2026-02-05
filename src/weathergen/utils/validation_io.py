@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import typing
 
 import numpy as np
 import torch
@@ -15,13 +16,26 @@ import torch
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
+from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.model.model import ModelOutput
+from weathergen.train.target_and_aux_module_base import TargetAuxOutput
 
 _logger = logging.getLogger(__name__)
 
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
+    cf: config.Config,  # only streams const
+    val_cfg: config.Config,  # const
+    batch_size: int,  # const
+    mini_epoch: int,  # get filename
+    batch_idx: int,  # calculate sample_start
+    dn_data: typing.Callable,  # const
+    batch: ModelBatch,
+    # contains physical/latent predictions => can ignore latent?
+    model_output: ModelOutput,
+    # contains physical/latent targets => can ignore latent?
+    target_aux_out: dict[str, TargetAuxOutput],
 ):
     """
     Interface for writing model output

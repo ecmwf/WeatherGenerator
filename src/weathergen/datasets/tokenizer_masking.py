@@ -11,8 +11,8 @@
 import numpy as np
 import torch
 
+from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
-from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
@@ -53,7 +53,9 @@ class TokenizerMasking(Tokenizer):
         self.masker.reset_rng(rng)
         self.rng = rng
 
-    def get_tokens_windows(self, stream_info, data, pad_tokens):
+    def get_tokens_windows(
+        self, stream_info: Config, data: list[IOReaderData], pad_tokens: bool
+    ) -> list[tuple[list[list[torch.Tensor | None]], list[list[int]]]]:
         """
         Tokenize data (to amortize over the different views that are generated)
 
@@ -83,7 +85,7 @@ class TokenizerMasking(Tokenizer):
         num_cells: int,
         stage_cfg: dict,
         stream_cfg: dict,
-    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
+    ):
         """
         Create masks for samples
         """

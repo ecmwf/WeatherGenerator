@@ -80,7 +80,7 @@ class LossCalculator:
     def compute_loss(
         self,
         preds: ModelOutput,
-        targets_and_aux: TargetAuxOutput,
+        targets_and_aux: dict[str, TargetAuxOutput],
         metadata: dict,
     ):
         losses_all = defaultdict(dict)

@@ -259,7 +259,7 @@ class Masker:
         num_cells: int,
         stage_cfg: dict,
         stream_cfg: dict,
-    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
+    ) -> tuple[MaskData, MaskData, np.typing.NDArray[np.int32]]:
         """
         Construct teacher/student keep masks for a stream.
         SampleMetaData is currently just a dict with the masking params used.
@@ -355,7 +355,7 @@ class Masker:
                 source_target_mapping += [target_idx]
                 i_source += 1
 
-        source_target_mapping = np.array(source_target_mapping, dtype=np.int32)
+        source_target_mapping: NDArray[np.int32] = np.array(source_target_mapping, dtype=np.int32)
 
         return (target_masks, source_masks, source_target_mapping)
 

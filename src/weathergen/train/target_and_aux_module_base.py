@@ -13,7 +13,7 @@ import dataclasses
 
 import torch
 
-from weathergen.model.engines import LatentState
+from weathergen.datasets.batch import SampleMetaData
 
 type StreamName = str
 
@@ -26,8 +26,13 @@ class TargetAuxOutput:
 
     output_idxs: list[int]
 
-    physical: list[dict[StreamName, torch.Tensor]]
-    latent: list[dict[str, torch.Tensor | LatentState]]
+    physical: list[dict[StreamName, dict[str, torch.Tensor]]]
+    latent: list[
+        dict[
+            StreamName,
+            dict[str, list[torch.Tensor] | list[dict[str, SampleMetaData]] | list[bool]],
+        ]
+    ]
     aux_outputs: dict[str, torch.Tensor]
 
     def __init__(self, len_target: int, output_idxs: list) -> None:

@@ -50,7 +50,7 @@ class ModelOutput:
     Representation of model output
     """
 
-    physical: list[dict[StreamName, torch.Tensor]]
+    physical: list[dict[StreamName, tuple[torch.Tensor]]]
     latent: list[dict[str, torch.Tensor | LatentState]]
 
     def __init__(self, len_output: int) -> None:

@@ -11,6 +11,7 @@
 import copy
 import logging
 import time
+from collections.abc import Iterable
 
 import numpy as np
 import torch
@@ -22,6 +23,7 @@ from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
+from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -32,6 +34,7 @@ from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, TargetAuxOutput
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
@@ -75,8 +78,8 @@ class Trainer(TrainerBase):
         self.model_params = None
         self.optimizer: torch.optim.Optimizer | None = None
         self.t_start: float = 0
-        self.target_and_aux_calculators = None
-        self.target_and_aux_calculators_val = None
+        self.target_and_aux_calculators: dict[str, TargetAndAuxModuleBase] = None
+        self.target_and_aux_calculators_val: dict[str, TargetAndAuxModuleBase] = None
         self.validate_with_ema_cfg = None
         self.validate_with_ema: bool = False
         self.batch_size_per_gpu = -1
@@ -168,7 +171,7 @@ class Trainer(TrainerBase):
         # get target_aux calculators for different loss terms
         # del self.cf.training_config.losses["student-teacher"]["loss_fcts"]["JEPA"]
         # del mode_cfg.losses["student-teacher"]["loss_fcts"]["JEPA"]
-        target_and_aux_calculators = {}
+        target_and_aux_calculators: dict[str, TargetAndAuxModuleBase] = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
                 self.cf, loss_cfg, self.dataset, self.model, self.device, batch_size
@@ -549,7 +552,7 @@ class Trainer(TrainerBase):
         cf = self.cf
         self.model.eval()
 
-        dataset_val_iter = iter(self.data_loader_validation)
+        dataset_val_iter: Iterable[ModelBatch] = iter(self.data_loader_validation)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
@@ -580,7 +583,7 @@ class Trainer(TrainerBase):
                                 batch.get_source_samples(),
                             )
 
-                        targets_and_auxs = {}
+                        targets_and_auxs: dict[str, TargetAuxOutput] = {}
                         for loss_name, target_aux in self.target_and_aux_calculators_val.items():
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
