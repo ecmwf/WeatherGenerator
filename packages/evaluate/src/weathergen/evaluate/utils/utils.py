@@ -109,10 +109,10 @@ def calc_scores_per_stream(
         samples=samples,
         channels=channels,
         ensemble=ensemble,
-        return_counts=True,
     )
     da_preds = output_data.prediction
     da_tars = output_data.target
+    fsteps = list(da_preds.keys())
 
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
@@ -142,14 +142,14 @@ def calc_scores_per_stream(
         lead_time_map = {}
 
         for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
-            if preds.ipoint.size == 0:
+            if preds.sizes.get("ipoint") == 0:
                 _logger.warning(
                     f"No data for stream {stream} at fstep {fstep} in region {region}. Skipping."
                 )
                 continue
 
             _logger.debug(f"Verifying data for stream {stream}...")
-
+    
             preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
 
             if region != "global":
@@ -171,7 +171,7 @@ def calc_scores_per_stream(
 
             for metric in metrics:
                 score = get_score(
-                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
+                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord #agg_dims="ipoint"
                 )
                 if score is not None:
                     valid_scores.append(score)
@@ -183,11 +183,10 @@ def calc_scores_per_stream(
             ]
             if not valid_scores:
                 continue
-
+           
             combined_metrics = xr.concat(valid_scores, dim="metric")
             combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
             combined_metrics = combined_metrics.compute()
-
             for coord in ["channel", "sample", "ens"]:
                 combined_metrics = scalar_coord_to_dim(combined_metrics, coord)
 
@@ -199,9 +198,10 @@ def calc_scores_per_stream(
             }
             if "ens" in combined_metrics.dims:
                 criteria["ens"] = combined_metrics.ens.values
-
+            breakpoint()
             metric_stream.loc[criteria] = combined_metrics
 
+            breakpoint()
             lead_time_map[fstep] = (
                 np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
                 if "lead_time" in combined_metrics.coords

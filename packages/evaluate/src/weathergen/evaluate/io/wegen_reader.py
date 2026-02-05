@@ -68,7 +68,7 @@ class WeatherGenReader(Reader):
         self.metrics_dir = Path(
             self.eval_cfg.get("metrics_dir", self.metrics_base_dir / "evaluation")
         )
-
+    
     def get_inference_config(self):
         """
         load the config associated to the inference run (different from the eval_cfg which
@@ -330,7 +330,6 @@ class WeatherGenZarrReader(WeatherGenReader):
         fsteps: list[str] | None = None,
         channels: list[str] | None = None,
         ensemble: list[str] | None = None,
-        return_counts: bool = False,
     ) -> ReaderOutput:
         """
         Retrieve prediction and target data for a given run from the Zarr store.
@@ -350,8 +349,6 @@ class WeatherGenZarrReader(WeatherGenReader):
             List of forecast steps to retrieve. If None, all forecast steps are retrieved.
         channels :
             List of channel names to retrieve. If None, all channels are retrieved.
-        return_counts :
-            If True, also return the number of points per sample.
 
         Returns
         -------
@@ -359,8 +356,6 @@ class WeatherGenZarrReader(WeatherGenReader):
             A dataclass containing:
             - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
             - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
-            - points_per_sample: xarray DataArray containing the number of points per sample,
-              if `return_counts` is True.
         """
         # get type of zarr store
 
@@ -387,16 +382,6 @@ class WeatherGenZarrReader(WeatherGenReader):
             )
 
             da_tars, da_preds = [], []
-
-            if return_counts:
-                points_per_sample = xr.DataArray(
-                    np.full((len(fsteps), len(samples)), np.nan),
-                    coords={"forecast_step": fsteps, "sample": samples},
-                    dims=("forecast_step", "sample"),
-                    name=f"points_per_sample_{stream}",
-                )
-            else:
-                points_per_sample = None
 
             fsteps_final = []
 
@@ -442,8 +427,6 @@ class WeatherGenZarrReader(WeatherGenReader):
                     )
                     continue
 
-                fsteps_final.append(fstep)
-
                 _logger.debug(
                     f"Concatenating targets and predictions for stream {stream}, "
                     f"forecast_step {fstep}..."
@@ -456,12 +439,14 @@ class WeatherGenZarrReader(WeatherGenReader):
                     da_tars_fs = _force_consistent_grids(da_tars_fs)
 
                     # add lead time coordinate
-                    da_tars_fs = self.add_lead_time_coord(da_tars_fs)
-                    da_preds_fs = self.add_lead_time_coord(da_preds_fs)
+                    da_tars_fs, lead_times = self.add_lead_time_coord(da_tars_fs)
+                    da_preds_fs, _ = self.add_lead_time_coord(da_preds_fs)
+                    fsteps_final.append(lead_times.tolist())
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
                     da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
                     da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
+                    fsteps_final.append(fstep)
 
                 if len(samples) == 1:
                     _logger.debug("Repeating sample coordinate for single-sample case.")
@@ -492,15 +477,27 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                 da_tars.append(da_tars_fs)
                 da_preds.append(da_preds_fs)
-                if return_counts:
-                    points_per_sample.loc[{"forecast_step": fstep}] = np.array(pps)
 
             # Safer than a list
-            da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)}
-            da_preds = {fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)}
+            da_tars_dict, da_preds_dict = {}, {}
+            i = 0 
+            for fidx, (fstep, da_t, da_p) in enumerate(zip(fsteps_final, da_tars, da_preds,  strict=True)):
+                if type(fstep) == list and len(fstep) > 1:  # regular grid with lead times
+                    da_tar_substeps = self.retrieve_substeps(da_t)
+                    da_pred_substeps = self.retrieve_substeps(da_p)
+                    for da_tar, da_pred in zip(da_tar_substeps, da_pred_substeps, strict=True):
+                        da_tars_dict[i] = da_tar
+                        da_preds_dict[i] = da_pred
+                        i += 1
+                else:
+                    da_tars_dict[int(fstep)] = da_tars[fidx]
+                    da_preds_dict[int(fstep)] = da_preds[fidx]
 
+            # da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)}
+            # da_preds = {fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)}
+            # breakpoint()
             return ReaderOutput(
-                target=da_tars, prediction=da_preds, points_per_sample=points_per_sample
+                target= da_tars_dict, prediction=da_preds_dict
             )
 
     ######## reader utils ########
@@ -521,17 +518,39 @@ class WeatherGenZarrReader(WeatherGenReader):
             Collapse over the others.
         Returns
         -------
-            Returns a Dataset with an added lead_time coordinate.
+            Returns a list of Datasets for each lead_time coordinate.
         """
+        # breakpoint()
 
+        # da_t = da.stack(lead_time=("sample", "ipoint"))
+
+        # # drop the MultiIndex, turning time into a plain dimension
+        # da_t = da_t.reset_index("lead_time", drop=True)
+
+        # # now safely assign valid_time as the time coordinate
+        # da_t = da_t.assign_coords(lead_time=da_t.valid_time - da_t.source_interval_start).drop_vars("valid_time")
         vt = da["valid_time"]
         sis = da["source_interval_start"]
 
-        vt_reduced = vt.min(dim=[d for d in vt.dims if d != sample_dim])
+        # vt_reduced = vt.min(dim=[d for d in vt.dims if d != sample_dim])
 
-        lead_time = vt_reduced - sis
+        # lead_time = vt_reduced - sis
+        lead_time = vt - sis
+        # breakpoint()
+        da = da.assign_coords(lead_time=lead_time)
+        unique_lead = np.unique(da.lead_time.data)
 
-        return da.assign_coords(lead_time=lead_time)
+        return da, unique_lead
+
+    def retrieve_substeps(self, da) -> list[int]:
+        unique_lead = np.unique(da.lead_time.data)
+        lead_time_das = []
+        for lt in unique_lead:
+            mask = da.lead_time == lt
+            # select only the matching points
+            da_lt = da.where(mask, drop=True)
+            lead_time_das.append(da_lt)
+        return lead_time_das
 
     def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
         """
@@ -590,6 +609,19 @@ class WeatherGenZarrReader(WeatherGenReader):
         with zarrio_reader(self.fname_zarr) as zio:
             return set(int(f) for f in zio.forecast_steps)
 
+    def get_forecast_substep_valid_times(self, stream: str) -> set[str]:
+        """Get the set of forecast times from the Zarr file."""
+        if not self.is_regular(stream):
+            _logger.warning(
+                f"Stream {stream} is not regular. Forecast times cannot be retrieved."
+            )
+            return set()
+        
+        with zarrio_reader(self.fname_zarr) as zio:
+            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
+            unique_lead = np.unique(dummy.valid_time.data)
+        return set(str(lt) for lt in unique_lead)   
+        
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Get the list of ensemble member names for a given stream from the config.
         Parameters
@@ -714,7 +746,6 @@ class WeatherGenMergeReader(Reader):
         fsteps: list[str] | None = None,
         channels: list[str] | None = None,
         ensemble: list[str] | None = None,
-        return_counts: bool = False,
     ) -> ReaderOutput:
         """
         Retrieve prediction and target data for a given run from the Zarr store.
@@ -735,16 +766,12 @@ class WeatherGenMergeReader(Reader):
             List of forecast steps to retrieve. If None, all forecast steps are retrieved.
         channels :
             List of channel names to retrieve. If None, all channels are retrieved.
-        return_counts :
-            If True, also return the number of points per sample.
         Returns
         -------
         ReaderOutput
             A dataclass containing:
             - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
             - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
-            - points_per_sample: xarray DataArray containing the number of points per sample,
-              if `return_counts` is True.
         """
 
         da_tars_merge, da_preds_merge, fsteps_merge = [], [], []
@@ -769,12 +796,6 @@ class WeatherGenMergeReader(Reader):
                 da_tars.append(out.target[fstep])
                 da_preds.append(out.prediction[fstep])
                 da_fsteps.append(fstep)
-
-                if return_counts:
-                    if points_per_sample is None:
-                        points_per_sample = out.points_per_sample
-                    else:
-                        points_per_sample += out.points_per_sample
 
             da_tars_merge.append(da_tars)
             da_preds_merge.append(da_preds)

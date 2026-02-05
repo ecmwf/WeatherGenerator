@@ -35,7 +35,6 @@ class ReaderOutput:
 
     target: dict[str, xr.Dataset]
     prediction: dict[str, xr.Dataset]
-    points_per_sample: xr.DataArray | None
 
 
 @dataclass

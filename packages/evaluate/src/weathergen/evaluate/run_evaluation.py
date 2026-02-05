@@ -217,12 +217,13 @@ def _process_stream(
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
     """
-
+    breakpoint()
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
+        _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
         return run_id, stream, {}
 
     # Parallel plotting
