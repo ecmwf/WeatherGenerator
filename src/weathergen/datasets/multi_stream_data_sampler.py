@@ -257,6 +257,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 if ds.target_channel_weights is not None
                 else [1.0 for _ in ds.target_channels]
             )
+            stream_info["geoinfo_channels"] = ds.geoinfo_channels
 
         return streams_datasets
 
