@@ -21,6 +21,13 @@ OR
 uv run packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/psd_main.py
 --config packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/psd_config.yml
 
+Prerequisties:
+
+Please export the inference into a regular gridded netcdf first using the export package:
+e.g.
+uv run export --run-id <INFERENCE_ID> --stream ERA5 \
+--output-dir ../output_nc --format netcdf --regrid-degree 1 \
+--regrid-type regular_ll
 """
 import argparse
 import glob

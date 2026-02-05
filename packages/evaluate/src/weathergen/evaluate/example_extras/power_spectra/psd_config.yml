@@ -1,8 +1,8 @@
-variables: ['u'] # , 'dew_point_temperature']
+variables: ['u'] # , 'v10', 'z'] etc.
 regions: ['ShortGlobe'] #, 'N-Mid-Lats', 'S-Mid-Lats', 'Tropics']
-pressure_levels: [250]
-forecast_steps : [6, 12] # choose the forecast stpes (must be common to all the datasets)
-output_dir: "~/WeatherGen/test_output"
+pressure_levels: [250] 
+forecast_steps : [6, 12] # choose the forecast steps (must be common to all the datasets)
+output_dir: "./plots/power_spectra" #relative to dir in which script is run
 prefix: "comparison_gn3gotvh"
 # define prefix for images
 comparisons: 
