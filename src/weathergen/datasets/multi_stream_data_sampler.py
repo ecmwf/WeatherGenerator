@@ -198,6 +198,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     if ds.target_channel_weights is not None
                     else [1.0 for _ in ds.target_channels]
                 )
+                stream_info["geoinfo_channels"] = ds.geoinfo_channels
 
                 self.streams_datasets[stream_info["name"]] += [ds]
 
@@ -682,7 +683,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 tidx: int = source_to_target[sidx].item()
                 sdata = self._build_stream_data(
                     source_select,
-                    tidx,
+                    tidx, # Why use not idx here?
                     num_forecast_steps,
                     stream_info,
                     source_masks.metadata[sidx].params.get("num_steps_input", 1),
