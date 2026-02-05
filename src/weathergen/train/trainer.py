@@ -823,12 +823,19 @@ class Trainer(TrainerBase):
                 return latent_data
             if isinstance(latent_data, LatentState):
                 # Use patch_tokens as the primary latent representation
-                return latent_data.patch_tokens
+                # For forecast steps > 0, patch_tokens is None, so fall back to z_pre_norm
+                if latent_data.patch_tokens is not None:
+                    return latent_data.patch_tokens
+                if latent_data.z_pre_norm is not None:
+                    # z_pre_norm includes register/class tokens, extract patch tokens only
+                    # This assumes the same token layout as patch_tokens
+                    return latent_data.z_pre_norm
+                return None
             if isinstance(latent_data, list) and len(latent_data) > 0:
                 return extract_latent_tensor(latent_data[0])
             if isinstance(latent_data, dict):
                 # Try common keys
-                for key in ["latent", "patch_tokens"]:
+                for key in ["latent", "patch_tokens", "z_pre_norm"]:
                     if key in latent_data:
                         return extract_latent_tensor(latent_data[key])
             return None
