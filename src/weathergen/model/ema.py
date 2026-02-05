@@ -49,6 +49,11 @@ class EMAModel:
         maybe_sharded_sd = self.original_model.state_dict()
         # this copies correctly tested in pdb
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
+        self.ema_model.eval()
+
+    def requires_grad_(self, flag: bool):
+        for p in self.ema_model.parameters():
+            p.requires_grad = flag
 
     @torch.no_grad()
     def update(self, cur_step, batch_size):
@@ -63,9 +68,14 @@ class EMAModel:
 
         for name, p_ema in self.ema_model.named_parameters():
             p_src = self.src_params.get(name, None)
+            # Due to DDP only being applied only to the student the names may missmatch
+            # Thus, we check for the alternate naming scheme
+            p_src = self.src_params.get("module." + name, None) if p_src is None else p_src
+            if "identity" in name.lower() or "q_cells" in name.lower():
+                continue
             if p_src is None:
                 # EMA-only param or intentionally excluded
-                assert False, "All parameters of the EMA model must be in the base model."
+                assert False, f"{name}: All parameters of the EMA model must be in the base model."
 
             p_ema.lerp_(p_src, 1.0 - beta)
 

@@ -11,7 +11,6 @@
 
 import os
 
-import pynvml
 import torch
 import torch.distributed as dist
 import torch.multiprocessing
@@ -25,8 +24,6 @@ PORT = 1345
 
 class TrainerBase:
     def __init__(self):
-        self.device_handles = []
-        self.device_names = []
         self.cf: Config | None = None
 
     @staticmethod
@@ -52,15 +49,16 @@ class TrainerBase:
         if not use_cuda:
             return torch.device("cpu")
 
-        local_id_node = os.environ.get("SLURM_LOCALID", "-1")
-        if local_id_node == "-1":
+        # if local_id_node == "-1":
+        local_id_node = dist.get_node_local_rank(fallback_rank=-1)
+        if local_id_node == -1:
             devices = ["cuda"]
         else:
+            local_id_node = int(local_id_node)
             devices = [
-                f"cuda:{int(local_id_node) * num_accs_per_task + i}"
-                for i in range(num_accs_per_task)
+                f"cuda:{local_id_node * num_accs_per_task + i}" for i in range(num_accs_per_task)
             ]
-        torch.cuda.set_device(int(local_id_node) * num_accs_per_task)
+        torch.cuda.set_device(local_id_node * num_accs_per_task)
 
         return devices
 
@@ -144,26 +142,3 @@ class TrainerBase:
         cf.with_ddp = world_size > 1
 
         return cf
-
-    def init_perf_monitoring(self):
-        self.device_handles, self.device_names = [], []
-
-        pynvml.nvmlInit()
-        device_count = pynvml.nvmlDeviceGetCount()
-
-        for i in range(device_count):
-            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-            self.device_names += [pynvml.nvmlDeviceGetName(handle)]
-            self.device_handles += [handle]
-
-    def get_perf(self):
-        perf_gpu, perf_mem = 0.0, 0.0
-        if len(self.device_handles) > 0:
-            for handle in self.device_handles:
-                perf = pynvml.nvmlDeviceGetUtilizationRates(handle)
-                perf_gpu += perf.gpu
-                perf_mem += perf.memory
-            perf_gpu /= len(self.device_handles)
-            perf_mem /= len(self.device_handles)
-
-        return perf_gpu, perf_mem
