@@ -150,6 +150,29 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
 
+  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
+  # Detects representation collapse via various metrics
+  collapse_monitoring:
+    enabled: true
+    compute_frequency: 100  # batches between metric computations
+    log_frequency: 100      # batches between metric logging
+    metrics:
+      effective_rank:
+        enabled: true
+        tensor_source: "both"  # "student", "teacher", or "both"
+        sample_size: 2048      # max samples for SVD (0 = no sampling)
+      singular_values:
+        enabled: true
+        tensor_source: "both"
+        sample_size: 2048
+      dimension_variance:
+        enabled: true
+        tensor_source: "both"  # cheap to compute, good early indicator
+      prototype_entropy:
+        enabled: true  # only applies to DINO
+      ema_beta:
+        enabled: true
+
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
@@ -187,7 +210,7 @@ training_config:
       eps: 2e-08
     muon:
       # Learning rate multiplier for Muon relative to base LR (muon_lr = base_lr * lr_multiplier)
-      lr_multiplier: 20.0
+      lr_multiplier: 30.0
       # Momentum factor for Muon SGD
       momentum: 0.95
       # Use Nesterov momentum
@@ -209,8 +232,8 @@ training_config:
         },
         },
         target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : 0.09,
-            ema_halflife_in_thousands: 1e-3,
+          { ema_ramp_up_ratio : null,
+            ema_halflife_in_thousands: 1e-1,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
@@ -227,7 +250,7 @@ training_config:
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
-        rate : 0.6,
+        rate : 0.4,
         rate_sampling: False
       },
     },
@@ -237,7 +260,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+      masking_strategy_config : { rate : 0.4, hl_mask: 5, rate_sampling: False },
     },
   }
 
@@ -268,7 +291,7 @@ validation_config:
   output_streams: null
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: 8
   
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
