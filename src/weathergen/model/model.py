@@ -503,7 +503,9 @@ class Model(torch.nn.Module):
         num_params_latent_heads = get_num_parameters(self.latent_heads)
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
+        num_params_fe = (
+            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
+        )
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
