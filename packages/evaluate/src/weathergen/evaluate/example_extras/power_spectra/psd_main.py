@@ -208,8 +208,8 @@ def construct_config_from_run_id(run_id: str, args: argparse.Namespace) -> DictC
         "prefix": args.prefix,
         "output_dir": Path(args.output_dir),
         "comparisons": {
-            run_id: {"netcdf_paths": [f"{args.export_dir}/pred*.nc"]},
             "target": {"netcdf_paths": [f"{args.export_dir}/targ*.nc"]},
+            run_id: {"netcdf_paths": [f"{args.export_dir}/pred*.nc"]}
         },
     }
     run_id_config = DictConfig(run_id_config)

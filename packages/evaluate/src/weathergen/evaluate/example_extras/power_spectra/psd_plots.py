@@ -597,9 +597,9 @@ def plot_psds(
                         except Exception as e:
                             _logger.error(e)
                             _logger.error(
-                                f"Plotting power spectra failed for {testfile, tot_constraint}"
+                                f"Plotting power spectra failed for {testfile}"
                             )
-                            failed_string += f"{testfile, tot_constraint}"
+                            failed_string += f"{testfile}"
                     plt.savefig(outdir / figname)
                     plt.close()
     _logger.info(f"Runs failed: {failed_string}")
