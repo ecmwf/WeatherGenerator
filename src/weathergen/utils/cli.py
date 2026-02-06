@@ -13,20 +13,21 @@ class Stage(enum.StrEnum):
 
 def get_main_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
-    train_parser = parser.add_subparsers(
-        "train", "Train a WeatherGenerator configuration from the ground up.", dest="stage"
+    subparsers = parser.add_subparsers(dest="stage")
+    
+    train_parser = subparsers.add_parser(
+        Stage.train,
+        help="Train a WeatherGenerator configuration from the ground up.",
     )
     _add_train_args(train_parser)
-    continue_parser = parser.add_subparsers(
-        "continue",
-        "Resume training from a pretrained WeatherGenerator configuration.",
-        dest="stage",
+    continue_parser = subparsers.add_parser(
+        Stage.train_continue,
+        help="Resume training from a pretrained WeatherGenerator configuration.",
     )
     _add_continue_args(continue_parser)
-    inference_parser = parser.add_subparsers(
-        "inference",
-        "Run infernce on a trained WeatherGenerator configuration",
-        "stage"
+    inference_parser = subparsers.add_parser(
+        Stage.inference,
+        help="Run infernce on a trained WeatherGenerator configuration",
     )
     _add_inference_args(inference_parser)
 
