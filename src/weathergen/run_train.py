@@ -29,17 +29,17 @@ logger = logging.getLogger(__name__)
 
 def train() -> None:
     """Entry point for calling the training code from the command line."""
-    main(["train"] + sys.argv[1:])
+    main([cli.Stage.train] + sys.argv[1:])
 
 
 def train_continue() -> None:
     """Entry point for calling train_continue from the command line."""
-    main(["continue"] + sys.argv[1:])
+    main([cli.Stage.train_continue] + sys.argv[1:])
 
 
 def inference():
     """Entry point for calling the inference code from the command line."""
-    main(["inference"] + sys.argv[1:])
+    main([cli.Stage.inference] + sys.argv[1:])
 
 
 def main(argl: list[str]):
@@ -51,11 +51,11 @@ def main(argl: list[str]):
     parser = cli.get_main_parser()
     args = parser.parse_args(argl)
     match args.stage:
-        case "train":
+        case cli.Stage.train:
             run_train(args)
-        case "continue":
+        case cli.Stage.train_continue:
             run_continue(args)
-        case "inference":
+        case cli.Stage.inference:
             run_inference(args)
         case _:
             logger.error("No stage was found.")
@@ -63,7 +63,7 @@ def main(argl: list[str]):
 
 def _fix_argl(argl):  # TODO remove this fix after grace period
     """Ensure `stage` positional argument is in arglist."""
-    if argl[0] not in ("train", "continue", "inference"):
+    if argl[0] not in cli.Stage:
         try:
             stage = os.environ.get("WEATHERGEN_STAGE")
         except KeyError as e:

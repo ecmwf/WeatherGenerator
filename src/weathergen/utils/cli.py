@@ -1,7 +1,14 @@
 import argparse
+import enum
 from pathlib import Path
 
 import pandas as pd
+
+
+class Stage(enum.StrEnum):
+    train = enum.auto()
+    train_continue = enum.auto()
+    inference = enum.auto()
 
 
 def get_main_parser() -> argparse.ArgumentParser:
