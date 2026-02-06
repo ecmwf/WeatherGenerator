@@ -82,7 +82,8 @@ latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
 
-freeze_modules: ""
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*ERA5.*"
+load_chkpt: {run_id: zosrc8ti}
 
 norm_type: "LayerNorm"
 
