@@ -210,7 +210,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+      masking_strategy_config : { rate : 0.64, hl_mask: 4, rate_sampling: False },
     },
   }
 
