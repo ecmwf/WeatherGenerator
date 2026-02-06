@@ -183,15 +183,20 @@ class FrozenTeacher(EncoderTeacher):
     from a pre-trained model as described in arXiv:2509.24317.
     """
 
-    def __init__(self, teacher_model, training_cfg, **kwargs):
+    def __init__(self, teacher_model, training_cfg, teacher_model_params=None, **kwargs):
         """Initialize the FrozenTeacher.
 
         Args:
             teacher_model: Pre-trained model to use as teacher.
             training_cfg: Training configuration.
+            teacher_model_params: Model parameters matching the teacher's architecture.
+                If None, will use the student's model_params (may cause dimension mismatch).
             **kwargs: Additional arguments passed to parent.
         """
         super().__init__(teacher_model, training_cfg, **kwargs)
+
+        # Store teacher-specific model params
+        self.teacher_model_params = teacher_model_params
 
         # Ensure all parameters are frozen
         for param in self.teacher_model.parameters():
@@ -220,6 +225,7 @@ class FrozenTeacher(EncoderTeacher):
         """
         # Lazy imports to avoid circular dependency with model_interface
         from weathergen.common.config import load_run_config, merge_configs
+        from weathergen.model.model import ModelParams
         from weathergen.model.model_interface import get_model, load_model
         from weathergen.utils.distributed import is_root
 
@@ -249,11 +255,23 @@ class FrozenTeacher(EncoderTeacher):
             teacher_config, teacher_model, device, teacher_run_id, teacher_mini_epoch
         )
 
-        return cls(teacher_model, cf.training_config)
+        # Create model params matching teacher's architecture
+        teacher_model_params = ModelParams(teacher_config).create(teacher_config)
+        teacher_model_params = teacher_model_params.to(device)
+
+        return cls(teacher_model, cf.training_config, teacher_model_params=teacher_model_params)
 
     def _forward_teacher(self, model_params, batch):
-        """Execute forward pass on the frozen teacher model."""
-        return self.teacher_model(model_params, batch)
+        """Execute forward pass on the frozen teacher model.
+
+        Uses the teacher's own model_params instead of the student's to ensure
+        dimension compatibility.
+        """
+        # Use teacher's model params if available, otherwise fall back to passed-in params
+        params_to_use = (
+            self.teacher_model_params if self.teacher_model_params is not None else model_params
+        )
+        return self.teacher_model(params_to_use, batch)
 
     def reset(self, batch_size=None):
         """No-op: frozen teacher weights don't change."""
