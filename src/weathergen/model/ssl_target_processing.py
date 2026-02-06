@@ -263,3 +263,13 @@ class JEPATargetProcessing(nn.Module):
 
     def forward(self, z):
         return z
+
+
+class LeJEPATargetProcessing(nn.Module):
+    """Identity pass-through for LeJEPA teacher targets (no centering/sharpening)."""
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, z):
+        return z

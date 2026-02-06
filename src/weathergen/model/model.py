@@ -432,13 +432,12 @@ class Model(torch.nn.Module):
         self.latent_heads = nn.ModuleDict()
         self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
 
+        ssl_loss_types = {"LossLatentSSLStudentTeacher", "LossLatentLeJEPA"}
         ssl_losses_cfgs = [
-            v
-            for _, v in cf.training_config.losses.items()
-            if v.type == "LossLatentSSLStudentTeacher"
+            v for _, v in cf.training_config.losses.items() if v.type in ssl_loss_types
         ]
 
-        # TODO: support multiple LossLatentSSLStudentTeacher terms
+        # TODO: support multiple SSL loss terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
         for ssl_target_losses in ssl_losses_cfgs:
             self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
@@ -451,7 +450,7 @@ class Model(torch.nn.Module):
                         use_class_token=True,
                         use_patch_token=True,
                     )
-                elif loss == "JEPA":
+                elif loss in ("JEPA", "LeJEPA"):
                     self.latent_heads[loss] = self._create_latent_pred_head(
                         cf,
                         f"{loss}-head",
