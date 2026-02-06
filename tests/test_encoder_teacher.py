@@ -551,3 +551,121 @@ class TestEncoderTeacherBaseClass:
         from weathergen.train.target_and_aux_ssl_teacher import EncoderTeacher
 
         assert hasattr(EncoderTeacher, "_forward_teacher")
+
+
+# =============================================================================
+# Validation and Error Handling Tests
+# =============================================================================
+
+
+class TestValidationAndErrorHandling:
+    """Tests for input validation and error handling."""
+
+    def test_ema_teacher_rejects_zero_batch_size(
+        self, simple_model, mock_ema_model, mock_training_cfg
+    ):
+        """EMATeacher should reject batch_size <= 0."""
+        from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            EMATeacher(
+                simple_model, mock_ema_model, batch_size=0, training_cfg=mock_training_cfg
+            )
+
+    def test_ema_teacher_rejects_negative_batch_size(
+        self, simple_model, mock_ema_model, mock_training_cfg
+    ):
+        """EMATeacher should reject negative batch_size."""
+        from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            EMATeacher(
+                simple_model, mock_ema_model, batch_size=-5, training_cfg=mock_training_cfg
+            )
+
+    def test_encoder_teacher_rejects_config_without_ssl_losses(self, simple_model):
+        """EncoderTeacher should reject config with no LossLatentSSLStudentTeacher."""
+        from omegaconf import OmegaConf
+
+        from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+
+        # Config with only physical loss, no SSL
+        cfg = OmegaConf.create(
+            {
+                "losses": {
+                    "physical_loss": {
+                        "type": "LossPhysical",
+                        "weight": 1.0,
+                    }
+                }
+            }
+        )
+
+        mock_ema = MagicMock()
+        mock_ema.reset = MagicMock()
+        mock_ema.update = MagicMock()
+        mock_ema.forward_eval = MagicMock()
+
+        with pytest.raises(ValueError, match="LossLatentSSLStudentTeacher"):
+            EMATeacher(simple_model, mock_ema, batch_size=8, training_cfg=cfg)
+
+    def test_frozen_teacher_handles_malformed_config_gracefully(self, model_without_latent_heads):
+        """FrozenTeacher should handle config without 'losses' attribute."""
+        from omegaconf import OmegaConf
+
+        from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
+
+        # Config without 'losses' key
+        cfg = OmegaConf.create({"some_other_key": "value"})
+
+        # Should not raise, should default to JEPA
+        teacher = FrozenTeacher(model_without_latent_heads, training_cfg=cfg)
+        assert "JEPA" in teacher.postprocess_targets
+
+    def test_frozen_teacher_from_pretrained_rejects_none_run_id(self):
+        """from_pretrained should reject None teacher_run_id with helpful message."""
+        from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
+
+        with pytest.raises(ValueError, match="teacher_run_id"):
+            FrozenTeacher.from_pretrained(
+                cf=MagicMock(get=lambda k: "/some/path", training_config=None),
+                dataset=MagicMock(),
+                device="cpu",
+                params={},  # Missing teacher_run_id
+            )
+
+    def test_frozen_teacher_from_pretrained_rejects_empty_run_id(self):
+        """from_pretrained should reject empty string teacher_run_id."""
+        from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
+
+        with pytest.raises(ValueError, match="non-empty string"):
+            FrozenTeacher.from_pretrained(
+                cf=MagicMock(get=lambda k: "/some/path", training_config=None),
+                dataset=MagicMock(),
+                device="cpu",
+                params={"teacher_run_id": ""},
+            )
+
+    def test_get_target_postprocessing_validates_dino_config(self):
+        """get_target_postprocessing should raise KeyError for missing DINO config."""
+        from omegaconf import OmegaConf
+
+        from weathergen.train.target_and_aux_ssl_teacher import get_target_postprocessing
+
+        # DINO config missing required keys
+        incomplete_config = OmegaConf.create({"DINO": {"out_dim": 256}})  # Missing other keys
+
+        with pytest.raises(KeyError, match="DINO loss config missing required keys"):
+            get_target_postprocessing(incomplete_config, training_cfg=None)
+
+    def test_get_target_postprocessing_validates_ibot_config(self):
+        """get_target_postprocessing should raise KeyError for missing iBOT config."""
+        from omegaconf import OmegaConf
+
+        from weathergen.train.target_and_aux_ssl_teacher import get_target_postprocessing
+
+        # iBOT config missing required keys
+        incomplete_config = OmegaConf.create({"iBOT": {"out_dim": 256}})  # Missing other keys
+
+        with pytest.raises(KeyError, match="iBOT loss config missing required keys"):
+            get_target_postprocessing(incomplete_config, training_cfg=None)
