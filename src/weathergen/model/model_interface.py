@@ -21,7 +21,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import distribute_tensor
 
-from weathergen.common.config import Config, merge_configs
+from weathergen.common.config import Config, load_run_config, merge_configs
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -34,7 +34,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
-from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher, FrozenTeacher
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
@@ -327,7 +327,57 @@ def get_target_aux_calculator(
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
         target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
 
+    elif target_and_aux_calc == "FrozenTeacher":
+        target_aux = _create_frozen_teacher(cf, dataset, device, target_and_aux_calc_params)
+
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
 
     return target_aux
+
+
+def _create_frozen_teacher(cf: Config, dataset, device, params: dict) -> FrozenTeacher:
+    """Create a FrozenTeacher from a pre-trained checkpoint.
+
+    Args:
+        cf: Current training configuration.
+        dataset: Dataset for model creation.
+        device: Target device.
+        params: FrozenTeacher parameters from config, including:
+            - teacher_run_id (required): Run ID of the pre-trained teacher model.
+            - teacher_mini_epoch (optional): Mini-epoch to load. Default -1 (latest).
+
+    Returns:
+        FrozenTeacher instance with loaded and frozen weights.
+
+    Raises:
+        ValueError: If teacher_run_id is not provided.
+    """
+    teacher_run_id = params.get("teacher_run_id")
+    teacher_mini_epoch = params.get("teacher_mini_epoch", -1)
+
+    if teacher_run_id is None:
+        raise ValueError("FrozenTeacher requires 'teacher_run_id' in config")
+
+    if is_root():
+        logger.info(
+            f"Loading FrozenTeacher from run_id={teacher_run_id}, mini_epoch={teacher_mini_epoch}"
+        )
+
+    # Load teacher's config (contains full architecture)
+    teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, cf.get("model_path"))
+
+    # Create model with teacher's architecture
+    teacher_model = get_model(teacher_config, "student", dataset, {})
+
+    # Load weights
+    teacher_model = load_model(
+        teacher_config, teacher_model, device, teacher_run_id, teacher_mini_epoch
+    )
+
+    # Freeze all parameters
+    for param in teacher_model.parameters():
+        param.requires_grad = False
+    teacher_model.eval()
+
+    return FrozenTeacher(teacher_model, cf.training_config)
