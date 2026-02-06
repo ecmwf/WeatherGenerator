@@ -188,15 +188,17 @@ class FrozenTeacher(EncoderTeacher):
 
         Args:
             teacher_model: Pre-trained model to use as teacher.
-            training_cfg: Training configuration.
+            training_cfg: Training configuration (used for parent class, may be None).
             teacher_model_params: Model parameters matching the teacher's architecture.
                 If None, will use the student's model_params (may cause dimension mismatch).
             **kwargs: Additional arguments passed to parent.
         """
-        super().__init__(teacher_model, training_cfg, **kwargs)
-
-        # Store teacher-specific model params
+        # Don't call parent __init__ - we set up postprocessing based on actual model heads
+        self.teacher_model = teacher_model
         self.teacher_model_params = teacher_model_params
+
+        # Set up postprocessing based on teacher model's actual latent heads
+        self.postprocess_targets = self._setup_postprocessing_from_model(teacher_model)
 
         # Ensure all parameters are frozen
         for param in self.teacher_model.parameters():
@@ -204,6 +206,46 @@ class FrozenTeacher(EncoderTeacher):
 
         # Set to eval mode permanently
         self.teacher_model.eval()
+
+    def _setup_postprocessing_from_model(self, teacher_model):
+        """Set up postprocessing based on the teacher model's actual latent heads.
+
+        This inspects the model's latent_heads to determine what postprocessing is needed,
+        rather than relying on training config which may not have the SSL loss structure.
+        """
+        postprocess = {}
+
+        # Get latent head names from the model
+        if hasattr(teacher_model, "latent_heads") and teacher_model.latent_heads is not None:
+            for head_name in teacher_model.latent_heads.keys():
+                if head_name == "JEPA":
+                    postprocess[head_name] = JEPATargetProcessing()
+                elif head_name == "DINO":
+                    # DINO requires more config - use identity for now
+                    # Full DINO postprocessing would need center_momentum, temps, etc.
+                    logger.warning(
+                        "DINO postprocessing for FrozenTeacher using identity transform. "
+                        "Full DINO centering not supported for frozen teachers."
+                    )
+                    postprocess[head_name] = JEPATargetProcessing()
+                elif head_name == "iBOT":
+                    # iBOT requires more config - use identity for now
+                    logger.warning(
+                        "iBOT postprocessing for FrozenTeacher using identity transform. "
+                        "Full iBOT centering not supported for frozen teachers."
+                    )
+                    postprocess[head_name] = JEPATargetProcessing()
+                else:
+                    # Unknown head type - use identity
+                    postprocess[head_name] = JEPATargetProcessing()
+
+        if not postprocess:
+            raise ValueError(
+                "FrozenTeacher model has no latent heads. "
+                "Ensure the teacher model was trained with SSL losses."
+            )
+
+        return postprocess
 
     @classmethod
     def from_pretrained(cls, cf, dataset, device, params: dict) -> FrozenTeacher:
@@ -259,11 +301,9 @@ class FrozenTeacher(EncoderTeacher):
         teacher_model_params = ModelParams(teacher_config).create(teacher_config)
         teacher_model_params = teacher_model_params.to(device)
 
-        # Use teacher's training config for postprocessing setup - the latent head names
-        # must match the teacher model's output keys
-        return cls(
-            teacher_model, teacher_config.training_config, teacher_model_params=teacher_model_params
-        )
+        # FrozenTeacher sets up postprocessing by inspecting the model's latent heads,
+        # so we don't need to pass training_config
+        return cls(teacher_model, training_cfg=None, teacher_model_params=teacher_model_params)
 
     def _forward_teacher(self, model_params, batch):
         """Execute forward pass on the frozen teacher model.

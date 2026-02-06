@@ -135,6 +135,15 @@ def mock_ema_model(simple_model):
     return MockEMAModel(simple_model)
 
 
+@pytest.fixture
+def model_with_latent_heads():
+    """Create a model with latent_heads attribute for FrozenTeacher testing."""
+    model = nn.Sequential(nn.Linear(10, 10), nn.ReLU(), nn.Linear(10, 5))
+    # Add latent_heads attribute to mimic real model structure
+    model.latent_heads = nn.ModuleDict({"JEPA": nn.Identity()})
+    return model
+
+
 # =============================================================================
 # Interface Tests - Both EMATeacher and FrozenTeacher must pass these
 # =============================================================================
@@ -194,17 +203,12 @@ class TestEncoderTeacherInterface:
         assert result is None
 
     def test_frozen_teacher_update_state_pre_backward_is_noop(
-        self, simple_model, mock_training_cfg
+        self, simple_model, model_with_latent_heads
     ):
         """Verify FrozenTeacher.update_state_pre_backward returns None (no-op)."""
         from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
 
-        # Create a callable model for FrozenTeacher
-        teacher_model = MagicMock()
-        teacher_model.parameters.return_value = iter([])
-        teacher_model.eval = MagicMock()
-
-        teacher = FrozenTeacher(teacher_model, mock_training_cfg)
+        teacher = FrozenTeacher(model_with_latent_heads, training_cfg=None)
         result = teacher.update_state_pre_backward(
             istep=0, batch=MockBatch(), model=simple_model
         )
@@ -230,16 +234,12 @@ class TestEncoderTeacherInterface:
             module.to.assert_called_once_with("cpu")
 
     def test_frozen_teacher_to_device_moves_postprocessors(
-        self, simple_model, mock_training_cfg
+        self, model_with_latent_heads
     ):
         """Verify FrozenTeacher.to_device moves postprocessors."""
         from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
 
-        teacher_model = MagicMock()
-        teacher_model.parameters.return_value = iter([])
-        teacher_model.eval = MagicMock()
-
-        teacher = FrozenTeacher(teacher_model, mock_training_cfg)
+        teacher = FrozenTeacher(model_with_latent_heads, training_cfg=None)
 
         for name, module in teacher.postprocess_targets.items():
             module.to = MagicMock(return_value=module)
@@ -314,37 +314,34 @@ class TestEMATeacher:
 class TestFrozenTeacher:
     """Tests specific to FrozenTeacher behavior."""
 
-    def test_frozen_teacher_init_freezes_parameters(self, mock_training_cfg):
+    def test_frozen_teacher_init_freezes_parameters(self, model_with_latent_heads):
         """FrozenTeacher should freeze all model parameters on init."""
         from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
 
-        # Create a model with actual parameters
-        model = nn.Linear(10, 5)
-        assert all(p.requires_grad for p in model.parameters())
+        # Verify model starts with requires_grad=True
+        assert all(p.requires_grad for p in model_with_latent_heads.parameters())
 
-        teacher = FrozenTeacher(model, mock_training_cfg)
+        teacher = FrozenTeacher(model_with_latent_heads, training_cfg=None)
 
         # All parameters should be frozen
         assert all(not p.requires_grad for p in teacher.teacher_model.parameters())
 
-    def test_frozen_teacher_init_sets_eval_mode(self, mock_training_cfg):
+    def test_frozen_teacher_init_sets_eval_mode(self, model_with_latent_heads):
         """FrozenTeacher should set model to eval mode."""
         from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
 
-        model = nn.Linear(10, 5)
-        model.train()
-        assert model.training
+        model_with_latent_heads.train()
+        assert model_with_latent_heads.training
 
-        teacher = FrozenTeacher(model, mock_training_cfg)
+        teacher = FrozenTeacher(model_with_latent_heads, training_cfg=None)
 
         assert not teacher.teacher_model.training
 
-    def test_frozen_reset_is_noop(self, mock_training_cfg):
+    def test_frozen_reset_is_noop(self, model_with_latent_heads):
         """FrozenTeacher.reset() should not change weights."""
         from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
 
-        model = nn.Linear(10, 5)
-        teacher = FrozenTeacher(model, mock_training_cfg)
+        teacher = FrozenTeacher(model_with_latent_heads, training_cfg=None)
 
         # Get weights before reset
         weights_before = {
@@ -358,12 +355,11 @@ class TestFrozenTeacher:
         for key in weights_before:
             assert torch.equal(weights_before[key], weights_after[key])
 
-    def test_frozen_update_is_noop(self, mock_training_cfg):
+    def test_frozen_update_is_noop(self, model_with_latent_heads):
         """FrozenTeacher.update_state_post_opt_step() should not change weights."""
         from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
 
-        model = nn.Linear(10, 5)
-        teacher = FrozenTeacher(model, mock_training_cfg)
+        teacher = FrozenTeacher(model_with_latent_heads, training_cfg=None)
 
         # Get weights before update
         weights_before = {
@@ -379,26 +375,27 @@ class TestFrozenTeacher:
         for key in weights_before:
             assert torch.equal(weights_before[key], weights_after[key])
 
-    def test_frozen_weights_require_no_grad(self, mock_training_cfg):
+    def test_frozen_weights_require_no_grad(self, model_with_latent_heads):
         """All FrozenTeacher parameters should have requires_grad=False."""
         from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
 
-        model = nn.Sequential(nn.Linear(10, 10), nn.ReLU(), nn.Linear(10, 5))
-        teacher = FrozenTeacher(model, mock_training_cfg)
+        teacher = FrozenTeacher(model_with_latent_heads, training_cfg=None)
 
         for name, param in teacher.teacher_model.named_parameters():
             assert not param.requires_grad, f"Parameter {name} should have requires_grad=False"
 
-    def test_frozen_model_in_eval_mode(self, mock_training_cfg):
+    def test_frozen_model_in_eval_mode(self):
         """FrozenTeacher model should always be in eval mode."""
         from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
 
         model = nn.Sequential(
             nn.Linear(10, 10), nn.BatchNorm1d(10), nn.Linear(10, 5)
         )
+        # Add latent_heads to model
+        model.latent_heads = nn.ModuleDict({"JEPA": nn.Identity()})
         model.train()  # Start in train mode
 
-        teacher = FrozenTeacher(model, mock_training_cfg)
+        teacher = FrozenTeacher(model, training_cfg=None)
 
         # Model should be in eval mode
         assert not teacher.teacher_model.training
