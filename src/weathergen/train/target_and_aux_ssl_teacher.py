@@ -259,7 +259,11 @@ class FrozenTeacher(EncoderTeacher):
         teacher_model_params = ModelParams(teacher_config).create(teacher_config)
         teacher_model_params = teacher_model_params.to(device)
 
-        return cls(teacher_model, cf.training_config, teacher_model_params=teacher_model_params)
+        # Use teacher's training config for postprocessing setup - the latent head names
+        # must match the teacher model's output keys
+        return cls(
+            teacher_model, teacher_config.training_config, teacher_model_params=teacher_model_params
+        )
 
     def _forward_teacher(self, model_params, batch):
         """Execute forward pass on the frozen teacher model.
