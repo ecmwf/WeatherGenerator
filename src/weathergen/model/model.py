@@ -32,8 +32,10 @@ from weathergen.model.engines import (
     LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
+    GMMPredictionHead,
 )
 from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.parametrised_prob_dist import GaussianMixtureDiag
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
@@ -418,15 +420,36 @@ class Model(torch.nn.Module):
                     logger.debug(
                         f"{final_activation} activation of predictionhead of {si['name']} stream"
                     )
-                self.pred_heads[stream_name] = EnsPredictionHead(
-                    dims_embed[-1],
-                    self.targets_num_channels[i_stream],
-                    si["pred_head"]["num_layers"],
-                    si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
-                    final_activation=final_activation,
-                    stream_name=stream_name,
-                )
+                if si["pred_head"]["distribution"] == "gmm":
+                    # Head outputs raw GMM params; we will sample later for logging-compat
+                    self.pred_heads[stream_name] = GMMPredictionHead(
+                        in_dim=dims_embed[-1],
+                        out_channels=self.targets_num_channels[i_stream],
+                        num_components=si["pred_head"].get("num_components",4),
+                        stream_name=stream_name,
+                    )
+                else:
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_stream],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
+                    )
+                # Prepare per-stream GMM helpers (None for non-GMM streams)
+                self.gmm_helpers: dict[str, GaussianMixtureDiag | None] = nn.ModuleDict()
+                for i_obs, si in enumerate(cf.streams):
+                    pred_dist = si["pred_head"].get("distribution", "deterministic")
+                    if pred_dist == "gmm":
+                        self.gmm_helpers[stream_name] = GaussianMixtureDiag(
+                            num_components=si["pred_head"].get("num_components", 4),
+                            event_dim=self.targets_num_channels[i_obs],
+                            min_scale=1e-6,
+                        )
+                    else:
+                        self.gmm_helpers[stream_name] = None
 
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
@@ -717,12 +740,37 @@ class Model(torch.nn.Module):
                         output_lens=tcs_lens,
                         coordinates=t_coords,
                     )
-
                     # final prediction head to map back to physical space
-                    pred = self.pred_heads[stream_name](tc_tokens)
+                    head = self.pred_heads[stream_name]
+                    ens_size = 8
+                    if isinstance(head, GMMPredictionHead):
+                        # 1) raw params
+                        raw_logits, raw_means, raw_log_scales = head(tc_tokens)
+                        # 2) valid params
+                        pi, mu, sigma = GaussianMixtureDiag.params_from_raw(
+                            raw_logits, raw_means, raw_log_scales, min_scale=1e-6
+                        )
+
+                        # 3) sample to [ens, N, C] to keep compatibility with logging/denorm
+
+                        if self.training:
+                            # Return samples + params so the loss can consume the GMM
+                            pred = (pi.unsqueeze(0), mu.unsqueeze(0), sigma.unsqueeze(0))
+                        else:
+                            # Sampling only for eval/logging
+                            pred = self.gmm_helpers[stream_name].sample(
+                                pi, mu, sigma, num_samples=ens_size
+                            )  # [S, N, C]
+
+                    else:
+                        # final prediction head to map back to physical space
+                        pred = head(tc_tokens)
 
             # recover batch dimension (ragged, so as list)
-            pred = torch.split(pred, t_coords_lens, dim=1)
+            if isinstance(pred, tuple):
+                pred = tuple(zip(*[torch.split(p, t_coords_lens, dim=1) for p in pred]))
+            else:
+                pred = torch.split(pred, t_coords_lens, dim=1)
             output.add_physical_prediction(step, stream_name, pred)
 
         return output

@@ -144,9 +144,19 @@ class LossPhysical(LossModuleBase):
         for mask_t in substep_masks:
             assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
 
-            loss, loss_chs = loss_fct(
-                target[mask_t], pred[:, mask_t], weights_channels, weights_locations
-            )
+            if getattr(loss_fct, "__name__", "") == "gmm_nll":
+                # Align params with the same rows
+                pi_t, mu_t, sg_t = (
+                        p[:, mask_t] for p in pred
+                )  # [Nt,K], [Nt,K,C],                                  # [Nt,C]
+                loss, loss_chs = loss_fct(
+                    target[mask_t], (pi_t, mu_t, sg_t), weights_channels, weights_locations
+                )
+            else:
+                # pred are ensemble samples [S,N,C]; align rows
+                loss, loss_chs = loss_fct(
+                    target[mask_t], pred[:, mask_t], weights_channels, weights_locations
+                )
 
             # accumulate loss
             loss_lfct = loss_lfct + loss
@@ -280,15 +290,26 @@ class LossPhysical(LossModuleBase):
                         sw = 0.0 if targets_is_spoof[target_idx] else 1.0
                         spoof_weight = torch.tensor(sw, device=self.device, requires_grad=False)
 
-                        # skip if either target or prediction has no data points
-                        if not (target.shape[0] > 0 and pred.shape[0] > 0):
-                            continue
+                        if isinstance(pred, tuple):
+                            # skip if either target or prediction has no data points
+                            if not (target.shape[0] > 0 and pred[0].shape[0] > 0):
+                                continue
 
-                        # reshape prediction tensor to match target's dimensions: extract
-                        # data/coords and remove token dimension if it exists.
-                        # expected shape of pred is [ensemble_size, num_samples, num_channels].
-                        pred = pred.reshape([pred.shape[0], *target.shape])
-                        assert pred.shape[1] > 0
+                            # reshape prediction tensor to match target's dimensions: extract
+                            # data/coords and remove token dimension if it exists.
+                            # expected shape of pred is [ensemble_size, num_samples, num_channels].
+                            # pred = tuple([p.reshape([p.shape[0], *target.shape]) for p in pred])
+                            assert pred[0].shape[1] > 0
+                        else:
+                            # skip if either target or prediction has no data points
+                            if not (target.shape[0] > 0 and pred.shape[0] > 0):
+                                continue
+
+                            # reshape prediction tensor to match target's dimensions: extract
+                            # data/coords and remove token dimension if it exists.
+                            # expected shape of pred is [ensemble_size, num_samples, num_channels].
+                            pred = pred.reshape([pred.shape[0], *target.shape])
+                            assert pred.shape[1] > 0
 
                         # get masks for sub-time steps
                         substep_masks = self._get_substep_masks(
