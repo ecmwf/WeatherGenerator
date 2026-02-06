@@ -1188,6 +1188,9 @@ class ScoreCards:
         tag:
             Tag to be added to the plot title and filename
         """
+        import seaborn as sns
+        import pandas as pd
+
         n_runs = len(runs)
 
         if self.baseline and self.baseline in runs:
@@ -1197,92 +1200,137 @@ class ScoreCards:
 
         common_channels, n_common_channels = self.extract_common_channels(data, channels, n_runs)
 
-        fig, ax = plt.subplots(figsize=(2 * n_runs, 1.2 * n_common_channels))
+        # Group channels by variable
+        def get_variable(channel):
+            if channel.startswith('tc_'):
+                return channel[3:].upper()
+            else:
+                return channel.split('_')[0].upper()
 
-        baseline = data[0]
-        skill_models = []
-        for run_index in range(1, n_runs):
-            skill_model = 0.0
-            for var_index, var in enumerate(common_channels):
-                if var not in data[0].channel.values or var not in data[run_index].channel.values:
+        variables = {}
+        for ch in common_channels:
+            var = get_variable(ch)
+            if var not in variables:
+                variables[var] = []
+            variables[var].append(ch)
+
+        results = []
+        for var_name, ch_list in variables.items():
+            for ch in ch_list:
+                if ch not in data[0].channel.values or ch not in data[1].channel.values:
                     continue
-                diff, avg_diff, avg_skill = self.compare_models(
-                    data, baseline, run_index, var, metric
-                )
-                skill_model += avg_skill.values
+                baseline_score = data[0].sel(channel=ch).mean().values
+                model_score = data[1].sel(channel=ch).mean().values
+                level = ch.split('_')[-1] if '_' in ch else 'TC'
+                improvement = ((model_score - baseline_score) / baseline_score) * 100
+                results.append({
+                    'Variable': var_name,
+                    'Channel': ch,
+                    'Level (hPa)': level,
+                    f'{runs[0]} {metric.upper()}': baseline_score,
+                    f'{runs[1]} {metric.upper()}': model_score,
+                    f'{metric.upper()} Δ (%)': improvement,
+                })
 
-                # Get symbols based on difference and performance as well as coordinates
-                # for the position of the triangles.
+        if not results:
+            _logger.warning("No results to plot")
+            return
 
-                x, y, alt, color, triangle, size = self.get_plot_symbols(
-                    run_index, var_index, avg_skill, avg_diff, metric
-                )
+        df = pd.DataFrame(results)
 
-                ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
-
-                # Perform Wilcoxon test
-                if len(diff["forecast_step"].values) > 1:
-                    stat, p = wilcoxon(diff, alternative=alt)
-
-                    # Draw rectangle border for significance
-                    if p < 0.05:
-                        lw = 2 if p < 0.01 else 1
-                        rect_color = color
-                        rect = plt.Rectangle(
-                            (x - 0.25, y - 0.25),
-                            0.5,
-                            0.5,
-                            fill=False,
-                            edgecolor=rect_color,
-                            linewidth=lw,
-                            zorder=2,
-                        )
-                        ax.add_patch(rect)
-
-            skill_models.append(skill_model / n_common_channels)
-
-        # Set axis labels
-        ylabels = [
-            f"{var}\n({baseline.coords['metric'].item().upper()}={baseline.sel(channel=var).mean().values.squeeze():.3f})"
-            for var in common_channels
-        ]
-        xlabels = [
-            f"{model_name}\nSkill: {skill_models[i]:.3f}" for i, model_name in enumerate(runs[1::])
-        ]
-        ax.set_xticks(np.arange(1, n_runs))
-        ax.set_xticklabels(xlabels, fontsize=10)
-        ax.set_yticks(np.arange(n_common_channels) + 0.5)
-        ax.set_yticklabels(ylabels, fontsize=10)
-        for label in ax.get_yticklabels():
-            label.set_horizontalalignment("center")
-            label.set_x(-0.17)
-        ax.set_ylabel("Variable", fontsize=14)
-        ax.set_title(
-            f"Model Scorecard vs. Baseline '{runs[0]}'",
-            fontsize=16,
-            pad=20,
-        )
-        for x in np.arange(0.5, n_runs - 1, 1):
-            ax.axvline(x, color="gray", linestyle="--", linewidth=0.5, zorder=0, alpha=0.5)
-        ax.set_xlim(0.5, n_runs - 0.5)
-        ax.set_ylim(0, n_common_channels)
-
-        legend = [
-            Line2D(
-                [0],
-                [0],
-                marker="^",
-                color="white",
-                label=f"{self.improvement * 100:.0f}% improvement",
-                markerfacecolor="blue",
-                markersize=np.sqrt(200),
+        # Create visualizations
+        for var_name in df['Variable'].unique():
+            _logger.info(f"Creating scorecard for variable {var_name}")
+            var_df = df[df['Variable'] == var_name].copy()
+            
+            if len(var_df) == 0:
+                continue
+            
+            # Sort by level
+            var_df['Level_num'] = var_df['Level (hPa)'].apply(lambda x: x if x != 'TC' else "N/A")
+            var_df = var_df.sort_values('Level_num', ascending=False)
+            
+            channels_sorted = var_df['Channel'].values
+            
+            # Create figure with bar plot and heatmap
+            fig, axes = plt.subplots(1, 2, figsize=(12, max(6, len(var_df) * 0.4)))
+            
+            # Plot 1: Bar plot
+            ax1 = axes[0]
+            x = np.arange(len(channels_sorted))
+            width = 0.35
+            ax1.barh(x - width/2, var_df[f'{runs[0]} {metric.upper()}'], width, label=runs[0], color='steelblue', alpha=0.7)
+            ax1.barh(x + width/2, var_df[f'{runs[1]} {metric.upper()}'], width, label=runs[1], color='coral', alpha=0.7)
+            ax1.set_yticks(x)
+            ax1.set_yticklabels(channels_sorted, fontsize=9)
+            ax1.set_xlabel(f'{metric.upper()}', fontsize=10)
+            ax1.set_title(f'{var_name} - {metric.upper()} Comparison', fontsize=11, fontweight='bold')
+            ax1.legend()
+            ax1.grid(axis='x', alpha=0.3)
+            
+            # Plot 2: Improvement Heatmap
+            ax2 = axes[1]
+            improvement_data = var_df[[f'{metric.upper()} Δ (%)']].values
+            im = ax2.imshow(improvement_data, cmap='RdYlGn_r', aspect='auto', vmin=-50, vmax=50)
+            ax2.set_xticks([0])
+            ax2.set_xticklabels([f'{metric.upper()} Δ%'], fontsize=10)
+            ax2.set_yticks(np.arange(len(channels_sorted)))
+            ax2.set_yticklabels(channels_sorted, fontsize=9)
+            ax2.set_title(f'{var_name} - {runs[1]} vs {runs[0]}\n(Negative = {runs[1]} Better)', fontsize=11, fontweight='bold')
+            
+            # Add text annotations
+            for i in range(len(channels_sorted)):
+                text = ax2.text(0, i, f'{improvement_data[i, 0]:.1f}',
+                              ha="center", va="center", color="black", fontsize=8)
+            
+            cbar = plt.colorbar(im, ax=ax2)
+            cbar.set_label('% Difference', rotation=270, labelpad=15)
+            
+            plt.tight_layout()
+            
+            # Save figure
+            parts = ["score_card", var_name, tag] + runs
+            name = "_".join(filter(None, parts))
+            plt.savefig(
+                f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
+                bbox_inches="tight",
+                dpi=self.dpi_val,
             )
-        ]
-        plt.legend(handles=legend, loc="upper left", bbox_to_anchor=(1.02, 1.0))
+            plt.close(fig)
 
-        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
+        # Create summary heatmap
+        _logger.info("Creating summary scorecard heatmap")
+        fig, ax = plt.subplots(figsize=(10, max(8, len(df) * 0.25)))
 
-        parts = ["score_card", tag] + runs
+        # Create a pivot table for overall performance
+        heatmap_data = df.pivot_table(
+            values=f'{metric.upper()} Δ (%)',
+            index='Channel',
+            columns='Variable',
+            aggfunc='first'
+        )
+
+        # Create heatmap
+        sns.heatmap(
+            heatmap_data,
+            cmap='RdYlGn_r',
+            center=0,
+            vmin=-50,
+            vmax=50,
+            annot=True,
+            fmt='.1f',
+            cbar_kws={'label': f'{metric.upper()} % Difference (Negative = {runs[1]} Better)'},
+            ax=ax
+        )
+
+        ax.set_title(f'{runs[1]} vs {runs[0]} Performance Scorecard\n{tag}', 
+                     fontsize=14, fontweight='bold', pad=20)
+        ax.set_xlabel('Variable', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Channel', fontsize=12, fontweight='bold')
+
+        plt.tight_layout()
+
+        parts = ["score_card_summary", tag] + runs
         name = "_".join(filter(None, parts))
         plt.savefig(
             f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
@@ -1290,6 +1338,8 @@ class ScoreCards:
             dpi=self.dpi_val,
         )
         plt.close(fig)
+
+        _logger.info(f"Saving scorecards to: {self.out_plot_dir}")
 
     def extract_common_channels(self, data, channels, n_runs):
         common_channels = []
