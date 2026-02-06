@@ -631,7 +631,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
             target_select += ["target_values"]
-        if "student_teacher" in mode or mode == "latent_loss" in mode:
+        if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
         # remove duplicates
