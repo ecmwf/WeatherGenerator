@@ -82,6 +82,7 @@ latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
 freeze_modules: ""
+load_chkpt: {}
 
 norm_type: "LayerNorm"
 
