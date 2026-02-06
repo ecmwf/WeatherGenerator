@@ -33,7 +33,7 @@ from weathergen.datasets.utils import (
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import TRAIN, Stage
+from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -537,7 +537,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
-            
+
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
