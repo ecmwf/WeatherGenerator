@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import torch
@@ -22,6 +23,8 @@ from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, 
 
 if TYPE_CHECKING:
     pass
+
+logger = logging.getLogger(__name__)
 
 
 class EncoderTeacher(TargetAndAuxModuleBase):
@@ -196,6 +199,57 @@ class FrozenTeacher(EncoderTeacher):
 
         # Set to eval mode permanently
         self.teacher_model.eval()
+
+    @classmethod
+    def from_pretrained(cls, cf, dataset, device, params: dict) -> FrozenTeacher:
+        """Create a FrozenTeacher from a pre-trained checkpoint.
+
+        Args:
+            cf: Current training configuration.
+            dataset: Dataset for model creation.
+            device: Target device.
+            params: FrozenTeacher parameters from config, including:
+                - teacher_run_id (required): Run ID of the pre-trained teacher model.
+                - teacher_mini_epoch (optional): Mini-epoch to load. Default -1 (latest).
+
+        Returns:
+            FrozenTeacher instance with loaded and frozen weights.
+
+        Raises:
+            ValueError: If teacher_run_id is not provided.
+        """
+        # Lazy imports to avoid circular dependency with model_interface
+        from weathergen.common.config import load_run_config, merge_configs
+        from weathergen.model.model_interface import get_model, load_model
+        from weathergen.utils.distributed import is_root
+
+        teacher_run_id = params.get("teacher_run_id")
+        teacher_mini_epoch = params.get("teacher_mini_epoch", -1)
+
+        if teacher_run_id is None:
+            raise ValueError("FrozenTeacher requires 'teacher_run_id' in config")
+
+        if is_root():
+            logger.info(
+                f"Loading FrozenTeacher from run_id={teacher_run_id}, "
+                f"mini_epoch={teacher_mini_epoch}"
+            )
+
+        # Load teacher's config (contains full architecture)
+        teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, cf.get("model_path"))
+
+        # Disable FSDP/DDP for frozen teacher - it's loaded as a simple non-sharded model
+        teacher_config = merge_configs(teacher_config, {"with_ddp": False, "with_fsdp": False})
+
+        # Create model with teacher's architecture
+        teacher_model = get_model(teacher_config, "student", dataset, {})
+
+        # Load weights
+        teacher_model = load_model(
+            teacher_config, teacher_model, device, teacher_run_id, teacher_mini_epoch
+        )
+
+        return cls(teacher_model, cf.training_config)
 
     def _forward_teacher(self, model_params, batch):
         """Execute forward pass on the frozen teacher model."""
