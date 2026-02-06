@@ -1,19 +1,65 @@
 import argparse
+import enum
 from pathlib import Path
 
 import pandas as pd
 
 
+class Stage(enum.StrEnum):
+    train = enum.auto()
+    train_continue = enum.auto()
+    inference = enum.auto()
+
+
+def get_main_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    subparsers = parser.add_subparsers(dest="stage")
+    
+    train_parser = subparsers.add_parser(
+        Stage.train,
+        help="Train a WeatherGenerator configuration from the ground up.",
+    )
+    _add_train_args(train_parser)
+    continue_parser = subparsers.add_parser(
+        Stage.train_continue,
+        help="Resume training from a pretrained WeatherGenerator configuration.",
+    )
+    _add_continue_args(continue_parser)
+    inference_parser = subparsers.add_parser(
+        Stage.inference,
+        help="Run infernce on a trained WeatherGenerator configuration",
+    )
+    _add_inference_args(inference_parser)
+
+    return parser
+
+
 def get_train_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
-    _add_general_arguments(parser)
+    _add_train_args(parser)
 
     return parser
 
 
 def get_continue_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
+    _add_continue_args(parser)
 
+    return parser
+
+
+def get_inference_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    _add_inference_args(parser)
+
+    return parser
+
+
+def _add_train_args(parser: argparse.ArgumentParser):
+    _add_general_arguments(parser)
+
+
+def _add_continue_args(parser: argparse.ArgumentParser):
     _add_general_arguments(parser)
     _add_model_loading_params(parser)
 
@@ -26,12 +72,8 @@ def get_continue_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    return parser
 
-
-def get_inference_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False)
-
+def _add_inference_args(parser: argparse.ArgumentParser):
     _add_model_loading_params(parser)
     _add_general_arguments(parser)
 
@@ -63,8 +105,6 @@ def get_inference_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="Output streams during inference.",
     )
-
-    return parser
 
 
 def _format_date(date: str) -> str:
