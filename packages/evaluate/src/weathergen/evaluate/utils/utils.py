@@ -112,7 +112,7 @@ def calc_scores_per_stream(
     )
     da_preds = output_data.prediction
     da_tars = output_data.target
-    fsteps = list(da_preds.keys())
+    fsteps = sorted(list(da_preds.keys()))
 
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
@@ -198,10 +198,9 @@ def calc_scores_per_stream(
             }
             if "ens" in combined_metrics.dims:
                 criteria["ens"] = combined_metrics.ens.values
-            breakpoint()
+            
             metric_stream.loc[criteria] = combined_metrics
 
-            breakpoint()
             lead_time_map[fstep] = (
                 np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
                 if "lead_time" in combined_metrics.coords
@@ -225,7 +224,7 @@ def calc_scores_per_stream(
                 )
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-
+        breakpoint()
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[

@@ -92,7 +92,7 @@ class RegionBoundingBox:
         # lat/lon coordinates should be 1D and aligned with ipoint
         lat = data[lat_name]
         lon = data[lon_name]
-
+ 
         mask = (
             (lat >= self.lat_min)
             & (lat <= self.lat_max)

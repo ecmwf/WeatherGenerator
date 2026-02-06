@@ -375,19 +375,16 @@ class WeatherGenZarrReader(WeatherGenReader):
             ensemble = ensemble or self.get_ensemble(stream)
             ensemble = to_list(ensemble)
 
-            dc = DeriveChannels(
-                all_channels,
-                channels,
-                stream_cfg,
-            )
-
             da_tars, da_preds = [], []
 
             fsteps_final = []
 
             for fstep in fsteps:
                 _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
-                da_tars_fs, da_preds_fs, pps = [], [], []
+                da_tars_fs, da_preds_fs, valid_times_fs = [], [], []
+                
+                lats = zio.get_data(samples[0], stream, fstep).prediction.as_xarray().lat
+                lons = zio.get_data(samples[0], stream, fstep).prediction.as_xarray().lon
 
                 for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
                     out = zio.get_data(sample, stream, fstep)
@@ -402,7 +399,6 @@ class WeatherGenZarrReader(WeatherGenReader):
                     target, pred = out.target.as_xarray(), out.prediction.as_xarray()
 
                     npoints = len(target.ipoint)
-                    pps.append(npoints)
 
                     if npoints == 0:
                         _logger.info(
@@ -417,15 +413,28 @@ class WeatherGenZarrReader(WeatherGenReader):
                     else:
                         _logger.debug(f"Selecting ensemble members {ensemble}.")
                         pred = pred.sel(ens=ensemble)
+                    
+                    pred = pred.squeeze()
+                    target = target.squeeze()
 
-                    da_tars_fs.append(target.squeeze())
-                    da_preds_fs.append(pred.squeeze())
+                    if self.is_regular(stream):
+                        # pred, vt_list = self.add_lead_time_coord(pred)
+                        # target, _ = self.add_lead_time_coord(target)
+                        vt_list = np.unique(target.valid_time.values).tolist()
+                        valid_times_fs.append(vt_list)
+                    else:
+                        valid_times_fs.append(fstep)
 
+                    da_tars_fs.append(target.persist())
+                    da_preds_fs.append(pred.persist())
+                    
                 if not da_tars_fs:
                     _logger.info(
                         f"[{self.run_id} - {stream}] No valid data found for fstep {fstep}."
                     )
                     continue
+
+                fsteps_final.append(valid_times_fs)
 
                 _logger.debug(
                     f"Concatenating targets and predictions for stream {stream}, "
@@ -435,122 +444,128 @@ class WeatherGenZarrReader(WeatherGenReader):
                 # faster processing
                 if self.is_regular(stream):
                     # Efficient concatenation for regular grid
-                    da_preds_fs = _force_consistent_grids(da_preds_fs)
+                    
+                    da_preds_fs = split_by_valid_time_fast(da_preds_fs)
+                    da_tars_fs  = split_by_valid_time_fast(da_tars_fs)
                     da_tars_fs = _force_consistent_grids(da_tars_fs)
-
-                    # add lead time coordinate
-                    da_tars_fs, lead_times = self.add_lead_time_coord(da_tars_fs)
-                    da_preds_fs, _ = self.add_lead_time_coord(da_preds_fs)
-                    fsteps_final.append(lead_times.tolist())
+                    da_preds_fs = _force_consistent_grids(da_preds_fs)
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
-                    da_tars_fs = xr.concat(da_tars_fs, dim="ipoint")
-                    da_preds_fs = xr.concat(da_preds_fs, dim="ipoint")
-                    fsteps_final.append(fstep)
+                    da_tars_fs = [xr.concat(da_tars_fs, dim="ipoint")]
+                    da_preds_fs = [xr.concat(da_preds_fs, dim="ipoint")]
+           
+                da_tars.append([da.sel(channel=channels) for da in da_tars_fs])
+                da_preds.append([da.sel(channel=channels) for da in da_preds_fs])
 
-                if len(samples) == 1:
-                    _logger.debug("Repeating sample coordinate for single-sample case.")
-                    for da in (da_tars_fs, da_preds_fs):
-                        da.assign_coords(
-                            sample=(
-                                "ipoint",
-                                np.repeat(da.sample.values, da.sizes["ipoint"]),
-                            )
-                        )
-
-                if set(channels) != set(all_channels):
-                    _logger.debug(
-                        f"Restricting targets and predictions to channels {channels} "
-                        f"for stream {stream}..."
-                    )
-
-                    da_tars_fs, da_preds_fs, channels = dc.get_derived_channels(
-                        da_tars_fs, da_preds_fs
-                    )
-
-                    da_tars_fs = da_tars_fs.sel(channel=channels)
-                    da_preds_fs = da_preds_fs.sel(channel=channels)
-
-                # apply z scaling if needed
-                da_tars_fs = self.scale_z_channels(da_tars_fs, stream)
-                da_preds_fs = self.scale_z_channels(da_preds_fs, stream)
-
-                da_tars.append(da_tars_fs)
-                da_preds.append(da_preds_fs)
-
+            #TODO: reapply zscaling
+            #TODO: reapply derived coord
+            
             # Safer than a list
             da_tars_dict, da_preds_dict = {}, {}
-            i = 0 
+            i = 1 
             for fidx, (fstep, da_t, da_p) in enumerate(zip(fsteps_final, da_tars, da_preds,  strict=True)):
                 if type(fstep) == list and len(fstep) > 1:  # regular grid with lead times
-                    da_tar_substeps = self.retrieve_substeps(da_t)
-                    da_pred_substeps = self.retrieve_substeps(da_p)
-                    for da_tar, da_pred in zip(da_tar_substeps, da_pred_substeps, strict=True):
+                    for da_tar, da_pred in zip(da_t, da_p, strict=True):
+
+                        da_tar = da_tar.assign_coords(forecast_step=i)
+                        da_pred = da_pred.assign_coords(forecast_step=i)
                         da_tars_dict[i] = da_tar
                         da_preds_dict[i] = da_pred
                         i += 1
                 else:
                     da_tars_dict[int(fstep)] = da_tars[fidx]
                     da_preds_dict[int(fstep)] = da_preds[fidx]
-
+            
             # da_tars = {fstep: da for fstep, da in zip(fsteps_final, da_tars, strict=True)}
             # da_preds = {fstep: da for fstep, da in zip(fsteps_final, da_preds, strict=True)}
-            # breakpoint()
             return ReaderOutput(
                 target= da_tars_dict, prediction=da_preds_dict
             )
 
     ######## reader utils ########
 
-    def add_lead_time_coord(self, da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
+    def preprocess_data(self, da_pred_list: xr.DataArray, da_tars_list: xr.DataArray, 
+                        all_channels, channels, stream_cfg) -> tuple[xr.DataArray, xr.DataArray]:
         """
-        Add lead_time coordinate computed as:
-        valid_time - source_interval_end
+        Preprocess the data by scaling z channels if needed and adding lead_time coordinate.
 
-        lead_time has dims (sample, ipoint) and dtype timedelta64[ns].
+        Parameters
+        ----------
+        da :
+            Input DataArray to preprocess.
+        Returns
+        -------
+            Returns a DataArray after preprocessing.
+        """
+
+        dc = DeriveChannels(
+            all_channels,
+            channels,
+            stream_cfg,
+        )
+        
+        da_tars_list_processed, da_pred_list_processed = [], []
+        stream = da_pred_list[0].stream
+        # all_channels = self.get_channels(stream)
+        for da_tar, da_pred in zip(da_tars_list, da_pred_list):
+            samples = set(da_tar.sample.values)
+            if len(samples) == 1:
+                _logger.debug("Repeating sample coordinate for single-sample case.")
+                
+                da_tar = da_tar.assign_coords(
+                    sample=(
+                        "ipoint",
+                        np.repeat(da_tar.sample.values, da_tar.sizes["ipoint"]),
+                    )
+                )
+                da_pred = da_pred.assign_coords(
+                    sample=(
+                        "ipoint",
+                        np.repeat(da_pred.sample.values, da_pred.sizes["ipoint"]),
+                    )
+                )
+
+            if set(channels) != set(all_channels):
+                _logger.debug(
+                    f"Restricting targets and predictions to channels {channels} "
+                    f"for stream {stream}..."
+                )
+
+                da_tar, da_pred, channels = dc.get_derived_channels(
+                    da_tar, da_pred
+                )
+
+                da_tar = da_tar.sel(channel=channels)
+                da_pred = da_pred.sel(channel=channels)
+
+            # apply z scaling if needed
+            da_tar = self.scale_z_channels(da_tar, stream)
+            da_pred = self.scale_z_channels(da_pred, stream)
+            da_tars_list_processed.append(da_tar)
+            da_pred_list_processed.append(da_pred)
+        return da_tars_list_processed, da_pred_list_processed
+
+    
+    def get_valid_times(self, da: xr.DataArray) -> np.ndarray:
+        """
+        Get the valid times from a DataArray.
 
         Parameters
         ----------
         da :
             Input DataArray
-        sample_dim :
-            The name of the sample dimension (default is "sample") which should be kept.
-            Collapse over the others.
+
         Returns
         -------
-            Returns a list of Datasets for each lead_time coordinate.
+        np.ndarray
+            The unique valid times.
         """
-        # breakpoint()
-
-        # da_t = da.stack(lead_time=("sample", "ipoint"))
-
-        # # drop the MultiIndex, turning time into a plain dimension
-        # da_t = da_t.reset_index("lead_time", drop=True)
-
-        # # now safely assign valid_time as the time coordinate
-        # da_t = da_t.assign_coords(lead_time=da_t.valid_time - da_t.source_interval_start).drop_vars("valid_time")
-        vt = da["valid_time"]
-        sis = da["source_interval_start"]
-
-        # vt_reduced = vt.min(dim=[d for d in vt.dims if d != sample_dim])
-
-        # lead_time = vt_reduced - sis
-        lead_time = vt - sis
-        # breakpoint()
-        da = da.assign_coords(lead_time=lead_time)
-        unique_lead = np.unique(da.lead_time.data)
-
-        return da, unique_lead
+        valid_times = np.unique(da.valid_time.values)
+        return valid_times
 
     def retrieve_substeps(self, da) -> list[int]:
-        unique_lead = np.unique(da.lead_time.data)
-        lead_time_das = []
-        for lt in unique_lead:
-            mask = da.lead_time == lt
-            # select only the matching points
-            da_lt = da.where(mask, drop=True)
-            lead_time_das.append(da_lt)
-        return lead_time_das
+        substeps = [group for _, group in da.groupby("valid_time")] 
+        return substeps, np.unique(da.valid_time.values)
 
     def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
         """
@@ -683,6 +698,86 @@ class WeatherGenZarrReader(WeatherGenReader):
 
 ################### Helper functions ########################
 
+def _valid_time_groups(ipoint_valid_time: xr.DataArray):
+    """
+    Returns:
+    times: 1D array of unique valid_times
+    groups: list[np.ndarray] of ipoint indices per valid_time
+    """
+    vt = ipoint_valid_time.values
+    times, inv = np.unique(vt, return_inverse=True)
+
+    groups = [np.where(inv == i)[0] for i in range(len(times))]
+    return times, groups
+
+def split_by_valid_time_fast(
+    arrays: list[xr.DataArray],
+    ) -> list[xr.DataArray]:
+    """
+    Split arrays into a list of DataArrays grouped by valid_time,
+    concatenating samples for each valid_time.
+    """
+
+    # compute groups from FIRST array only
+    times, groups = _valid_time_groups(arrays[0].valid_time)
+
+    out = []
+
+    for _, ip_idx in zip(times, groups):
+        per_sample = []
+
+        for da in arrays:
+            
+            da_i = da.isel(ipoint=ip_idx)
+
+            if "sample" not in da_i.dims:
+                da_i = da_i.expand_dims(sample=[da.sample.values])
+
+            per_sample.append(da_i)
+
+        da_vt = xr.concat(per_sample, dim="sample")
+       
+        out.append(da_vt)
+
+    return out
+
+def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
+        """
+        Add lead_time coordinate computed as:
+        valid_time - source_interval_end
+
+        lead_time has dims (sample, ipoint) and dtype timedelta64[ns].
+
+        Parameters
+        ----------
+        da :
+            Input DataArray
+        sample_dim :
+            The name of the sample dimension (default is "sample") which should be kept.
+            Collapse over the others.
+        Returns
+        -------
+            Returns a DataArray with the lead_time coordinate added.
+        """
+        # breakpoint()
+
+        # da_t = da.stack(lead_time=("sample", "ipoint"))
+
+        # # drop the MultiIndex, turning time into a plain dimension
+        # da_t = da_t.reset_index("lead_time", drop=True)
+
+        # # now safely assign valid_time as the time coordinate
+        # da_t = da_t.assign_coords(lead_time=da_t.valid_time - da_t.source_interval_start).drop_vars("valid_time")
+        vt = da["valid_time"]
+        sis = da["source_interval_start"]
+
+        # vt_reduced = vt.min(dim=[d for d in vt.dims if d != sample_dim])
+
+        # lead_time = vt_reduced - sis
+        lead_time = vt - sis
+        breakpoint()
+        da = da.assign_coords(lead_time=("sample", np.unique(lead_time)))
+        return da
 
 def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     """
@@ -698,14 +793,15 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     """
 
     # Pick first sample as reference
-    ref_lat = ref[0].lat
-    ref_lon = ref[0].lon
+    ref_lat = ref[0][0].lat
+    ref_lon = ref[0][0].lon
 
     sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
     npoints = sort_idx.size
     aligned = []
     samples = []
     for i, a in enumerate(ref):
+        a = _add_lead_time_coord(a) #TODO: move somewhere else into another loop maybe. but 2 loops is slow? 
         a_sorted = a.isel(ipoint=sort_idx)
         samples.append(a_sorted.sample.values)
         a_sorted = a_sorted.assign_coords(
@@ -716,11 +812,10 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
 
         if "sample" not in a_sorted.dims:
             a_sorted = a_sorted.expand_dims(sample=[i])
-
+      
         aligned.append(a_sorted)
 
-    return xr.concat(aligned, dim="sample").assign_coords({"sample": samples})
-
+    return aligned #xr.concat(aligned, dim="sample")
 
 class WeatherGenMergeReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
