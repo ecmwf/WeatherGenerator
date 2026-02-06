@@ -148,10 +148,10 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 1e-6
     lr_final_decay: 1e-6
     lr_final: 0.0
-    num_steps_warmup: 512
+    num_steps_warmup: 4096
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
@@ -182,7 +182,7 @@ training_config:
           },
         },
         target_and_aux_calc: {FrozenTeacher: {
-            teacher_run_id: "zosrc8ti",    # Required
+            teacher_run_id:  "yoqxf234",# "zosrc8ti",    # Required
             teacher_mini_epoch: -1}},
         
         # target_and_aux_calc: { "EMATeacher" : 
