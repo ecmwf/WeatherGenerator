@@ -537,10 +537,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
-
-            if rdata.is_empty() and self._stage == TRAIN:
+            
+            if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
+                # Also needed to ensure input_tokens has same length as input_data
+                # (get_tokens_windows skips empty data, causing IndexError later)
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
                     self.healpix_level,
@@ -560,9 +562,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
-            if rdata.is_empty() and self._stage == TRAIN:
+            if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
+                # Also needed to ensure output_tokens has same length as output_data
                 time_win = self.time_window_handler.window(timestep_idx)
                 rdata = spoof(
                     self.healpix_level,
