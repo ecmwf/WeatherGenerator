@@ -312,7 +312,7 @@ def _check_datasets(config: Config) -> Config:
     config = config.copy()
     if config.get("data_paths") is None:  # TODO remove this for next version
         legacy_keys = [
-            "data_path_anmoi",
+            "data_path_anemoi",
             "data_path_obs",
             "data_path_eobs",
             "data_path_fesom",
