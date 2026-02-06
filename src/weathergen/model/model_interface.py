@@ -152,7 +152,7 @@ def init_model_and_shard(
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
         model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
-    elif cf.get("load_chkpt", None).get("run_id", None):
+    elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
         mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
