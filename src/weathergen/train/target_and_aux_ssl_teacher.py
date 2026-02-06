@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from weathergen.model.engines import LatentPredictionHeadIdentity
 from weathergen.model.ssl_target_processing import (
     DINOTargetProcessing,
     JEPATargetProcessing,
@@ -181,6 +182,10 @@ class FrozenTeacher(EncoderTeacher):
     This teacher uses a model loaded from a previous training run. The weights
     are frozen and never updated during training. This is useful for distillation
     from a pre-trained model as described in arXiv:2509.24317.
+
+    The teacher model may have been pre-trained with any method (forecasting, MAE, etc.)
+    and doesn't need to have SSL latent heads. Identity heads are added automatically
+    for any SSL losses the student needs.
     """
 
     def __init__(self, teacher_model, training_cfg, teacher_model_params=None, **kwargs):
@@ -188,17 +193,23 @@ class FrozenTeacher(EncoderTeacher):
 
         Args:
             teacher_model: Pre-trained model to use as teacher.
-            training_cfg: Training configuration (used for parent class, may be None).
+            training_cfg: Current training configuration containing the student's SSL losses.
+                Used to determine which identity heads to add to the teacher.
             teacher_model_params: Model parameters matching the teacher's architecture.
                 If None, will use the student's model_params (may cause dimension mismatch).
             **kwargs: Additional arguments passed to parent.
         """
-        # Don't call parent __init__ - we set up postprocessing based on actual model heads
         self.teacher_model = teacher_model
         self.teacher_model_params = teacher_model_params
 
-        # Set up postprocessing based on teacher model's actual latent heads
-        self.postprocess_targets = self._setup_postprocessing_from_model(teacher_model)
+        # Get required SSL loss names from current training config
+        required_heads = self._get_required_ssl_heads(training_cfg)
+
+        # Add identity heads to teacher if it doesn't have them
+        self._ensure_identity_heads(teacher_model, required_heads)
+
+        # Set up identity postprocessing for all SSL losses
+        self.postprocess_targets = {name: JEPATargetProcessing() for name in required_heads}
 
         # Ensure all parameters are frozen
         for param in self.teacher_model.parameters():
@@ -207,45 +218,55 @@ class FrozenTeacher(EncoderTeacher):
         # Set to eval mode permanently
         self.teacher_model.eval()
 
-    def _setup_postprocessing_from_model(self, teacher_model):
-        """Set up postprocessing based on the teacher model's actual latent heads.
+    def _get_required_ssl_heads(self, training_cfg):
+        """Extract SSL loss names from training config.
 
-        This inspects the model's latent_heads to determine what postprocessing is needed,
-        rather than relying on training config which may not have the SSL loss structure.
+        Args:
+            training_cfg: Training configuration containing losses specification.
+
+        Returns:
+            Set of SSL loss names (e.g., {"JEPA", "DINO"}).
         """
-        postprocess = {}
+        if training_cfg is None:
+            # Default to JEPA if no config provided
+            return {"JEPA"}
 
-        # Get latent head names from the model
-        if hasattr(teacher_model, "latent_heads") and teacher_model.latent_heads is not None:
-            for head_name in teacher_model.latent_heads.keys():
-                if head_name == "JEPA":
-                    postprocess[head_name] = JEPATargetProcessing()
-                elif head_name == "DINO":
-                    # DINO requires more config - use identity for now
-                    # Full DINO postprocessing would need center_momentum, temps, etc.
-                    logger.warning(
-                        "DINO postprocessing for FrozenTeacher using identity transform. "
-                        "Full DINO centering not supported for frozen teachers."
-                    )
-                    postprocess[head_name] = JEPATargetProcessing()
-                elif head_name == "iBOT":
-                    # iBOT requires more config - use identity for now
-                    logger.warning(
-                        "iBOT postprocessing for FrozenTeacher using identity transform. "
-                        "Full iBOT centering not supported for frozen teachers."
-                    )
-                    postprocess[head_name] = JEPATargetProcessing()
-                else:
-                    # Unknown head type - use identity
-                    postprocess[head_name] = JEPATargetProcessing()
+        required_heads = set()
+        for loss_cfg in training_cfg.losses.values():
+            if loss_cfg.type == "LossLatentSSLStudentTeacher":
+                required_heads.update(loss_cfg.loss_fcts.keys())
 
-        if not postprocess:
-            raise ValueError(
-                "FrozenTeacher model has no latent heads. "
-                "Ensure the teacher model was trained with SSL losses."
-            )
+        if not required_heads:
+            # Default to JEPA if no SSL losses found
+            required_heads = {"JEPA"}
 
-        return postprocess
+        return required_heads
+
+    def _ensure_identity_heads(self, teacher_model, required_heads):
+        """Add identity latent heads to teacher model if they don't exist.
+
+        The teacher may have been pre-trained without SSL losses (e.g., forecasting).
+        We add identity heads so that `get_latent_prediction()` returns the raw
+        encoder representations for the student's SSL losses.
+
+        Args:
+            teacher_model: The teacher model to modify.
+            required_heads: Set of head names that must exist.
+        """
+        import torch.nn as nn
+
+        # Ensure latent_heads exists
+        if not hasattr(teacher_model, "latent_heads") or teacher_model.latent_heads is None:
+            teacher_model.latent_heads = nn.ModuleDict()
+
+        # Add missing identity heads
+        for head_name in required_heads:
+            if head_name not in teacher_model.latent_heads:
+                logger.info(
+                    f"FrozenTeacher: Adding identity head '{head_name}' to teacher model "
+                    f"(teacher was likely pre-trained without SSL losses)"
+                )
+                teacher_model.latent_heads[head_name] = LatentPredictionHeadIdentity()
 
     @classmethod
     def from_pretrained(cls, cf, dataset, device, params: dict) -> FrozenTeacher:
@@ -301,9 +322,12 @@ class FrozenTeacher(EncoderTeacher):
         teacher_model_params = ModelParams(teacher_config).create(teacher_config)
         teacher_model_params = teacher_model_params.to(device)
 
-        # FrozenTeacher sets up postprocessing by inspecting the model's latent heads,
-        # so we don't need to pass training_config
-        return cls(teacher_model, training_cfg=None, teacher_model_params=teacher_model_params)
+        # Pass current training config so FrozenTeacher knows which SSL heads to add
+        return cls(
+            teacher_model,
+            training_cfg=cf.training_config,
+            teacher_model_params=teacher_model_params,
+        )
 
     def _forward_teacher(self, model_params, batch):
         """Execute forward pass on the frozen teacher model.

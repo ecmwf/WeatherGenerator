@@ -144,6 +144,14 @@ def model_with_latent_heads():
     return model
 
 
+@pytest.fixture
+def model_without_latent_heads():
+    """Create a model WITHOUT latent_heads (like a forecasting-only model)."""
+    model = nn.Sequential(nn.Linear(10, 10), nn.ReLU(), nn.Linear(10, 5))
+    # No latent_heads - simulates a model trained without SSL
+    return model
+
+
 # =============================================================================
 # Interface Tests - Both EMATeacher and FrozenTeacher must pass these
 # =============================================================================
@@ -402,6 +410,108 @@ class TestFrozenTeacher:
         # All submodules should be in eval mode
         for module in teacher.teacher_model.modules():
             assert not module.training
+
+    def test_frozen_teacher_adds_identity_heads_when_missing(
+        self, model_without_latent_heads, mock_training_cfg
+    ):
+        """FrozenTeacher should add identity heads if teacher lacks them."""
+        from weathergen.model.engines import LatentPredictionHeadIdentity
+        from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
+
+        # Model has no latent_heads
+        assert not hasattr(model_without_latent_heads, "latent_heads")
+
+        teacher = FrozenTeacher(model_without_latent_heads, training_cfg=mock_training_cfg)
+
+        # latent_heads should now exist with JEPA
+        assert hasattr(teacher.teacher_model, "latent_heads")
+        assert "JEPA" in teacher.teacher_model.latent_heads
+        assert isinstance(
+            teacher.teacher_model.latent_heads["JEPA"], LatentPredictionHeadIdentity
+        )
+
+    def test_frozen_teacher_uses_training_cfg_for_heads(self, model_without_latent_heads):
+        """FrozenTeacher should use training_cfg to determine which heads to add."""
+        from omegaconf import OmegaConf
+
+        from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
+
+        # Config with both JEPA and DINO losses
+        cfg = OmegaConf.create(
+            {
+                "losses": {
+                    "ssl_loss": {
+                        "type": "LossLatentSSLStudentTeacher",
+                        "loss_fcts": {
+                            "JEPA": {"head": "identity"},
+                            "DINO": {"head": "mlp", "out_dim": 256},
+                        },
+                    }
+                }
+            }
+        )
+
+        teacher = FrozenTeacher(model_without_latent_heads, training_cfg=cfg)
+
+        # Both heads should be added
+        assert "JEPA" in teacher.teacher_model.latent_heads
+        assert "DINO" in teacher.teacher_model.latent_heads
+        # Postprocessing should exist for both
+        assert "JEPA" in teacher.postprocess_targets
+        assert "DINO" in teacher.postprocess_targets
+
+    def test_frozen_teacher_defaults_to_jepa_without_config(self, model_without_latent_heads):
+        """FrozenTeacher should default to JEPA head when no config provided."""
+        from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
+
+        teacher = FrozenTeacher(model_without_latent_heads, training_cfg=None)
+
+        # Should default to JEPA
+        assert "JEPA" in teacher.teacher_model.latent_heads
+        assert "JEPA" in teacher.postprocess_targets
+
+    def test_frozen_teacher_preserves_existing_heads(self, model_with_latent_heads, mock_training_cfg):
+        """FrozenTeacher should not overwrite existing latent heads."""
+        from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
+
+        # Get reference to original head
+        original_head = model_with_latent_heads.latent_heads["JEPA"]
+
+        teacher = FrozenTeacher(model_with_latent_heads, training_cfg=mock_training_cfg)
+
+        # Original head should be preserved (same object)
+        assert teacher.teacher_model.latent_heads["JEPA"] is original_head
+
+    def test_frozen_teacher_all_postprocessing_is_identity(self, model_without_latent_heads):
+        """All FrozenTeacher postprocessing should use identity (JEPATargetProcessing)."""
+        from omegaconf import OmegaConf
+
+        from weathergen.model.ssl_target_processing import JEPATargetProcessing
+        from weathergen.train.target_and_aux_ssl_teacher import FrozenTeacher
+
+        # Config with multiple SSL losses
+        cfg = OmegaConf.create(
+            {
+                "losses": {
+                    "ssl_loss": {
+                        "type": "LossLatentSSLStudentTeacher",
+                        "loss_fcts": {
+                            "JEPA": {"head": "identity"},
+                            "DINO": {"head": "mlp"},
+                            "iBOT": {"head": "mlp"},
+                        },
+                    }
+                }
+            }
+        )
+
+        teacher = FrozenTeacher(model_without_latent_heads, training_cfg=cfg)
+
+        # All postprocessors should be JEPATargetProcessing (identity)
+        for name, processor in teacher.postprocess_targets.items():
+            assert isinstance(processor, JEPATargetProcessing), (
+                f"Postprocessor for {name} should be JEPATargetProcessing"
+            )
 
 
 # =============================================================================
