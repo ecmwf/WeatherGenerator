@@ -148,7 +148,7 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 1e-6
+    lr_max: 1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 4096
@@ -159,8 +159,8 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 1.0
-    weight_decay: 0.1
+    grad_clip: 0.1
+    weight_decay: 0.04
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
