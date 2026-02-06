@@ -10,6 +10,8 @@
 
 import torch
 
+from weathergen.utils.train_logger import TRAIN, Stage
+
 
 def get_dtype(value: str) -> torch.dtype:
     """
@@ -25,3 +27,43 @@ def get_dtype(value: str) -> torch.dtype:
         raise NotImplementedError(
             f"Dtype {value} is not recognized, choose either, bf16, fp16, or fp32"
         )
+
+
+def is_stream_forcing(stream_cfg: dict, stage: Stage | None = None) -> bool:
+    """
+    Determine if stream is forcing, i.e. does not produce (physical) predictions
+    """
+    is_forcing = stream_cfg.get("forcing", False)
+    if stage is not None:
+        is_forcing = is_forcing or (
+            (len(stream_cfg.get("train_target_channels", [])) == 0)
+            if stage == TRAIN
+            else (len(stream_cfg.get("val_target_channels", [])) == 0)
+        )
+    else:
+        is_forcing = is_forcing or (
+            len(stream_cfg.get("train_target_channels", [])) == 0
+            and len(stream_cfg.get("val_target_channels", [])) == 0
+        )
+
+    return is_forcing
+
+
+def is_stream_diagnostic(stream_cfg: dict, stage: Stage | None = None) -> bool:
+    """
+    Determine if stream is diagnostic, i.e. does not contribute to model input
+    """
+    is_diagnostic = stream_cfg.get("diagnostic", False)
+    if stage is not None:
+        is_diagnostic = is_diagnostic or (
+            (len(stream_cfg.get("train_source_channels", [])) == 0)
+            if stage == TRAIN
+            else (len(stream_cfg.get("val_source_channels", [])) == 0)
+        )
+    else:
+        is_diagnostic = is_diagnostic or (
+            len(stream_cfg.get("train_source_channels", [])) == 0
+            and len(stream_cfg.get("val_source_channels", [])) == 0
+        )
+
+    return is_diagnostic

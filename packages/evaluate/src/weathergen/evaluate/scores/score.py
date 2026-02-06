@@ -438,7 +438,7 @@ class Scores:
         """
 
         a = self._sum((p >= thresh) & (gt >= thresh))
-        b = self._sum((p >= thresh) & (gt >= thresh))
+        b = self._sum((p >= thresh) & (gt < thresh))
         c = self._sum((p < thresh) & (gt >= thresh))
         d = self._sum((p < thresh) & (gt < thresh))
 
@@ -1151,7 +1151,7 @@ class Scores:
             seeps_weights = seeps_weights.stack({"xy": spatial_dims})
             t3 = t3.stack({"xy": spatial_dims})
             lstack = True
-        elif self.prediction.ndim == 2:
+        elif p.ndim == 2:
             prediction, ground_truth = p, gt
             lstack = False
         else:
@@ -1377,13 +1377,6 @@ class Scores:
             bins=np.arange(len(fcst_stacked[self._ens_dim]) + 2),
             block_size=None if rank.chunks is None else "auto",
         )
-
-        # Reattach preserved coordinates by broadcasting
-        for coord_name, coord_values in preserved_coords.items():
-            # Only keep unique values along npoints if necessary
-            if coord_name in rank_counts.coords:
-                continue
-            rank_counts = rank_counts.assign_coords({coord_name: coord_values})
 
         # Reattach preserved coordinates by broadcasting
         for coord_name, coord_values in preserved_coords.items():
