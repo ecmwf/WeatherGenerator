@@ -34,5 +34,7 @@ ERA5 :
     num_heads : 4
     # sampling_rate : 0.2
   pred_head :
+    distribution: gmm
     ens_size : 1
     num_layers : 1
+    num_components: 4
