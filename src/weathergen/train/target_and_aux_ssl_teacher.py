@@ -164,6 +164,10 @@ class EncoderTeacher(TargetAndAuxModuleBase):
             module.to(device)
         return self
 
+    def get_current_beta(self, cur_step: int) -> float:
+        beta = self.ema_model.get_current_beta(cur_step)
+        return beta
+
 
 class EMATeacher(EncoderTeacher):
     """Teacher using Exponential Moving Average of student weights.

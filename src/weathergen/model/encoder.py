@@ -153,7 +153,6 @@ class EncoderModule(torch.nn.Module):
         # combined cell lens for all tokens in batch across all input steps
         zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
 
-        # subdivision factor for required splitting
         clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
         tokens_global_unmasked = []
         posteriors = []

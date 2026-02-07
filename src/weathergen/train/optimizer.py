@@ -1,0 +1,650 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+"""
+Optimizer module for WeatherGenerator.
+
+Provides support for:
+- Standard AdamW optimizer
+- Hybrid Muon+AdamW optimizer (Muon for 2D hidden weights, AdamW for embeddings/heads)
+
+The Muon optimizer uses orthogonalization of gradients for improved training dynamics
+on transformer hidden layer weights. See: https://arxiv.org/abs/2407.01490
+"""
+
+import logging
+from typing import Any
+
+import numpy as np
+import torch
+from torch.optim import Optimizer
+
+logger = logging.getLogger(__name__)
+
+
+# Patterns identifying parameters that should use AdamW (not Muon)
+# These include embeddings, prediction heads, and other 1D or special parameters
+ADAMW_PATTERNS = [
+    "embed_target_coords",
+    "embeds.",
+    "embed.",
+    "unembed",
+    "pred_heads",
+    "latent_heads",
+    "q_cells",
+    "bilin",
+    "class_token",
+    "register_token",
+    "norm",
+    "bias",
+]
+
+
+def classify_muon_params(
+    model: torch.nn.Module,
+) -> tuple[list[torch.nn.Parameter], list[torch.nn.Parameter], list[str], list[str]]:
+    """
+    Classify model parameters into Muon-eligible and AdamW-eligible groups.
+
+    Muon is applied to 2D hidden layer weights (attention Q/K/V/O, MLP linear layers).
+    AdamW is applied to embeddings, output heads, 1D parameters, and biases.
+
+    Args:
+        model: The model whose parameters to classify.
+
+    Returns:
+        A tuple of (muon_params, adamw_params, muon_names, adamw_names).
+    """
+    muon_params: list[torch.nn.Parameter] = []
+    adamw_params: list[torch.nn.Parameter] = []
+    muon_names: list[str] = []
+    adamw_names: list[str] = []
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+
+        name_lower = name.lower()
+
+        # 1D parameters (biases, layer norm weights) -> AdamW
+        if param.ndim < 2:
+            adamw_params.append(param)
+            adamw_names.append(name)
+            continue
+
+        # Check if parameter matches any AdamW pattern
+        is_adamw = any(pattern in name_lower for pattern in ADAMW_PATTERNS)
+
+        if is_adamw:
+            adamw_params.append(param)
+            adamw_names.append(name)
+        else:
+            # 2D hidden weights -> Muon
+            muon_params.append(param)
+            muon_names.append(name)
+
+    return muon_params, adamw_params, muon_names, adamw_names
+
+
+def _scale_adamw_betas(
+    beta1_base: float,
+    beta2_base: float,
+    eps_base: float,
+    batch_size_total: int,
+) -> tuple[float, float, float]:
+    """
+    Scale AdamW hyperparameters based on batch size following SDE scaling rules.
+
+    See: https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
+
+    Args:
+        beta1_base: Base beta1 value (target for batch_size_total=1).
+        beta2_base: Base beta2 value (target for batch_size_total=1).
+        eps_base: Base epsilon value.
+        batch_size_total: Total effective batch size across all ranks.
+
+    Returns:
+        Tuple of (scaled_beta1, scaled_beta2, scaled_eps).
+    """
+    kappa = batch_size_total
+    beta1 = max(0.5, 1.0 - kappa * (1.0 - beta1_base))
+    beta2 = 1.0 - kappa * (1.0 - beta2_base)
+    eps = eps_base / np.sqrt(kappa)
+    return beta1, beta2, eps
+
+
+def create_optimizer(
+    model: torch.nn.Module,
+    optimizer_cfg: Any,
+    lr_cfg: Any,
+    batch_size_total: int,
+) -> Optimizer:
+    """
+    Factory function to create the appropriate optimizer based on config.
+
+    Args:
+        model: The model to optimize.
+        optimizer_cfg: Optimizer configuration containing type and hyperparameters.
+        lr_cfg: Learning rate configuration containing lr_start.
+        batch_size_total: Total effective batch size across all ranks.
+
+    Returns:
+        The configured optimizer (AdamW or CompositeOptimizer).
+    """
+    optimizer_type = optimizer_cfg.get("type", "adamw")
+    initial_lr = lr_cfg.lr_start
+    weight_decay = optimizer_cfg.weight_decay
+
+    # Scale AdamW betas based on batch size
+    adamw_cfg = optimizer_cfg.adamw
+    beta1, beta2, eps = _scale_adamw_betas(
+        adamw_cfg.beta1,
+        adamw_cfg.beta2,
+        adamw_cfg.get("eps", 2e-08),
+        batch_size_total,
+    )
+
+    if optimizer_type == "adamw":
+        logger.info("Creating AdamW optimizer")
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=initial_lr,
+            weight_decay=weight_decay,
+            betas=(beta1, beta2),
+            eps=eps,
+        )
+
+    elif optimizer_type == "muon_adamw":
+        logger.info("Creating Muon+AdamW composite optimizer")
+        return _create_muon_adamw_optimizer(
+            model=model,
+            optimizer_cfg=optimizer_cfg,
+            initial_lr=initial_lr,
+            weight_decay=weight_decay,
+            adamw_betas=(beta1, beta2),
+            adamw_eps=eps,
+            batch_size_total=batch_size_total,
+        )
+
+    else:
+        raise ValueError(f"Unknown optimizer type: {optimizer_type}")
+
+
+def _create_muon_adamw_optimizer(
+    model: torch.nn.Module,
+    optimizer_cfg: Any,
+    initial_lr: float,
+    weight_decay: float,
+    adamw_betas: tuple[float, float],
+    adamw_eps: float,
+    batch_size_total: int,
+) -> "CompositeOptimizer":
+    """
+    Create a Muon+AdamW composite optimizer.
+
+    Args:
+        model: The model to optimize.
+        optimizer_cfg: Optimizer configuration.
+        initial_lr: Initial learning rate (for AdamW; Muon uses multiplied version).
+        weight_decay: Weight decay coefficient.
+        adamw_betas: Scaled (beta1, beta2) for AdamW.
+        adamw_eps: Scaled epsilon for AdamW.
+        batch_size_total: Total effective batch size.
+
+    Returns:
+        CompositeOptimizer wrapping Muon and AdamW.
+    """
+    muon_cfg = optimizer_cfg.get("muon", {})
+    lr_multiplier = muon_cfg.get("lr_multiplier", 20.0)
+    muon_momentum = muon_cfg.get("momentum", 0.95)
+    muon_nesterov = muon_cfg.get("nesterov", True)
+    muon_weight_decay = muon_cfg.get("weight_decay", weight_decay)
+
+    # Classify parameters
+    muon_params, adamw_params, muon_names, adamw_names = classify_muon_params(model)
+
+    logger.info(f"Muon parameters ({len(muon_params)}): {muon_names[:5]}...")
+    logger.info(f"AdamW parameters ({len(adamw_params)}): {adamw_names[:5]}...")
+
+    # Create parameter groups for AdamW
+    # Include both AdamW-only params and mark them appropriately
+    adamw_param_groups = [
+        {
+            "params": adamw_params,
+            "lr": initial_lr,
+            "is_muon": False,
+            "lr_multiplier": 1.0,
+        }
+    ]
+
+    # Create AdamW optimizer for embeddings/heads
+    adamw_optimizer = torch.optim.AdamW(
+        adamw_param_groups,
+        lr=initial_lr,
+        weight_decay=weight_decay,
+        betas=adamw_betas,
+        eps=adamw_eps,
+    )
+
+    # Create Muon optimizer for hidden weights
+    muon_lr = initial_lr * lr_multiplier
+
+    # Parameter groups for Muon
+    muon_param_groups = [
+        {
+            "params": muon_params,
+            "lr": muon_lr,
+            "is_muon": True,
+            "lr_multiplier": lr_multiplier,
+        }
+    ]
+
+    # Try to use PyTorch's built-in Muon if available (PyTorch >= 2.9)
+    muon_optimizer = _create_muon_optimizer(
+        param_groups=muon_param_groups,
+        lr=muon_lr,
+        momentum=muon_momentum,
+        nesterov=muon_nesterov,
+        weight_decay=muon_weight_decay,
+    )
+
+    return CompositeOptimizer(
+        muon_optimizer=muon_optimizer,
+        adamw_optimizer=adamw_optimizer,
+        muon_lr_multiplier=lr_multiplier,
+    )
+
+
+def _create_muon_optimizer(
+    param_groups: list[dict],
+    lr: float,
+    momentum: float,
+    nesterov: bool,
+    weight_decay: float,
+) -> Optimizer:
+    """
+    Create a Muon optimizer, using PyTorch's built-in version if available.
+
+    Falls back to custom implementation for older PyTorch versions.
+    """
+    # Try PyTorch's built-in Muon (available in PyTorch >= 2.9)
+    if hasattr(torch.optim, "Muon"):
+        logger.info("Using torch.optim.Muon")
+        return torch.optim.Muon(
+            param_groups,
+            lr=lr,
+            momentum=momentum,
+            nesterov=nesterov,
+            weight_decay=weight_decay,
+        )
+    else:
+        logger.warning(
+            "Using custom Muon implementation (torch.optim.Muon not available). "
+            "NOTE: This implementation does NOT support FSDP2. Use DDP or single-GPU training."
+        )
+        return MuonCustom(
+            param_groups,
+            lr=lr,
+            momentum=momentum,
+            nesterov=nesterov,
+            weight_decay=weight_decay,
+        )
+
+
+class CompositeOptimizer(Optimizer):
+    """
+    Composite optimizer that combines Muon and AdamW for different parameter groups.
+
+    Muon is used for 2D hidden layer weights, AdamW for embeddings and heads.
+    This class wraps both optimizers and provides a unified interface.
+
+    Inherits from Optimizer for compatibility with PyTorch LR schedulers.
+    """
+
+    def __init__(
+        self,
+        muon_optimizer: Optimizer,
+        adamw_optimizer: Optimizer,
+        muon_lr_multiplier: float = 20.0,
+    ):
+        """
+        Initialize the composite optimizer.
+
+        Args:
+            muon_optimizer: Optimizer for Muon-eligible parameters.
+            adamw_optimizer: Optimizer for AdamW-eligible parameters.
+            muon_lr_multiplier: LR multiplier for Muon relative to base LR.
+        """
+        self.muon_optimizer = muon_optimizer
+        self.adamw_optimizer = adamw_optimizer
+        self.muon_lr_multiplier = muon_lr_multiplier
+
+        # Manually initialize Optimizer base class attributes without calling __init__
+        # This avoids the param_groups setup that would conflict with our combined groups
+        from collections import OrderedDict, defaultdict
+
+        # Set defaults with betas for LR scheduler compatibility (OneCycleLR checks this)
+        # Use AdamW's betas since that's the more common scheduler interaction
+        adamw_betas = adamw_optimizer.defaults.get("betas", (0.9, 0.999))
+        self.defaults = {
+            "betas": adamw_betas,
+            "momentum": muon_optimizer.defaults.get("momentum", 0.95),
+        }
+        self._optimizer_step_pre_hooks = OrderedDict()
+        self._optimizer_step_post_hooks = OrderedDict()
+        self._optimizer_state_dict_pre_hooks = OrderedDict()
+        self._optimizer_state_dict_post_hooks = OrderedDict()
+        self._optimizer_load_state_dict_pre_hooks = OrderedDict()
+        self._optimizer_load_state_dict_post_hooks = OrderedDict()
+
+        # Ensure all param groups have betas for OneCycleLR compatibility
+        # OneCycleLR with cycle_momentum=True tries to modify betas on ALL groups
+        for group in muon_optimizer.param_groups:
+            if "betas" not in group:
+                group["betas"] = adamw_betas
+
+        # Combined param_groups from both optimizers
+        self.param_groups = muon_optimizer.param_groups + adamw_optimizer.param_groups
+
+        # State is a combined view (we override the property below)
+        self._state = defaultdict(dict)
+
+    def step(self, closure=None):
+        """
+        Perform a single optimization step.
+
+        Args:
+            closure: A closure that reevaluates the model and returns the loss.
+                Optional for most optimizers.
+
+        Returns:
+            Loss value if closure is provided, None otherwise.
+        """
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        self.muon_optimizer.step()
+        self.adamw_optimizer.step()
+
+        return loss
+
+    def zero_grad(self, set_to_none: bool = True):
+        """
+        Reset gradients of all optimized parameters.
+
+        Args:
+            set_to_none: If True, set gradients to None instead of zero.
+                This can improve memory efficiency.
+        """
+        self.muon_optimizer.zero_grad(set_to_none=set_to_none)
+        self.adamw_optimizer.zero_grad(set_to_none=set_to_none)
+
+    def state_dict(self) -> dict:
+        """
+        Return the state of both optimizers as a single dictionary.
+
+        Returns:
+            Dictionary containing state from both Muon and AdamW optimizers.
+        """
+        return {
+            "muon": self.muon_optimizer.state_dict(),
+            "adamw": self.adamw_optimizer.state_dict(),
+            "muon_lr_multiplier": self.muon_lr_multiplier,
+            "optimizer_type": "composite_muon_adamw",
+        }
+
+    def load_state_dict(self, state_dict: dict):
+        """
+        Load optimizer state from a dictionary.
+
+        Args:
+            state_dict: Dictionary containing saved optimizer state.
+        """
+        if (
+            "optimizer_type" in state_dict
+            and state_dict["optimizer_type"] == "composite_muon_adamw"
+        ):
+            self.muon_optimizer.load_state_dict(state_dict["muon"])
+            self.adamw_optimizer.load_state_dict(state_dict["adamw"])
+            self.muon_lr_multiplier = state_dict.get("muon_lr_multiplier", self.muon_lr_multiplier)
+        else:
+            # Fallback: try to load as regular optimizer state
+            # This handles migration from pure AdamW checkpoints
+            logger.warning(
+                "Loading non-composite state dict into CompositeOptimizer. "
+                "This may not work correctly - optimizer state may be lost."
+            )
+
+    @property
+    def state(self) -> dict:
+        """
+        Return combined state from both optimizers.
+
+        This provides a unified view of optimizer state for checkpointing.
+        """
+        combined_state = dict(self._state)
+        combined_state.update(self.muon_optimizer.state)
+        combined_state.update(self.adamw_optimizer.state)
+        return combined_state
+
+    @state.setter
+    def state(self, value):
+        """Set state (needed for Optimizer base class compatibility)."""
+        self._state = value
+
+
+def _zeropower_via_newtonschulz5(grad: torch.Tensor, steps: int) -> torch.Tensor:
+    """
+    Newton-Schulz iteration to compute the zeroth power / orthogonalization of grad.
+
+    Uses quintic iteration with coefficients selected to maximize the slope at zero.
+    This produces something like US'V^T where S' is diagonal with S_{ii}' ~ Uniform(0.5, 1.5),
+    rather than exact UV^T, but this doesn't hurt model performance.
+
+    Reference: https://github.com/KellerJordan/Muon
+
+    Args:
+        grad: Gradient tensor (must be at least 2D).
+        steps: Number of Newton-Schulz iterations.
+
+    Returns:
+        Orthogonalized gradient tensor.
+    """
+    assert grad.ndim >= 2
+    coef_a, coef_b, coef_c = (3.4445, -4.7750, 2.0315)
+    x = grad.bfloat16()
+
+    # Transpose if more rows than columns (NS works better on wide matrices)
+    if grad.size(-2) > grad.size(-1):
+        x = x.mT
+
+    # Normalize by spectral norm (approximated by Frobenius norm for stability)
+    x = x / (x.norm(dim=(-2, -1), keepdim=True) + 1e-7)
+
+    # Perform Newton-Schulz iterations with quintic coefficients
+    for _ in range(steps):
+        xxt = x @ x.mT
+        poly = coef_b * xxt + coef_c * xxt @ xxt
+        x = coef_a * x + poly @ x
+
+    # Restore original orientation
+    if grad.size(-2) > grad.size(-1):
+        x = x.mT
+
+    return x
+
+
+def _muon_update(
+    grad: torch.Tensor,
+    momentum_buffer: torch.Tensor,
+    beta: float = 0.95,
+    ns_steps: int = 5,
+    nesterov: bool = True,
+) -> torch.Tensor:
+    """
+    Compute Muon update: momentum + orthogonalization + scaling.
+
+    Args:
+        grad: Parameter gradient.
+        momentum_buffer: Momentum buffer (modified in-place).
+        beta: Momentum coefficient.
+        ns_steps: Number of Newton-Schulz iterations.
+        nesterov: Whether to use Nesterov momentum.
+
+    Returns:
+        The update to apply to parameters.
+    """
+    # Momentum accumulation using lerp for numerical stability
+    momentum_buffer.lerp_(grad, 1 - beta)
+
+    # Compute update (Nesterov or standard momentum)
+    if nesterov:
+        update = grad.lerp(momentum_buffer, beta)
+    else:
+        update = momentum_buffer.clone()
+
+    # Reshape for orthogonalization if needed (e.g., conv filters)
+    original_shape = update.shape
+    if update.ndim == 4:
+        update = update.view(len(update), -1)
+
+    # Apply Newton-Schulz orthogonalization
+    update = _zeropower_via_newtonschulz5(update, steps=ns_steps)
+
+    # Scale by sqrt(max(1, rows/cols)) to preserve gradient magnitude
+    update = update * max(1, update.size(-2) / update.size(-1)) ** 0.5
+
+    # Restore original shape and dtype
+    return update.to(grad.dtype).view(original_shape)
+
+
+class MuonCustom(Optimizer):
+    """
+    Custom Muon optimizer implementation based on Keller Jordan's reference.
+
+    Muon (MomentUm Orthogonalized by Newton-schulz) internally runs standard SGD-momentum,
+    then performs an orthogonalization post-processing step where each 2D parameter's update
+    is replaced with the nearest orthogonal matrix via Newton-Schulz iteration.
+
+    Reference: https://github.com/KellerJordan/Muon
+               https://kellerjordan.github.io/posts/muon/
+
+    Note: Muon should only be used for hidden weight layers. Embeddings, output heads,
+    biases, and layer norms should use AdamW.
+
+    WARNING: This implementation does NOT support FSDP2 (Fully Sharded Data Parallel).
+    The Newton-Schulz orthogonalization requires the FULL gradient matrix, but FSDP2
+    shards gradients across GPUs. Computing `X @ X.T` on a sharded gradient gives
+    mathematically incorrect results. For FSDP2 support, see the distributed version
+    in the reference implementation: https://github.com/KellerJordan/Muon/blob/master/muon.py
+    """
+
+    def __init__(
+        self,
+        params,
+        lr: float = 0.02,
+        momentum: float = 0.95,
+        nesterov: bool = True,
+        weight_decay: float = 0.0,
+        ns_steps: int = 5,
+    ):
+        """
+        Initialize the Muon optimizer.
+
+        Args:
+            params: Iterable of parameters to optimize or dicts defining param groups.
+            lr: Learning rate (in units of spectral norm per update).
+            momentum: Momentum factor (0.95 is typically good).
+            nesterov: Whether to use Nesterov momentum.
+            weight_decay: Decoupled weight decay (like AdamW).
+            ns_steps: Number of Newton-Schulz iterations for orthogonalization.
+        """
+        if lr < 0.0:
+            raise ValueError(f"Invalid learning rate: {lr}")
+        if momentum < 0.0:
+            raise ValueError(f"Invalid momentum value: {momentum}")
+        if weight_decay < 0.0:
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+
+        defaults = dict(
+            lr=lr,
+            momentum=momentum,
+            nesterov=nesterov,
+            weight_decay=weight_decay,
+            ns_steps=ns_steps,
+        )
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        """
+        Perform a single optimization step.
+
+        Args:
+            closure: A closure that reevaluates the model and returns the loss.
+
+        Returns:
+            Loss value if closure is provided, None otherwise.
+        """
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        # Check for FSDP2 on first step (DTensor indicates sharded parameters)
+        if not hasattr(self, "_fsdp_checked"):
+            self._fsdp_checked = True
+            for group in self.param_groups:
+                for p in group["params"]:
+                    # FSDP2 uses DTensor for sharding
+                    is_fsdp2 = hasattr(p, "_local_tensor") or type(p).__name__ == "DTensor"
+                    assert not is_fsdp2, (
+                        "MuonCustom does not support FSDP2 (Fully Sharded Data Parallel). "
+                        "The Newton-Schulz orthogonalization requires full gradients, but "
+                        "FSDP2 shards gradients across GPUs, leading to incorrect results. "
+                        "Options: (1) Use DDP instead of FSDP, (2) Use AdamW optimizer, "
+                        "(3) Use torch.optim.Muon (PyTorch >= 2.9) if it supports FSDP. "
+                        "Reference FSDP impl: github.com/KellerJordan/Muon/blob/master/muon.py"
+                    )
+
+        for group in self.param_groups:
+            momentum = group["momentum"]
+            nesterov = group["nesterov"]
+            lr = group["lr"]
+            weight_decay = group["weight_decay"]
+            ns_steps = group.get("ns_steps", 5)
+
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+
+                # Initialize momentum buffer if needed
+                state = self.state[p]
+                if len(state) == 0:
+                    state["momentum_buffer"] = torch.zeros_like(p)
+
+                # Compute Muon update
+                update = _muon_update(
+                    p.grad,
+                    state["momentum_buffer"],
+                    beta=momentum,
+                    ns_steps=ns_steps,
+                    nesterov=nesterov,
+                )
+
+                # Apply decoupled weight decay FIRST (like AdamW)
+                if weight_decay != 0:
+                    p.mul_(1 - lr * weight_decay)
+
+                # Apply the orthogonalized update
+                p.add_(update.view(p.shape), alpha=-lr)
+
+        return loss

@@ -13,6 +13,7 @@ import torch
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
+from weathergen.model.layers import LayerScale, StochasticDepth
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
@@ -31,6 +32,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        layer_scale_init: float | None = None,
+        stochastic_depth_rate: float = 0.0,
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -66,6 +69,16 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         self.dtype = attention_dtype
 
+        # LayerScale: per-channel learned scaling before residual
+        self.layer_scale = (
+            LayerScale(dim_embed, layer_scale_init) if layer_scale_init is not None else None
+        )
+
+        # Stochastic Depth: randomly drop residual path during training
+        self.drop_path = (
+            StochasticDepth(stochastic_depth_rate) if stochastic_depth_rate > 0.0 else None
+        )
+
         assert with_flash, "Only flash attention supported at the moment"
 
     def forward(self, x, x_lens, ada_ln_aux=None):
@@ -99,6 +112,14 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         out = self.proj_out(outs.flatten(-2, -1))
 
+        # Apply LayerScale before residual
+        if self.layer_scale is not None:
+            out = self.layer_scale(out)
+
+        # Apply Stochastic Depth before residual
+        if self.drop_path is not None:
+            out = self.drop_path(out)
+
         if self.with_residual:
             out = out + x_in
 
@@ -119,6 +140,8 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         softcap=0.0,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        layer_scale_init: float | None = None,
+        stochastic_depth_rate: float = 0.0,
     ):
         super(MultiSelfAttentionHeadVarlenFlex, self).__init__()
 
@@ -149,6 +172,16 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
         self.dtype = attention_dtype
 
+        # LayerScale: per-channel learned scaling before residual
+        self.layer_scale = (
+            LayerScale(dim_embed, layer_scale_init) if layer_scale_init is not None else None
+        )
+
+        # Stochastic Depth: randomly drop residual path during training
+        self.drop_path = (
+            StochasticDepth(stochastic_depth_rate) if stochastic_depth_rate > 0.0 else None
+        )
+
         assert with_flash, "Only flash attention supported at the moment"
 
         def att(qs, ks, vs, x_mask):
@@ -174,6 +207,15 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
         out = self.dropout(self.proj_out(outs.flatten(-2, -1)))
+
+        # Apply LayerScale before residual
+        if self.layer_scale is not None:
+            out = self.layer_scale(out)
+
+        # Apply Stochastic Depth before residual
+        if self.drop_path is not None:
+            out = self.drop_path(out)
+
         if self.with_residual:
             out = out + x_in
 
@@ -197,6 +239,8 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        layer_scale_init: float | None = None,
+        stochastic_depth_rate: float = 0.0,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -230,6 +274,17 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+
+        # LayerScale: per-channel learned scaling before residual
+        self.layer_scale = (
+            LayerScale(dim_embed, layer_scale_init) if layer_scale_init is not None else None
+        )
+
+        # Stochastic Depth: randomly drop residual path during training
+        self.drop_path = (
+            StochasticDepth(stochastic_depth_rate) if stochastic_depth_rate > 0.0 else None
+        )
+
         assert with_flash, "Only flash attention supported."
 
         # define block mask
@@ -256,6 +311,15 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
         out = self.proj_out(self.dropout(outs.flatten(-2, -1)))
+
+        # Apply LayerScale before residual
+        if self.layer_scale is not None:
+            out = self.layer_scale(out)
+
+        # Apply Stochastic Depth before residual
+        if self.drop_path is not None:
+            out = self.drop_path(out)
+
         if self.with_residual:
             out = x_in + out
 
@@ -278,6 +342,8 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        layer_scale_init: float | None = None,
+        stochastic_depth_rate: float = 0.0,
     ):
         super(MultiCrossAttentionHeadVarlen, self).__init__()
 
@@ -318,6 +384,17 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+
+        # LayerScale: per-channel learned scaling before residual
+        self.layer_scale = (
+            LayerScale(dim_embed_q, layer_scale_init) if layer_scale_init is not None else None
+        )
+
+        # Stochastic Depth: randomly drop residual path during training
+        self.drop_path = (
+            StochasticDepth(stochastic_depth_rate) if stochastic_depth_rate > 0.0 else None
+        )
+
         assert with_flash, "Only flash attention supported at the moment"
 
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
@@ -355,6 +432,15 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
             assert False
 
         outs = self.proj_out(outs.flatten(-2, -1))
+
+        # Apply LayerScale before residual
+        if self.layer_scale is not None:
+            outs = self.layer_scale(outs)
+
+        # Apply Stochastic Depth before residual
+        if self.drop_path is not None:
+            outs = self.drop_path(outs)
+
         if self.with_residual:
             outs = x_q_in + outs
 
@@ -378,6 +464,8 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        layer_scale_init: float | None = None,
+        stochastic_depth_rate: float = 0.0,
     ):
         super(MultiCrossAttentionHeadVarlenSlicedQ, self).__init__()
 
@@ -425,6 +513,17 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+
+        # LayerScale: per-channel learned scaling before residual
+        self.layer_scale = (
+            LayerScale(dim_embed_q, layer_scale_init) if layer_scale_init is not None else None
+        )
+
+        # Stochastic Depth: randomly drop residual path during training
+        self.drop_path = (
+            StochasticDepth(stochastic_depth_rate) if stochastic_depth_rate > 0.0 else None
+        )
+
         assert with_flash, "Only flash attention supported at the moment"
 
     def forward(self, x_q, x_kv, x_q_lens=None, x_kv_lens=None, ada_ln_aux=None):
@@ -466,6 +565,15 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
             ]
 
         outs = self.proj_out(torch.stack(outs).transpose(1, 0).flatten(-2, -1))
+
+        # Apply LayerScale before residual
+        if self.layer_scale is not None:
+            outs = self.layer_scale(outs)
+
+        # Apply Stochastic Depth before residual
+        if self.drop_path is not None:
+            outs = self.drop_path(outs)
+
         if self.with_residual:
             outs = x_q_in + outs.reshape(x_q_in.shape)
 
@@ -487,6 +595,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        layer_scale_init: float | None = None,
+        stochastic_depth_rate: float = 0.0,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -521,6 +631,17 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+
+        # LayerScale: per-channel learned scaling before residual
+        self.layer_scale = (
+            LayerScale(dim_embed, layer_scale_init) if layer_scale_init is not None else None
+        )
+
+        # Stochastic Depth: randomly drop residual path during training
+        self.drop_path = (
+            StochasticDepth(stochastic_depth_rate) if stochastic_depth_rate > 0.0 else None
+        )
+
         if with_flash:
             self.att = torch.nn.functional.scaled_dot_product_attention
         else:
@@ -546,6 +667,15 @@ class MultiSelfAttentionHead(torch.nn.Module):
         outs = flash_attn_func(qs, ks, vs, softcap=self.softcap, dropout_p=dropout_rate)
 
         out = self.proj_out(outs.flatten(-2, -1))
+
+        # Apply LayerScale before residual
+        if self.layer_scale is not None:
+            out = self.layer_scale(out)
+
+        # Apply Stochastic Depth before residual
+        if self.drop_path is not None:
+            out = self.drop_path(out)
+
         if self.with_residual:
             out = out + x_in
 
@@ -566,6 +696,8 @@ class MultiCrossAttentionHead(torch.nn.Module):
         norm_type="LayerNorm",
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
+        layer_scale_init: float | None = None,
+        stochastic_depth_rate: float = 0.0,
     ):
         super(MultiCrossAttentionHead, self).__init__()
 
@@ -602,6 +734,17 @@ class MultiCrossAttentionHead(torch.nn.Module):
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
+
+        # LayerScale: per-channel learned scaling before residual
+        self.layer_scale = (
+            LayerScale(dim_embed_q, layer_scale_init) if layer_scale_init is not None else None
+        )
+
+        # Stochastic Depth: randomly drop residual path during training
+        self.drop_path = (
+            StochasticDepth(stochastic_depth_rate) if stochastic_depth_rate > 0.0 else None
+        )
+
         self.att = torch.nn.functional.scaled_dot_product_attention
         self.softmax = torch.nn.Softmax(dim=-1)
 
@@ -624,6 +767,15 @@ class MultiCrossAttentionHead(torch.nn.Module):
             outs = self.att(qs, ks, vs).transpose(2, 1)
 
         outs = self.dropout(self.proj_out(outs.flatten(-2, -1)))
+
+        # Apply LayerScale before residual
+        if self.layer_scale is not None:
+            outs = self.layer_scale(outs)
+
+        # Apply Stochastic Depth before residual
+        if self.drop_path is not None:
+            outs = self.drop_path(outs)
+
         if self.with_residual:
             outs = x_q_in + outs
 

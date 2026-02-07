@@ -26,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 2
+ae_global_num_blocks: 0
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 8
+ae_aggregation_num_blocks: 12
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -130,9 +130,32 @@ data_loading :
 
 # config for training
 training_config:
-  
+
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
+
+  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
+  # Detects representation collapse via various metrics
+  collapse_monitoring:
+    enabled: true
+    compute_frequency: 100  # batches between metric computations
+    log_frequency: 100      # batches between metric logging
+    metrics:
+      effective_rank:
+        enabled: true
+        tensor_source: "both"  # "student", "teacher", or "both"
+        sample_size: 2048      # max samples for SVD (0 = no sampling)
+      singular_values:
+        enabled: true
+        tensor_source: "both"
+        sample_size: 2048
+      dimension_variance:
+        enabled: true
+        tensor_source: "both"  # cheap to compute, good early indicator
+      prototype_entropy:
+        enabled: true  # only applies to DINO
+      ema_beta:
+        enabled: true
 
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
@@ -159,14 +182,25 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
+    # Optimizer type: "adamw" (default) or "muon_adamw" (Muon for hidden weights, AdamW for embeddings/heads)
+    type: "muon_adamw"
     grad_clip: 0.1
-    weight_decay: 0.04
+    weight_decay: 0.05
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.975
       beta2 : 0.9875
       eps : 2e-08
+    muon:
+      # Learning rate multiplier for Muon relative to base LR (muon_lr = base_lr * lr_multiplier)
+      lr_multiplier: 30.0
+      # Momentum factor for Muon SGD
+      momentum: 0.95
+      # Use Nesterov momentum
+      nesterov: true
+      # Weight decay for Muon parameters (uses optimizer.weight_decay if not specified)
+      weight_decay: 0.05
 
   losses : {
     "student-teacher": {
@@ -182,12 +216,12 @@ training_config:
           },
         },
         target_and_aux_calc: {FrozenTeacher: {
-            teacher_run_id:  "yoqxf234",# "zosrc8ti",    # Required
+            teacher_run_id:  "yoqxf234", # "zosrc8ti",    # Required
             teacher_mini_epoch: -1}},
-        
+        # },
         # target_and_aux_calc: { "EMATeacher" : 
-        #   { ema_ramp_up_ratio : 0.09,
-        #     ema_halflife_in_thousands: 1e-3,
+        #   { ema_ramp_up_ratio : null,
+        #     ema_halflife_in_thousands: 1e-1,
         #     model_param_overrides : { 
         #       training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
         #     },
