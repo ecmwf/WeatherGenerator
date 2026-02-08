@@ -292,8 +292,8 @@ def cosine_latitude(target_coords, min_value=1e-3, max_value=1.0):
     return (max_value - min_value) * np.cos(latitudes_radian) + min_value
 
 
-def gamma_decay(forecast_steps, gamma):
-    fsteps = np.arange(forecast_steps)
+def gamma_decay(num_forecast_steps, gamma):
+    fsteps = np.arange(num_forecast_steps)
     weights = gamma**fsteps
     return weights * (len(fsteps) / np.sum(weights))
 

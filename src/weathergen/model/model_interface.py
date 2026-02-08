@@ -11,7 +11,6 @@
 
 import itertools
 import logging
-import re
 from pathlib import Path
 
 import omegaconf
@@ -33,7 +32,7 @@ from weathergen.model.attention import (
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import freeze_weights
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_diffusion import DiffusionLatentTargetEncoder
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
@@ -48,37 +47,38 @@ type TrainingMode = str
 
 
 def init_model_and_shard(
-    cf, dataset, run_id_contd, mini_epoch_contd, training_mode, device, overrides={}
+    cf,
+    dataset,
+    run_id_contd,
+    mini_epoch_contd,
+    training_mode,
+    device,
+    with_ddp,
+    with_fsdp,
+    overrides={},
 ):
-    model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
+    model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
     # freeze request model part
-    for name, module in model.named_modules():
-        name = module.name if hasattr(module, "name") else name
-        # avoid the whole model element which has name ''
-        if name == "":
-            continue
-        if re.fullmatch(cf.freeze_modules, name) is not None:
-            logger.info(f"Froze weights {name}")
-            freeze_weights(module)
-        
+    apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
+
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
 
-    if cf.with_ddp and not cf.with_fsdp:
+    if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             broadcast_buffers=True,
-            find_unused_parameters=True,
+            find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
         )
 
-    elif cf.with_ddp and cf.with_fsdp:
+    elif with_ddp and with_fsdp:
         # with DDP *and() FSDP
         fsdp_kwargs = {
             "mp_policy": (
@@ -119,6 +119,14 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
+        for module in model.latent_heads.modules():
+            if isinstance(module, modules_to_shard):
+                fully_shard(module, **fsdp_kwargs)
+
+        for module in model.latent_heads.modules():
+            if isinstance(module, modules_to_shard):
+                fully_shard(module, **fsdp_kwargs)
+
         full_precision_fsdp_kwargs = {
             "mp_policy": (
                 MixedPrecisionPolicy(
@@ -134,7 +142,7 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
-    if cf.with_ddp and cf.with_fsdp:
+    if with_ddp and with_fsdp:
         fully_shard(model)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
@@ -149,43 +157,21 @@ def init_model_and_shard(
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
     # complete initalization and load model if inference/continuing a run
-    if run_id_contd is None:
-        if cf.with_ddp and cf.with_fsdp:
-            model.to_empty(device="cuda")
-            if cf.with_fsdp:
-                model.reset_parameters()
-    else:
+    if run_id_contd is not None:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
         model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
-
-    # ------------------------------------------------------------------------------------------
-    # LOAD AND FREEZE ENCODER WEIGHTS
-    # ONLY FOR EXPERIMENTATION, TO BE REMOVED
-    if cf.chkpt_encoder_weights:
+    elif cf.get("load_chkpt", {}).get("run_id", None):
+        run_id = cf.load_chkpt.run_id
+        mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
-            logger.info(
-                f"Loading chkpt from run_id={cf.chkpt_encoder_weights}"\
-                f" at mini_epoch {cf.chkpt_encoder_mini_epoch}."
-            )
-
-        encoder_modules = [
-            "embed_engine",
-            "ae_local_engine",
-            "ae_local_global_engine",
-            "ae_global_engine",
-        ]
-
-        model = load_encoder(
-            cf,
-            model,
-            encoder_modules,
-            device,
-            cf.chkpt_encoder_weights,
-            cf.chkpt_encoder_mini_epoch,
-        )
-
-    # ------------------------------------------------------------------------------------------
+            logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
+        model = load_model(cf, model, device, run_id, mini_epoch)
+    else:
+        if with_ddp and with_fsdp:
+            model.to_empty(device="cuda")
+            if with_fsdp:
+                model.reset_parameters()
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -194,92 +180,6 @@ def init_model_and_shard(
 
     return model, model_params
 
-def load_encoder(cf, model, encoder_modules, device, run_id: str, mini_epoch=-1):
-    """Loads model state from checkpoint and checks for missing and unused keys.
-    Args:
-        run_id : model_id of the trained model
-        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
-    """
-
-    path_run = Path(cf.model_path) / run_id
-    mini_epoch_id = (
-        f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
-    )
-    filename = f"{run_id}_{mini_epoch_id}.chkpt"
-
-    if not (path_run / filename).exists():
-        mini_epoch_id = f"epoch{mini_epoch:05d}"
-        filename = f"{run_id}_{mini_epoch_id}.chkpt"
-    if is_root():
-        logger.info(path_run / filename)
-
-    params = torch.load(
-        path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
-    )
-
-    is_model_sharded = cf.with_ddp and cf.with_fsdp
-    if is_model_sharded:
-        meta_sharded_sd = model.state_dict()
-        maybe_sharded_sd = {}
-        for param_name, full_tensor in params.items():
-            if any(e_module in param_name for e_module in encoder_modules):
-                sharded_meta_param = meta_sharded_sd.get(param_name)
-                sharded_tensor = distribute_tensor(
-                    full_tensor,
-                    sharded_meta_param.device_mesh,
-                    sharded_meta_param.placements,
-                )
-                # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
-                maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
-        # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
-        mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
-
-        if is_root():
-            if len(mkeys) > 0:
-                logger.warning(f"Missing keys when loading model: {mkeys}")
-            if len(ukeys) > 0:
-                logger.warning(f"Unused keys when loading model: {mkeys}")
-
-        # # new network parts (e.g. for fine-tuning)
-        # if mkeys:
-        #     # Get the unique parent modules for the missing parameters
-        #     new_modules_to_init = {key.rsplit(".", 1)[0] for key in mkeys}
-
-        #     # Find the highest-level "root" new modules to avoid redundant initializations
-        #     root_new_modules = set()
-        #     for path in sorted(list(new_modules_to_init)):
-        #         if not any(path.startswith(root + ".") for root in root_new_modules):
-        #             root_new_modules.add(path)
-
-        #     # Get all modules for quick lookup and initialize the new ones
-        #     all_modules = dict(model.named_modules())
-        #     for path in root_new_modules:
-        #         if is_root():
-        #             logger.info(f"Initializing new module not found in checkpoint: {path}")
-        #         module_to_init = all_modules[path]
-        #         module_to_init.to_empty(device="cuda")
-        #         module_to_init.reset_parameters()
-
-    else:
-        if not cf.with_ddp:
-            params_temp = {}
-            for k in params.keys():
-                if any(e_module in k for e_module in encoder_modules):
-                    params_temp[k.replace("module.", "")] = params[k]
-            params = params_temp
-
-        mkeys, ukeys = model.load_state_dict(params, strict=False)
-        model = model.to(device)
-
-    # warn about difference in checkpoint and model
-    if len(mkeys) == 0 and len(ukeys) == 0:
-        logger.info(f"Checkpoint {filename} loaded successfully with all weights matching.")
-    if len(mkeys) > 0:
-        logger.warning(f"Missing keys when loading model: {mkeys}")
-    if len(ukeys) > 0:
-        logger.warning(f"Unused keys when loading model: {mkeys}")
-
-    return model
     
 def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
@@ -293,10 +193,6 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
     )
     filename = f"{run_id}_{mini_epoch_id}.chkpt"
-
-    if not (path_run / filename).exists():
-        mini_epoch_id = f"epoch{mini_epoch:05d}"
-        filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
     params = torch.load(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
@@ -339,11 +235,22 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
                 module_to_init.reset_parameters()
 
     else:
-        if not cf.with_ddp:
+        # fix mismatch between state_dict keys that can occur between interactive/non-interactive
+        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
+        params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
+        if model_has_prefix_module and not params_has_prefix_module:
+            # add "module." prefix
+            params_temp = {}
+            for k in params.keys():
+                params_temp["module." + k] = params[k]
+            params = params_temp
+        elif not model_has_prefix_module and params_has_prefix_module:
+            # remove "module." prefix
             params_temp = {}
             for k in params.keys():
                 params_temp[k.replace("module.", "")] = params[k]
             params = params_temp
+        # load checkpoint
         mkeys, ukeys = model.load_state_dict(params, strict=False)
         model = model.to(device)
 
@@ -353,7 +260,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     if len(mkeys) > 0:
         logger.warning(f"Missing keys when loading model: {mkeys}")
     if len(ukeys) > 0:
-        logger.warning(f"Unused keys when loading model: {mkeys}")
+        logger.warning(f"Unused keys when loading model: {ukeys}")
 
     return model
 
@@ -405,6 +312,9 @@ def get_target_aux_calculator(
     elif target_and_aux_calc == "DiffusionLatentTargetEncoder":
         target_aux = DiffusionLatentTargetEncoder(model)
     elif target_and_aux_calc == "EMATeacher":
+        # work around for problems with FSDP2
+        assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"
+
         meta_ema_model, _ = init_model_and_shard(
             cf,
             dataset,
@@ -412,6 +322,8 @@ def get_target_aux_calculator(
             None,
             "student",
             device,
+            with_ddp=False,
+            with_fsdp=False,
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
         ema_model = EMAModel(

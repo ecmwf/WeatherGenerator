@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import functools
 import io
 import json
 import logging
@@ -84,6 +85,7 @@ OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
 def _sanitize_start_end_time_keys(sub_conf):
+    """Convert start_date and end_date keys to datetime resolvers."""
     time_keys = ["start_date", "end_date"]
     for key in time_keys:
         if key in sub_conf:
@@ -93,6 +95,7 @@ def _sanitize_start_end_time_keys(sub_conf):
 
 
 def _sanitize_delta_time_keys(sub_conf):
+    """Convert time delta keys to timedelta resolvers."""
     delta_keys = ["time_window_step", "time_window_len"]
     for key in delta_keys:
         if key in sub_conf:
@@ -134,6 +137,7 @@ def _sanitize_time_keys(conf: Config) -> Config:
 
 
 def _strip_interpolation(conf: Config) -> Config:
+    """Remove OmegaConf interpolations and convert timedelta/datetime objects to strings."""
     stripped = OmegaConf.create()
     for key in list(conf.keys()):
         if key.startswith("_"):
@@ -165,12 +169,19 @@ def _strip_interpolation(conf: Config) -> Config:
 
 
 def get_run_id():
+    """Generate a random 8-character run ID."""
     s1 = string.ascii_lowercase
     s2 = string.ascii_lowercase + string.digits
     return "".join(random.sample(s1, 1)) + "".join(random.sample(s2, 7))
 
 
+def get_run_id_from_config(config: Config) -> str:
+    general_cfg = config.get("general", None)
+    return general_cfg.run_id if general_cfg else config.run_id
+
+
 def format_cf(config: Config) -> str:
+    """Format config as a human-readable string."""
     stream = io.StringIO()
     clean_cf = _strip_interpolation(config)
     for key, value in clean_cf.items():
@@ -188,15 +199,14 @@ def format_cf(config: Config) -> str:
 
 def save(config: Config, mini_epoch: int | None):
     """Save current config into the current runs model directory."""
-    path_models = Path(config.model_path)
     # save in directory with model files
-    dirname = path_models / config.general.run_id
+    dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_write_name(path_models, config.general.run_id, mini_epoch)
+    fname = _get_model_config_file_write_name(get_run_id_from_config(config), mini_epoch)
 
     json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
-    with fname.open("w") as f:
+    with (dirname / fname).open("w") as f:
         f.write(json_str)
 
 
@@ -213,24 +223,23 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     Returns:
         Configuration object loaded from the specified run and mini_epoch.
     """
+    # Loading path
     if Path(run_id).exists():  # load from the full path if a full path is provided
         fname = Path(run_id)
         _logger.info(f"Loading config from provided full run_id path: {fname}")
     else:
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
-            pconf = _load_private_conf()
-            model_path = _get_config_attribute(
-                config=pconf, attribute_name="model_path", fallback="models"
-            )
-        path = Path(model_path)
-        fname = _get_model_config_file_read_name(path, run_id, mini_epoch)
+            path = get_path_model(run_id=run_id)
+        else:
+            path = Path(model_path) / run_id
+
+        fname = path / _get_model_config_file_read_name(run_id, mini_epoch)
         assert fname.exists(), (
             "The fallback path to the model does not exist. Please provide a `model_path`.",
             fname,
         )
-
-    _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
+        _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
 
     with fname.open() as f:
         json_str = f.read()
@@ -241,7 +250,8 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     return _apply_fixes(config)
 
 
-def _get_model_config_file_write_name(path: Path, run_id: str, mini_epoch: int | None):
+def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
+    """Generate the filename for writing a model config file."""
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
@@ -249,20 +259,19 @@ def _get_model_config_file_write_name(path: Path, run_id: str, mini_epoch: int |
     else:
         mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
-    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
+    return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def _get_model_config_file_read_name(path: Path, run_id: str, mini_epoch: int | None):
+def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
+    """Generate the filename for reading a model config file."""
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
         mini_epoch_str = "_latest"
-    elif (path / run_id / f"model_{run_id}_epoch{mini_epoch:05d}.json").exists():
-        mini_epoch_str = f"_epoch{mini_epoch:05d}"
     else:
         mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
-    return path / run_id / f"model_{run_id}{mini_epoch_str}.json"
+    return f"model_{run_id}{mini_epoch_str}.json"
 
 
 def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
@@ -272,13 +281,10 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
     for ext in StoreType.extensions():
-        zarr_path_new = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
-        zarr_path_old = run_results / f"validation_epoch{mini_epoch:05d}_rank{rank:04d}.{ext}"
+        zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
 
-        if zarr_path_new.exists() or zarr_path_new.is_dir():
-            return zarr_path_new
-        elif zarr_path_old.exists() or zarr_path_old.is_dir():
-            return zarr_path_old
+        if zarr_path.exists() or zarr_path.is_dir():
+            return zarr_path
     raise FileNotFoundError(
         f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
         f"exist or is not a directory."
@@ -295,6 +301,26 @@ def _apply_fixes(config: Config) -> Config:
     eventually removed.
     """
     config = _check_logging(config)
+    config = _check_datasets(config)
+    return config
+
+
+def _check_datasets(config: Config) -> Config:
+    """
+    Collect dataset paths under legacy keys.
+    """
+    config = config.copy()
+    if config.get("data_paths") is None:  # TODO remove this for next version
+        legacy_keys = [
+            "data_path_anemoi",
+            "data_path_obs",
+            "data_path_eobs",
+            "data_path_fesom",
+            "data_path_icon",
+        ]
+        paths = [config.get(key) for key in legacy_keys]
+        config.data_paths = [path for path in paths if path is not None]
+
     return config
 
 
@@ -361,16 +387,12 @@ def load_merge_configs(
             c = _load_overwrite_conf(overwrite)
             c = _load_streams_in_config(c)
             overwrite_configs.append(c)
-    private_config = set_paths(private_config)
 
     if from_run_id is None:
         base_config = _load_base_conf(base)
     else:
-        base_config = load_run_config(
-            from_run_id, mini_epoch, private_config.get("model_path", None)
-        )
-        from_run_id = base_config.general.run_id
-
+        base_config = load_run_config(from_run_id, mini_epoch, None)
+        from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
@@ -378,10 +400,6 @@ def load_merge_configs(
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
 
-    # Ensure the config has mini-epoch notation
-    if hasattr(c, "samples_per_epoch"):
-        c.samples_per_mini_epoch = c.samples_per_epoch
-        c.num_mini_epochs = c.num_epochs
     return c
 
 
@@ -423,8 +441,8 @@ def set_run_id(config: Config, run_id: str | None, reuse_run_id: bool) -> Config
     """
     config = config.copy()
     if reuse_run_id:
-        assert config.general.run_id is not None, "Loaded run_id should not be None."
-        _logger.info(f"reusing run_id from previous run: {config.general.run_id}")
+        assert get_run_id_from_config(config) is not None, "Loaded run_id should not be None."
+        _logger.info(f"reusing run_id from previous run: {get_run_id_from_config(config)}")
     else:
         if run_id is None:
             # generate new id if run_id is None
@@ -478,9 +496,9 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
 
 
 def _load_private_conf(private_home: Path | None = None) -> DictConfig:
-    "Return the private configuration."
-    "If none, take it from the environment variable WEATHERGEN_PRIVATE_CONF."
-
+    """
+    Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
+    """
     env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
 
     if private_home is not None and private_home.is_file():
@@ -528,6 +546,8 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     if "secrets" in private_cf:
         del private_cf["secrets"]
 
+    private_cf = _check_datasets(private_cf)  # TODO: remove temp backward compatibility fix
+
     assert isinstance(private_cf, DictConfig)
     return private_cf
 
@@ -549,6 +569,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
+    """Load all stream configurations from a directory."""
     # TODO: might want to put this into config later instead of hardcoding it here...
     streams_history = {
         "streams_anemoi": "era5_1deg",
@@ -613,43 +634,23 @@ def load_streams(streams_directory: Path) -> list[Config]:
     return list(streams.values())
 
 
-def set_paths(config: Config) -> Config:
-    """Set the configs run_path model_path attributes to default values if not present."""
-    config = config.copy()
-    config.run_path = _get_config_attribute(
-        config=config, attribute_name="run_path", fallback="results"
-    )
-    config.model_path = _get_config_attribute(
-        config=config, attribute_name="model_path", fallback="models"
-    )
-
-    return config
-
-
-def _get_config_attribute(config: Config, attribute_name: str, fallback: str) -> str:
-    """Get an attribute from a Config. If not available, fall back to path_shared_working_dir
-    concatenated with the desired fallback path. Raise an error if neither the attribute nor a
-    fallback is specified."""
-    attribute = OmegaConf.select(config, attribute_name)
-    fallback_root = OmegaConf.select(config, "path_shared_working_dir")
-    assert attribute is not None or fallback_root is not None, (
-        f"Must specify `{attribute_name}` in config if `path_shared_working_dir` is None in config"
-    )
-    attribute = attribute if attribute else fallback_root + fallback
-    return attribute
-
-
 def get_path_run(config: Config) -> Path:
-    """Get the current runs run_path for storing run results and logs."""
-    return Path(config.run_path) / config.general.run_id
+    """Get the current runs results_path for storing run results and logs."""
+    return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
 
 
-def get_path_model(config: Config) -> Path:
+def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
-    return Path(config.model_path) / config.general.run_id
+    if config or run_id:
+        run_id = run_id if run_id else get_run_id_from_config(config)
+    else:
+        msg = f"Missing run_id and cannot infer it from config: {config}"
+        raise ValueError(msg)
+    return _get_shared_wg_path() / "models" / run_id
 
 
-def get_path_output(config: Config, mini_epoch: int) -> Path:
+def get_path_results(config: Config, mini_epoch: int) -> Path:
+    """Get the path to validation results for a specific mini_epoch and rank."""
     ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
@@ -657,80 +658,80 @@ def get_path_output(config: Config, mini_epoch: int) -> Path:
     return base_path / fname
 
 
-def get_shared_wg_path(local_path: str | Path) -> Path:
+@functools.cache
+def _get_shared_wg_path() -> Path:
+    """Get the shared working directory for WeatherGenerator."""
+    private_config = _load_private_conf()
+    return Path(private_config.get("path_shared_working_dir"))
+
+
+def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     """
-    Resolves a local, relative path to an absolute path within the configured shared working
-    directory.
+    Validates the forecast policy, steps and offset within a configuration object.
 
-    This utility function retrieves the base path defined for the shared WeatherGenerator (WG)
-    working directory from the private configuration and appends the provided local path segment.
-
-    Parameters
-    ----------
-    local_path : str or Path
-        The local or relative path segment (e.g., 'results', 'models', 'output') that needs
-        to be located within the shared working directory structure.
-
-    Returns
-    -------
-    Path
-        The absolute pathlib.Path object pointing to the specified location
-        within the shared working directory.
-
-    Notes
-    -----
-    The shared working directory base is retrieved from the 'path_shared_working_dir'
-    key found in the private configuration loaded by `_load_private_conf()`.
-    """
-    pcfg = _load_private_conf()
-    return Path(pcfg.get("path_shared_working_dir")) / local_path
-
-
-def validate_forecast_policy_and_steps(cf: OmegaConf):
-    """
-    Validates the forecast policy and steps within a configuration object.
-
-    This method enforces specific rules for the `forecast_steps` attribute, which can be
+    This method enforces specific rules for the `forecast.num_steps` attribute, which can be
     either a single integer or a list of integers, ensuring consistency with the
-    `forecast_policy` attribute.
+    `forecast.policy` attribute. Furthermore `forecast.offset` is enforeced to be either 0 or 1.
 
     The validation logic is as follows:
-    - If `cf.forecast_steps` is a single integer, a `forecast_policy` must be defined
-    (i.e., not None or empty) only if `forecast_steps` is unequal to 0.
-    - If `cf.forecast_steps` is a list, it must be non-empty, and all of its elements
-    must be non-negative integers. Additionally, a `forecast_policy` must be
-    defined if any of the forecast steps in the list are greater than 0.
+    - `forecast.offset` must either be 0 or 1.
+    - If `forecast.offset` is 0, `forecast.num_steps` must be an integer and can either be 0 (e.g.
+      used for SSL training without forecast engine) or 1 (e.g. used for diffusion in which the
+      forecast engine is used to denoise the current time window).
+    - If `forecast.offset` is 1, a `forecast.policy` must be specified and `forecast.num_steps` can
+      either be a single integer greater than 1 or a non-empty list and all of its elements must be
+      integers greater than 1.
 
     Args:
-        cf (OmegaConf): The configuration object containing the `forecast_steps`
-                        and `forecast_policy` attributes.
+        mode_cfg (OmegaConf): The training/validation/test configuration object containing the
+                             `forecast.num_steps` and `forecast.policy` attributes.
+        mode (str): the training mode, i.e. training_config, validation_config, or test_config
 
     Raises:
-        TypeError: If `cf.forecast_steps` is not an integer or a non-empty list.
-        AssertionError: If a `forecast_policy` is required but not provided, or
-                        if `forecast_step` is negative while `forecast_policy` is provided, or
+        TypeError: If `forecast.offset` is not an integer of value 0 or 1.
+        TypeError: If `forecast.num_steps` is not an integer or a non-empty list.
+        AssertionError: If a `forecast.policy` is required but not provided, or
+                        if `forecast_step` is negative while `forecast.policy` is provided, or
                         if any of the forecast steps in a list are negative.
     """
+
+    if len(forecast_cfg) == 0:
+        return
+
     provide_forecast_policy = (
-        "A 'forecast_policy' must be specified when 'forecast_steps' is not zero. "
+        f"'{mode}.forecast.policy' must be specified when '{mode}.forecast.num_steps' is not zero "
+        f"and '{mode}.forecast.offset' is 1. "
     )
     valid_forecast_policies = (
-        "Valid values for 'forecast_policy' are, e.g., 'fixed' when using constant "
-        "forecast steps throughout the training, or 'sequential' when varying the forecast "
-        "steps over mini_epochs, such as, e.g., 'forecast_steps: [2, 2, 4, 4]'. "
+        "Valid values for '{mode}.forecast.policy' are, e.g., 'fixed' when using constant number "
+        "of forecast steps throughout the training, or 'sequential' when varying the number of "
+        "forecast steps over mini_epochs, such as, e.g., 'forecast.num_steps: [2, 2, 4, 4]'. "
     )
-    valid_forecast_steps = (
-        "'forecast_steps' must be a positive integer or a non-empty list of positive integers. "
+    valid_forecast_offset = f"'{mode}.forecast.offset' must be an integer of either value 0 or 1. "
+    valid_forecast_steps_offset0 = (
+        f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer of value "
+        f"either 0 or 1. "
     )
-    if isinstance(cf.forecast_steps, int):
-        assert cf.forecast_policy and cf.forecast_steps > 0 if cf.forecast_steps != 0 else True, (
-            provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
-        )
-    elif isinstance(cf.forecast_steps, ListConfig) and len(cf.forecast_steps) > 0:
-        assert (
-            cf.forecast_policy and all(step >= 0 for step in cf.forecast_steps)
-            if any(n > 0 for n in cf.forecast_steps)
-            else True
-        ), provide_forecast_policy + valid_forecast_policies + valid_forecast_steps
+    valid_forecast_steps_offset1 = (
+        f"For '{mode}.forecast.offset: 0', '{mode}.forecast.num_steps' must be an integer greater "
+        "than 1 or a non-empty list and all of its elements must be integers greater than 1."
+    )
+
+    # get output_offset or set default to 0 as in multi_stream_data_sampler.py
+    output_offset = forecast_cfg.get("offset", 0)
+    assert isinstance(output_offset, int), TypeError(valid_forecast_offset)
+    if output_offset == 0:
+        if isinstance(forecast_cfg.num_steps, int):
+            assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
+        else:
+            raise TypeError(valid_forecast_steps_offset0)
+    elif output_offset == 1:
+        assert forecast_cfg.policy, (provide_forecast_policy, valid_forecast_policies)
+        if isinstance(forecast_cfg.num_steps, int):
+            assert forecast_cfg.num_steps > 0, valid_forecast_steps_offset1
+        elif isinstance(forecast_cfg.num_steps, ListConfig) and len(forecast_cfg.num_steps) > 0:
+            assert all(step > 0 for step in forecast_cfg.num_steps), valid_forecast_steps_offset1
+        else:
+            raise TypeError(valid_forecast_steps_offset1)
     else:
-        raise TypeError(valid_forecast_steps)
+        raise TypeError(valid_forecast_offset)

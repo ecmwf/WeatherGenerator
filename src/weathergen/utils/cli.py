@@ -1,24 +1,70 @@
 import argparse
+import enum
 from pathlib import Path
 
 import pandas as pd
 
 
+class Stage(enum.StrEnum):
+    train = enum.auto()
+    train_continue = enum.auto()
+    inference = enum.auto()
+
+
+def get_main_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    subparsers = parser.add_subparsers(dest="stage")
+    
+    train_parser = subparsers.add_parser(
+        Stage.train,
+        help="Train a WeatherGenerator configuration from the ground up.",
+    )
+    _add_train_args(train_parser)
+    continue_parser = subparsers.add_parser(
+        Stage.train_continue,
+        help="Resume training from a pretrained WeatherGenerator configuration.",
+    )
+    _add_continue_args(continue_parser)
+    inference_parser = subparsers.add_parser(
+        Stage.inference,
+        help="Run infernce on a trained WeatherGenerator configuration",
+    )
+    _add_inference_args(inference_parser)
+
+    return parser
+
+
 def get_train_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
-    _add_general_arguments(parser)
+    _add_train_args(parser)
 
     return parser
 
 
 def get_continue_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
+    _add_continue_args(parser)
 
+    return parser
+
+
+def get_inference_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    _add_inference_args(parser)
+
+    return parser
+
+
+def _add_train_args(parser: argparse.ArgumentParser):
+    _add_general_arguments(parser)
+
+
+def _add_continue_args(parser: argparse.ArgumentParser):
     _add_general_arguments(parser)
     _add_model_loading_params(parser)
 
     parser.add_argument(
-        "--finetune_forecast",
+        "--finetune-forecast",
         action="store_true",
         help=(
             "Fine tune for forecasting. It overwrites some of the Config settings. "
@@ -26,24 +72,20 @@ def get_continue_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    return parser
 
-
-def get_inference_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False)
-
+def _add_inference_args(parser: argparse.ArgumentParser):
     _add_model_loading_params(parser)
     _add_general_arguments(parser)
 
     parser.add_argument(
-        "--start_date",
+        "--start-date",
         "-start",
         type=_format_date,
         default="2022-10-01",
         help="Start date for inference. Format must be parsable with pd.to_datetime.",
     )
     parser.add_argument(
-        "--end_date",
+        "--end-date",
         "-end",
         type=_format_date,
         default="2022-12-01",
@@ -53,18 +95,16 @@ def get_inference_parser() -> argparse.ArgumentParser:
         "--samples", type=int, default=10000000, help="Number of inference samples."
     )
     parser.add_argument(  # behaviour changed => implies default=False
-        "--save_samples",
+        "--save-samples",
         type=bool,
         default=True,
         help="Toggle saving of samples from inference. Default True",
     )
     parser.add_argument(
-        "--streams_output",
+        "--streams-output",
         nargs="+",
         help="Output streams during inference.",
     )
-
-    return parser
 
 
 def _format_date(date: str) -> str:
@@ -79,7 +119,7 @@ def _format_date(date: str) -> str:
 
 def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
-        "--private_config",
+        "--private-config",
         type=Path,
         default=None,
         help=(
@@ -95,7 +135,7 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
         help="Optional experiment specfic configuration files in ascending order of precedence.",
     )
     parser.add_argument(
-        "--run_id",
+        "--run-id",
         type=str,
         help=(
             "The run id for this run."
@@ -116,17 +156,19 @@ def _add_general_arguments(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--base-config",
         type=Path,
+        nargs="?",
         help=(
             "Path to the base configuration file."
             "If not provided, ./config/default_config.yml is used."
         ),
+        default=None,
     )
 
 
 def _add_model_loading_params(parser: argparse.ArgumentParser):
     parser.add_argument(
         "-id",
-        "--from_run_id",
+        "--from-run-id",
         required=True,
         help=(
             "Start inference or continue training from the WeatherGenerator"
@@ -135,18 +177,18 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
     )
     parser.add_argument(
         "-e",
-        "--mini_epoch",
+        "--mini-epoch",
         type=int,
         default=-1,
         help=(
-            "Mini_epoch of pretrained WeatherGenerator model used"
+            "Mini-epoch of pretrained WeatherGenerator model used"
             " (Default -1 corresponds to the last checkpoint)."
         ),
     )
     parser.add_argument(
-        "--reuse_run_id",
+        "--reuse-run-id",
         action="store_true",
-        help="Use the id given via --from_run_id also for the current run. "
+        help="Use the id given via --from-run-id also for the current run. "
         "The storage location for artifacts will be reused as well. "
         "This might overwrite artifacts from previous runs.",
     )

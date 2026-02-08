@@ -217,7 +217,7 @@ def _process_stream(
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
     """
-    # try:
+
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
@@ -226,28 +226,29 @@ def _process_stream(
         return run_id, stream, {}
 
     # Parallel plotting
-    if stream_dict.get("plotting"):
+    if stream_dict.get("plotting") and type_ == "zarr":
         plot_data(reader, stream, global_plotting_opts)
 
     # Scoring per stream
     if not stream_dict.get("evaluation"):
         return run_id, stream, {}
 
-    stream_loaded_scores, missing_metrics = reader.load_scores(
+    stream_loaded_scores, recomputable_metrics = reader.load_scores(
         stream,
         regions,
         metrics,
     )
     scores_dict = stream_loaded_scores
 
-    if missing_metrics or plot_score_maps:
-        regions_to_compute = list(set(missing_metrics.keys())) if missing_metrics else regions
-        metrics_to_compute = missing_metrics if missing_metrics else metrics
+    if recomputable_metrics or (plot_score_maps and type_ == "zarr"):
+        regions_to_compute = (
+            list(set(recomputable_metrics.keys())) if recomputable_metrics else regions
+        )
+        metrics_to_compute = recomputable_metrics if recomputable_metrics else metrics
 
         stream_computed_scores = calc_scores_per_stream(
             reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
         )
-
         metric_list_to_json(reader, stream, stream_computed_scores, regions)
         scores_dict = merge(stream_loaded_scores, stream_computed_scores)
 
@@ -279,6 +280,8 @@ def evaluate_from_config(
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     use_parallel = cfg.evaluation.get("num_processes", 0)
+    default_streams = cfg.get("default_streams", {})
+
     if use_parallel == "auto":
         num_processes = mp.cpu_count()
     elif isinstance(use_parallel, int):
@@ -301,9 +304,14 @@ def evaluate_from_config(
     # Build tasks per stream
     for run_id, run in runs.items():
         type_ = run.get("type", "zarr")
-        reader = get_reader(
-            type_, run, run_id, private_paths, cfg.evaluation.regions, cfg.evaluation.metrics
-        )
+
+        if "streams" not in run:
+            run["streams"] = default_streams
+
+        regions = cfg.evaluation.regions
+        metrics = cfg.evaluation.metrics
+
+        reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
         for stream in reader.streams:
             tasks.append(
