@@ -28,9 +28,15 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         with torch.no_grad():
             tokens, posteriors = self.encoder(model_params=model_params, batch=batch)
 
-        return TargetAuxOutput(
-            num_forecast_steps=batch.get_forecast_steps(),
-            physical=None,
-            latent=tokens,
-            aux_outputs={"noise_level_rn": noise_level_rn},
+        target_aux_output = TargetAuxOutput(
+            batch.get_output_len(), 
+            output_idxs=batch.get_output_idxs(),
         )
+
+        #TODO: currently hard-coding 0
+        target_aux_output.add_latent_target(0, 'diffusion_latent', tokens)
+
+        #TODO: write function in TargetAuxOutput class
+        target_aux_output.aux_outputs={"noise_level_rn": noise_level_rn}
+
+        return target_aux_output

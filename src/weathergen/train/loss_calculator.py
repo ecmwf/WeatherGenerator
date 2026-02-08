@@ -88,6 +88,8 @@ class LossCalculator:
         loss = torch.tensor(0.0, requires_grad=True)
         for loss_term_name, calc_term in self.loss_calculators.items():
             target = targets_and_aux[loss_term_name]
+            print(f'available targets for targets_and_aux.keys(): {targets_and_aux.keys()}')
+            print(f'Computing loss for {loss_term_name}')
             for weight, calculator in calc_term:
                 if weight > 0.0:
                     loss_values = calculator.compute_loss(
