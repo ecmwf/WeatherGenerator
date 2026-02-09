@@ -251,7 +251,10 @@ def get_variables(xdata: xr.DataArray, config_file: Path, arg_variables: list, s
         raise Exception("No variables with configuration found in zarr file.")
 
     for v in variables:
-        v.unit = v.zarr_units = v.zarr_units[stream]
+        try:
+            v.zarr_units = v.zarr_units[stream]
+        except KeyError:
+            v.zarr_units = v.zarr_units["DEFAULT"]
 
     return variables
 
@@ -314,7 +317,7 @@ def main():
 
     method_factory = Interpolator_factory(args.method)
 
-    with ZarrIO(args.zarrfile) as zarrio:
+    with ZarrIO(args.zarrfile, read_only=True) as zarrio:
         streams = get_streams(zarrio, args.streams)
 
         t_start = time()

@@ -2,7 +2,7 @@ import numpy as np
 import xarray as xr
 
 from weathergen.common.io import ZarrIO
-from weathergen.evaluate.score import Scores
+from weathergen.evaluate.scores.score import Scores
 from weathergen.verif.verif_config import Variable
 from weathergen.verif.verif_interpolator import Verif_interpolator
 
