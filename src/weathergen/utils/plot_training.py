@@ -23,7 +23,8 @@ from weathergen.utils.train_logger import Metrics, TrainLogger
 _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
-
+DEFAULT_CONFIG_FILE= Path("./config/default_config.yml")
+DEFAULT_MODEL_PATH = config._get_shared_wg_path() / "models"
 
 ####################################################################################################
 def _ensure_list(value):
@@ -150,7 +151,7 @@ def clean_plot_folder(plot_dir: Path):
 
 
 ####################################################################################################
-def get_stream_names(run_id: str, model_path: Path | None = "./model"):
+def get_stream_names(run_id: str, model_path: Path | None = DEFAULT_MODEL_PATH):
     """
     Get the stream names from the model configuration file.
 
@@ -492,7 +493,7 @@ def plot_loss_per_run(
     if errs is None:
         errs = ["mse"]
 
-    plot_dir = Path(plot_dir)
+    plot_dir = config._get_shared_wg_path() / "plots" 
 
     modes = [modes] if type(modes) is not list else modes
     # repeat colors when train and val is plotted simultaneously
@@ -594,12 +595,14 @@ def plot_train(args=None):
     )
 
     parser.add_argument(
-        "-o", "--output_dir", default="./plots/", type=Path, help="Directory where plots are saved"
+        "-o", "--output_dir", 
+        default=config._get_shared_wg_path() / "plots", 
+        type=Path, help="Directory where plots are saved"
     )
     parser.add_argument(
         "-m",
         "--model_base_dir",
-        default=None,
+        default=config._get_shared_wg_path() / "models",
         type=Path,
         help="Base-directory where models are saved",
     )
@@ -673,7 +676,7 @@ def plot_train(args=None):
         clean_plot_folder(out_dir)
 
     # read logged data
-
+    
     runs_data = [TrainLogger.read(run_id, model_path=model_base_dir) for run_id in runs_ids]
 
     # determine which runs are still alive (as a process, though they might hang internally)
