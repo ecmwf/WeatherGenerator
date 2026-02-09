@@ -459,25 +459,19 @@ def metric_list_to_json(
 
     Parameters
     ----------
-    reader:
+    reader: Reader
         Reader object containing all info about the run_id.
-    metrics_list :
+    stream: str
+        Stream name.
+    metrics_dict: list
         Metrics per stream.
-    npoints_sample_list :
-        Number of points per sample per stream.
-    streams :
-        Stream names.
-    region :
-        Region name.
-    metric_dir :
-        Output directory.
-    run_id :
-        Identifier of the inference run.
-    mini_epoch :
-        Mini_epoch number.
+    regions: list
+        Region names.
     """
     # stream_loaded_scores['rmse']['nhem']['ERA5']['jjqce6x5']
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
+
+    #_logger.info(f"{reader.mini_epoch}")
 
     for metric, metric_stream in metrics_dict.items():
         for region in regions:

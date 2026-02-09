@@ -172,7 +172,7 @@ def get_reader(
     elif reader_type == "json":
         reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
     elif reader_type == "merge":
-        reader = WeatherGenMergeReader(run, run_id, private_paths)
+        reader = WeatherGenMergeReader(run, run_id, private_paths, region, metric)
     else:
         raise ValueError(f"Unknown reader type: {reader_type}")
     return reader
@@ -272,6 +272,7 @@ def evaluate_from_config(
         Configuration input stored as dictionary.
     """
     runs = cfg.run_ids
+    _logger.info(f"Detected {runs} runs")
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
