@@ -356,7 +356,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "regions": global_plotting_opts.get("regions", ["global"]),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
     }
-    plotter = Plotter(plotter_cfg, reader.runplot_dir)
+    plotter = Plotter(plotter_cfg, run_id)
 
     available_data = reader.check_availability(stream, mode="plotting")
 

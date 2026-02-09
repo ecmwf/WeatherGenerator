@@ -65,6 +65,7 @@ class QuaverParser(CfParser):
         self.sf_file = ekd.create_target("file", self.get_output_filename("sfc"))
 
         self.template_cache = self.cache_templates()
+    
 
     def process_sample(
         self,
@@ -190,7 +191,7 @@ class QuaverParser(CfParser):
                 Output filename as a Path object.
         """
         return (
-            Path(self.output_dir)
+            self.output_dir
             / f"{self.data_type}_{level_type}_{self.run_id}_{self.expver}.{self.file_extension}"
         )
 
