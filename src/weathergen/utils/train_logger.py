@@ -144,7 +144,7 @@ class TrainLogger:
             )
         run_id = cf.general.run_id
 
-        result_dir_base = config.get_path_run(cf)
+        result_dir_base = config.get_path_run(cf).parent
         result_dir = result_dir_base / run_id
         fname_log_train = result_dir / f"{run_id}_train_log.txt"
         fname_log_val = result_dir / f"{run_id}_val_log.txt"
@@ -156,12 +156,12 @@ class TrainLogger:
         cols_train = ["dtime", "samples", "mse", "lr"]
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
         for si in cf.streams:
-            for lf in cf.loss_fcts:
+            for lf in cf.training_config.losses.physical.loss_fcts:
                 cols1 += [_key_loss(si["name"], lf[0])]
                 cols_train += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
-        with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
+        with_stddev = [("stats" in lf) for lf in cf.training_config.losses.physical.loss_fcts]
         if with_stddev:
             for si in cf.streams:
                 cols1 += [_key_stddev(si["name"])]
@@ -214,12 +214,12 @@ class TrainLogger:
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
         for si in cf.streams:
-            for lf in cf.loss_fcts_val:
+            for lf in cf.training_config.losses.physical.loss_fcts:
                 cols_val += [
                     si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
                 ]
                 cols2 += [_key_loss(si["name"], lf[0])]
-        with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
+        with_stddev = [("stats" in lf) for lf in cf.training_config.losses.physical.loss_fcts]
         if with_stddev:
             for si in cf.streams:
                 cols2 += [_key_stddev(si["name"])]
@@ -370,6 +370,8 @@ def clean_df(df, columns: list[str] | None):
             idcs = [i for i in range(len(columns)) if columns[i] == "loss_avg_mean"]
             if len(idcs) > 0:
                 columns[idcs[0]] = "loss_avg_0_mean"
+        for key in list(df.columns):
+            _logger.info(key)
         df = df.select(columns)
         # Remove all rows where all columns are null
         df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))
@@ -392,18 +394,21 @@ def clean_name(s: str) -> str:
 
 
 def _key_loss(st_name: str, lf_name: str) -> str:
-    st_name = clean_name(st_name)
-    return f"stream.{st_name}.loss_{lf_name}.loss_avg"
+    st_name = clean_name(st_name) # LossPhysical.ERA5.mse.t_600.2
+    return f"LossPhysical.{st_name}.mse.avg" # LossPhysical.ERA5.mse.avg
+    # return f"stream.{st_name}.loss_{lf_name}.loss_avg"
 
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
-    st_name = clean_name(st_name)
-    return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
+    st_name = clean_name(st_name) 
+    return f"LossPhysical.{st_name}.{lf_name}.{ch_name}" # LossPhysical.ERA5.mse.t_500.1
+    # return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
 def _key_stddev(st_name: str) -> str:
     st_name = clean_name(st_name)
-    return f"stream.{st_name}.stddev_avg"
+    return f"LossPhysical.loss_avg" # 
+    # return f"stream.{st_name}.stddev_avg"
 
 
 def prepare_losses_for_logging(
