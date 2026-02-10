@@ -97,9 +97,6 @@ class StreamData:
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
         ]
         self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
-        self.target_tokens_lens = [
-            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
-        ]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
 
         # source tokens per cell
@@ -122,7 +119,6 @@ class StreamData:
         self.target_coords = _pin_tensor_list(self.target_coords)
         self.target_coords_lens = _pin_tensor_list(self.target_coords_lens)
         self.target_tokens = _pin_tensor_list(self.target_tokens)
-        self.target_tokens_lens = _pin_tensor_list(self.target_tokens_lens)
         self.idxs_inv = _pin_tensor_list(self.idxs_inv)
         self.target_coords_raw = _pin_tensor_list(self.target_coords_raw)
 

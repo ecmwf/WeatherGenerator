@@ -9,6 +9,8 @@ import torch
 from numpy.typing import NDArray
 
 from weathergen.datasets.batch import SampleMetaData
+from weathergen.utils.train_logger import Stage
+from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +111,7 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, healpix_level):
+    def __init__(self, healpix_level: int, stage: Stage):
         self.rng = None
 
         self.mask_value = 0.0
@@ -118,6 +120,8 @@ class Masker:
         # number of healpix cells
         self.healpix_level_data = healpix_level
         self.healpix_num_cells = 12 * (4**healpix_level)
+
+        self.stage = stage
 
     def reset_rng(self, rng) -> None:
         """
@@ -250,7 +254,11 @@ class Masker:
         return corr_dict
 
     def build_samples_for_stream(
-        self, training_mode: str, num_cells: int, stage_cfg: dict
+        self,
+        training_mode: str,
+        num_cells: int,
+        stage_cfg: dict,
+        stream_cfg: dict,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
@@ -276,12 +284,17 @@ class Masker:
         for i_cfg, (_, target_cfg) in enumerate(target_cfgs.items()):
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
-                target_mask, mask_params = self._get_mask(
-                    num_cells=num_cells,
-                    strategy=target_cfg.get("masking_strategy"),
-                    masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
-                    target_relationship_mask=("independent", None),
-                )
+                # determine if forcing dataset => mask is empty
+                if is_stream_forcing(stream_cfg, self.stage):
+                    target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                else:
+                    target_mask, mask_params = self._get_mask(
+                        num_cells=num_cells,
+                        strategy=target_cfg.get("masking_strategy"),
+                        masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
+                        target_relationship_mask=("independent", None),
+                    )
+
                 # get all losses and flatten
                 losses = [v[1][1] for _, v in corr_dict.items() if len(v) > 0 and v[0] == i_cfg]
                 losses = [ll for lt in losses for ll in lt]
@@ -323,12 +336,17 @@ class Masker:
                 # target is specified)
                 target_idx += i_sample % target_num_samples[target_cfg_idx].item()
 
-                source_mask, mask_params = self._get_mask(
-                    num_cells=num_cells,
-                    strategy=source_cfg.get("masking_strategy"),
-                    masking_strategy_config=masking_config,
-                    target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
-                )
+                # determine if forcing dataset => mask is empty
+                if is_stream_diagnostic(stream_cfg, self.stage):
+                    source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                else:
+                    source_mask, mask_params = self._get_mask(
+                        num_cells=num_cells,
+                        strategy=source_cfg.get("masking_strategy"),
+                        masking_strategy_config=masking_config,
+                        target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
+                    )
+
                 corr = target_idx
                 source_masks.add_mask(
                     source_mask, mask_params, source_cfg, losses, i_source, corr, relationship

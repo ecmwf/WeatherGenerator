@@ -60,23 +60,21 @@ def write_output(
             preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
             targets_lens[-1] += [[]]
 
+            # handle forcing streams or if sample is empty
+            if preds is None:
+                # preds are empty so create copy of target and add ensemble dimension
+                assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
+                preds = [targets[0].clone().unsqueeze(0)]
+
             for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
-                pred, target = pred.to(fp32), target.to(fp32)
+                # denormalize data if requested and map to storage format
+                preds_s += [dn_data(sname, pred).detach().to(fp32).cpu().numpy()]
+                targets_s += [dn_data(sname, target).detach().to(fp32).cpu().numpy()]
 
-                if not (target.shape[0] > 0 and pred.shape[0] > 0):
-                    continue
-
-                # extract data/coords and remove token dimension if it exists
-                pred = pred.reshape([pred.shape[0], *target.shape])
-                assert pred.shape[1] > 0
-
-                preds_s += [dn_data(sname, pred).detach().cpu().numpy()]
-                targets_s += [dn_data(sname, target).detach().cpu().numpy()]
-
-                key = "target_coords"
-                t_coords_s += [target_aux_out.physical[t_idx][sname][key][i_batch].cpu().numpy()]
-                key = "target_times"
-                t_times_s += [target_aux_out.physical[t_idx][sname][key][i_batch]]
+                # extract original target coords and times from target data
+                target_data = target_aux_out.physical[t_idx][sname]
+                t_coords_s += [target_data["target_coords"][i_batch].cpu().numpy()]
+                t_times_s += [target_data["target_times"][i_batch].astype("datetime64[ns]")]
 
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
 
@@ -114,7 +112,7 @@ def write_output(
     # output stream names to be written, use specified ones or all if nothing specified
     stream_names = [stream.name for stream in cf.streams]
     if val_cfg.get("output").get("streams") is not None:
-        output_stream_names = val_cfg.streams_output
+        output_stream_names = val_cfg.output.streams
     else:
         output_stream_names = stream_names
 
