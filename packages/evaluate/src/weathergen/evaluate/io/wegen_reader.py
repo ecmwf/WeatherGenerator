@@ -870,6 +870,14 @@ class WeatherGenMergeReader(Reader):
                 scores, missing = reader.load_scores(stream, regions, metrics)
                 merge(merged_scores, scores)
                 merge(merged_missing, missing)
+
+            for metric in merged_scores.keys():
+                for region in merged_scores[metric].keys():
+                    for stream in merged_scores[metric][region].keys():
+                        scores = (merged_scores[metric][region][stream].pop(run_id, None) for run_id in self.run_ids)
+                        _logger.info(f"scores {scores}")
+                        merged_scores[metric][region][stream].setdefault('merge_test', xr.concat(scores,dim='ens').assign_coords(ens=range(len(self.readers))))
+
             return merged_scores, merged_missing
 
         # ZarrReader
