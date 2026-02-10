@@ -272,7 +272,6 @@ def evaluate_from_config(
         Configuration input stored as dictionary.
     """
     runs = cfg.run_ids
-    _logger.info(f"Detected {runs} runs")
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))

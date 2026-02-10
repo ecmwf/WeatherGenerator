@@ -29,6 +29,7 @@ from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
+from weathergen.evaluate.utils.utils import merge
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -205,7 +206,8 @@ class WeatherGenReader(Reader):
         Load a single pre-computed score for a given run, stream and metric
         """
         score_path = (
-            Path(self.results_base_dir) / "evaluation"
+            Path(self.results_base_dir)
+            / "evaluation"
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
@@ -691,10 +693,20 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
 
 
 class WeatherGenMergeReader(Reader):
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None,/,  regions: list[str] | None = None, metrics: list[str] | None = None, *, reader_type: str = 'json'):
+    def __init__(
+        self,
+        eval_cfg: dict,
+        run_id: str,
+        private_paths: dict | None = None,
+        /,
+        regions: list[str] | None = None,
+        metrics: list[str] | None = None,
+        *,
+        reader_type: str = "json",
+    ):
         """
         Data reader class for merging WeatherGenerator model outputs stored in Zarr or JSON format.
-        
+
         Parameters
         ----------
         eval_cfg: dict
@@ -715,10 +727,12 @@ class WeatherGenMergeReader(Reader):
 
         # TODO: Decide which reader shall be used.
         for run_id in self.run_ids:
-            if reader_type == 'zarr':
+            if reader_type == "zarr":
                 reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
             else:
-                reader = WeatherGenJSONReader(self.eval_cfg, run_id, self.private_paths, regions, metrics)
+                reader = WeatherGenJSONReader(
+                    self.eval_cfg, run_id, self.private_paths, regions, metrics
+                )
             self.readers.append(reader)
 
     def get_data(
@@ -848,11 +862,20 @@ class WeatherGenMergeReader(Reader):
         missing_metrics:
             dictionary of missing regions and metrics that need to be recomputed.
         """
-        # TODO: merge the scores
+        # Merge scores from all JsonReaders
         if isinstance(self.readers[0], WeatherGenJSONReader):
-            return self.readers[0].load_scores(stream,regions,metrics)
+            merged_scores = {}
+            merged_missing = {}
+            for reader in self.readers:
+                scores, missing = reader.load_scores(stream, regions, metrics)
+                merge(merged_scores, scores)
+                merge(merged_missing, missing)
 
+            _logger.info(f"scores {merged_scores}")
+            _logger.info(f"missing {merged_missing}")
+            return merged_scores, merged_missing
 
+        # ZarrReader
         # TODO: implement this properly. Not it is skipping loading scores
         local_scores = {}
         missing_metrics = {}
