@@ -876,7 +876,7 @@ class WeatherGenMergeReader(Reader):
                     for stream in merged_scores[metric][region].keys():
                         scores = (merged_scores[metric][region][stream].pop(run_id, None) for run_id in self.run_ids)
                         _logger.info(f"scores {scores}")
-                        merged_scores[metric][region][stream].setdefault('merge_test', xr.concat(scores,dim='ens').assign_coords(ens=range(len(self.readers))))
+                        merged_scores[metric][region][stream].setdefault(self.run_id, xr.concat(scores,dim='ens').assign_coords(ens=range(len(self.readers))))
 
             return merged_scores, merged_missing
 
