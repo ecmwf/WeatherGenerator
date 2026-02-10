@@ -715,6 +715,13 @@ class WeatherGenMergeReader(Reader):
             run id of the model
         private_paths: dict
             dictionary of private paths for the supported HPC
+        regions: list[str]
+            names of predefined bounding box for a region
+        metrics: list[str]
+            names of the metric scores to compute
+        reader_type: str
+            The type of the internal reader. If zarr, WeatherGenZarrReader is used,
+            WeatherGenJSONReader otherwise. Default: zarr
         """
         super().__init__(eval_cfg, run_id, private_paths)
         self.run_ids = eval_cfg.get("merge_run_ids", [])
@@ -841,7 +848,9 @@ class WeatherGenMergeReader(Reader):
 
         return da_ens
 
-    def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray | None:
+    def load_scores(
+        self, stream: str, regions: list[str], metrics: list[str]
+    ) -> xr.DataArray | None:
         """
         Load the pre-computed scores for a given run, stream and metric and epoch.
 
@@ -866,7 +875,7 @@ class WeatherGenMergeReader(Reader):
         if isinstance(self.readers[0], WeatherGenJSONReader):
             merged_scores = {}
             merged_missing = {}
-            
+
             # deep merge dicts
             for reader in self.readers:
                 scores, missing = reader.load_scores(stream, regions, metrics)
@@ -877,9 +886,17 @@ class WeatherGenMergeReader(Reader):
             for metric in merged_scores.keys():
                 for region in merged_scores[metric].keys():
                     for stream in merged_scores[metric][region].keys():
-                        scores = (merged_scores[metric][region][stream].pop(run_id, None) for run_id in self.run_ids)
+                        scores = (
+                            merged_scores[metric][region][stream].pop(run_id, None)
+                            for run_id in self.run_ids
+                        )
                         _logger.info(f"scores {scores}")
-                        merged_scores[metric][region][stream].setdefault(self.run_id, xr.concat(scores,dim='ens').assign_coords(ens=range(len(self.readers))))
+                        merged_scores[metric][region][stream].setdefault(
+                            self.run_id,
+                            xr.concat(scores, dim="ens").assign_coords(
+                                ens=range(len(self.readers))
+                            ),
+                        )
 
             return merged_scores, merged_missing
 
