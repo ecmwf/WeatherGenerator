@@ -20,7 +20,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import distribute_tensor
 
-from weathergen.common.config import get_path_model, Config, merge_configs
+from weathergen.common.config import Config, get_path_model, merge_configs
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
