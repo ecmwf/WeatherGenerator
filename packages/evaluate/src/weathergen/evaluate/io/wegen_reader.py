@@ -862,15 +862,18 @@ class WeatherGenMergeReader(Reader):
         missing_metrics:
             dictionary of missing regions and metrics that need to be recomputed.
         """
-        # Merge scores from all JsonReaders
+        # merge scores from all JsonReaders
         if isinstance(self.readers[0], WeatherGenJSONReader):
             merged_scores = {}
             merged_missing = {}
+            
+            # deep merge dicts
             for reader in self.readers:
                 scores, missing = reader.load_scores(stream, regions, metrics)
                 merge(merged_scores, scores)
                 merge(merged_missing, missing)
 
+            # merge runs into one with all scores concatenated
             for metric in merged_scores.keys():
                 for region in merged_scores[metric].keys():
                     for stream in merged_scores[metric][region].keys():
