@@ -659,7 +659,8 @@ def plot_train(args=None):
     model_base_dir = DEFAULT_SHARED_PATH / "models" 
     if model_base_dir !=  Path(args.model_base_dir):
         _logger.warning(
-            f"Model base directory specified in args ({args.model_base_dir}) is different from the default shared path ({model_base_dir}). "
+            f"Model base directory specified in args ({args.model_base_dir}) "
+            f"is different from the default shared path ({model_base_dir}). "
             f"Using the model base directory from args: {model_base_dir}"
         )
     out_dir = Path(args.output_dir)
