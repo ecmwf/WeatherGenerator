@@ -324,8 +324,8 @@ class WeatherGenZarrReader(WeatherGenReader):
             ):
                 self.fname_zarr = fname_zarr
         else:
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
+            _logger.error(f"Zarr file {fname_zarr} does not exist.")
+            raise FileNotFoundError(f"Zarr file {fname_zarr} does not exist")
 
     def get_data(
         self,
