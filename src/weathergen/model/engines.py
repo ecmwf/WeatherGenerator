@@ -479,7 +479,7 @@ class ForecastingEngine(torch.nn.Module):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             else:
-                tokens = block(tokens, coords, aux_info)
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 

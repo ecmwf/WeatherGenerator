@@ -186,6 +186,7 @@ training_config:
       time_step: 06:00:00
       num_steps: 2
       policy: "fixed" 
+      offset: 1
 
 
 # validation config; full validation config is merge of training and validation config
