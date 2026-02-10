@@ -471,7 +471,6 @@ def metric_list_to_json(
     # stream_loaded_scores['rmse']['nhem']['ERA5']['jjqce6x5']
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
 
-
     for metric, metric_stream in metrics_dict.items():
         for region in regions:
             metric_now = metric_stream[region][stream]

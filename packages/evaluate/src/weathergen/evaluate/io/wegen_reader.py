@@ -702,7 +702,7 @@ class WeatherGenMergeReader(Reader):
         regions: list[str] | None = None,
         metrics: list[str] | None = None,
         *,
-        reader_type: str = "json",
+        reader_type: str = "zarr",
     ):
         """
         Data reader class for merging WeatherGenerator model outputs stored in Zarr or JSON format.
@@ -870,9 +870,6 @@ class WeatherGenMergeReader(Reader):
                 scores, missing = reader.load_scores(stream, regions, metrics)
                 merge(merged_scores, scores)
                 merge(merged_missing, missing)
-
-            _logger.info(f"scores {merged_scores}")
-            _logger.info(f"missing {merged_missing}")
             return merged_scores, merged_missing
 
         # ZarrReader
