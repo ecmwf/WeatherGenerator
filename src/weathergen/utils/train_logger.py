@@ -148,7 +148,6 @@ class TrainLogger:
         result_dir = result_dir_base / run_id
         fname_log_train = result_dir / f"{run_id}_train_log.txt"
         fname_log_val = result_dir / f"{run_id}_val_log.txt"
-        fname_perf_val = result_dir / f"{run_id}_perf_log.txt"
 
         # training
 
@@ -157,15 +156,6 @@ class TrainLogger:
         cols_train += ["dtime", "samples", "mse", "lr"]
         cols1 += [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
 
-        # with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
-        # if with_stddev:
-        #     for si in cf.streams:
-        #         cols1 += [_key_stddev(si["name"])]
-        #         cols_train += [
-        #             si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-        #             + ", "
-        #             + "stddev"
-        #         ]
         # read training log data
         try:
             with open(fname_log_train, "rb") as f:
@@ -210,14 +200,7 @@ class TrainLogger:
         cols2, cols_val = get_loss_terms_per_stream(cf.streams, cf.validation_config)
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
-        # if with_stddev:
-        #     for si in cf.streams:
-        #         cols2 += [_key_stddev(si["name"])]
-        #         cols_val += [
-        #             si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-        #             + ", "
-        #             + "stddev"
-        #         ]
+
         # read validation log data
         try:
             with open(fname_log_val, "rb") as f:
@@ -256,54 +239,7 @@ class TrainLogger:
             log_val = np.array([])
         metrics_val_df = read_metrics(cf, run_id, "val", cols2, result_dir_base)
 
-        # performance
-        # define cols for performance monitoring
-        cols_perf = ["GPU", "memory"]
-        # read perf log data
-        try:
-            with open(fname_perf_val, "rb") as f:
-                log_perf = np.loadtxt(f, delimiter=",")
-            log_perf = log_perf.reshape((log_perf.shape[0] // len(cols_perf), len(cols_perf)))
-        except (
-            TypeError,
-            AttributeError,
-            IndexError,
-            ZeroDivisionError,
-            ValueError,
-        ) as e:
-            _logger.warning(
-                (
-                    f"Warning: no validation data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — "
-                    "possible format, dimension, or logic issue.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    "File system error occurred while handling the log file.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except Exception:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    f"Due to exception with trace:\n{traceback.format_exc()}",
-                )
-            )
-            log_perf = np.array([])
-        metrics_system_df = read_metrics(
-            cf,
-            run_id,
-            None,
-            [_weathergen_timestamp, _performance_gpu, _performance_memory],
-            result_dir_base,
-        )
-
-        return Metrics(run_id, "train", log_train_df, metrics_val_df, metrics_system_df)
+        return Metrics(run_id, "train", log_train_df, metrics_val_df, None)
 
 
 def read_metrics(
