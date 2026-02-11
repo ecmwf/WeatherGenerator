@@ -103,7 +103,7 @@ class NetcdfParser(CfParser):
 
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
         out_fname = (
-            self.output_dir / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
+            Path(self.output_dir) / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
         )
         return out_fname
 

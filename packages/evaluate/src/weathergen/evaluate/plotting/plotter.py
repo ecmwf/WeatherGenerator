@@ -17,7 +17,7 @@ from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
 
-from weathergen.common.config import _get_shared_wg_path, _load_private_conf
+from weathergen.common.config import _load_private_conf
 from weathergen.evaluate.plotting.plot_utils import (
     DefaultMarkerSize,
 )
@@ -44,7 +44,7 @@ class Plotter:
     Contains all basic plotting functions.
     """
 
-    def __init__(self, plotter_cfg: dict, run_id: str , stream: str | None = None):
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path, stream: str | None = None):
         """
         Initialize the Plotter class.
 
@@ -57,8 +57,9 @@ class Plotter:
                 - dpi_val: DPI value for the saved images
                 - fig_size: Size of the figure (width, height) in inches
                 - tokenize_spacetime: If True, all valid times will be plotted in one plot
-        run_id:
-            Run identifier used to organize the plots.
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
         stream:
             Stream identifier for which the plots will be created.
             It can also be set later via update_data_selection.
@@ -74,9 +75,9 @@ class Plotter:
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
-        self.run_id = run_id
+        self.run_id = output_basedir.name
 
-        self.out_plot_basedir = _get_shared_wg_path() / "results" / self.run_id / "plots"
+        self.out_plot_basedir = Path(output_basedir) / "plots"
 
         if not os.path.exists(self.out_plot_basedir):
             _logger.info(f"Creating dir {self.out_plot_basedir}")
@@ -606,7 +607,7 @@ class Plotter:
                         image_paths += names
 
                     if image_paths:
-                        image_paths=sorted(image_paths)
+                        image_paths = sorted(image_paths)
                         images = [Image.open(path) for path in image_paths]
                         images[0].save(
                             f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",

@@ -23,8 +23,9 @@ from weathergen.utils.train_logger import Metrics, TrainLogger
 _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
-DEFAULT_CONFIG_FILE= Path("./config/default_config.yml")
+DEFAULT_CONFIG_FILE = Path("./config/default_config.yml")
 DEFAULT_SHARED_PATH = config._get_shared_wg_path()
+
 
 ####################################################################################################
 def _ensure_list(value):
@@ -152,9 +153,8 @@ def clean_plot_folder(plot_dir: Path):
 
 ####################################################################################################
 def get_stream_names(
-        run_id: str, 
-        model_path: Path | None = DEFAULT_SHARED_PATH / "models"
-    ) -> list[str]:
+    run_id: str, model_path: Path | None = DEFAULT_SHARED_PATH / "models"
+) -> list[str]:
     """
     Get the stream names from the model configuration file.
 
@@ -496,7 +496,7 @@ def plot_loss_per_run(
     if errs is None:
         errs = ["mse"]
 
-    plot_dir = DEFAULT_SHARED_PATH / "plots" 
+    plot_dir = DEFAULT_SHARED_PATH / "plots"
 
     modes = [modes] if type(modes) is not list else modes
     # repeat colors when train and val is plotted simultaneously
@@ -598,9 +598,11 @@ def plot_train(args=None):
     )
 
     parser.add_argument(
-        "-o", "--output_dir", 
-        default=DEFAULT_SHARED_PATH / "plots", 
-        type=Path, help="Directory where plots are saved"
+        "-o",
+        "--output_dir",
+        default=DEFAULT_SHARED_PATH / "plots",
+        type=Path,
+        help="Directory where plots are saved",
     )
     parser.add_argument(
         "-m",
@@ -656,8 +658,8 @@ def plot_train(args=None):
     # parse the command line arguments
     args = parser.parse_args(args)
 
-    model_base_dir = DEFAULT_SHARED_PATH / "models" 
-    if model_base_dir !=  Path(args.model_base_dir):
+    model_base_dir = DEFAULT_SHARED_PATH / "models"
+    if model_base_dir != Path(args.model_base_dir):
         _logger.warning(
             f"Model base directory specified in args ({args.model_base_dir}) "
             f"is different from the default shared path ({model_base_dir}). "
@@ -685,7 +687,7 @@ def plot_train(args=None):
         clean_plot_folder(out_dir)
 
     # read logged data
-    
+
     runs_data = [TrainLogger.read(run_id, model_path=model_base_dir) for run_id in runs_ids]
 
     # determine which runs are still alive (as a process, though they might hang internally)

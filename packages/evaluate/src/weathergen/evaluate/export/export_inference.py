@@ -20,7 +20,7 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
-from weathergen.common.config import _REPO_ROOT, _get_shared_wg_path
+from weathergen.common.config import _REPO_ROOT
 from weathergen.evaluate.export.export_core import export_model_outputs
 
 _logger = logging.getLogger(__name__)
@@ -217,8 +217,7 @@ def export_from_args(args: list) -> None:
     _logger.info(kwargs)
 
     # Ensure output directory exists
-    _logger.info(f"Path(args.output_dir) = {Path(args.output_dir)}")
-    out_dir = _get_shared_wg_path() / "results" / args.run_id
+    out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for dtype in args.type:

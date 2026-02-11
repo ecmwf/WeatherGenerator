@@ -21,7 +21,6 @@ from tqdm import tqdm
 
 # Local application / package
 from weathergen.common.config import (
-    _get_shared_wg_path,
     get_path_run,
     load_merge_configs,
     load_run_config,
@@ -48,9 +47,6 @@ class WeatherGenReader(Reader):
         if not self.results_base_dir:
             self.results_base_dir = get_path_run(self.inference_cfg)
             _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
-        elif self.results_base_dir == "./results/":
-            self.results_base_dir = _get_shared_wg_path() / "results" / run_id
-            _logger.info(f"Results directory parsed: {self.results_base_dir}")
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
 
