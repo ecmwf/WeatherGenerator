@@ -91,7 +91,7 @@ class TrainLogger:
         # but we can probably do better and rely for example on the logging module.
 
         metrics_path = get_train_metrics_path(
-            base_path=config.get_path_run(self.cf).parent, run_id=self.cf.general.run_id
+            base_path=config.get_path_run(self.cf), run_id=self.cf.general.run_id
         )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
@@ -131,7 +131,7 @@ class TrainLogger:
 
     #######################################
     @staticmethod
-    def read(run_id: str, model_path: str = None, mini_epoch: int = -1) -> Metrics:
+    def read(run_id: str, model_path: str = None, mini_epoch: int | None = None) -> Metrics:
         """
         Read data for run_id
         """
@@ -153,23 +153,19 @@ class TrainLogger:
         # training
 
         # define cols for training
-        cols_train = ["dtime", "samples", "mse", "lr"]
-        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
-        for si in cf.streams:
-            for lf in cf.loss_fcts:
-                cols1 += [_key_loss(si["name"], lf[0])]
-                cols_train += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
-                ]
-        with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
-        if with_stddev:
-            for si in cf.streams:
-                cols1 += [_key_stddev(si["name"])]
-                cols_train += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-                    + ", "
-                    + "stddev"
-                ]
+        cols1, cols_train = get_loss_terms_per_stream(cf.streams, cf.training_config)
+        cols_train += ["dtime", "samples", "mse", "lr"]
+        cols1 += [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
+
+        # with_stddev = [("stats" in lf) for lf in cf.loss_fcts]
+        # if with_stddev:
+        #     for si in cf.streams:
+        #         cols1 += [_key_stddev(si["name"])]
+        #         cols_train += [
+        #             si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
+        #             + ", "
+        #             + "stddev"
+        #         ]
         # read training log data
         try:
             with open(fname_log_train, "rb") as f:
@@ -211,23 +207,17 @@ class TrainLogger:
 
         # validation
         # define cols for validation
+        cols2, cols_val = get_loss_terms_per_stream(cf.streams, cf.validation_config)
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
-        for si in cf.streams:
-            for lf in cf.loss_fcts_val:
-                cols_val += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_") + ", " + lf[0]
-                ]
-                cols2 += [_key_loss(si["name"], lf[0])]
-        with_stddev = [("stats" in lf) for lf in cf.loss_fcts_val]
-        if with_stddev:
-            for si in cf.streams:
-                cols2 += [_key_stddev(si["name"])]
-                cols_val += [
-                    si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
-                    + ", "
-                    + "stddev"
-                ]
+        # if with_stddev:
+        #     for si in cf.streams:
+        #         cols2 += [_key_stddev(si["name"])]
+        #         cols_val += [
+        #             si["name"].replace(",", "").replace("/", "_").replace(" ", "_")
+        #             + ", "
+        #             + "stddev"
+        #         ]
         # read validation log data
         try:
             with open(fname_log_val, "rb") as f:
@@ -391,9 +381,27 @@ def clean_name(s: str) -> str:
     return "".join(c for c in s if c.isalnum() or c == "_")
 
 
+def get_loss_terms_per_stream(streams, stage_config):
+    """
+    Extract per stream loss terms
+    """
+    cols, cols_stage = [], []
+    for si in streams:
+        for _, loss_config in stage_config.get("losses", {}).items():
+            if loss_config.get("type", "LossPhysical") == "LossPhysical":
+                for lname, _ in loss_config.loss_fcts.items():
+                    cols += [_key_loss(si["name"], lname)]
+                    cols_stage += [_clean_stream_name(si["name"]) + lname]
+    return cols, cols_stage
+
+
+def _clean_stream_name(stream_name: str) -> str:
+    return stream_name.replace(",", "").replace("/", "_").replace(" ", "_") + ", "
+
+
 def _key_loss(st_name: str, lf_name: str) -> str:
     st_name = clean_name(st_name)
-    return f"stream.{st_name}.loss_{lf_name}.loss_avg"
+    return f"LossPhysical.{st_name}.{lf_name}.avg"
 
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
