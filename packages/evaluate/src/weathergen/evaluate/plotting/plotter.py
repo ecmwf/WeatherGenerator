@@ -387,7 +387,12 @@ class Plotter:
                         _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
                     da_t = da_t.dropna(dim="ipoint")
-                    assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+                    if da_t.size == 0:
+                        _logger.warning(
+                            f"Data array for {var} at valid_time {valid_time} is empty after "
+                            f"dropping NAs. Skipping this plot."
+                        )
+                        continue
 
                     name = self.scatter_plot(
                         da_t,
@@ -602,6 +607,7 @@ class Plotter:
                         image_paths += names
 
                     if image_paths:
+                        image_paths=sorted(image_paths)
                         images = [Image.open(path) for path in image_paths]
                         images[0].save(
                             f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",
@@ -697,7 +703,9 @@ class LinePlots:
                 label = line.get_label()
                 _logger.info(f"Summary for {label} plot:")
                 for xi, yi in zip(xdata, ydata, strict=False):
-                    _logger.info(f"  x: {xi:.3f}, y: {yi:.3f}")
+                    xi = xi if isinstance(xi, str) else f"{float(xi):.3f}"
+                    yi = yi if isinstance(yi, str) else f"{float(yi):.3f}"
+                    _logger.info(f"  x: {xi}, y: {yi}")
                 _logger.info("--------------------------")
         return
 
@@ -814,7 +822,7 @@ class LinePlots:
         data: xr.DataArray | list,
         labels: str | list,
         tag: str = "",
-        x_dim: str = "forecast_step",
+        x_dim: str = "lead_time",
         y_dim: str = "value",
         print_summary: bool = False,
         plot_ensemble: str | bool = False,
@@ -843,8 +851,9 @@ class LinePlots:
 
         data_list, label_list = self._check_lengths(data, labels)
 
-        assert x_dim in data_list[0].dims, (
-            "x dimension '{x_dim}' not found in data dimensions {data_list[0].dims}"
+        assert x_dim in data_list[0].dims or x_dim in data_list[0].coords, (
+            f"x dimension '{x_dim}' not found in data dimensions "
+            f"{data_list[0].dims} or coords {data_list[0].coords}."
         )
 
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
@@ -978,18 +987,20 @@ class LinePlots:
         data_list, label_list = self._check_lengths(data, labels)
 
         if len(data_list) < 2:
-            _logger.warning("Ratio plot requires at least two datasets to compare. Skipping.")
-            return
-
-        baseline_name = self.baseline
-        baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
-        if baseline_idx is not None:
-            _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
-            baseline = data_list[baseline_idx]
-
+            baseline = xr.full_like(data_list[0], 1.0)
+            baseline_name = "ones"
+            descr = "scores"
         else:
-            baseline_name = run_ids[0]
-            baseline = data_list[0]
+            descr = "ratio_plot"
+            baseline_name = self.baseline
+            baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
+            if baseline_idx is not None:
+                _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
+                baseline = data_list[baseline_idx]
+
+            else:
+                baseline_name = run_ids[0]
+                baseline = data_list[0]
 
         ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
 
@@ -1022,11 +1033,14 @@ class LinePlots:
                 linestyle="-",
             )
 
-        parts = ["ratio_plot", tag]
+        parts = [descr, tag]
         name = "_".join(filter(None, parts))
         plt.xticks(rotation=90, ha="right")
         plt.grid(True, linestyle="--", color="gray", alpha=0.2)
-        title = f"Ratio plot {tag.split('_')[0]} - {tag.split('_')[-1]} (baseline: {baseline_name})"
+        title = (
+            f"{descr.replace('_', ' ')} {tag.split('_')[0]} -"
+            f" {tag.split('_')[-1]} (baseline: {baseline_name})"
+        )
         self._plot_base(fig, name, x_dim, y_dim, print_summary, line=1.0, vlines=True, title=title)
 
     def heat_map(
@@ -1034,6 +1048,7 @@ class LinePlots:
         data: xr.DataArray | list,
         labels: str | list,
         metric: str,
+        x_dim,
         tag: str = "",
     ) -> None:
         """
@@ -1046,6 +1061,8 @@ class LinePlots:
             Label or list of labels for each dataset
         metric:
             Metric for which we are plotting
+        x_dim:
+            Dimension to be used for the x-axis. The code will average over all other dimensions.
         tag:
             Tag to be added to the plot title and filename
         Returns
@@ -1060,7 +1077,7 @@ class LinePlots:
         x_ticks_names = set()
 
         for data in data_list:
-            da = data.isel(forecast_step=0)
+            da = data.isel({x_dim: 0})
             x_ticks_names.update(map(str, da.channel.values))
 
         ref_ticks_names = sorted(x_ticks_names, key=channel_sort_key)
@@ -1073,9 +1090,10 @@ class LinePlots:
         global_max = float("-inf")
 
         for ax, data, label in zip(axes[0], data_list, labels, strict=False):
-            fsteps = sorted(data.forecast_step.values)
+            time_steps = sorted(data[x_dim].values)
 
-            ref = data.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps[0])
+            # Use the first time step as reference
+            ref = data.reindex(channel=ref_ticks_names).sel({x_dim: time_steps[0]})
             ref = self._preprocess_data(ref, "channel", verbose=False)
 
             if ref.isnull().all():
@@ -1085,8 +1103,9 @@ class LinePlots:
                 )
                 continue
 
-            num = self._preprocess_data(data, ["forecast_step", "channel"], verbose=False)
-            num = num.reindex(channel=ref_ticks_names).sel(forecast_step=fsteps)
+            # Compute ratio for all time steps
+            num = self._preprocess_data(data, [x_dim, "channel"], verbose=False)
+            num = num.reindex(channel=ref_ticks_names).sel({x_dim: time_steps})
 
             heatmap_data = num / ref
 
@@ -1100,21 +1119,21 @@ class LinePlots:
                 cmap=cmap,
                 vmin=global_min,
                 vmax=global_max,
-                xticklabels=fsteps,
+                xticklabels=time_steps,
                 yticklabels=ref_ticks_names,
                 annot=False,
                 fmt=".2f",
                 cbar=False,
             )
             ax.set_title(f"Heatmap {metric} – {label}")
-            ax.set_xlabel("Forecast Step (h)")
+            ax.set_xlabel(f"{x_dim.replace('_', ' ').title()} (h)")
             ax.set_ylabel("Variable")
             plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
         cbar = fig.colorbar(
             last_hm.collections[0], ax=axes.ravel().tolist(), shrink=0.6, location="right", pad=0.02
         )
-        cbar.set_label(f"{metric} - fstep[0]/fstep[x]")
+        cbar.set_label(rf"{metric} - $t_{{\mathrm{{step}}}}[0] / t_{{\mathrm{{step}}}}[x]$")
         parts = ["heat_map", metric, tag]
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
@@ -1508,39 +1527,51 @@ class BarPlots:
 
         fig, ax = plt.subplots(
             1,
-            len(runs) - 1,
+            len(runs) - 1 if len(runs) > 1 else 1,
             figsize=(5 * len(runs), 2 * len(channels)),
             dpi=self.dpi_val,
             squeeze=False,
         )
         ax = ax.flatten()
-
         if self.baseline and self.baseline in runs:
             baseline_idx = runs.index(self.baseline)
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
             data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
+        elif len(runs) < 2:
+            _logger.warning(
+                "BarPlots:: Less than two runs provided. Generating bar plot against ones."
+            )
+            ones_array = xr.full_like(data[0], 1.0)
+            runs = [""] + runs
+            data = [ones_array] + data
 
         for run_index in range(1, len(runs)):
-            ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
-                data, channels, run_index
-            )
-            if len(ratio_score) > 0:
+            score, channels_per_comparison = self.calc_ratio_per_run_id(data, channels, run_index)
+            if len(score) > 0:
                 ax[run_index - 1].barh(
-                    np.arange(len(ratio_score)),
-                    ratio_score,
-                    color=self.colors(ratio_score, metric),
+                    np.arange(len(score)),
+                    score,
+                    color=self.colors(score, metric),
                     align="center",
                     edgecolor="black",
                     linewidth=0.5,
                 )
-                ax[run_index - 1].set_yticks(
-                    np.arange(len(ratio_score)), labels=channels_per_comparison
-                )
+                ax[run_index - 1].set_yticks(np.arange(len(score)), labels=channels_per_comparison)
                 ax[run_index - 1].invert_yaxis()
-                ax[run_index - 1].set_xlabel(
+
+                xlabel = (
                     f"Relative {data[0].coords['metric'].item().upper()}: "
                     f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
                 )
+
+                if len(runs) == 2 and runs[0] == "":
+                    xlabel = xlabel.replace("Relative ", "")
+                    xlabel = xlabel.replace(
+                        f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})",
+                        f"Model ({runs[run_index]})",
+                    )
+
+                ax[run_index - 1].set_xlabel(xlabel)
             else:
                 ax[run_index - 1].set_visible(False)  # or annotate as missing
                 # Or show a message:
@@ -1554,7 +1585,7 @@ class BarPlots:
                 )
 
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
-        parts = ["bar_plot_compare", tag] + runs
+        parts = ["bar_plot", tag] + runs
         name = "_".join(filter(None, parts))
         plt.savefig(
             f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
@@ -1594,6 +1625,7 @@ class BarPlots:
         """
         ratio_score = []
         channels_per_comparison = []
+
         for _, var in enumerate(channels):
             if var not in data[0].channel.values or var not in data[run_index].channel.values:
                 continue
@@ -1605,7 +1637,11 @@ class BarPlots:
 
             ratio_score.append(model_score / baseline_score)
 
-        ratio_score = np.array(ratio_score) - 1
+        if np.allclose(baseline_score, 1.0, atol=1e-6):
+            ratio_score = np.array(ratio_score)
+        else:
+            ratio_score = np.array(ratio_score) - 1
+
         return ratio_score, channels_per_comparison
 
     def colors(self, ratio_score: np.array, metric: str) -> list[tuple]:

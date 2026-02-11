@@ -7,11 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import json
 
 import torch
 
 from weathergen.common import config
+from weathergen.common.config import Config
 
 # TODO: remove this definition, it should directly using common.
 get_run_id = config.get_run_id
@@ -116,7 +118,49 @@ def unflatten_dict(d, separator="."):
 def extract_batch_metadata(batch):
     return (
         batch.source2target_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.source_samples],
+        [list(sample.meta_info.values())[0] for sample in batch.source_samples.get_samples()],
         batch.target2source_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.target_samples],
+        [list(sample.meta_info.values())[0] for sample in batch.target_samples.get_samples()],
     )
+
+
+def get_batch_size_from_config(config: Config) -> int:
+    """
+    Determine batch size from training/validation/test config by parsing num_samples
+    """
+
+    num_samples = 0
+    for _, source_cfg in config.model_input.items():
+        num_samples += source_cfg.get("num_samples", 1)
+    assert num_samples > 0, "Number of samples in source configs needs to greater than 0."
+
+    return num_samples
+
+
+def get_target_idxs_from_cfg(cfg, loss_name) -> list[int] | None:
+    """
+    Extract target idxs from training/validation/test config
+    """
+
+    tc = [v.get("target_source_correspondence") for _, v in cfg.losses[loss_name].loss_fcts.items()]
+    tc = [list(t.keys()) for t in tc if t is not None]
+    target_idxs = list(set([int(i) for t in tc for i in t])) if len(tc) > 0 else None
+
+    return target_idxs
+
+
+def filter_config_by_enabled(cfg, keys):
+    """
+    Filtered disabled entries from config
+    """
+
+    cfg_out = copy.deepcopy(cfg)
+
+    for key in keys:
+        filtered = {}
+        for k, v in cfg_out.get(key, {}).items():
+            if v.get("enabled", True):
+                filtered[k] = v
+        cfg_out[key] = filtered
+
+    return cfg_out

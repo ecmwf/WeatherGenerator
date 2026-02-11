@@ -12,6 +12,7 @@ The entry point for training and inference weathergen-atmo
 """
 
 import logging
+import os
 import pdb
 import sys
 import time
@@ -26,35 +27,80 @@ from weathergen.train.trainer import Trainer
 logger = logging.getLogger(__name__)
 
 
+def train() -> None:
+    """Entry point for calling the training code from the command line."""
+    main([cli.Stage.train] + sys.argv[1:])
+
+
+def train_continue() -> None:
+    """Entry point for calling train_continue from the command line."""
+    main([cli.Stage.train_continue] + sys.argv[1:])
+
+
 def inference():
-    # By default, arguments from the command line are read.
-    inference_from_args(sys.argv[1:])
+    """Entry point for calling the inference code from the command line."""
+    main([cli.Stage.inference] + sys.argv[1:])
 
 
-def inference_from_args(argl: list[str]):
+def main(argl: list[str]):
+    try:
+        argl = _fix_argl(argl)
+    except ValueError as e:
+        logger.error(str(e))
+
+    parser = cli.get_main_parser()
+    args = parser.parse_args(argl)
+    match args.stage:
+        case cli.Stage.train:
+            run_train(args)
+        case cli.Stage.train_continue:
+            run_continue(args)
+        case cli.Stage.inference:
+            run_inference(args)
+        case _:
+            logger.error("No stage was found.")
+
+
+def _fix_argl(argl):  # TODO remove this fix after grace period
+    """Ensure `stage` positional argument is in arglist."""
+    if argl[0] not in cli.Stage:
+        try:
+            stage = os.environ.get("WEATHERGEN_STAGE")
+        except KeyError as e:
+            msg = (
+                "`stage` postional argument and environment variable 'WEATHERGEN_STAGE' missing.",
+                "Provide either one or the other.",
+            )
+            raise ValueError(msg) from e
+
+        argl = [stage] + argl
+
+    return argl
+
+
+def run_inference(args):
     """
     Inference function for WeatherGenerator model.
-    Entry point for calling the inference code from the command line.
 
-    When running integration tests, the arguments are directly provided.
+    Note: Additional configuration for inference (`test_config`) is set in the function.
     """
-    parser = cli.get_inference_parser()
-    args = parser.parse_args(argl)
-
-    inference_overwrite = dict(
-        shuffle=False,
-        start_date_val=args.start_date,
-        end_date_val=args.end_date,
-        samples_per_validation=args.samples,
-        log_validation=args.samples if args.save_samples else 0,
-        streams_output=args.streams_output,
-    )
+    inference_overwrite = {
+        "test_config": dict(
+            shuffle=False,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            samples_per_mini_epoch=args.samples,
+            output=dict(num_samples=args.samples if args.save_samples else 0),
+            streams_output=args.streams_output,
+        )
+    }
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
+        args.base_config,
         *args.config,
         inference_overwrite,
         cli_overwrite,
@@ -64,11 +110,11 @@ def inference_from_args(argl: list[str]):
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
-    init_loggers(cf.run_id)
+    init_loggers(cf.general.run_id)
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
-    cf.run_history += [(args.from_run_id, cf.istep)]
+    cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
     trainer = Trainer(cf.train_log_freq)
     try:
@@ -76,48 +122,37 @@ def inference_from_args(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
-####################################################################################################
-def train_continue() -> None:
+def run_continue(args):
     """
     Function to continue training for WeatherGenerator model.
-    Entry point for calling train_continue from the command line.
-    Configurations are set in the function body.
 
-    Args:
-      from_run_id (str): Run/model id of pretrained WeatherGenerator model to
-        continue training. Defaults to None.
     Note: All model configurations are set in the function body.
     """
-    train_continue_from_args(sys.argv[1:])
 
-
-def train_continue_from_args(argl: list[str]):
-    parser = cli.get_continue_parser()
-    args = parser.parse_args(argl)
-
-    finetune_overwrite = dict()
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
         args.mini_epoch,
-        finetune_overwrite,
+        args.base_config,
         *args.config,
+        {},
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    mp_method = cf.get("multiprocessing_method", "fork")
+    mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
-    init_loggers(cf.run_id)
+    init_loggers(cf.general.run_id)
 
     # track history of run to ensure traceability of results
-    cf.run_history += [(args.from_run_id, cf.istep)]
+    cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
     trainer = Trainer(cf.train_log_freq)
 
@@ -126,44 +161,32 @@ def train_continue_from_args(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
-####################################################################################################
-def train() -> None:
+def run_train(args):
     """
     Training function for WeatherGenerator model.
-    Entry point for calling the training code from the command line.
-    Configurations are set in the function body.
 
-    Args:
-      run_id (str, optional): Run/model id of pretrained WeatherGenerator model to
-        continue training. Defaults to None.
     Note: All model configurations are set in the function body.
     """
-    train_with_args(sys.argv[1:], None)
-
-
-def train_with_args(argl: list[str], stream_dir: str | None):
-    """
-    Training function for WeatherGenerator model."""
-    parser = cli.get_train_parser()
-    args = parser.parse_args(argl)
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
-    cf = config.load_merge_configs(args.private_config, None, None, *args.config, cli_overwrite)
+    cf = config.load_merge_configs(
+        args.private_config, None, None, args.base_config, *args.config, cli_overwrite
+    )
     cf = config.set_run_id(cf, args.run_id, False)
 
-    cf.data_loader_rng_seed = int(time.time())
-    mp_method = cf.get("multiprocessing_method", "fork")
+    cf.data_loading.rng_seed = int(time.time())
+    mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)
 
-    # if cf.rank == 0:
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
-    init_loggers(cf.run_id)
+    init_loggers(cf.general.run_id)
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
@@ -179,13 +202,9 @@ def train_with_args(argl: list[str], stream_dir: str | None):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        pdb.post_mortem(tb)
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
 
 
 if __name__ == "__main__":
-    # Entry point for slurm script.
-    # Check whether --from_run_id passed as argument.
-    if any("--from_run_id" in arg for arg in sys.argv):
-        train_continue()
-    else:
-        train()
+    main(sys.argv[1:])

@@ -11,6 +11,7 @@ import dataclasses
 
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
@@ -34,24 +35,19 @@ from weathergen.utils.utils import get_dtype
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
-    def __init__(self, cf: Config, sources_size, stream_names: list[str]) -> None:
+    def __init__(self, cf: Config, sources_size) -> None:
         """
         Initialize the EmbeddingEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param sources_size: List of source sizes for each stream.
-        :param stream_names: Ordered list of stream identifiers aligned with cf.streams.
         """
         super(EmbeddingEngine, self).__init__()
         self.cf = cf
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names = list(stream_names)
-
-        assert len(self.stream_names) == len(self.cf.streams), (
-            "stream_names must align with cf.streams"
-        )
+        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
 
         for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
@@ -83,40 +79,48 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, batch, pe_embed):
-        num_steps_input = batch.get_num_source_steps()
+        num_steps_input = batch.get_num_steps()
 
-        num_tokens = torch.sum(batch.source_tokens_lens, 2).flatten().sum().item()
+        num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )
 
         # iterate over all streams
+        x_embeds = []
         for stream_name in self.stream_names:
             # collect all source tokens from all input_steps and all samples in the batch
-            sdata, scatter_idxs, pe_idxs = [], [], []
+            sdata = []
             for istep in range(num_steps_input):
-                for sample in batch.source_samples:
-                    # token data
+                for sample in batch.get_samples():
                     sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
-                    # indices for positional encoding
-                    pe_idxs += [sample.streams_data[stream_name].source_idxs_embed_pe[istep]]
-                    # scatter idxs for switching from stream to cell-based ordering
-                    scatter_idxs += [sample.streams_data[stream_name].source_idxs_embed[istep]]
 
-            sdata = torch.cat(sdata)
+            sdata = torch.cat(sdata).to(tokens_all.dtype)
             # skip empty stream
             if len(sdata) == 0:
                 continue
 
-            scatter_idxs = torch.cat(scatter_idxs)
-            scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-            pe_idxs = torch.cat(pe_idxs)
-
             # embedding from physical space to per patch latent representation
-            x_embed = self.embeds[stream_name](sdata).flatten(0, 1)
+            x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 
-            # switch from stream to cell-based ordering
-            tokens_all.scatter_(0, scatter_idxs, x_embed + pe_embed[pe_idxs])
+        # switch from stream to cell-based ordering and apply per cell positional encoding
+
+        # computer scatter index across batch items and input steps
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten()
+        repeat = torch.repeat_interleave
+        scatter_idxs = repeat(
+            torch.ones(len(tok_counts), dtype=torch.int64, device=tok_counts.device), tok_counts
+        )
+        scatter_idxs = scatter_idxs.cumsum(0) - 1
+        # scatter index must exist for each element and not just per row
+        scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+
+        # per cell indices into positional encoding
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        pe_idxs = torch.cat([torch.arange(c) for c in tok_counts])
+
+        # actual scatter operation
+        tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
 
         return tokens_all
 
@@ -160,7 +164,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
+            tokens_c = block(tokens_c, cell_lens_c)
         return tokens_c
 
 
@@ -223,15 +227,13 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c, use_reentrant):
+    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
-            tokens_global_c = checkpoint(
-                block,
+            tokens_global_c = block(
                 tokens_global_c,
                 tokens_c,
                 q_cells_lens_c,
                 cell_lens_c,
-                use_reentrant=use_reentrant,
             )
         return tokens_global_c
 
@@ -262,7 +264,7 @@ class QueryAggregationEngine(torch.nn.Module):
             # Last block is always global attention
             if i % global_rate == 0 or i + 1 == self.cf.ae_aggregation_num_blocks:
                 self.ae_aggregation_blocks.append(
-                    MultiSelfAttentionHead(
+                    MultiSelfAttentionHeadVarlen(
                         self.cf.ae_global_dim_embed,
                         num_heads=self.cf.ae_aggregation_num_heads,
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
@@ -274,6 +276,7 @@ class QueryAggregationEngine(torch.nn.Module):
                     )
                 )
             else:
+                assert False, "Incompatible with batchsize > 1 here"
                 self.ae_aggregation_blocks.append(
                     MultiSelfAttentionHeadLocal(
                         self.cf.ae_global_dim_embed,
@@ -301,9 +304,12 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens, batch_lens, use_reentrant):
         for block in self.ae_aggregation_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            if isinstance(block, MultiSelfAttentionHeadVarlen):
+                tokens = block(tokens, x_lens=batch_lens)
+            else:
+                tokens = block(tokens)
         return tokens
 
 
@@ -373,16 +379,16 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
-    def forward(self, tokens, use_reentrant):
+    def forward(self, tokens):
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, use_reentrant=use_reentrant)
+            tokens = block(tokens)
         return tokens
 
 
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
-    def __init__(self, cf: Config, num_healpix_cells: int, dim_aux: int = None) -> None:
+    def __init__(self, cf: Config, mode_cfg, num_healpix_cells: int, dim_aux: int = None) -> None:
         """
         Initialize the ForecastingEngine with the configuration.
 
@@ -395,7 +401,7 @@ class ForecastingEngine(torch.nn.Module):
         self.fe_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
-        if self.cf.forecast_policy is not None:
+        if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
                 if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
@@ -446,14 +452,6 @@ class ForecastingEngine(torch.nn.Module):
                         torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
                     )
 
-            self.fe_blocks.append(
-                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
-            )
-
-            self.fe_blocks.append(
-                torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
-            )
-
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.001)
@@ -464,6 +462,12 @@ class ForecastingEngine(torch.nn.Module):
             block.apply(init_weights_final)
 
     def forward(self, tokens, fstep):
+        if self.training:
+            # Impute noise to the latent state
+            noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
+            if noise_std > 0.0:
+                tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+
         aux_info = None
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
@@ -537,7 +541,6 @@ class TargetPredictionEngineClassic(nn.Module):
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
         softcap,
-        tro_type,
         stream_name: str,
     ):
         """
@@ -549,7 +552,6 @@ class TargetPredictionEngineClassic(nn.Module):
         :param tr_dim_head_proj: Dimension for head projection.
         :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
         :param softcap: Softcap value for the attention layers.
-        :param tro_type: Type of target readout (e.g., "obs_value").
         """
         super(TargetPredictionEngineClassic, self).__init__()
         self.name = f"TargetPredictionEngine_{stream_name}"
@@ -560,7 +562,6 @@ class TargetPredictionEngineClassic(nn.Module):
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
-        self.tro_type = tro_type
         self.tte = torch.nn.ModuleList()
 
         for i in range(len(self.dims_embed) - 1):
@@ -604,7 +605,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 MLP(
                     self.dims_embed[i],
                     self.dims_embed[i + 1],
-                    with_residual=(self.cf.pred_dyadic_dims or self.tro_type == "obs_value"),
+                    with_residual=True,
                     hidden_factor=self.tr_mlp_hidden_factor,
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     norm_type=self.cf.norm_type,
@@ -622,16 +623,14 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
+                tc_tokens = block(tc_tokens, tcs_lens, tcs_aux)
             else:
-                tc_tokens = checkpoint(
-                    block,
+                tc_tokens = block(
                     tc_tokens,
                     tokens_stream,
                     tcs_lens,
                     tokens_lens,
                     tcs_aux,
-                    use_reentrant=False,
                 )
         return tc_tokens
 
@@ -645,7 +644,6 @@ class TargetPredictionEngine(nn.Module):
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
         softcap,
-        tro_type,
         stream_name: str,
     ):
         """
@@ -657,7 +655,6 @@ class TargetPredictionEngine(nn.Module):
         :param tr_dim_head_proj: Dimension for head projection.
         :param tr_mlp_hidden_factor: Hidden factor for the MLP layers.
         :param softcap: Softcap value for the attention layers.
-        :param tro_type: Type of target readout (e.g., "obs_value").
 
         the decoder_type decides the how the conditioning is done
 
@@ -678,10 +675,8 @@ class TargetPredictionEngine(nn.Module):
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
         self.softcap = softcap
-        self.tro_type = tro_type
 
         # For backwards compatibility
-        from omegaconf import OmegaConf
 
         self.cf = OmegaConf.merge(
             OmegaConf.create({"decoder_type": "PerceiverIOCoordConditioning"}), self.cf
@@ -771,7 +766,6 @@ class TargetPredictionEngine(nn.Module):
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,
-                        tro_type=tro_type,
                         mlp_norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
@@ -835,21 +829,140 @@ class LatentState:
     z_pre_norm: torch.Tensor
 
 
-class LatentPredictionHead(nn.Module):
-    def __init__(self, name, in_dim, out_dim, class_token: bool, patch_token: bool):
+class LatentPredictionHeadTransformer(nn.Module):
+    def __init__(
+        self,
+        cf: Config,
+        name: str,
+        in_dim: int,
+        loss_conf,
+        use_class_token: bool,
+        use_patch_token: bool,
+    ):
         super().__init__()
 
         self.name = name
-        self.class_token = class_token
-        self.patch_token = patch_token
-        # For now this is a Linear Layer TBD what this architecture should be
-        self.layer = nn.Linear(in_dim, out_dim, bias=False)
+
+        out_dim, num_blocks, num_heads, with_qk_lnorm, intermediate_dim, dropout_rate = (
+            loss_conf["out_dim"],
+            loss_conf["num_blocks"],
+            loss_conf["num_heads"],
+            loss_conf["with_qk_lnorm"],
+            loss_conf["intermediate_dim"],
+            loss_conf["dropout_rate"],
+        )
+
+        self.global_cf = cf
+        self.use_class_token = use_class_token
+        self.use_patch_token = use_patch_token
+
+        self.blocks = nn.ModuleList()
+
+        # first map to intermediate_dim to introduce a bottleneck
+        self.blocks.append(nn.Linear(in_dim, intermediate_dim, bias=False))
+
+        for _ in range(num_blocks):
+            self.blocks.append(
+                MultiSelfAttentionHead(
+                    intermediate_dim,
+                    num_heads=num_heads,
+                    dropout_rate=dropout_rate,
+                    with_qk_lnorm=with_qk_lnorm,
+                    with_flash=self.global_cf.with_flash_attention,
+                    norm_type=self.global_cf.norm_type,
+                    # dim_aux=dim_aux,
+                    norm_eps=self.global_cf.norm_eps,
+                    attention_dtype=get_dtype(self.global_cf.attention_dtype),
+                )
+            )
+            # Add MLP block
+            self.blocks.append(
+                MLP(
+                    intermediate_dim,
+                    intermediate_dim,
+                    hidden_factor=4,
+                    with_residual=True,
+                    dropout_rate=dropout_rate,
+                    norm_type=self.global_cf.norm_type,
+                    # dim_aux=dim_aux,
+                    norm_eps=self.global_cf.mlp_norm_eps,
+                )
+            )
+
+        # finally map from intermediate_dim to the out_dim
+        self.blocks.append(nn.Linear(intermediate_dim, out_dim, bias=False))
+
+    def forward(self, x: LatentState):
+        # we concatenate the patch and class tokens to process them together
+        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        patch_class_tokens = []
+        if self.use_class_token:
+            patch_class_tokens.append(x.class_token)
+        if self.use_patch_token:
+            patch_class_tokens.append(x.patch_tokens)
+        patch_class_tokens = torch.cat(patch_class_tokens, dim=1)
+
+        for _b_idx, block in enumerate(self.blocks):
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                patch_class_tokens = block(patch_class_tokens)
+            else:
+                patch_class_tokens = checkpoint(block, patch_class_tokens, use_reentrant=False)
+        return patch_class_tokens
+
+
+class LatentPredictionHeadIdentity(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def reset_parameters(self):
+        return
+
+    def forward(self, x: LatentState):
+        return x.patch_tokens
+
+
+class LatentPredictionHeadMLP(nn.Module):
+    def __init__(self, name, in_dim: int, loss_conf, use_class_token: bool, use_patch_token: bool):
+        super().__init__()
+
+        self.name = name
+
+        out_dim, num_layers, hidden_factor = (
+            loss_conf["out_dim"],
+            loss_conf["num_layers"],
+            loss_conf["hidden_factor"],
+        )
+
+        self.use_class_token = use_class_token
+        self.use_patch_token = use_patch_token
+
+        # Create an MLP block
+        self.blocks = MLP(in_dim, out_dim, num_layers, hidden_factor)
 
     def forward(self, x: LatentState):
         outputs = []
-        if self.class_token:
-            outputs.append(self.layer(x.class_token))
-        if self.patch_token:
-            outputs.append(self.layer(x.patch_tokens))
-        # We concatenate in the token dimension [Batch, Tokens, Dim]
+        if self.use_class_token:
+            outputs.append(self.blocks(x.class_token))
+        if self.use_patch_token:
+            outputs.append(self.blocks(x.patch_tokens))
+
         return torch.cat(outputs, dim=1)
+
+
+class BilinearDecoder(nn.Module):
+    def __init__(self, stream_name, coord_dim, latent_dim, out_dim):
+        super().__init__()
+
+        self.name = f"BilinearDecoder_{stream_name}"
+        self.latent_dim = latent_dim
+        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
+
+    def forward(self, coords_md, latent_nd, tcs_lens_n1):
+        """
+        Using Noam Shazeer notation
+        N = Number of latent tokens*batch_size (N1 means N+1)
+        M = Number of coordinates to decode
+        D = Hidden dimension
+        """
+        latent_md = torch.repeat_interleave(latent_nd, tcs_lens_n1[1:], 0)
+        return self.bilin(coords_md, latent_md)
