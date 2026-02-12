@@ -1202,7 +1202,8 @@ class Scores:
 
     def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
-        Calculate Nash–Sutcliffe_model_efficiency_coefficient (NSE) of forecast data w.r.t. reference data
+        Calculate Nash–Sutcliffe_model_efficiency_coefficient (NSE)
+        of forecast data vs reference data
         Metrics broadly used in hydrology
         Parameters
         ----------
@@ -1223,7 +1224,7 @@ class Scores:
 
         den = ((gt - obs_mean) ** 2).sum(dim=self._agg_dims)
 
-        nse = 1 - num/den
+        nse = 1 - num / den
 
         return nse
 
