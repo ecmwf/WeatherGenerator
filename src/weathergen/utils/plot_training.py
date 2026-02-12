@@ -152,9 +152,7 @@ def clean_plot_folder(plot_dir: Path):
 
 
 ####################################################################################################
-def get_stream_names(
-    run_id: str, model_path: Path | None = "./models"
-) -> list[str]:
+def get_stream_names(run_id: str, model_path: Path | None = "./models") -> list[str]:
     """
     Get the stream names from the model configuration file.
 
@@ -603,7 +601,7 @@ def plot_train(args=None):
     parser.add_argument(
         "-m",
         "--model_base_dir",
-        default= None,
+        default=None,
         type=Path,
         help="Base-directory where models are saved",
     )
