@@ -16,14 +16,15 @@ import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 import polars as pl
 import torch
 
 import weathergen.common.config as config
-from weathergen.train.utils import flatten_dict
+
+# from weathergen.train.trainer import cfg_keys_to_filter
+from weathergen.train.utils import Stage, cfg_keys_to_filter, flatten_dict, get_active_stage_config
 from weathergen.utils.distributed import ddp_average
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 
@@ -35,12 +36,7 @@ _performance_memory = "perf.memory"
 
 _logger = logging.getLogger(__name__)
 
-Stage = Literal["train", "val"]
 RunId = str
-
-# All the stages currently implemented:
-TRAIN: Stage = "train"
-VAL: Stage = "val"
 
 
 @dataclass
@@ -135,6 +131,7 @@ class TrainLogger:
         """
         Read data for run_id
         """
+
         # Load config from given model_path if provided, otherwise use path from private config
         if model_path:
             cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
@@ -152,7 +149,8 @@ class TrainLogger:
         # training
 
         # define cols for training
-        cols1, cols_train = get_loss_terms_per_stream(cf.streams, cf.training_config)
+        training_cfg = get_active_stage_config(cf.training_config, {}, cfg_keys_to_filter)
+        cols1, cols_train = get_loss_terms_per_stream(cf.streams, training_cfg)
         cols_train += ["dtime", "samples", "mse", "lr"]
         cols1 += [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
 
@@ -197,7 +195,10 @@ class TrainLogger:
 
         # validation
         # define cols for validation
-        cols2, cols_val = get_loss_terms_per_stream(cf.streams, cf.validation_config)
+        validation_cfg = get_active_stage_config(
+            training_cfg, cf.get("validation_config", {}), cfg_keys_to_filter
+        )
+        cols2, cols_val = get_loss_terms_per_stream(cf.streams, validation_cfg)
         cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
 
