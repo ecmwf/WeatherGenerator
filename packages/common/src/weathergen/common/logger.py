@@ -14,7 +14,7 @@ import os
 import pathlib
 from functools import cache
 
-from weathergen.common.config import _get_shared_wg_path, _load_private_conf
+from weathergen.common.config import _load_private_conf, get_path_output
 
 LOGGING_CONFIG = """
 {
@@ -123,7 +123,7 @@ def init_loggers(run_id=None, logging_config=None):
     # output_dir = f"./output/{timestamp}-{run_id}"
     output_dir = ""
     if run_id is not None:
-        output_dir = _get_shared_wg_path() / "output" / run_id
+        output_dir = get_path_output(run_id=run_id)
 
     # load the structure for logging config
     if logging_config is None:

@@ -626,6 +626,14 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
         raise ValueError(msg)
     return _get_shared_wg_path() / "models" / run_id
 
+def get_path_output(config: Config | None = None, run_id: str | None = None) -> Path:
+    """Get the current runs output path for storing output files."""
+    if config or run_id:
+        run_id = run_id if run_id else get_run_id_from_config(config)
+    else:
+        msg = f"Missing run_id and cannot infer it from config: {config}"
+        raise ValueError(msg)
+    return _get_shared_wg_path() / "output" / run_id
 
 def get_path_results(config: Config, mini_epoch: int) -> Path:
     """Get the path to validation results for a specific mini_epoch and rank."""
