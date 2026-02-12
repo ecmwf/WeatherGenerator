@@ -117,14 +117,10 @@ class Trainer(TrainerBase):
         self.validation_cfg = get_active_stage_config(
             self.training_cfg, cf.get("validation_config", {}), cfg_keys_to_filter
         )
-        # self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
-        # self.validation_cfg = filter_config_by_enabled(self.validation_cfg, cfg_keys_to_filter)
         # test cfg is derived from validation cfg with specified keys overwritten
         self.test_cfg = get_active_stage_config(
             self.validation_cfg, cf.get("test_config", {}), cfg_keys_to_filter
         )
-        # self.test_cfg = merge_configs(self.validation_cfg, cf.get("test_config", {}))
-        # self.test_cfg = filter_config_by_enabled(self.test_cfg, cfg_keys_to_filter)
 
         # batch sizes
         self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)
