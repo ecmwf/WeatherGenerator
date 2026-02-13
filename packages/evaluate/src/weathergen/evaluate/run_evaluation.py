@@ -30,10 +30,10 @@ from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJSONReader,
-    WeatherGenMergeReader,
     WeatherGenReader,
     WeatherGenZarrReader,
 )
+from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,

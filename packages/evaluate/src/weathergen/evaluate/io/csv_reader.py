@@ -47,42 +47,45 @@ class CsvReader(Reader):
         self.metrics_dir = Path(self.eval_cfg.get("metrics_dir"))
 
         self.metrics_base_dir = self.metrics_dir
-        # for backward compatibility allow metric_dir to be specified in the run config
+        # for backward compatibility allow metric_dir to be specified
+        # in the run config
 
-        assert self.metrics_dir is not None, "metrics_dir folder must be provided in the config."
+        assert self.metrics_dir is not None, \
+            "metrics_dir folder must be provided in the config."
 
         self.stream = list(eval_cfg.streams.keys())
         assert self.stream is not None, "stream must be provided in the config."
-        assert len(self.stream) == 1, "CsvReader only supports one stream."
+        assert len(self.stream) == 1, \
+            "CsvReader only supports one stream."
         self.stream = self.stream[0]
 
         self.channels = eval_cfg.streams.get(self.stream).get("channels")
-        assert self.channels is not None, "channels must be provided in the config."
+        assert self.channels is not None, \
+            "channels must be provided in the config."
 
         self.data = pd.DataFrame()
 
         # parameter,level,number,score,step,date,domain_name,value
-        for channel_file in (self.metrics_dir / self.run_id).iterdir():
+        metrics_run_dir = self.metrics_dir / self.run_id
+        for channel_file in metrics_run_dir.iterdir():
             data = pd.read_csv(channel_file)
             if data.empty:
                 continue
-            else:
-                self.data = pd.concat([self.data, data], ignore_index=True)
+            self.data = pd.concat([self.data, data], ignore_index=True)
 
         self.data = self.data.dropna(subset=["step", "level"])
         self.data["level"] = self.data["level"].astype(int)
 
         self.data["channel"] = (
-            self.data["parameter"].astype(str) + "_" + self.data["level"].astype(str)
-            if "level" in self.data.columns
+            self.data["parameter"].astype(str) + "_" +
+            self.data["level"].astype(str) if "level" in self.data.columns
             else self.data["parameter"].astype(str)
         )
-        self.data["step"] = pd.to_timedelta(self.data["step"]) / np.timedelta64(1, "h")
-        self.data["step"] = self.data["step"].astype(int)
-
+        self.data["step"] = (pd.to_timedelta(self.data["step"]) /
+                             np.timedelta64(1, "h")).astype(int)
         self.samples = [0]
-
-        self.forecast_steps = sorted(self.data.step.dropna().unique().tolist())
+        self.forecast_steps = sorted(
+            self.data["step"].dropna().unique().tolist())
         self.npoints_per_sample = [0]
         self.epoch = [0]
 
@@ -109,10 +112,14 @@ class CsvReader(Reader):
         return list(self.channels)  # Placeholder implementation
 
     def get_values(
-        self, region: str, metric: str, forecast_steps: list[int], channels: list[str]
+        self,
+        region: str,
+        metric: str,
+        forecast_steps: list[int],
+        channels: list[str]
     ) -> xr.DataArray:
         """
-        Get score values in the right format
+        Get score values in the right format.
         Parameters
         ----------
         region :
@@ -140,11 +147,9 @@ class CsvReader(Reader):
         data = data.copy()
         data["sample"] = data["date"].astype("category").cat.codes
         data["forecast_step"] = data["step"].astype("category").cat.codes
-        data = data.rename(columns={"step": "lead_time"})
-        data = data.rename(columns={"score": "metric"})
-
-        data = data[["sample", "forecast_step", "lead_time", "channel", "metric", "value"]]
-        df = data.set_index(["sample", "forecast_step", "channel", "metric"])
+        data = data.rename(columns={"step": "lead_time", "score": "metric"})
+        cols = ["sample", "forecast_step", "lead_time", "channel", "metric", "value"]
+        df = data[cols].set_index(["sample", "forecast_step", "channel", "metric"])
         da = df["value"].to_xarray()
 
         lead_time_map = (
@@ -154,7 +159,8 @@ class CsvReader(Reader):
         )
 
         da = da.assign_coords(
-            lead_time=("forecast_step", lead_time_map.loc[da.forecast_step.values].values)
+            lead_time=("forecast_step",
+                       lead_time_map.loc[da.forecast_step.values].values)
         )
 
         da.attrs["npoints_per_sample"] = self.npoints_per_sample
@@ -162,26 +168,23 @@ class CsvReader(Reader):
 
         return da
 
-    def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray:
+    def load_scores(self, stream: str, regions: list[str], metrics: list[str]) -> tuple[dict,None]:
         """
         Load the existing scores for a given run, stream and metric.
 
         Parameters
         ----------
-        reader :
-            Reader object containing all info for a specific run_id
         stream :
             Stream name.
         regions :
-            Regions name.
+            List of region names.
         metrics :
-            Metrics name.
+            List of metric names.
 
         Returns
         -------
-            The metric DataArray.
+            Dictionary of metric DataArrays keyed by metric/region/stream/run_id.
         """
-
         available_data = self.check_availability(stream, mode="evaluation")
         channels = available_data.channels
         fsteps = available_data.fsteps
@@ -190,8 +193,8 @@ class CsvReader(Reader):
         local_scores = {}
 
         for metric in metrics:
+            local_scores[metric] = {}
             for region in regions:
-                # fill it only for matching metric
                 data = self.get_values(
                     region=region, metric=metric, forecast_steps=fsteps, channels=channels
                 )
@@ -214,10 +217,9 @@ class CsvReader(Reader):
                         attrs={"npoints_per_sample": self.npoints_per_sample},
                     )
 
-                local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
-                    self.run_id
-                ] = data
-
+                local_scores[metric].setdefault(region, {})[stream] = {
+                    self.run_id: data,
+                }
         return local_scores, None
 
 
@@ -261,30 +263,3 @@ def _region_quaver_convention(region: str) -> str:
         # Add more mappings as needed
     }
     return region_mapping.get(region, region)
-
-
-##### Helper function for CSVReader ####
-def _rename_channels(data) -> pd.DataFrame:
-    """
-    The scores downloaded from Quaver have a different convention. Need renaming.
-    Rename channel names to include underscore between letters and digits.
-    E.g., 'z500' -> 'z_500', 't850' -> 't_850', '2t' -> '2t', '10ff' -> '10ff'
-
-    Parameters
-    ----------
-    name :
-        Original channel name.
-
-    Returns
-    -------
-        Dataset with renamed channel names.
-    """
-    for name in list(data.index):
-        # If it starts with digits (surface vars like 2t, 10ff) → leave unchanged
-        if re.match(r"^\d", name):
-            continue
-
-        # Otherwise, insert underscore between letters and digits
-        data = data.rename(index={name: re.sub(r"([a-zA-Z])(\d+)", r"\1_\2", name)})
-
-    return data
