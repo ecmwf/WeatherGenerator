@@ -10,7 +10,7 @@
 
 import torch
 
-from weathergen.utils.train_logger import TRAIN, Stage
+from weathergen.train.utils import TRAIN, Stage
 
 
 def get_dtype(value: str) -> torch.dtype:
