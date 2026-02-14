@@ -723,9 +723,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
 
         source_input_steps: int = input_steps.max().item()
-        target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
-        target_in_steps: int = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
-        batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
+
+        try:
+            target_input_steps: int = max(
+                target_cfg.get("num_steps_input", 1) for target_cfg in target_cfgs.values()
+            )
+        except ValueError:
+            # empty list produces value error when taking max
+            target_input_steps: int = 1
+
+        # only adds tokens lens as attribute to batch
+        batch = self._preprocess_model_batch(batch, source_input_steps, target_input_steps)
 
         return batch
 
