@@ -23,6 +23,7 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
+from weathergen.datasets.data_reader_mesh import DataReaderMesh
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
@@ -117,9 +118,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # forecast step
             self.list_num_forecast_steps = np.array(
-                [self.forecast_cfg.get("num_steps", 0)]
-                if isinstance(self.forecast_cfg.num_steps, int)
-                else self.forecast_cfg.num_steps,
+                (
+                    [self.forecast_cfg.get("num_steps", 0)]
+                    if isinstance(self.forecast_cfg.num_steps, int)
+                    else self.forecast_cfg.num_steps
+                ),
                 dtype=np.int32,
             )
 
@@ -154,6 +157,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         dataset = DataReaderAnemoi
                     case "fesom":
                         dataset = DataReaderFesom
+                    case "mesh":
+                        dataset = DataReaderMesh
                     case type_name:
                         dataset = get_extra_reader(type_name)
                         if dataset is None:
@@ -257,12 +262,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     def get_sources_size(self):
         return [
-            0
-            if ds[0].get_source_num_channels() == 0
-            else ds[0].get_source_num_channels()
-            + ds[0].get_geoinfo_size()
-            + ds[0].get_coords_size()
-            + self.tokenizer.get_size_time_embedding()
+            (
+                0
+                if ds[0].get_source_num_channels() == 0
+                else ds[0].get_source_num_channels()
+                + ds[0].get_geoinfo_size()
+                + ds[0].get_coords_size()
+                + self.tokenizer.get_size_time_embedding()
+            )
             for _, ds in self.streams_datasets.items()
         ]
 
@@ -651,9 +658,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # max number of input steps
             input_steps = np.array([sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()])
-            assert input_steps.min() == input_steps.max(), (
-                "Number of input steps has to be constant across configs."
-            )
+            assert (
+                input_steps.min() == input_steps.max()
+            ), "Number of input steps has to be constant across configs."
             assert input_steps.min(), "Number of input steps has to be greater than zero."
 
             # input_data and output_data is conceptually consecutive but differs
