@@ -308,8 +308,8 @@ def get_target_aux_calculator(
         meta_ema_model, _ = init_model_and_shard(
             cf,
             dataset,
-            None,
-            None,
+            target_and_aux_calc_cfg["EMATeacher"].get("teacher_run_id", None),
+            target_and_aux_calc_cfg["EMATeacher"].get("teacher_mini_epoch", -1),
             "student",
             device,
             with_ddp=False,
