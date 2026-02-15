@@ -879,9 +879,7 @@ class Trainer(TrainerBase):
                             teacher_latent = teacher_latent_data[0]
                         elif isinstance(teacher_latent_data, dict):
                             # Handle LatentState or dict
-                            teacher_latent = teacher_latent_data.get(
-                                "latent", teacher_latent_data
-                            )
+                            teacher_latent = teacher_latent_data.get("latent", teacher_latent_data)
                         else:
                             teacher_latent = teacher_latent_data
                         break

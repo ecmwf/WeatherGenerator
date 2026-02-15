@@ -108,16 +108,26 @@ class CollapseMonitor:
         var_source = self.dimension_variance_config.get("tensor_source", "both")
 
         # Build tensor dict based on what's requested
-        if effective_rank_source in ("student", "both") or sv_source in (
-            "student",
-            "both",
-        ) or var_source in ("student", "both"):
+        if (
+            effective_rank_source in ("student", "both")
+            or sv_source
+            in (
+                "student",
+                "both",
+            )
+            or var_source in ("student", "both")
+        ):
             tensors_to_monitor["student"] = student_latent
 
-        if effective_rank_source in ("teacher", "both") or sv_source in (
-            "teacher",
-            "both",
-        ) or var_source in ("teacher", "both"):
+        if (
+            effective_rank_source in ("teacher", "both")
+            or sv_source
+            in (
+                "teacher",
+                "both",
+            )
+            or var_source in ("teacher", "both")
+        ):
             tensors_to_monitor["teacher"] = teacher_latent
 
         # Compute effective rank

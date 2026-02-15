@@ -20,8 +20,8 @@ import numpy as np
 import yaml
 
 import weathergen.common.config as config
+from weathergen.train.utils import TRAIN, VAL
 from weathergen.utils.train_logger import Metrics, TrainLogger
-from weathergen.train.utils import TRAIN, VAL, Stage
 
 _logger = logging.getLogger(__name__)
 
@@ -331,13 +331,13 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, stage=TRAIN, x_scale_log=
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         # import code; code.interact( local=locals())
-        if stage == TRAIN :
+        if stage == TRAIN:
             x_vals = np.array(run_data.train["num_samples"])
             y_vals = np.array(run_data.train["loss_avg_mean"])
-        elif stage == VAL :
+        elif stage == VAL:
             x_vals = np.array(run_data.val["num_samples"])
             y_vals = np.array(run_data.val["LossLatentSSLStudentTeacher.loss_avg"])
-        else :
+        else:
             assert False
 
         plt.plot(
