@@ -36,6 +36,11 @@ cfg_keys_to_filter = ["losses", "model_input", "target_input"]
 # TODO: remove this definition, it should directly using common.
 get_run_id = config.get_run_id
 
+# Constants
+TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
+MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 def str_to_tensor(modelid):
     return torch.tensor([ord(c) for c in modelid], dtype=torch.int32)
