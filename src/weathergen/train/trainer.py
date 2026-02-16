@@ -11,6 +11,7 @@
 import copy
 import logging
 import time
+import sys
 
 import numpy as np
 import torch
@@ -44,6 +45,37 @@ from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
+
+
+from torch.profiler import record_function
+import torch.nn as nn
+
+def wrap_module_forward_with_profiling(model, prefix=""):
+    """
+    Recursively wrap all nn.Module forward methods with profiling context
+    """
+    for name, module in model.named_children():
+        module_name = f"{prefix}.{name}" if prefix else name
+        
+        # Skip standard PyTorch modules (they're already traced)
+        if type(module).__module__.startswith('torch.nn.modules'):
+            # Still recurse into children
+            wrap_module_forward_with_profiling(module, module_name)
+            continue
+        
+        # Wrap custom modules
+        original_forward = module.forward
+        
+        def make_profiled_forward(mod_name, orig_forward):
+            def profiled_forward(*args, **kwargs):
+                with record_function(f"nn.Module: {mod_name}"):
+                    return orig_forward(*args, **kwargs)
+            return profiled_forward
+        
+        module.forward = make_profiled_forward(module_name, original_forward)
+        
+        # Recurse into children
+        wrap_module_forward_with_profiling(module, module_name)
 
 
 class Trainer(TrainerBase):
@@ -395,7 +427,189 @@ class Trainer(TrainerBase):
             else:
                 assert False, "validate_before_training must be integer or boolean."
 
-    def train(self, mini_epoch):
+    def train_trace(self, mini_epoch):
+        """
+        Perform training for one epoch
+        """
+
+        cf = self.cf
+        self.model.train()
+
+        apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
+
+        dataset_iter = iter(self.data_loader)
+
+        self.optimizer.zero_grad()
+
+        # training loop
+        self.t_start = time.time()
+        
+        # ========================================================================
+        # WRAP CUSTOM MODULES BEFORE PROFILING STARTS
+        # ========================================================================
+        wrap_module_forward_with_profiling(self.model, prefix="model")
+        # ========================================================================
+        
+        # PyTorch Profiler setup for 3 iterations with FLOPs
+        from torch.profiler import profile, record_function, ProfilerActivity
+        
+        from contextlib import nullcontext
+
+        # Determine profiler setup
+        if cf.local_rank == 0:
+            prof = profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                record_shapes=True,
+                profile_memory=True,
+                with_stack=True,
+                with_modules=True,
+                with_flops=True,
+                schedule=torch.profiler.schedule(wait=1, warmup=1, active=1, repeat=1),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler('./profiler_logs/'),
+            )
+        else:
+            prof = nullcontext()
+
+        with prof:
+            
+            for bidx, batch in enumerate(dataset_iter):
+                with record_function("data_loading"):
+                    if cf.data_loading.get("memory_pinning", False):
+                        batch = batch.pin_memory()
+                    batch.to_device(self.device)
+
+                with record_function("forward_pass"):
+                    with torch.autocast(
+                        device_type=f"cuda:{cf.local_rank}",
+                        dtype=self.mixed_precision_dtype,
+                        enabled=cf.with_mixed_precision,
+                    ):
+                        preds = self.model(
+                            self.model_params,
+                            batch.get_source_samples(),
+                        )
+
+                with record_function("compute_targets_and_aux"):
+                    targets_and_auxs = {}
+                    for loss_name, target_aux in self.target_and_aux_calculators.items():
+                        target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                        targets_and_auxs[loss_name] = target_aux.compute(
+                            self.cf.general.istep,
+                            batch.get_target_samples(target_idxs),
+                            self.model_params,
+                            self.model,
+                        )
+
+                with record_function("loss_computation"):
+                    loss = self.loss_calculator.compute_loss(
+                        preds=preds,
+                        targets_and_aux=targets_and_auxs,
+                        metadata=extract_batch_metadata(batch),
+                    )
+
+                with record_function("pre_backward_updates"):
+                    [
+                        target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                        for _, target_aux in self.target_and_aux_calculators.items()
+                    ]
+                    [
+                        target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                        for _, target_aux in self.target_and_aux_calculators_val.items()
+                    ]
+
+                with record_function("backward_pass"):
+                    self.optimizer.zero_grad()
+                    self.grad_scaler.scale(loss).backward()
+
+                with record_function("gradient_clipping"):
+                    self.grad_scaler.unscale_(self.optimizer)
+                    total_norm = torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
+                    )
+
+                if self.log_grad_norms:
+                    if bidx % self.train_log_freq.terminal == 0:
+                        self.last_grad_norm = self._get_tensor_item(total_norm)
+                    if bidx % self.train_log_freq.metrics == 0:
+                        self._log_instant_grad_norms(TRAIN)
+
+                with record_function("optimizer_step"):
+                    self.grad_scaler.step(self.optimizer)
+                    self.grad_scaler.update()
+
+                with record_function("lr_scheduler_step"):
+                    self.lr_scheduler.step()
+
+                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+                step = batch_size_total * self.cf.general.istep
+
+                with record_function("post_opt_updates"):
+                    [
+                        target_aux.update_state_post_opt_step(step, batch, self.model)
+                        for _, target_aux in self.target_and_aux_calculators.items()
+                    ]
+                    [
+                        target_aux.update_state_post_opt_step(step, batch, self.model)
+                        for _, target_aux in self.target_and_aux_calculators_val.items()
+                    ]
+
+                with record_function("ema_update"):
+                    if self.validate_with_ema:
+                        self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
+
+                self._log_terminal(bidx, mini_epoch, TRAIN)
+                if bidx % self.train_log_freq.metrics == 0:
+                    self._log(TRAIN)
+
+                if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
+                    self.save_model(-1)
+
+                self.cf.general.istep += 1
+                
+                # Safe to call on all ranks - nullcontext ignores it
+                if hasattr(prof, 'step'):
+                    prof.step()
+                
+                if bidx >= 2:  # iterations 0, 1, 2 = 3 total
+                    break
+            
+            # Print only on rank 0
+            if cf.local_rank == 0 and hasattr(prof, 'key_averages'):
+                print("\n" + "="*80)
+                print("PROFILING SUMMARY")
+                print("="*80)
+                
+                print("\n--- Top Operations by FLOPs ---")
+                print(prof.key_averages().table(
+                    sort_by="flops", 
+                    row_limit=20,
+                    top_level_events_only=False
+                ))
+                
+                print("\n--- Operations Grouped by Module ---")
+                print(prof.key_averages(group_by_stack_n=5).table(
+                    sort_by="cuda_time_total",
+                    row_limit=30
+                ))
+                
+                print("\n--- Memory Usage ---")
+                print(prof.key_averages().table(
+                    sort_by="self_cuda_memory_usage",
+                    row_limit=20
+                ))
+
+        # EXIT THE ENTIRE TRAINING AFTER PROFILING
+        ##if PROFILING_MODE:
+        print("\n" + "="*80)
+        print("PROFILING COMPLETE - EXITING TRAINING")
+        print("="*80)
+        import sys
+        sys.exit(0)  # Exit the entire program
+
+        self.dataset.advance()
+
+
+    def train_ori(self, mini_epoch):
         """
         Perform training for one epoch
         """
