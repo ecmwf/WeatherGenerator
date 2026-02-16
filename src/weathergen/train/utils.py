@@ -9,11 +9,23 @@
 
 import copy
 import json
+from typing import Literal
 
 import torch
+from omegaconf import OmegaConf
 
 from weathergen.common import config
-from weathergen.common.config import Config
+from weathergen.common.config import Config, merge_configs
+
+# Run stages
+Stage = Literal["train", "val", "test"]
+TRAIN: Stage = "train"
+VAL: Stage = "val"
+TEST: Stage = "test"
+
+# keys to filter using enabled: True/False
+cfg_keys_to_filter = ["losses", "model_input", "target_input"]
+
 
 # TODO: remove this definition, it should directly using common.
 get_run_id = config.get_run_id
@@ -149,7 +161,21 @@ def get_target_idxs_from_cfg(cfg, loss_name) -> list[int] | None:
     return target_idxs
 
 
-def filter_config_by_enabled(cfg, keys):
+def get_active_stage_config(
+    base_config: dict | OmegaConf, merge_config: dict | OmegaConf, keys_to_filter: list[str]
+) -> dict | OmegaConf:
+    """
+    Combine a stage config with its predecessor and filter by enabled: False to obtain the
+    final config that is used
+    """
+
+    result_cfg = merge_configs(base_config, merge_config)
+    result_cfg = filter_config_by_enabled(result_cfg, keys_to_filter)
+
+    return result_cfg
+
+
+def filter_config_by_enabled(cfg: dict | OmegaConf, keys: list[str]):
     """
     Filtered disabled entries from config
     """

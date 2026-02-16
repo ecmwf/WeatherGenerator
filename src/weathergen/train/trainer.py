@@ -21,7 +21,7 @@ from omegaconf import OmegaConf
 from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
-from weathergen.common.config import Config, merge_configs
+from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -33,17 +33,24 @@ from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
+    TRAIN,
+    VAL,
+    Stage,
+    cfg_keys_to_filter,
     extract_batch_metadata,
     filter_config_by_enabled,
+    get_active_stage_config,
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
 )
-from weathergen.utils.distributed import ddp_average, is_root
-from weathergen.utils.train_logger import TRAIN, VAL, Stage, TrainLogger, prepare_losses_for_logging
+from weathergen.utils.distributed import is_root
+from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
+
+# cfg_keys_to_filter = ["losses", "model_input", "target_input"]
 
 
 class Trainer(TrainerBase):
@@ -66,8 +73,6 @@ class Trainer(TrainerBase):
         self.model = None
         self.model_params = None
         self.optimizer: torch.optim.Optimizer | None = None
-        self.perf_gpu = None
-        self.perf_mem = None
         self.t_start: float = 0
         self.target_and_aux_calculators = None
         self.target_and_aux_calculators_val = None
@@ -101,22 +106,21 @@ class Trainer(TrainerBase):
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
-        # keys to filter for enabled/disabled
-        keys_to_filter = ["losses", "model_input", "target_input"]
-
         # get training config and remove disabled options (e.g. because of overrides)
         self.training_cfg = cf.get("training_config")
-        self.training_cfg = filter_config_by_enabled(self.training_cfg, keys_to_filter)
+        self.training_cfg = filter_config_by_enabled(self.training_cfg, cfg_keys_to_filter)
         assert len(self.training_cfg.model_input.keys()) != 0, (
             "You probably have no loss term enabled"
         )
 
         # validation and test configs are training configs, updated by specified keys
-        self.validation_cfg = merge_configs(self.training_cfg, cf.get("validation_config", {}))
-        self.validation_cfg = filter_config_by_enabled(self.validation_cfg, keys_to_filter)
+        self.validation_cfg = get_active_stage_config(
+            self.training_cfg, cf.get("validation_config", {}), cfg_keys_to_filter
+        )
         # test cfg is derived from validation cfg with specified keys overwritten
-        self.test_cfg = merge_configs(self.validation_cfg, cf.get("test_config", {}))
-        self.test_cfg = filter_config_by_enabled(self.test_cfg, keys_to_filter)
+        self.test_cfg = get_active_stage_config(
+            self.validation_cfg, cf.get("test_config", {}), cfg_keys_to_filter
+        )
 
         # batch sizes
         self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)
@@ -146,7 +150,6 @@ class Trainer(TrainerBase):
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
-        self.init_perf_monitoring()
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
     def get_target_aux_calculators(self, mode_cfg):
@@ -288,9 +291,9 @@ class Trainer(TrainerBase):
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
-            if cf.with_fsdp:
-                logger.warning("Trainable parameters are inaccurate with FSDP enabled.")
-            # self.model.print_num_parameters()
+            # ddp-wrapped model does not expose this function
+            if not cf.with_ddp:
+                self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
         # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
@@ -504,10 +507,6 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
-            perf_gpu, perf_mem = self.get_perf()
-            self.perf_gpu = ddp_average(torch.tensor([perf_gpu], device=self.device)).item()
-            self.perf_mem = ddp_average(torch.tensor([perf_mem], device=self.device)).item()
-
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
@@ -715,8 +714,6 @@ class Trainer(TrainerBase):
                     stddev_all,
                     avg_loss=avg_loss,
                     lr=self.lr_scheduler.get_lr(),
-                    perf_gpu=self.perf_gpu,
-                    perf_mem=self.perf_mem,
                 )
 
         loss_calculator.loss_hist = []
