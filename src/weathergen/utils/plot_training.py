@@ -9,8 +9,10 @@
 
 import argparse
 import logging
+import pdb
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -167,7 +169,7 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
         List of stream names
     """
     # return col names from training (should be identical to validation)
-    cf = config.load_run_config(run_id, -1, model_path=model_path)
+    cf = config.load_run_config(run_id, None, model_path=model_path)
     return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
 
 
@@ -316,6 +318,49 @@ def plot_utilization(
     plt.close()
 
 
+def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, x_scale_log=False):
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
+
+    # # legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
+    # for line in legend.get_lines():
+    #     line.set(alpha=1.0)
+    _fig = plt.figure(figsize=(10, 7), dpi=300)
+
+    legend_str = []
+    for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
+        x_vals = np.array(run_data.train["num_samples"])
+        y_vals = np.array(run_data.train["loss_avg_mean"])
+        plt.plot(
+            x_vals,
+            y_vals,
+            color=colors[i_run % len(colors)],
+        )
+        legend_str += [run_id + " : " + runs_ids[run_id][1]]
+        # ("R" if runs_active[j] else "X")
+        # + " : "
+        # run_id + ", " + col + " : " + runs_ids[run_id][1]
+        # ]
+
+    plt.legend(legend_str)
+    plt.grid(True, which="both", ls="-")
+    plt.yscale("log")
+    # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
+    # plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
+    if x_scale_log:
+        plt.xscale("log")
+    plt.title("average loss")
+    plt.ylabel("loss")
+    plt.xlabel("step")
+    plt.tight_layout()
+    rstr = "".join([f"{r}_" for r in runs_ids])
+
+    plt_fname = plot_dir / f"{rstr}avg.png"
+    _logger.info(f"Saving avg plot to '{plt_fname}'")
+    plt.savefig(plt_fname)
+    plt.close()
+
+
 ####################################################################################################
 def plot_loss_per_stream(
     modes: list[str],
@@ -357,7 +402,7 @@ def plot_loss_per_stream(
     """
 
     if errs is None:
-        errs = ["loss_mse"]
+        errs = ["mse"]
 
     modes = [modes] if type(modes) is not list else modes
     # repeat colors when train and val is plotted simultaneously
@@ -688,6 +733,9 @@ def plot_train(args=None):
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
+    # plot average loss
+    plot_loss_avg(out_dir, runs_ids, runs_data)
+
     # # plot performance
     # plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
@@ -746,4 +794,9 @@ def plot_train(args=None):
 if __name__ == "__main__":
     args = sys.argv[1:]  # get CLI args
 
-    plot_train(args)
+    try:
+        plot_train(args)
+    except Exception:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        pdb.post_mortem(tb)
