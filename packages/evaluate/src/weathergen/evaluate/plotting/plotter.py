@@ -389,7 +389,7 @@ class Plotter:
 
                     da_t = da_t.dropna(dim="ipoint")
                     if da_t.size == 0:
-                        _logger.warning(
+                        self._logger.warning(
                             f"Data array for {var} at valid_time {valid_time} is empty after "
                             f"dropping NAs. Skipping this plot."
                         )
