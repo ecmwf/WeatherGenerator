@@ -9,11 +9,22 @@
 
 import copy
 import json
+import logging
+import socket
+from datetime import datetime
 
 import torch
+from torch.profiler import record_function
 
 from weathergen.common import config
 from weathergen.common.config import Config
+
+# Constants
+TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
+MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
+
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 # TODO: remove this definition, it should directly using common.
 get_run_id = config.get_run_id
@@ -164,3 +175,81 @@ def filter_config_by_enabled(cfg, keys):
         cfg_out[key] = filtered
 
     return cfg_out
+
+
+def start_record_memory_history() -> None:
+    if not torch.cuda.is_available():
+        logger.info("CUDA unavailable. Not recording memory history")
+        return
+
+    logger.info("Starting snapshot record_memory_history")
+    torch.cuda.memory._record_memory_history(max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT)
+
+
+def stop_record_memory_history() -> None:
+    if not torch.cuda.is_available():
+        logger.info("CUDA unavailable. Not recording memory history")
+        return
+
+    logger.info("Stopping snapshot record_memory_history")
+    torch.cuda.memory._record_memory_history(enabled=None)
+
+
+def export_memory_snapshot() -> None:
+    if not torch.cuda.is_available():
+        logger.info("CUDA unavailable. Not exporting memory snapshot")
+        return
+
+    # Prefix for file names.
+    host_name = socket.gethostname()
+    timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+    file_prefix = f"./profiler_logs/{host_name}_{timestamp}"
+
+    try:
+        logger.info(f"Saving snapshot to local file: {file_prefix}.pickle")
+        torch.cuda.memory._dump_snapshot(f"{file_prefix}.pickle")
+    except Exception as e:
+        logger.error(f"Failed to capture memory snapshot {e}")
+        return
+
+
+def trace_handler(prof: torch.profiler.profile):
+    # Prefix for file names.
+    host_name = socket.gethostname()
+    timestamp = datetime.now().strftime(TIME_FORMAT_STR)
+    file_prefix = f"./profiler_logs/{host_name}_{timestamp}"
+
+    # Construct the trace file.
+    prof.export_chrome_trace(f"{file_prefix}.json.gz")
+
+    # Construct the memory timeline file.
+    prof.export_memory_timeline(f"{file_prefix}.html", device="cuda:0")
+
+
+def wrap_module_forward_with_profiling(model, prefix=""):
+    """
+    Recursively wrap all nn.Module forward methods with profiling context
+    """
+    for name, module in model.named_children():
+        module_name = f"{prefix}.{name}" if prefix else name
+
+        # Skip standard PyTorch modules (they're already traced)
+        if type(module).__module__.startswith("torch.nn.modules"):
+            # Still recurse into children
+            wrap_module_forward_with_profiling(module, module_name)
+            continue
+
+        # Wrap custom modules
+        original_forward = module.forward
+
+        def make_profiled_forward(mod_name, orig_forward):
+            def profiled_forward(*args, **kwargs):
+                with record_function(f"nn.Module: {mod_name}"):
+                    return orig_forward(*args, **kwargs)
+
+            return profiled_forward
+
+        module.forward = make_profiled_forward(module_name, original_forward)
+
+        # Recurse into children
+        wrap_module_forward_with_profiling(module, module_name)
