@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 4
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 12
+ae_aggregation_num_blocks: 8
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -184,7 +184,7 @@ training_config:
   optimizer:
     # Optimizer type: "adamw" (default) or "muon_adamw" (Muon for hidden weights, AdamW for embeddings/heads)
     type: "muon_adamw"
-    grad_clip: 0.1
+    grad_clip: 0.5
     weight_decay: 0.05
     log_grad_norms: False
     adamw :
@@ -215,31 +215,32 @@ training_config:
             target_source_correspondence: {0 : {0 : "subset"} },
           },
         },
-        target_and_aux_calc: {FrozenTeacher: {
-            teacher_run_id:  "yoqxf234", # "zosrc8ti",    # Required
-            teacher_mini_epoch: -1}},
+        # target_and_aux_calc: {FrozenTeacher: {
+        #     teacher_run_id:  "yoqxf234", # "zosrc8ti",    # Required
+        #     teacher_mini_epoch: -1}},
         # },
-        # target_and_aux_calc: { "EMATeacher" : 
-        #   { ema_ramp_up_ratio : null,
-        #     ema_halflife_in_thousands: 1e-1,
-        #     model_param_overrides : { 
-        #       training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
-        #     },
-        #   }
-        # }
+        target_and_aux_calc: { "EMATeacher" : 
+          { ema_ramp_up_ratio : null,
+            ema_halflife_in_thousands: 1e-0,
+            model_param_overrides : { 
+              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
+            },
+          }
+        }
       }
   }
   
   model_input: {
     "random_easy" : {
       # masking strategy: "random", "forecast"
-      masking_strategy: "random",
+      masking_strategy: "healpix",
       num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
-        diffusion_rn : True, 
+        diffusion_rn : False, 
         rate : 0.6,
-        rate_sampling: False
+        hl_mask: 4,
+        rate_sampling: True 
       },
     },
   }
@@ -248,7 +249,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+      masking_strategy_config : { rate : 0.66, hl_mask: 4, rate_sampling: True},
     },
   }
 
@@ -284,7 +285,7 @@ validation_config:
   }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: 8
   
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
