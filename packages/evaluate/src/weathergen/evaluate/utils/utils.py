@@ -354,7 +354,10 @@ def _plot_score_maps_per_stream(
     preds = score_data.prediction
 
     plot_metrics = xr.concat(
-        [get_score(score_data, m, agg_dims="sample") for m in metrics], dim="metric"
+        [get_score(score_data, m, agg_dims="sample") for m in metrics],
+        dim="metric",
+        coords="minimal",
+        combine_attrs="drop_conflicts",
     )
 
     plot_metrics = plot_metrics.assign_coords(
