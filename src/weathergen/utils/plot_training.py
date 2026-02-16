@@ -212,12 +212,12 @@ def plot_lr(
         x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
         data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
-        plt.plot(
-            run_data.train[x_col],
-            run_data.train[data_cols],
-            linestyle,
-            color=colors[j % len(colors)],
-        )
+        x_vals = run_data.train[x_col]
+        y_vals = np.array(run_data.train[data_cols])
+        mask = y_vals > 1000.0
+        y_vals[mask] = 0.0  # np.nan
+
+        plt.plot(x_vals, y_vals, linestyle, color=colors[j % len(colors)])
         legend_str += [
             ("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
         ]
@@ -319,7 +319,7 @@ def plot_utilization(
     plt.close()
 
 
-def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, stage=TRAIN, x_scale_log=False):
+def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN, x_scale_log=False):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
@@ -345,11 +345,10 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, stage=TRAIN, x_scale_log=
             y_vals,
             color=colors[i_run % len(colors)],
         )
-        legend_str += [run_id + " : " + runs_ids[run_id][1]]
-        # ("R" if runs_active[j] else "X")
-        # + " : "
-        # run_id + ", " + col + " : " + runs_ids[run_id][1]
-        # ]
+        # legend_str += [ run_id + " : " + runs_ids[run_id][1]]
+        legend_str += [
+            ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
+        ]
 
     plt.legend(legend_str)
     plt.grid(True, which="both", ls="-")
@@ -743,8 +742,8 @@ def plot_train(args=None):
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # plot average loss
-    plot_loss_avg(out_dir, runs_ids, runs_data, stage=TRAIN)
-    plot_loss_avg(out_dir, runs_ids, runs_data, stage=VAL)
+    plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=TRAIN)
+    # plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=VAL)
 
     # # plot performance
     # plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
