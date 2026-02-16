@@ -191,6 +191,7 @@ class Scores:
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
             "qq_analysis": self.calc_quantiles,
+            "nse": self.calc_nse,
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
@@ -440,7 +441,7 @@ class Scores:
         """
 
         a = self._sum((p >= thresh) & (gt >= thresh))
-        b = self._sum((p >= thresh) & (gt >= thresh))
+        b = self._sum((p >= thresh) & (gt < thresh))
         c = self._sum((p < thresh) & (gt >= thresh))
         d = self._sum((p < thresh) & (gt < thresh))
 
@@ -1153,7 +1154,7 @@ class Scores:
             seeps_weights = seeps_weights.stack({"xy": spatial_dims})
             t3 = t3.stack({"xy": spatial_dims})
             lstack = True
-        elif self.prediction.ndim == 2:
+        elif p.ndim == 2:
             prediction, ground_truth = p, gt
             lstack = False
         else:
@@ -1200,6 +1201,34 @@ class Scores:
             seeps_values = seeps_values_all
 
         return seeps_values
+
+    def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+        """
+        Calculate Nash–Sutcliffe_model_efficiency_coefficient (NSE)
+        of forecast data vs reference data
+        Metrics broadly used in hydrology
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        Returns
+        -------
+        xr.DataArray
+            Nash–Sutcliffe_model_efficiency_coefficient (NSE)
+
+        """
+
+        obs_mean = gt.mean(dim=self._agg_dims)
+
+        num = ((gt - p) ** 2).sum(dim=self._agg_dims)
+
+        den = ((gt - obs_mean) ** 2).sum(dim=self._agg_dims)
+
+        nse = 1 - num / den
+
+        return nse
 
     ### Probablistic scores
 
@@ -1379,13 +1408,6 @@ class Scores:
             bins=np.arange(len(fcst_stacked[self._ens_dim]) + 2),
             block_size=None if rank.chunks is None else "auto",
         )
-
-        # Reattach preserved coordinates by broadcasting
-        for coord_name, coord_values in preserved_coords.items():
-            # Only keep unique values along npoints if necessary
-            if coord_name in rank_counts.coords:
-                continue
-            rank_counts = rank_counts.assign_coords({coord_name: coord_values})
 
         # Reattach preserved coordinates by broadcasting
         for coord_name, coord_values in preserved_coords.items():
