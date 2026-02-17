@@ -16,6 +16,7 @@ import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.model.engines import LatentState
 
 _logger = logging.getLogger(__name__)
 
@@ -116,7 +117,18 @@ def write_output(
     else:
         output_stream_names = stream_names
 
-    output_streams = {name: stream_names.index(name) for name in output_stream_names}
+    # Allow a pseudo-stream name 'latent' to enable latent writing while
+    # skipping it from the physical streams mapping.
+    latent_stream_name = None
+    output_streams = {}
+    for name in output_stream_names:
+        if name == "latent":
+            latent_stream_name = name
+            continue
+        if name not in stream_names:
+            _logger.warning(f"Configured output stream {name} is unknown. Skipping.")
+            continue
+        output_streams[name] = stream_names.index(name)
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
@@ -141,6 +153,27 @@ def write_output(
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
+    # collect latent outputs per forecast step and per sample (optional)
+    latents_all = []
+    if latent_stream_name is not None:
+        for t_idx in timestep_idxs:
+            latents_all.append([])
+            latent_pred = model_output.get_latent_prediction(t_idx)
+            # latent_pred is a dict mapping latent_name -> tensor or LatentState
+            n_samples = len(sample_idxs)
+            for i_sample in range(n_samples):
+                per_sample = {}
+                for lname, lval in latent_pred.items():
+                    if isinstance(lval, LatentState):
+                        for field in ("z_pre_norm", "patch_tokens", "register_tokens", "class_token"):
+                            tensor = getattr(lval, field)
+                            per_sample[f"{lname}_{field}"] = (
+                                tensor[i_sample].detach().to(fp32).cpu().numpy()
+                            )
+                    else:
+                        per_sample[lname] = lval[i_sample].detach().to(fp32).cpu().numpy()
+                latents_all[-1].append(per_sample)
+
     data = io.OutputBatchData(
         sources,
         source_intervals,
@@ -153,8 +186,10 @@ def write_output(
         target_channels,
         source_channels,
         geoinfo_channels,
-        sample_start,
-        forecast_offset,
+        latents=latents_all,
+        latent_stream_name=latent_stream_name,
+        sample_start=sample_start,
+        forecast_offset=forecast_offset,
     )
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():

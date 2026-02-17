@@ -583,6 +583,13 @@ class OutputBatchData:
     source_channels: list[list[str]]
     geoinfo_channels: list[list[str]]
 
+    # latent outputs: outer list over forecast steps, inner list over samples.
+    # each entry is a dict mapping latent_name -> ndarray
+    latents: list[list[dict]]
+
+    # optional name to use for latent pseudo-stream when yielding latent items
+    latent_stream_name: typing.Optional[str] = None
+
     sample_start: int
     forecast_offset: int
 
@@ -607,6 +614,14 @@ class OutputBatchData:
             self.samples, self.forecast_steps, self.streams.keys()
         ):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
+
+        # additionally yield latent output items if a latent stream name was provided
+        if self.latent_stream_name is not None and self.latents:
+            for s, fo_s in itertools.product(self.samples, self.forecast_steps):
+                key = ItemKey(int(s), int(fo_s), self.latent_stream_name)
+                latent_item = self._make_latent_item(key)
+                if latent_item is not None:
+                    yield latent_item
 
     def extract(self, key: ItemKey) -> OutputItem:
         """Extract datasets from lists for one output item."""
@@ -764,6 +779,55 @@ class OutputBatchData:
         _logger.debug(f"source shape: {source_dataset.data.shape}")
 
         return source_dataset
+
+    def _make_latent_item(self, key: ItemKey):
+        """Create a lightweight output-like item for latent datasets.
+
+        Returns an object with attributes `key` and `datasets` suitable for
+        `ZarrIO.write_zarr`.
+        """
+        offset_key = self._offset_key(key)
+
+        # ensure latents were provided
+        try:
+            latents_for_fstep = self.latents[offset_key.forecast_step]
+        except Exception:
+            return None
+
+        try:
+            latents_for_sample = latents_for_fstep[offset_key.sample]
+        except Exception:
+            return None
+
+        if not latents_for_sample:
+            return None
+
+        source_interval = self.source_intervals[offset_key.sample]
+
+        datasets = []
+        for lname, arr in latents_for_sample.items():
+            arr = np.asarray(arr)
+            # determine datapoints
+            n = arr.shape[0] if arr.ndim > 0 else 0
+            # times/coords placeholders
+            times = np.array([], dtype="datetime64[ns]")
+            coords = np.zeros((n, 2), dtype=np.float32)
+            geoinfo = np.empty((0, 0))
+
+            if arr.ndim == 1:
+                data = arr.reshape((n, 1))
+                channels = [lname]
+            else:
+                data = arr
+                channels = [f"{lname}_{i}" for i in range(data.shape[1])]
+
+            ds = OutputDataset(lname, key, source_interval, data, times, coords, geoinfo, channels, [])
+            datasets.append(ds)
+
+        item = type("LatentItem", (object,), {})()
+        item.key = key
+        item.datasets = datasets
+        return item
 
 
 def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:
