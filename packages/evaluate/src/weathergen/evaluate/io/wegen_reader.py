@@ -730,7 +730,8 @@ class WeatherGenMergeReader(Reader):
 
         _logger.info(f"MERGE READERS: {self.run_ids} ...")
 
-        # TODO: Decide which reader shall be used.
+        
+
         for run_id in self.run_ids:
             if reader_type == "zarr":
                 reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
@@ -890,10 +891,9 @@ class WeatherGenMergeReader(Reader):
                 for region in local_scores[metric].keys():
                     for stream in local_scores[metric][region].keys():
                         scores = (
-                            local_scores[metric][region][stream].pop(run_id, None)
+                            local_scores[metric][region][stream].pop(run_id)
                             for run_id in self.run_ids
                         )
-                        _logger.info(f"scores {scores}")
                         local_scores[metric][region][stream].setdefault(
                             self.run_id,
                             xr.concat(scores, dim="ens").assign_coords(
