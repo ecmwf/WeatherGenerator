@@ -144,7 +144,7 @@ training_config:
     "masking": {
       masking_strategy: "healpix",
       num_samples: 1,
-      masking_strategy_config: { rate: 0.5, hl_mask: 2, rate_sampling: False }
+      masking_strategy_config: { rate: 0.6, hl_mask: 2, rate_sampling: False }
       },
     }
 
