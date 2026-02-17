@@ -111,7 +111,7 @@ training_config:
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
-  window_offset_prediction: 1
+  window_offset_prediction: 0
 
   learning_rate_scheduling:
     lr_start: 1e-6
@@ -151,7 +151,7 @@ training_config:
 
   forecast:
     time_step: 06:00:00
-    num_steps: 1
+    num_steps: 0
     policy: "fixed"
 
 validation_config:
