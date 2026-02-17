@@ -25,8 +25,8 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 0
+ae_global_dim_embed: 1024
+ae_global_num_blocks: 2
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -65,7 +65,7 @@ fe_impute_latent_noise_std: 0.0  # 1e-4
 forecast_att_dense_rate: 1.0
 with_step_conditioning: True # False
 
-healpix_level: 5
+healpix_level: 4
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -162,7 +162,7 @@ training_config:
   shuffle: True
 
   start_date: 1979-01-01T00:00
-  end_date: 2022-12-31T00:00
+  end_date: 2021-12-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -209,8 +209,8 @@ training_config:
         weight: 1.0,
         loss_fcts : {
           "JEPA": {
-            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+            'weight': 4, "loss_extra_args": {}, "out_dim": 1024, "head": transformer,
+            "num_blocks": 12, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 512, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
           },
@@ -239,7 +239,7 @@ training_config:
       masking_strategy_config : { 
         diffusion_rn : False, 
         rate : 0.6,
-        hl_mask: 4,
+        hl_mask: 2,
         rate_sampling: True 
       },
     },
@@ -265,8 +265,8 @@ validation_config:
   samples_per_mini_epoch: 256
   shuffle: False
 
-  start_date: 2023-10-01T00:00
-  end_date: 2023-12-31T00:00
+  start_date: 2022-10-01T00:00
+  end_date: 2022-12-31T00:00
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
@@ -312,7 +312,7 @@ wgtags:
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: null
+  exp: jepa
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
