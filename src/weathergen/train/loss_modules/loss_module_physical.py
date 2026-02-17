@@ -134,6 +134,7 @@ class LossPhysical(LossModuleBase):
         substep_masks: list[torch.Tensor],
         weights_channels: torch.Tensor,
         weights_locations: torch.Tensor,
+        channel_loss_mask: torch.Tensor | None = None,
     ):
         """
         Compute loss for given loss function
@@ -146,8 +147,14 @@ class LossPhysical(LossModuleBase):
         for mask_t in substep_masks:
             assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
 
+            clm = channel_loss_mask[mask_t] if channel_loss_mask is not None else None
+
             loss, loss_chs = loss_fct(
-                target[mask_t], pred[:, mask_t], weights_channels, weights_locations
+                target[mask_t],
+                pred[:, mask_t],
+                weights_channels,
+                weights_locations,
+                channel_loss_mask=clm,
             )
 
             # accumulate loss
@@ -236,6 +243,9 @@ class LossPhysical(LossModuleBase):
                 targets_times_batch = targets.physical[stream_name][fstep]["target_times"]
                 targets_params = targets.physical[stream_name][fstep]["target_metda_data"]
                 targets_is_spoof = targets.physical[stream_name][fstep]["is_spoof"]
+                channel_loss_masks_batch = targets.physical[stream_name][fstep].get(
+                    "channel_loss_mask", []
+                )
 
                 loss_batch = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_batch = 0
@@ -289,6 +299,14 @@ class LossPhysical(LossModuleBase):
                         # get masks for sub-time steps
                         substep_masks = self._get_substep_masks(stream_info, fstep, target_times)
 
+                        # Extract per-channel loss mask for this target sample
+                        channel_loss_mask = None
+                        if (
+                            target_idx < len(channel_loss_masks_batch)
+                            and channel_loss_masks_batch[target_idx] is not None
+                        ):
+                            channel_loss_mask = channel_loss_masks_batch[target_idx]
+
                         losses_all[stream_name][str(fstep)][loss_fct_name] = defaultdict(dict)
                         # loss for current loss function
                         loss_lfct, loss_lfct_chs = self._loss_per_loss_function(
@@ -298,6 +316,7 @@ class LossPhysical(LossModuleBase):
                             substep_masks,
                             weights_channels,
                             weights_locations,
+                            channel_loss_mask=channel_loss_mask,
                         )
 
                         for ch_n, v in zip(target_channels, loss_lfct_chs, strict=True):

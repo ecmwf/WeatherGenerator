@@ -1,0 +1,374 @@
+# Autocorrelation configuration for variable-specific masking
+# Generated from: /capstor/store/cscs/userlab/ch17/data/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
+# Correlation multiplier: 1.5
+
+channel_masking:
+  enabled: true
+  autocorr:
+    10u:
+      space_km: 1040
+      time_h: 31
+      hl_mask_recommended: 2
+    10v:
+      space_km: 620
+      time_h: 26
+      hl_mask_recommended: 2
+    2d:
+      space_km: 122990
+      time_h: 40
+      hl_mask_recommended: 1
+    2t:
+      space_km: 500
+      time_h: 31
+      hl_mask_recommended: 3
+    cp:
+      space_km: 1650
+      time_h: 6
+      hl_mask_recommended: 1
+    msl:
+      space_km: 1630
+      time_h: 30
+      hl_mask_recommended: 1
+    q_100:
+      space_km: 2180
+      time_h: 38
+      hl_mask_recommended: 1
+    q_1000:
+      space_km: 6470
+      time_h: 37
+      hl_mask_recommended: 1
+    q_150:
+      space_km: 3430
+      time_h: 24
+      hl_mask_recommended: 1
+    q_200:
+      space_km: 2800
+      time_h: 26
+      hl_mask_recommended: 1
+    q_250:
+      space_km: 2320
+      time_h: 25
+      hl_mask_recommended: 1
+    q_300:
+      space_km: 1970
+      time_h: 26
+      hl_mask_recommended: 1
+    q_400:
+      space_km: 1760
+      time_h: 25
+      hl_mask_recommended: 1
+    q_50:
+      space_km: 3480
+      time_h: 58
+      hl_mask_recommended: 1
+    q_500:
+      space_km: 1880
+      time_h: 25
+      hl_mask_recommended: 1
+    q_600:
+      space_km: 2220
+      time_h: 26
+      hl_mask_recommended: 1
+    q_700:
+      space_km: 2710
+      time_h: 25
+      hl_mask_recommended: 1
+    q_850:
+      space_km: 4110
+      time_h: 26
+      hl_mask_recommended: 1
+    q_925:
+      space_km: 5930
+      time_h: 29
+      hl_mask_recommended: 1
+    skt:
+      space_km: 500
+      time_h: 82
+      hl_mask_recommended: 3
+    sp:
+      space_km: 8210
+      time_h: 30
+      hl_mask_recommended: 1
+    t_100:
+      space_km: 5660
+      time_h: 51
+      hl_mask_recommended: 1
+    t_1000:
+      space_km: 19240
+      time_h: 31
+      hl_mask_recommended: 1
+    t_150:
+      space_km: 4740
+      time_h: 42
+      hl_mask_recommended: 1
+    t_200:
+      space_km: 2380
+      time_h: 39
+      hl_mask_recommended: 1
+    t_250:
+      space_km: 7820
+      time_h: 40
+      hl_mask_recommended: 1
+    t_300:
+      space_km: 11810
+      time_h: 48
+      hl_mask_recommended: 1
+    t_400:
+      space_km: 12390
+      time_h: 49
+      hl_mask_recommended: 1
+    t_50:
+      space_km: 6420
+      time_h: 73
+      hl_mask_recommended: 1
+    t_500:
+      space_km: 13380
+      time_h: 48
+      hl_mask_recommended: 1
+    t_600:
+      space_km: 15070
+      time_h: 41
+      hl_mask_recommended: 1
+    t_700:
+      space_km: 19900
+      time_h: 43
+      hl_mask_recommended: 1
+    t_850:
+      space_km: 19330
+      time_h: 49
+      hl_mask_recommended: 1
+    t_925:
+      space_km: 18460
+      time_h: 35
+      hl_mask_recommended: 1
+    tcw:
+      space_km: 4270
+      time_h: 37
+      hl_mask_recommended: 1
+    tp:
+      space_km: 1390
+      time_h: 7
+      hl_mask_recommended: 1
+    u_100:
+      space_km: 1760
+      time_h: 64
+      hl_mask_recommended: 1
+    u_1000:
+      space_km: 1070
+      time_h: 31
+      hl_mask_recommended: 2
+    u_150:
+      space_km: 1210
+      time_h: 58
+      hl_mask_recommended: 1
+    u_200:
+      space_km: 1070
+      time_h: 51
+      hl_mask_recommended: 2
+    u_250:
+      space_km: 1030
+      time_h: 47
+      hl_mask_recommended: 2
+    u_300:
+      space_km: 1040
+      time_h: 45
+      hl_mask_recommended: 2
+    u_400:
+      space_km: 1110
+      time_h: 45
+      hl_mask_recommended: 1
+    u_50:
+      space_km: 3280
+      time_h: 81
+      hl_mask_recommended: 1
+    u_500:
+      space_km: 1220
+      time_h: 46
+      hl_mask_recommended: 1
+    u_600:
+      space_km: 1280
+      time_h: 46
+      hl_mask_recommended: 1
+    u_700:
+      space_km: 1320
+      time_h: 44
+      hl_mask_recommended: 1
+    u_850:
+      space_km: 1190
+      time_h: 36
+      hl_mask_recommended: 1
+    u_925:
+      space_km: 1080
+      time_h: 33
+      hl_mask_recommended: 2
+    v_100:
+      space_km: 790
+      time_h: 35
+      hl_mask_recommended: 2
+    v_1000:
+      space_km: 590
+      time_h: 27
+      hl_mask_recommended: 2
+    v_150:
+      space_km: 620
+      time_h: 39
+      hl_mask_recommended: 2
+    v_200:
+      space_km: 510
+      time_h: 35
+      hl_mask_recommended: 3
+    v_250:
+      space_km: 490
+      time_h: 31
+      hl_mask_recommended: 3
+    v_300:
+      space_km: 500
+      time_h: 30
+      hl_mask_recommended: 3
+    v_400:
+      space_km: 520
+      time_h: 29
+      hl_mask_recommended: 3
+    v_50:
+      space_km: 900
+      time_h: 10
+      hl_mask_recommended: 2
+    v_500:
+      space_km: 530
+      time_h: 28
+      hl_mask_recommended: 3
+    v_600:
+      space_km: 530
+      time_h: 28
+      hl_mask_recommended: 3
+    v_700:
+      space_km: 520
+      time_h: 27
+      hl_mask_recommended: 3
+    v_850:
+      space_km: 530
+      time_h: 26
+      hl_mask_recommended: 3
+    v_925:
+      space_km: 540
+      time_h: 26
+      hl_mask_recommended: 3
+    w_100:
+      space_km: 710
+      time_h: 4
+      hl_mask_recommended: 2
+    w_1000:
+      space_km: 500
+      time_h: 4
+      hl_mask_recommended: 3
+    w_150:
+      space_km: 900
+      time_h: 5
+      hl_mask_recommended: 2
+    w_200:
+      space_km: 630
+      time_h: 5
+      hl_mask_recommended: 2
+    w_250:
+      space_km: 470
+      time_h: 6
+      hl_mask_recommended: 3
+    w_300:
+      space_km: 450
+      time_h: 5
+      hl_mask_recommended: 3
+    w_400:
+      space_km: 260
+      time_h: 5
+      hl_mask_recommended: 4
+    w_50:
+      space_km: 1860
+      time_h: 3
+      hl_mask_recommended: 1
+    w_500:
+      space_km: 310
+      time_h: 5
+      hl_mask_recommended: 3
+    w_600:
+      space_km: 590
+      time_h: 5
+      hl_mask_recommended: 2
+    w_700:
+      space_km: 900
+      time_h: 5
+      hl_mask_recommended: 2
+    w_850:
+      space_km: 9550
+      time_h: 5
+      hl_mask_recommended: 1
+    w_925:
+      space_km: 19830
+      time_h: 5
+      hl_mask_recommended: 1
+    z_100:
+      space_km: 42460
+      time_h: 87
+      hl_mask_recommended: 1
+    z_1000:
+      space_km: 1990
+      time_h: 30
+      hl_mask_recommended: 1
+    z_150:
+      space_km: 21650
+      time_h: 76
+      hl_mask_recommended: 1
+    z_200:
+      space_km: 17240
+      time_h: 63
+      hl_mask_recommended: 1
+    z_250:
+      space_km: 15490
+      time_h: 52
+      hl_mask_recommended: 1
+    z_300:
+      space_km: 14690
+      time_h: 42
+      hl_mask_recommended: 1
+    z_400:
+      space_km: 13910
+      time_h: 41
+      hl_mask_recommended: 1
+    z_50:
+      space_km: 64560
+      time_h: 160
+      hl_mask_recommended: 1
+    z_500:
+      space_km: 12980
+      time_h: 40
+      hl_mask_recommended: 1
+    z_600:
+      space_km: 11500
+      time_h: 40
+      hl_mask_recommended: 1
+    z_700:
+      space_km: 9410
+      time_h: 40
+      hl_mask_recommended: 1
+    z_850:
+      space_km: 5330
+      time_h: 30
+      hl_mask_recommended: 1
+    z_925:
+      space_km: 3300
+      time_h: 30
+      hl_mask_recommended: 1
+  mapping:
+    correlation_multiplier: 1.5
+    hl_mask_min: 1
+    hl_mask_max: 5
+    time_block_min: 1
+    time_block_max: 8
+  temporal:
+    strategy: tube
+    obs_strategy: tube
+  default:
+    space_km: 500
+    time_h: 24
+    hl_mask: 3
+    keep_rate: 0.6
+    time_block: 1

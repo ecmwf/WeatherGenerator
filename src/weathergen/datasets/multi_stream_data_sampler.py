@@ -348,6 +348,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         input_data: list,
         input_tokens: list,
         mask: torch.Tensor | None = None,
+        channel_masks_dict: dict[str, np.typing.NDArray] | None = None,
     ) -> tuple[StreamData, dict | None]:
         """
         Build model network input
@@ -385,6 +386,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     token_data,
                     (time_win_source.start, time_win_source.end),
                     mask,
+                    channel_masks_dict=channel_masks_dict,
                 )
 
                 # collect data for stream
@@ -402,6 +404,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         output_data: list,
         output_tokens: list,
         target_mask,
+        channel_masks_dict: dict[str, np.typing.NDArray] | None = None,
     ) -> StreamData:
         """
         Generate stream data for output
@@ -431,14 +434,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 stream_data.add_target_coords(fstep, tc, tc_l)
 
             if "target_values" in mode:
-                (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
+                (tt_cells, tt_t, tt_c, idxs_inv, ch_loss_mask) = self.tokenizer.get_target_values(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
+                    channel_masks_dict=channel_masks_dict,
                 )
-                stream_data.add_target_values(fstep, tt_cells, tt_c, tt_t, idxs_inv)
+                stream_data.add_target_values(
+                    fstep, tt_cells, tt_c, tt_t, idxs_inv, channel_loss_mask=ch_loss_mask
+                )
 
         return stream_data
 
@@ -455,6 +461,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         output_tokens: list,
         output_mask,
         input_mask,
+        channel_masks_dict: dict[str, np.typing.NDArray] | None = None,
     ) -> StreamData:
         """
         Return one batch of data
@@ -489,6 +496,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             input_data,
             input_tokens,
             input_mask,
+            channel_masks_dict=channel_masks_dict,
         )
 
         stream_data = self._build_stream_data_output(
@@ -500,6 +508,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             output_data,
             output_tokens,
             output_mask,
+            channel_masks_dict=channel_masks_dict,
         )
 
         return stream_data
@@ -655,6 +664,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
                 tidx = source_to_target[sidx].item()
+                # Extract per-channel masks from source metadata (if any)
+                channel_masks_dict = source_masks.get_channel_masks(sidx)
                 sdata = self._build_stream_data(
                     source_select,
                     idx,
@@ -667,6 +678,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     output_tokens,
                     output_mask=target_masks.masks[tidx],
                     input_mask=source_mask,
+                    channel_masks_dict=channel_masks_dict,
                 )
 
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
@@ -676,6 +688,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # Note: for EMATeacher we the the streamdata obj
                 # to have the target mask applied to the inputs!
                 # Hence the target mask is also the source mask here!!
+                # Extract per-channel masks from target metadata for loss masking
+                channel_masks_dict_target = target_masks.get_channel_masks(tidx)
                 sdata = self._build_stream_data(
                     target_select,
                     idx,
@@ -688,6 +702,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     output_tokens,
                     output_mask=target_mask,
                     input_mask=target_mask,
+                    channel_masks_dict=channel_masks_dict_target,
                 )
                 target_metadata = target_masks.metadata[tidx]
                 # also want to add the mask to the metadata

@@ -1,0 +1,30 @@
+global_plotting_options:
+  image_format: "png"
+  dpi_val: 300
+
+evaluation:
+  regions: ["global"]
+  metrics: ["rmse", "l1", "mse"]
+  verbose: True
+  summary_plots: True
+  summary_dir: "./plots/"
+  print_summary: True
+
+run_ids:
+  iy4m8chp:
+    streams:
+      ERA5:
+        results_base_dir: "./results/"
+        channels: ["z_500", "t_850", "10u", "tp"]
+        evaluation:
+          forecast_steps: "all"
+          sample: "all"
+        plotting:
+          sample: [0, 1]
+          forecast_step: "all"
+          plot_maps: true
+          plot_histograms: true
+          plot_animations: false
+    label: "Channel Masking Test"
+    mini_epoch: 0
+    rank: 0

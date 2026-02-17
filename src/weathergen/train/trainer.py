@@ -202,7 +202,7 @@ class Trainer(TrainerBase):
         )
 
         # get target_aux calculators for different loss terms
-        self.validate_with_ema_cfg = self.get_target_aux_calculators(self.test_cfg)
+        self.target_and_aux_calculators = self.get_target_aux_calculators(self.test_cfg)
 
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 

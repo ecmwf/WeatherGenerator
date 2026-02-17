@@ -1,0 +1,63 @@
+# (C) Copyright 2024 WeatherGenerator contributors.
+#
+# Small test stream config with channel_masking enabled for testing
+# the per-variable masking implementation.
+
+ERA5 :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  stream_id : 0
+  
+  # Use a small subset of variables for testing
+  source : ["z_500", "t_850", "10u", "tp"]
+  target : ["z_500", "t_850", "10u", "tp"]
+  
+  loss_weight : 1.
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 32
+  tokenize_spacetime : True
+  max_num_targets: -1 
+
+  # Per-variable masking configuration based on autocorrelation
+  channel_masking:
+    enabled: true
+    autocorr:
+      z_1000:  {space_km: 4000}   # Level 1 (coarse)
+      z_925:  {space_km: 4000}   # Level 1 (coarse)
+      z_850:  {space_km: 4000}   # Level 1 (coarse)
+      z_700:  {space_km: 4000}   # Level 1 (coarse)
+      z_500:  {space_km: 4000}   # Level 1 (coarse)
+      z_300:  {space_km: 4000}   # Level 1 (coarse)
+      z_200:  {space_km: 4000}   # Level 1 (coarse)
+      z_200:  {space_km: 4000}   # Level 1 (coarse)
+      z_200:  {space_km: 4000}   # Level 1 (coarse)
+      t_850:  {space_km: 4000}   # Level 1 (coarse)
+      10u:    {space_km: 1200}   # Level 2 (medium)
+      tp:     {space_km: 177}    # Level 5 (fine, capped at data level - 1)
+      z_500:  {space_km: 4000}   # Level 1 (coarse)
+      t_850:  {space_km: 4000}   # Level 1 (coarse)
+      10u:    {space_km: 1200}   # Level 2 (medium)
+      tp:     {space_km: 177}    # Level 5 (fine, capped at data level - 1)
+    multiplier: 1.0
+    hl_mask_min: 1
+    hl_mask_max: 5
+    default_hl_mask: 4
+
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 16
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 16
+  target_readout :
+    type : 'obs_value'
+    num_layers : 2
+    num_heads : 2
+  pred_head :
+    ens_size : 1
+    num_layers : 1

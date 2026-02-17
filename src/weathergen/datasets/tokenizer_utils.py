@@ -231,6 +231,8 @@ def tokenize_apply_mask_source(
     time_win,
     hpy_verts_rots,
     enc_time,
+    channel_masks_dict=None,
+    channel_list=None,
 ):
     """
     Apply masking to the data.
@@ -239,6 +241,13 @@ def tokenize_apply_mask_source(
     the cols the channels. Thereby mask_tokens acts on the rows, grouped according to the tokens as
     specified in idxs_cells and mask_channels acts on the columns.
 
+    Parameters
+    ----------
+    channel_masks_dict : dict[str, np.ndarray] | None
+        Per-channel cell-level boolean masks. Keys are channel names, values are
+        boolean arrays of shape ``[num_healpix_cells]``.
+    channel_list : list[str] | None
+        Ordered channel names matching the columns of ``rdata.data``.
     """
 
     # convert to token level, forgetting about cells
@@ -275,21 +284,6 @@ def tokenize_apply_mask_source(
         coords = coords_padded[idxs_data]
         data = data_padded[idxs_data]
 
-    # Apply per-channel masking if provided
-    # mask_channels is a 2D tensor [num_cells, num_channels] where True = keep
-    # We need to apply it to the data after spatial indexing
-    if mask_channels is not None:
-        # mask_channels should be [num_points, num_channels] after cell->point expansion
-        # or [num_channels] if uniform across points
-        if mask_channels.dim() == 1:
-            # Broadcast across points: [num_channels] -> [1, num_channels]
-            channel_mask = mask_channels.unsqueeze(0)
-        else:
-            # Already [num_points, num_channels]
-            channel_mask = mask_channels
-        # Zero out masked channels (where mask is False)
-        data = data * channel_mask.to(data.dtype)
-
     # local coords
     num_tokens_per_cell = [len(idxs) for idxs in idxs_cells_lens]
     mask_tokens_per_cell = torch.split(torch.from_numpy(mask_tokens), num_tokens_per_cell)
@@ -300,6 +294,32 @@ def tokenize_apply_mask_source(
             for tt, mm in zip(idxs_cells, mask_tokens_per_cell, strict=False)
         ]
     ).to(dtype=torch.int32)
+
+    # Apply per-channel masking if provided.
+    # channel_masks_dict maps channel_name -> [num_cells] boolean mask.
+    # We use masked_points_per_cell to determine which cell each surviving
+    # data point belongs to, then look up the per-channel mask for that cell.
+    if channel_masks_dict and channel_list:
+        num_survived = int(masked_points_per_cell.sum().item())
+        num_channels = len(channel_list)
+        if num_survived > 0:
+            # Build cell assignment for each surviving point
+            num_cells = len(idxs_cells)
+            cell_ids = torch.repeat_interleave(
+                torch.arange(num_cells, dtype=torch.long), masked_points_per_cell.long()
+            )
+            # Build [num_survived, num_channels] mask (float, 1.0 = keep, 0.0 = mask)
+            ch_mask = torch.ones(num_survived, num_channels, dtype=data.dtype)
+            for c_idx, ch_name in enumerate(channel_list):
+                if ch_name in channel_masks_dict:
+                    cell_mask = channel_masks_dict[ch_name]
+                    if isinstance(cell_mask, torch.Tensor):
+                        cell_mask_f = cell_mask.float()
+                    else:
+                        cell_mask_f = torch.from_numpy(np.asarray(cell_mask)).float()
+                    ch_mask[:, c_idx] = cell_mask_f[cell_ids]
+            data = data * ch_mask
+
     coords_local = get_source_coords_local(coords, hpy_verts_rots, masked_points_per_cell)
 
     # create tensor that contains all data
@@ -326,6 +346,8 @@ def tokenize_apply_mask_target(
     hpy_verts_local,
     hpy_nctrs,
     enc_time,
+    channel_masks_dict=None,
+    channel_list=None,
 ):
     """
     Apply masking to the data.
@@ -334,6 +356,18 @@ def tokenize_apply_mask_target(
     the cols the channels. Thereby mask_tokens acts on the rows, grouped according to the tokens as
     specified in idxs_cells and mask_channels acts on the columns.
 
+    Per-channel loss masking: when ``channel_masks_dict`` and ``channel_list``
+    are provided, a ``channel_loss_mask`` tensor is computed as the COMPLEMENT
+    of the source-side channel masks. This ensures that the loss is only
+    computed for channels that were truly "masked" (hidden from the encoder)
+    at each target cell, implementing per-channel source/target splits.
+
+    Parameters
+    ----------
+    channel_masks_dict : dict[str, np.ndarray] | None
+        Per-channel cell-level boolean masks (True = keep/unmasked on source side).
+    channel_list : list[str] | None
+        Ordered channel names matching columns of ``rdata.data``.
     """
 
     # convert to token level, forgetting about cells
@@ -350,8 +384,8 @@ def tokenize_apply_mask_target(
             coords = torch.zeros([0, rdata.coords.shape[-1]])
             dt = np.array([], dtype=np.datetime64)
             masked_points_per_cell = torch.zeros(len(idxs_cells_lens), dtype=torch.int32)
-            # data, datetimes, coords, coords_local, masked_points_per_cell
-            return do, dt, coords, coords, masked_points_per_cell
+            # data, datetimes, coords, coords_local, masked_points_per_cell, channel_loss_mask
+            return do, dt, coords, coords, masked_points_per_cell, None
 
         idxs_data = torch.cat(idxs_data)
 
@@ -362,21 +396,6 @@ def tokenize_apply_mask_target(
         coords = rdata.coords[idxs_data]
         data = rdata.data[idxs_data]
 
-    # Apply per-channel masking if provided
-    # mask_channels is a 2D tensor [num_cells, num_channels] where True = keep
-    # We need to apply it to the data after spatial indexing
-    if mask_channels is not None:
-        # mask_channels should be [num_points, num_channels] after cell->point expansion
-        # or [num_channels] if uniform across points
-        if mask_channels.dim() == 1:
-            # Broadcast across points: [num_channels] -> [1, num_channels]
-            channel_mask = mask_channels.unsqueeze(0)
-        else:
-            # Already [num_points, num_channels]
-            channel_mask = mask_channels
-        # Zero out masked channels (where mask is False)
-        data = data * channel_mask.to(data.dtype)
-
     num_tokens_per_cell = [len(idxs) for idxs in idxs_cells_lens]
     mask_tokens_per_cell = torch.split(torch.from_numpy(mask_tokens), num_tokens_per_cell)
     masked_points_per_cell = torch.tensor(
@@ -385,6 +404,32 @@ def tokenize_apply_mask_target(
             for tt, mm in zip(idxs_cells, mask_tokens_per_cell, strict=False)
         ]
     ).to(dtype=torch.int32)
+
+    # Compute per-channel loss mask (complement of source-side channel masks).
+    # At target cells where a channel's source mask is True ("unmasked" / visible),
+    # we set loss_mask = 0.0 (skip loss — channel was effectively "source" there).
+    # At target cells where a channel's source mask is False ("masked" / hidden),
+    # we set loss_mask = 1.0 (compute loss — channel was truly masked).
+    channel_loss_mask = None
+    if channel_masks_dict and channel_list:
+        num_survived = int(masked_points_per_cell.sum().item())
+        num_channels = len(channel_list)
+        if num_survived > 0:
+            num_cells = len(idxs_cells)
+            cell_ids = torch.repeat_interleave(
+                torch.arange(num_cells, dtype=torch.long), masked_points_per_cell.long()
+            )
+            ch_loss_mask = torch.ones(num_survived, num_channels, dtype=data.dtype)
+            for c_idx, ch_name in enumerate(channel_list):
+                if ch_name in channel_masks_dict:
+                    cell_mask = channel_masks_dict[ch_name]
+                    if isinstance(cell_mask, torch.Tensor):
+                        cell_mask_f = cell_mask.float()
+                    else:
+                        cell_mask_f = torch.from_numpy(np.asarray(cell_mask)).float()
+                    # Complement: loss where source mask was False (channel was hidden)
+                    ch_loss_mask[:, c_idx] = 1.0 - cell_mask_f[cell_ids]
+            channel_loss_mask = ch_loss_mask
 
     # compute encoding of target coordinates used in prediction network
     if torch.tensor(idxs_lens).sum() > 0:
@@ -402,7 +447,7 @@ def tokenize_apply_mask_target(
     else:
         coords_local = torch.tensor([])
 
-    return data, datetimes, coords, coords_local, masked_points_per_cell
+    return data, datetimes, coords, coords_local, masked_points_per_cell, channel_loss_mask
 
 
 def get_source_coords_local(

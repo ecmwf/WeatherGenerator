@@ -93,6 +93,11 @@ class StreamData:
         ]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(forecast_steps + 1)]
 
+        # Per-channel loss mask: shape (N, C) per forecast step, or None.
+        # 1.0 = compute loss for this channel at this point,
+        # 0.0 = skip loss (channel was "visible" / unmasked at this cell).
+        self.channel_loss_mask = [None for _ in range(forecast_steps + 1)]
+
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
@@ -116,6 +121,9 @@ class StreamData:
         self.target_tokens_lens = _pin_tensor_list(self.target_tokens_lens)
         self.idxs_inv = _pin_tensor_list(self.idxs_inv)
         self.target_coords_raw = _pin_tensor_list(self.target_coords_raw)
+        self.channel_loss_mask = [
+            _pin_tensor(t) if t is not None else None for t in self.channel_loss_mask
+        ]
 
         # Pin source tensors
         self.source_tokens_cells = _pin_tensor_list(self.source_tokens_cells)
@@ -149,6 +157,10 @@ class StreamData:
         self.target_coords = [t.to(dv, non_blocking=True) for t in self.target_coords]
         self.target_coords_lens = [t.to(dv, non_blocking=True) for t in self.target_coords_lens]
         self.target_tokens = [t.to(dv, non_blocking=True) for t in self.target_tokens]
+        self.channel_loss_mask = [
+            t.to(dv, non_blocking=True) if t is not None else None
+            for t in self.channel_loss_mask
+        ]
 
         # move to device if source data is present
         if not np.array([s is None for s in self.source_tokens_cells]).all():
@@ -241,6 +253,7 @@ class StreamData:
         target_coords_raw: torch.Tensor,
         times_raw: torch.Tensor,
         idxs_inv: torch.Tensor,
+        channel_loss_mask: torch.Tensor | None = None,
     ) -> None:
         """
         Add data for target for one input.
@@ -252,16 +265,15 @@ class StreamData:
         targets : torch.tensor( number of healpix cells )
             [ torch.tensor( num tokens, channels) ]
               Target data for loss computation
-        targets_lens : torch.tensor( number of healpix cells)
-            length of targets per cell
-        target_coords : list( number of healpix cells)
-            [ torch.tensor( points per cell, 105) ]
-              target coordinates
-        target_times : list( number of healpix cells)
-            [ torch.tensor( points per cell) ]
-              absolute target times
+        target_coords_raw : torch.Tensor
+            Raw coordinates
+        times_raw : torch.Tensor
+            Target times
         idxs_inv:
             Indices to reorder targets back to order in input
+        channel_loss_mask : torch.Tensor | None
+            Per-channel loss mask of shape (N, C). 1.0 = compute loss,
+            0.0 = skip (channel was visible at this cell).
 
         Returns
         -------
@@ -272,6 +284,7 @@ class StreamData:
         self.target_times_raw[fstep] = times_raw
         self.target_coords_raw[fstep] = target_coords_raw
         self.idxs_inv[fstep] = idxs_inv
+        self.channel_loss_mask[fstep] = channel_loss_mask
 
     def add_target_coords(
         self,

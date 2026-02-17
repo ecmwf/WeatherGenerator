@@ -73,6 +73,7 @@ def kernel_crps(
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
     fair=True,
+    channel_loss_mask: torch.Tensor | None = None,
 ):
     """
     Compute kernel CRPS
@@ -131,6 +132,7 @@ def lp_loss(
     with_mean: bool = True,
     weights_channels: torch.Tensor | None = None,
     weights_points: torch.Tensor | None = None,
+    channel_loss_mask: torch.Tensor | None = None,
 ):
     """
     This function computes the Lp-norm for any arbitrary integer p < inf.
@@ -140,6 +142,11 @@ def lp_loss(
     The norm can optionally be normalised by the pth root.
     * For example: p=2 and with_p_root=True corresponds to RMSE.
     The mean across all channels can optionally be weighted by channel weights.
+
+    When ``channel_loss_mask`` (shape ``[N, C]``) is provided, it acts as a
+    per-point, per-channel binary weight: 1.0 = include in loss, 0.0 = exclude.
+    The mean is taken over the effective number of non-zero entries per channel
+    so that masked entries do not dilute the loss.
 
     The function implements:
 
@@ -180,6 +187,8 @@ def lp_loss(
         with_p_root : boolean defining whether the p-th root of the norm is returned
         weights_channels (optional): tensor of shape = (num_channels,)
         weights_points (optional): tensor of shape = (num_data_points)
+        channel_loss_mask (optional): tensor of shape = (num_data_points, num_channels)
+            Binary mask: 1.0 = compute loss, 0.0 = skip.
 
     Return:
         loss : (weighted) scalar loss (e.g. for gradient computation)
@@ -196,7 +205,16 @@ def lp_loss(
     )
     if weights_points is not None:
         diff_p = (diff_p.transpose(1, 0) * weights_points).transpose(1, 0)
-    loss_chs = diff_p.mean(0) if with_mean else diff_p.sum(0)
+
+    # Apply per-channel loss mask: zero out entries where channel was visible
+    # at the corresponding source cell, and normalise by effective count.
+    if channel_loss_mask is not None:
+        diff_p = diff_p * channel_loss_mask
+        effective_n = channel_loss_mask.sum(0).clamp(min=1)
+        loss_chs = diff_p.sum(0) / effective_n if with_mean else diff_p.sum(0)
+    else:
+        loss_chs = diff_p.mean(0) if with_mean else diff_p.sum(0)
+
     loss_chs = torch.pow(loss_chs, 1.0 / p_norm) if with_p_root else loss_chs
     loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
 
@@ -208,6 +226,7 @@ def mse(
     pred: torch.Tensor,
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
+    channel_loss_mask: torch.Tensor | None = None,
 ):
     """
     Computes the mean squared error (mse).
@@ -221,6 +240,7 @@ def mse(
         with_mean=True,
         weights_channels=weights_channels,
         weights_points=weights_points,
+        channel_loss_mask=channel_loss_mask,
     )
 
 
@@ -229,6 +249,7 @@ def rss(
     pred: torch.Tensor,
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
+    channel_loss_mask: torch.Tensor | None = None,
 ):
     """
     Computes the residual sum of squares (rss).
@@ -242,6 +263,7 @@ def rss(
         with_mean=False,
         weights_channels=weights_channels,
         weights_points=weights_points,
+        channel_loss_mask=channel_loss_mask,
     )
 
 
@@ -250,6 +272,7 @@ def rmse(
     pred: torch.Tensor,
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
+    channel_loss_mask: torch.Tensor | None = None,
 ):
     """
     Computes the root mean squared error (rmse).
@@ -263,6 +286,7 @@ def rmse(
         with_mean=True,
         weights_channels=weights_channels,
         weights_points=weights_points,
+        channel_loss_mask=channel_loss_mask,
     )
 
 
@@ -271,6 +295,7 @@ def mae(
     pred: torch.Tensor,
     weights_channels: torch.Tensor | None,
     weights_points: torch.Tensor | None,
+    channel_loss_mask: torch.Tensor | None = None,
 ):
     """
     Computes the mean absolute error (mae).
@@ -284,6 +309,7 @@ def mae(
         with_mean=True,
         weights_channels=weights_channels,
         weights_points=weights_points,
+        channel_loss_mask=channel_loss_mask,
     )
 
 

@@ -70,7 +70,7 @@ def compute_spatial_autocorr(
     lats: NDArray[np.float32],
     lons: NDArray[np.float32],
     max_lag_km: float = 3000.0,
-    n_bins: int = 30,
+    n_bins: int = 50,
     n_sample_pairs: int = 50000,
     seed: int = 42,
 ) -> tuple[float, NDArray[np.float64], NDArray[np.float64]]:

@@ -147,12 +147,16 @@ class TokenizerMasking(Tokenizer):
         idxs_cells_data,
         time_win: tuple,
         cell_mask: torch.Tensor,
+        channel_masks_dict: dict[str, np.typing.NDArray] | None = None,
     ):
         stream_id = stream_info["stream_id"]
         is_diagnostic = stream_info.get("diagnostic", False)
+        source_channels = stream_info.get(
+            "train_source_channels", stream_info.get("val_source_channels", [])
+        )
+        val_source_channels = stream_info.get("val_source_channels", [])
         is_diagnostic = is_diagnostic or (
-            len(stream_info.train_source_channels) == 0
-            and len(stream_info.val_source_channels) == 0
+            len(source_channels) == 0 and len(val_source_channels) == 0
         )
 
         # return empty if there is no data or we are in diagnostic mode
@@ -164,22 +168,31 @@ class TokenizerMasking(Tokenizer):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
 
-        # select strategy from XXX depending on stream and if student or teacher
-
-        (mask_tokens, mask_channels) = self.cell_to_token_mask(
+        # Spatial token mask from cell-level mask
+        (mask_tokens, _) = self.cell_to_token_mask(
             idxs_cells, idxs_cells_lens, cell_mask
         )
+
+        # Resolve channel list for per-channel masking
+        channel_list = None
+        if channel_masks_dict:
+            channel_list = stream_info.get(
+                "train_source_channels",
+                stream_info.get("val_source_channels"),
+            )
 
         source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
             idxs_cells,
             idxs_cells_lens,
             mask_tokens,
-            mask_channels,
+            None,  # mask_channels (legacy parameter, unused)
             stream_id,
             rdata,
             time_win,
             self.hpy_verts_rots_source[-1],
             encode_times_source,
+            channel_masks_dict=channel_masks_dict,
+            channel_list=channel_list,
         )
 
         return (source_tokens_cells, source_tokens_lens)
@@ -194,9 +207,12 @@ class TokenizerMasking(Tokenizer):
         # mask_state: dict | None = None,
     ):
         is_forcing = stream_info.get("forcing", False)
+        target_channels = stream_info.get(
+            "train_target_channels", stream_info.get("val_target_channels", [])
+        )
+        val_target_channels = stream_info.get("val_target_channels", [])
         is_forcing = is_forcing or (
-            len(stream_info.train_target_channels) == 0
-            and len(stream_info.val_target_channels) == 0
+            len(target_channels) == 0 and len(val_target_channels) == 0
         )
 
         if is_forcing:
@@ -212,7 +228,7 @@ class TokenizerMasking(Tokenizer):
         )
 
         # TODO: split up
-        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+        _, _, _, coords_local, coords_per_cell, _ = tokenize_apply_mask_target(
             self.hl_target,
             idxs_cells,
             idxs_cells_lens,
@@ -261,13 +277,17 @@ class TokenizerMasking(Tokenizer):
         token_data,
         time_win: tuple,
         cell_mask,
+        channel_masks_dict: dict[str, np.typing.NDArray] | None = None,
         # mask_state: dict | None = None,
         # selection: torch.Tensor | None = None,
     ):
         is_forcing = stream_info.get("forcing", False)
+        target_channels = stream_info.get(
+            "train_target_channels", stream_info.get("val_target_channels", [])
+        )
+        val_target_channels = stream_info.get("val_target_channels", [])
         is_forcing = is_forcing or (
-            len(stream_info.train_target_channels) == 0
-            and len(stream_info.val_target_channels) == 0
+            len(target_channels) == 0 and len(val_target_channels) == 0
         )
 
         if is_forcing:
@@ -275,7 +295,7 @@ class TokenizerMasking(Tokenizer):
             datetimes = np.array([], dtype="datetime64[s]")
             coords = torch.tensor((0, 2))
             idxs_ord_inv = None
-            return (data, datetimes, coords, idxs_ord_inv)
+            return (data, datetimes, coords, idxs_ord_inv, None)
 
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
@@ -284,7 +304,15 @@ class TokenizerMasking(Tokenizer):
             idxs_cells, idxs_cells_lens, cell_mask
         )
 
-        data, datetimes, coords, _, _ = tokenize_apply_mask_target(
+        # Resolve target channel list for per-channel loss masking
+        target_channel_list = None
+        if channel_masks_dict:
+            target_channel_list = stream_info.get(
+                "train_target_channels",
+                stream_info.get("val_target_channels"),
+            )
+
+        data, datetimes, coords, _, _, channel_loss_mask = tokenize_apply_mask_target(
             self.hl_target,
             idxs_cells,
             idxs_cells_lens,
@@ -296,6 +324,8 @@ class TokenizerMasking(Tokenizer):
             self.hpy_verts_local_target,
             self.hpy_nctrs_target,
             encode_times_target,
+            channel_masks_dict=channel_masks_dict,
+            channel_list=target_channel_list,
         )
 
         # if selection is None:
@@ -318,7 +348,7 @@ class TokenizerMasking(Tokenizer):
         idxs_ord_inv = None
 
         # selection not passed on, we call get_target_coords first
-        return (data, datetimes, coords, idxs_ord_inv)
+        return (data, datetimes, coords, idxs_ord_inv, channel_loss_mask)
 
     def _select_target_subset(
         self,

@@ -73,11 +73,15 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
             targets[stream_name] = []
             for fstep in range(forecast_steps):
                 targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
+                channel_loss_mask_cur = []
                 is_spoof = []
                 for sample in batch.samples:
                     targets_cur += [sample.streams_data[stream_name].target_tokens[fstep]]
                     target_times_cur += [sample.streams_data[stream_name].target_times_raw[fstep]]
                     target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[fstep]]
+                    channel_loss_mask_cur += [
+                        sample.streams_data[stream_name].channel_loss_mask[fstep]
+                    ]
                     meta_data += [sample.meta_info]
                     is_spoof += [sample.streams_data[stream_name].is_spoof()]
 
@@ -88,6 +92,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                         "target_coords": target_coords_cur,
                         "target_metda_data": meta_data,
                         "is_spoof": is_spoof,
+                        "channel_loss_mask": channel_loss_mask_cur,
                     }
                 )
 

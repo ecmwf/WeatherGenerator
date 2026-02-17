@@ -1,30 +1,35 @@
 # (C) Copyright 2025 WeatherGenerator contributors.
 #
-# Test config for per-variable channel masking based on autocorrelation.
-# Uses a small model for quick testing.
+# Training config for per-variable channel masking on ERA5.
+# Uses autocorrelation-based masking for all ERA5 variables.
+#
+# Usage:
+#   uv run train --config config/config_channel_masking.yml
+#
+# This config uses the production-size model with healpix level 5.
+# For a quick test with a smaller model, use config_channel_masking_test.yml.
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-# Small model for testing
-ae_local_dim_embed: 64
-ae_local_num_blocks: 1
-ae_local_num_heads: 4
+ae_local_dim_embed: 1024
+ae_local_num_blocks: 4
+ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
-ae_adapter_num_heads: 4
-ae_adapter_embed: 32
+ae_adapter_num_heads: 16
+ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 64
-ae_global_num_blocks: 1
-ae_global_num_heads: 4
+ae_global_dim_embed: 2048
+ae_global_num_blocks: 2
+ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 1.0
@@ -32,8 +37,8 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 1
-ae_aggregation_num_heads: 4
+ae_aggregation_num_blocks: 8
+ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
 ae_aggregation_att_dense_rate: 1.0
@@ -48,21 +53,20 @@ pred_mlp_adaln: True
 num_class_tokens: 1
 num_register_tokens: 7
 
-fe_num_blocks: 2
-fe_num_heads: 4
+fe_num_blocks: 6
+fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: []
 fe_impute_latent_noise_std: 0.0
 forecast_att_dense_rate: 1.0
 
-# Use level 4 for faster testing
-healpix_level: 4
+healpix_level: 5
 
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: False
+with_fsdp: True
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -70,7 +74,7 @@ norm_eps: 1e-4
 
 latent_noise_kl_weight: 0.0
 latent_noise_gamma: 2.0
-latent_noise_saturate_encodings: 5 
+latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
@@ -80,52 +84,51 @@ zarr_store: "zip"
 
 #####################################
 
-# Use the channel masking stream config (dedicated directory with only this stream)
-streams_directory: "./integration_tests/streams_channel_masking/"
-streams: ["era5_channel_masking.yml"]
+# Point to the stream config with autocorrelation-based channel masking
+streams_directory: "./config/streams/era5_1deg/"
+streams: ["era5_channel_masking_all.yml"]
 
 general:
   istep: 0
   rank: ???
   world_size: ???
   multiprocessing_method: "fork"
-  desc: "channel_masking_test"
+  desc: "channel_masking_all_vars"
   run_id: ???
   run_history: []
 
 train_log_freq:
-  terminal: 1
-  metrics: 5
-  checkpoint: 100
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
 
 data_loading:
-  num_workers: 4
+  num_workers: 12
   rng_seed: ???
   repeat_data_in_mini_epoch: False
   memory_pinning: True
 
 training_config:
   training_mode: ["masking"]
-  
-  # Small run for testing
-  num_mini_epochs: 5
-  samples_per_mini_epoch: 32
+
+  num_mini_epochs: 32
+  samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 2020-01-01T00:00
-  end_date: 2020-01-31T00:00
+  start_date: 1979-01-01T00:00
+  end_date: 2022-12-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
   window_offset_prediction: 1
-  
+
   learning_rate_scheduling:
     lr_start: 1e-6
-    lr_max: 1e-4
+    lr_max: 5e-5
     lr_final_decay: 1e-6
     lr_final: 0.0
-    num_steps_warmup: 8
-    num_steps_cooldown: 8
+    num_steps_warmup: 512
+    num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
@@ -146,7 +149,7 @@ training_config:
         loss_fcts: { "mse": { }, },
         },
     }
-  
+
   model_input: {
     "masking": {
       masking_strategy: "healpix",
@@ -160,14 +163,14 @@ training_config:
     num_steps: 1
     policy: "fixed"
 
-validation_config: 
-  samples_per_mini_epoch: 16
+validation_config:
+  samples_per_mini_epoch: 256
   shuffle: False
-  start_date: 2020-02-01T00:00
-  end_date: 2020-02-07T00:00
-  
-  validate_with_ema: 
-    enabled: False
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+
+  validate_with_ema:
+    enabled: True
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
@@ -178,5 +181,5 @@ validation_config:
 wgtags:
   org: null
   issue: null
-  exp: "channel_masking_test"
+  exp: "channel_masking"
   grid: null
