@@ -93,12 +93,19 @@ class EmbeddingEngine(torch.nn.Module):
             sdata = []
             for istep in range(num_steps_input):
                 for sample in batch.get_samples():
-                    sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
+                    cell_tensor = sample.streams_data[stream_name].source_tokens_cells[istep]
+                    # skip None or empty tensors
+                    if cell_tensor is None:
+                        continue
+                    if isinstance(cell_tensor, torch.Tensor) and cell_tensor.numel() == 0:
+                        continue
+                    sdata.append(cell_tensor)
 
-            sdata = torch.cat(sdata).to(tokens_all.dtype)
-            # skip empty stream
+            # if no data collected for this stream, skip
             if len(sdata) == 0:
                 continue
+
+            sdata = torch.cat(sdata).to(tokens_all.dtype)
 
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]

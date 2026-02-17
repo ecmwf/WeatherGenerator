@@ -99,11 +99,11 @@ class StreamData:
         self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
 
-        # source tokens per cell
-        self.source_tokens_cells = [None for _ in range(self.input_steps)]
+        # source tokens per cell (initialize to empty tensors to avoid None)
+        self.source_tokens_cells = [torch.tensor([]) for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = [
-            torch.tensor([], dtype=torch.int32) for _ in range(self.input_steps)
+            torch.zeros(self.healpix_cells, dtype=torch.int32) for _ in range(self.input_steps)
         ]
         # unprocessed source (for logging)
         self.source_raw = [None for _ in range(self.input_steps)]

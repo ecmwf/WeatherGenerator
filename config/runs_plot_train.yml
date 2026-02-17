@@ -1,0 +1,20 @@
+train:
+  plot:
+    ftfcqr0v:
+      slurm_id: 0
+      description: "ftfcqr0v, old finetuning"
+    pkfuwqdh:
+      slurm_id: 0
+      description: "pkfuwqdh, old finetuning"
+    k8smwg67:
+      slurm_id: 0
+      description: "k8smwg67, finetuning NPPATMS diagnostic"
+    spm6zeor:
+      slurm_id: 0
+      description: "spm6zeor, cont. k8smwg67, finetuning NPPATMS diagnostic"
+    ypcir9kz:
+      slurm_id: 0
+      description: "ypcir9kz, finetuning NPPATMS"
+    qh893msa:
+      slurm_id: 0
+      description: "qh893msa, ypcir9kz continued, finetuning NPPATMS"
