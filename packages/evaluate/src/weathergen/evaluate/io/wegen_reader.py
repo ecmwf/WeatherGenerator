@@ -869,43 +869,37 @@ class WeatherGenMergeReader(Reader):
         missing_metrics:
             dictionary of missing regions and metrics that need to be recomputed.
         """
-        # merge scores from all JsonReaders
-        if isinstance(self.readers[0], WeatherGenJSONReader):
-            merged_scores = {}
-            merged_missing = {}
+        local_scores = {}
+        missing_metrics = {}
 
+        if isinstance(self.readers[0], WeatherGenZarrReader):
+            # TODO: implement this properly. Not it is skipping loading scores
+            for region in regions:
+                for metric in metrics:
+                    # all other cases: recompute scores
+                    missing_metrics.setdefault(region, []).append(metric)
+        else: #JsonReader
             # deep merge dicts
             for reader in self.readers:
                 scores, missing = reader.load_scores(stream, regions, metrics)
-                merge(merged_scores, scores)
-                merge(merged_missing, missing)
+                merge(local_scores, scores)
+                merge(missing_metrics, missing)
 
             # merge runs into one with all scores concatenated
-            for metric in merged_scores.keys():
-                for region in merged_scores[metric].keys():
-                    for stream in merged_scores[metric][region].keys():
+            for metric in local_scores.keys():
+                for region in local_scores[metric].keys():
+                    for stream in local_scores[metric][region].keys():
                         scores = (
-                            merged_scores[metric][region][stream].pop(run_id, None)
+                            local_scores[metric][region][stream].pop(run_id, None)
                             for run_id in self.run_ids
                         )
                         _logger.info(f"scores {scores}")
-                        merged_scores[metric][region][stream].setdefault(
+                        local_scores[metric][region][stream].setdefault(
                             self.run_id,
                             xr.concat(scores, dim="ens").assign_coords(
                                 ens=range(len(self.readers))
                             ),
                         )
-
-            return merged_scores, merged_missing
-
-        # ZarrReader
-        # TODO: implement this properly. Not it is skipping loading scores
-        local_scores = {}
-        missing_metrics = {}
-        for region in regions:
-            for metric in metrics:
-                # all other cases: recompute scores
-                missing_metrics.setdefault(region, []).append(metric)
 
         return local_scores, missing_metrics
 
