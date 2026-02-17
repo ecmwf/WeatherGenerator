@@ -75,7 +75,7 @@ def parse_args(args: list) -> argparse.Namespace:
         "--format",
         dest="output_format",
         type=str,
-        choices=["netcdf", "grib", "quaver"],
+        choices=["netcdf", "verif", "quaver"],
         help="Output file format (currently only netcdf supported)",
         required=True,
     )
@@ -207,7 +207,10 @@ def export_from_args(args: list) -> None:
     args = parse_args(sys.argv[1:])
 
     # Load configuration
-    config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
+    if args.format == "verif":
+        config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2verif.yaml")
+    else:
+        config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
     config = OmegaConf.load(config_file)
     # check config loaded correctly
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"

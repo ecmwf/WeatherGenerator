@@ -94,10 +94,12 @@ def _get_file_extension(output_format: str) -> str:
     """
     if output_format == "netcdf":
         return "nc"
+    if output_format == "verif":
+        return "nc"
     elif output_format == "quaver":
         return "grib"
     else:
         raise ValueError(
             f"Unsupported output format: {output_format},"
-            "supported formats are ['netcdf', 'DWD', 'quaver']"
+            "supported formats are ['netcdf', 'verif', 'quaver']"
         )
