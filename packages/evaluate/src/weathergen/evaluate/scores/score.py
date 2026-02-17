@@ -190,6 +190,7 @@ class Scores:
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
+            "qq_analysis": self.calc_quantiles,
             "nse": self.calc_nse,
         }
         self.prob_metrics_dict = {
@@ -242,6 +243,7 @@ class Scores:
         """
         if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
+            _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
             assert self.ens_dim in data.prediction.dims, (
                 f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
@@ -1517,3 +1519,138 @@ class Scores:
             raise ValueError(f"Second-order differentation is not implemenetd in {method} yet.")
 
         return var_diff_amplitude
+
+    def calc_quantiles(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        n_quantiles: int = 100,
+        quantile_method: str = "linear",
+        focus_extremes: bool = True,
+        extreme_percentiles: tuple[float, float] = (5.0, 95.0),  # 5th and 95th percentiles
+        iqr_percentiles: tuple[float, float] = (25.0, 75.0),
+    ) -> xr.DataArray:
+        """
+        Calculate quantile-quantile (Q-Q) analysis metric for extreme value evaluation.
+
+        This metric compares the distribution of forecast values with ground truth values
+        by computing quantiles and their deviations.
+
+        The Q-Q analysis returns quantile values from both prediction and ground truth,
+        along with metrics to assess how well the forecast captures the observed distribution,
+        especially in the tails (extremes).
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        n_quantiles: int
+            Number of quantiles to calculate for the Q-Q plot. Default is 100.
+            Higher values provide finer resolution of the distribution.
+        quantile_method: str
+            Method for quantile calculation. Options: 'linear', 'lower', 'higher',
+            'midpoint', 'nearest'. Default is 'linear'.
+        focus_extremes: bool
+            If True, additional quantiles are computed in the extreme tails of the
+            distribution for better resolution of extreme values. Default is True.
+        extreme_percentiles: tuple[float, float]
+            Lower and upper percentile thresholds to define extremes.
+            Default is (5.0, 95.0), meaning values below 5th and above 95th percentile
+            are considered extremes.
+        iqr_percentiles: tuple[float, float]
+            Lower and upper percentile thresholds for interquartile range (IQR) calculation.
+            Default is (25.0, 75.0), meaning IQR is computed as difference between 75th and
+            25th percentiles.
+
+        Returns
+        -------
+        xr.DataArray
+            Dataset containing Q-Q analysis results with the following variables:
+            - 'quantile': Theoretical quantile levels (0 to 1)
+            - 'p_quantiles': Quantile values from prediction data
+            - 'gt_quantiles': Quantile values from ground truth data
+            - 'qq_deviation': Absolute difference between prediction and ground truth quantiles
+            - 'qq_deviation_normalized': Normalized deviation (relative to ground truth IQR)
+            - 'extreme_low_mse': MSE for lower extreme quantiles
+            - 'extreme_high_mse': MSE for upper extreme quantiles
+            - 'overall_qq_score': Overall Q-Q score (lower is better, 0 is perfect)
+        """
+        if self._agg_dims is None:
+            raise ValueError(
+                "Cannot calculate Q-Q analysis without aggregation dimensions (agg_dims=None)."
+            )
+
+        _logger.info(f"Starting Q-Q analysis with {n_quantiles} quantiles")
+
+        # Generate quantile levels
+        if focus_extremes:
+            # Add more resolution in the tails for extreme value analysis
+            lower_tail = np.linspace(0.001, extreme_percentiles[0] / 100, 20)
+            middle = np.linspace(
+                extreme_percentiles[0] / 100, extreme_percentiles[1] / 100, n_quantiles - 40
+            )
+            upper_tail = np.linspace(extreme_percentiles[1] / 100, 0.999, 20)
+            quantile_levels = np.concatenate([lower_tail, middle, upper_tail])
+        else:
+            quantile_levels = np.linspace(0.001, 0.999, n_quantiles)
+
+        # Stack aggregation dimensions into a single dimension
+        p_flat = p.stack({"_agg_points": self._agg_dims})
+        gt_flat = gt.stack({"_agg_points": self._agg_dims})
+
+        # Remove NaN values before quantile calculation
+        p_flat = p_flat.dropna(dim="_agg_points", how="all")
+        gt_flat = gt_flat.dropna(dim="_agg_points", how="all")
+
+        # Calculate quantiles using xarray's quantile method
+        p_quantiles = p_flat.quantile(quantile_levels, dim="_agg_points", method=quantile_method)
+        gt_quantiles = gt_flat.quantile(quantile_levels, dim="_agg_points", method=quantile_method)
+
+        # Calculate Q-Q deviations
+        qq_deviation = np.abs(p_quantiles - gt_quantiles)
+
+        # Calculate normalized deviation (relative to interquartile range of ground truth)
+        gt_q_low = gt_flat.quantile(iqr_percentiles[0] / 100, dim="_agg_points")
+        gt_q_high = gt_flat.quantile(iqr_percentiles[1] / 100, dim="_agg_points")
+        iqr = gt_q_high - gt_q_low
+        # Avoid division by zero
+        iqr = iqr.where(iqr > 1e-10, 1.0)
+
+        qq_deviation_normalized = qq_deviation / iqr
+
+        # Calculate MSE for extreme quantiles
+        extreme_low_mask = quantile_levels < (extreme_percentiles[0] / 100)
+        extreme_high_mask = quantile_levels > (extreme_percentiles[1] / 100)
+
+        extreme_low_mse = (
+            ((p_quantiles - gt_quantiles) ** 2).isel(quantile=extreme_low_mask).mean(dim="quantile")
+        )
+        extreme_high_mse = (
+            ((p_quantiles - gt_quantiles) ** 2)
+            .isel(quantile=extreme_high_mask)
+            .mean(dim="quantile")
+        )
+
+        # Calculate overall Q-Q score (mean absolute deviation across all quantiles)
+        overall_qq_score = qq_deviation.mean(dim="quantile")
+
+        # Store Q-Q data as xarray attributes for automatic JSON serialization
+        overall_qq_score.attrs.update(
+            {
+                "p_quantiles": p_quantiles.values.tolist(),
+                "gt_quantiles": gt_quantiles.values.tolist(),
+                "qq_deviation": qq_deviation.values.tolist(),
+                "qq_deviation_normalized": qq_deviation_normalized.values.tolist(),
+                "extreme_low_mse": extreme_low_mse.values.tolist(),
+                "extreme_high_mse": extreme_high_mse.values.tolist(),
+                "quantile_levels": quantile_levels.tolist(),
+                "extreme_percentiles": list(extreme_percentiles),
+                "iqr_percentiles": list(iqr_percentiles),
+            }
+        )
+
+        _logger.info(f"Q-Q analysis completed with {len(overall_qq_score.attrs)} attributes")
+
+        return overall_qq_score
