@@ -1165,8 +1165,6 @@ class QuantilePlots:
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
-        _logger.info(f"Saving quantile plots to: {self.out_plot_dir}")
-
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
         Check if the lengths of data and labels match.
@@ -1708,7 +1706,6 @@ class BarPlots:
         self.cmap = plotter_cfg.get("cmap", "bwr")
         self.out_plot_dir = Path(output_basedir) / "bar_plots"
         self.baseline = plotter_cfg.get("baseline")
-        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
