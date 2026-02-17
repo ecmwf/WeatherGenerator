@@ -67,7 +67,9 @@ class TokenizerMasking(Tokenizer):
         tokens = []
         for rdata in data:
             # skip empty data
+            # append None and then skip later in msds
             if rdata.is_empty():
+                tokens += [None]
                 continue
             # tokenize data
             idxs_cells, idxs_cells_lens = tok(

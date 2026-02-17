@@ -103,7 +103,7 @@ class StreamData:
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = [
-            torch.tensor([], dtype=torch.int32) for _ in range(self.input_steps)
+            torch.zeros(self.healpix_cells, dtype=torch.int32) for _ in range(self.input_steps)
         ]
         # unprocessed source (for logging)
         self.source_raw = [None for _ in range(self.input_steps)]
