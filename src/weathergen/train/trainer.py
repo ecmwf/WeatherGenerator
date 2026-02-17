@@ -371,7 +371,8 @@ class Trainer(TrainerBase):
         self.validate_before_training()
 
         # training loop
-        run_profiler = os.getenv("RUN_PROFILER", "0") == "1"
+        #run_profiler = os.getenv("RUN_PROFILER", "0") == "1"
+        run_profiler = os.getenv("RUN_PROFILER", "1") == "1"
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
