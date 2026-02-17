@@ -10,15 +10,15 @@
 import copy
 import json
 import logging
+import os
 import socket
 from datetime import datetime
-
-import torch
-from torch.profiler import record_function
+from pathlib import Path
 from typing import Literal
 
 import torch
 from omegaconf import OmegaConf
+from torch.profiler import record_function
 
 from weathergen.common import config
 from weathergen.common.config import Config, merge_configs
@@ -229,7 +229,15 @@ def export_memory_snapshot() -> None:
     # Prefix for file names.
     host_name = socket.gethostname()
     timestamp = datetime.now().strftime(TIME_FORMAT_STR)
-    file_prefix = f"./profiler_logs/{host_name}_{timestamp}"
+
+    curr_dir = os.environ.get("WEATHERGEN_HOME")
+    if not curr_dir:
+        raise RuntimeError("WEATHERGEN_HOME is not set")
+
+    log_dir = Path(curr_dir) / "profiler_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)  # create if missing; do nothing if exists
+
+    file_prefix = str(log_dir / f"{host_name}_{timestamp}")
 
     try:
         logger.info(f"Saving snapshot to local file: {file_prefix}.pickle")
@@ -243,7 +251,15 @@ def trace_handler(prof: torch.profiler.profile):
     # Prefix for file names.
     host_name = socket.gethostname()
     timestamp = datetime.now().strftime(TIME_FORMAT_STR)
-    file_prefix = f"./profiler_logs/{host_name}_{timestamp}"
+    
+    curr_dir = os.environ.get("WEATHERGEN_HOME")
+    if not curr_dir:
+        raise RuntimeError("WEATHERGEN_HOME is not set")
+
+    log_dir = Path(curr_dir) / "profiler_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)  # create if missing; do nothing if exists
+
+    file_prefix = str(log_dir / f"{host_name}_{timestamp}")
 
     # Construct the trace file.
     prof.export_chrome_trace(f"{file_prefix}.json.gz")
