@@ -29,6 +29,7 @@ from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
+from weathergen.evaluate.utils.utils import merge
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
