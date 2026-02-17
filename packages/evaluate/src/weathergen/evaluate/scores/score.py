@@ -190,6 +190,7 @@ class Scores:
             "grad_amplitude": self.calc_spatial_variability,
             "psnr": self.calc_psnr,
             "seeps": self.calc_seeps,
+            "nse": self.calc_nse,
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
@@ -1198,6 +1199,34 @@ class Scores:
             seeps_values = seeps_values_all
 
         return seeps_values
+
+    def calc_nse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+        """
+        Calculate Nash–Sutcliffe_model_efficiency_coefficient (NSE)
+        of forecast data vs reference data
+        Metrics broadly used in hydrology
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        Returns
+        -------
+        xr.DataArray
+            Nash–Sutcliffe_model_efficiency_coefficient (NSE)
+
+        """
+
+        obs_mean = gt.mean(dim=self._agg_dims)
+
+        num = ((gt - p) ** 2).sum(dim=self._agg_dims)
+
+        den = ((gt - obs_mean) ** 2).sum(dim=self._agg_dims)
+
+        nse = 1 - num / den
+
+        return nse
 
     ### Probablistic scores
 

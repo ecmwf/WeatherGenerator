@@ -9,7 +9,7 @@ import torch
 from numpy.typing import NDArray
 
 from weathergen.datasets.batch import SampleMetaData
-from weathergen.utils.train_logger import Stage
+from weathergen.train.utils import Stage
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 logger = logging.getLogger(__name__)
