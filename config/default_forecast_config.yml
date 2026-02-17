@@ -1,12 +1,17 @@
-streams_directory: "./config/streams/era5_1deg/"
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-target_cell_local_prediction: True
-
-ae_local_dim_embed: 1024
+ae_local_dim_embed: 2048
 ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -40,26 +45,24 @@ ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
-decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
+decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
 pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
+num_class_tokens: 0
+num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-forecast_offset : 1
-forecast_delta: 00:00:00
-forecast_steps: 4
-forecast_policy: "fixed"
-forecast_freeze_model: False
-forecast_att_dense_rate: 1.0
 fe_num_blocks: 8
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: [3]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 1e-4  # 1e-4
+fe_impute_latent_noise_std: 1e-4
+# currently fixed to 1.0 (due to limitations with flex_attention and triton)
+forecast_att_dense_rate: 1.0
 
 healpix_level: 5
 
@@ -68,6 +71,7 @@ with_flash_attention: True
 compile_model: False
 with_fsdp: True
 attention_dtype: bf16
+mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
 
@@ -77,91 +81,143 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-batch_size_per_gpu: 1
-batch_size_validation_per_gpu: 1
-
-# a regex that needs to fully match the name of the modules you want to freeze
-# e.g. ".*ERA5" will match any module whose name ends in ERA5\
-# encoders and decoders that exist per stream have the stream name attached at the end
 freeze_modules: ""
+load_chkpt: {}
 
-# whether to track the exponential moving average of weights for validation
-validate_with_ema: True
-ema_ramp_up_ratio: 0.09
-ema_halflife_in_thousands: 1e-3
-
-validation_config: {"losses": {LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]},}}
-# Student-teacher configuration (only used when training_mode == "student_teacher")
-# TODO: adapt so that the masking or forecast config entry also sits here
-training_config:
-  # # when this is "masking", we are basically only using the model_input subconfig
-  training_mode: "masking"  
-
-  losses :
-      LossPhysical: {weight: 1.0, loss_fcts: [['mse', 1.0]]}
-  # Example config for masking/diffusion
-  model_input:
-    - masking_strategy: "forecast" # "random", "healpix". Masking strategy to use for model input for masking, and local (student) views when doing student-teacher
-      num_samples: 1  # if student-teacher, the number of local (student) views to generate
-      masking_strategy_config : { diffusion_rn : True, rate : 0.4 }
-      relationship: "independent"  # "independent", "subset", "disjoint". Relationship of student views to teacher view.
-      num_steps_input: 1
-
-num_register_tokens: 0
-
-num_mini_epochs: 64
-samples_per_mini_epoch: 4096
-samples_per_validation: 512
-shuffle: True
-
-lr_scaling_policy: "sqrt"
-lr_start: 1e-6
-lr_max: 0.0001
-lr_final_decay: 2e-6
-lr_final: 0.0
-lr_steps_warmup: 256
-lr_steps_cooldown: 512
-lr_policy_warmup: "cosine"
-lr_policy_decay: "constant"
-lr_policy_cooldown: "linear"
-
-grad_clip: 1.0
-weight_decay: 0.1
 norm_type: "LayerNorm"
-nn_module: "te"
-log_grad_norms: False
 
-start_date: 1979-01-01T00:00
-end_date: 2022-12-31T00:00
-start_date_val: 2023-10-01T00:00
-end_date_val: 2023-12-31T00:00
-time_window_step: 06:00:00
-time_window_len: 06:00:00
+#####################################
 
-input_window_steps: 1
-
-val_initial: False
-
-loader_num_workers: 12
-log_validation: 0
-streams_output: ["ERA5"]
+streams_directory: "./config/streams/era5_1deg/"
+streams: ???
 
 # type of zarr_store
 zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
-istep: 0
-run_history: []
+general:
 
-desc: ""
-data_loader_rng_seed: ???
-run_id: ???
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
 
-# The period to log in the training loop (in number of batch steps)
+  # local_rank, 
+  # with_ddp,
+  # data_path_*, 
+  # model_path, 
+  # run_path, 
+  # path_shared_
+  
+  multiprocessing_method: "fork"
+
+  desc: ""
+  run_id: ???
+  run_history: []
+
+# logging frequency in the training loop (in number of batches)
 train_log_freq:
   terminal: 10
   metrics: 20
   checkpoint: 250
 
+# parameters for data loading
+data_loading :
+
+  num_workers: 12
+  rng_seed: ???
+  repeat_data_in_mini_epoch : False
+
+
+# config for training
+training_config:
+  
+  # training_mode: "masking", "student_teacher", "latent_loss"
+  training_mode: ["masking"]
+
+  num_mini_epochs: 64
+  samples_per_mini_epoch: 4096
+  shuffle: True
+
+  start_date: 1979-01-01T00:00
+  end_date: 2022-12-31T00:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+  
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 5e-5
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 512
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw :
+      # parameters are scaled by number of DDP workers
+      beta1 : 0.98125 # == 0.85 on 2 nodes x 4 gpus
+      beta2 : 0.9875  # == 0.90 on 2 nodes x 4 gpus
+      eps : 2e-08
+
+  losses : {
+    "physical": {
+        type: LossPhysical,
+        loss_fcts: { "mse": { }, },
+        },
+    }
+  
+  model_input: {
+    "forecasting" : {
+      # masking strategy: "random", "healpix", "forecast"
+      masking_strategy: "forecast",
+      },
+    }
+
+  forecast :
+      time_step: 06:00:00
+      offset: 1
+      num_steps: 2
+      policy: "fixed"
+
+
+# validation config; full validation config is merge of training and validation config
+validation_config: 
+
+  samples_per_mini_epoch: 256
+  shuffle: False
+
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+  
+  # whether to track the exponential moving average of weights for validation
+  validate_with_ema: 
+    enabled : True
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 1e-3
+
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 0,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
+
+  # run validation before training starts (mainly for model development)
+  validate_before_training: False
+
+
+# test config; full test config is merge of validation and test config
+# test config is used by default when running inference
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val
@@ -172,14 +228,21 @@ train_log_freq:
 # - do not use long strings in values (less than 20 characters is a good rule of thumb, we may enforce this in the future)
 wgtags:
   # The name of the organization of the person running the experiment.
-  # This may be autofilled in the future. Expected values are lowercase strings of 
-  # the organizations codenames in https://confluence.ecmwf.int/display/MAEL/Staff+Contact+List
+  # This may be autofilled in the future. Expected values are lowercase strings 
   # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
-  org: None
+  org: null
+  # The Github issue corresponding to this run (number such as 1234)
+  # Github issues are the central point when running experiment and contain 
+  # links to hedgedocs, code branches, pull requests etc.
+  # It is recommended to associate a run with a Github issue.
+  issue: null
   # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
-  # This is expected to be the primary tag for comparing experiments in MLFlow.
+  # This is expected to be the primary tag for comparing experiments in MLFlow, along with the
+  # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: None
+  exp: null
   # *** Experiment-specific tags ***
-  grid: None
+  # All extra tags (including lists, dictionaries, etc.) are treated 
+  # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
+  grid: null

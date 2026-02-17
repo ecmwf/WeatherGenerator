@@ -15,9 +15,9 @@ from pathlib import Path
 
 import omegaconf
 import pytest
-from weathergen.evaluate.run_evaluation import evaluate_from_config
 
-from weathergen.run_train import inference_from_args, train_with_args
+from weathergen.evaluate.run_evaluation import evaluate_from_config
+from weathergen.run_train import main
 from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
@@ -49,13 +49,13 @@ def setup(test_run_id):
 def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id} {WEATHERGEN_HOME}")
 
-    train_with_args(
-        f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml".split()
-        + [
+    main(
+        [
+            "inference",
+            f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml",
             "--run-id",
             test_run_id,
-        ],
-        f"{WEATHERGEN_HOME}/config/streams/streams_test/",
+        ]
     )
 
     infer_with_missing(test_run_id)
@@ -68,9 +68,16 @@ def test_train(setup, test_run_id):
 
 def infer(run_id):
     logger.info("run inference")
-    inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini-epoch", "0"]
-        + [
+    main(
+        [
+            "-start",
+            "2022-10-10",
+            "-end",
+            "2022-10-11",
+            "--samples",
+            "10",
+            "--mini-epoch",
+            "0",
             "--from-run-id",
             run_id,
             "--run-id",
@@ -83,9 +90,16 @@ def infer(run_id):
 
 def infer_with_missing(run_id):
     logger.info("run inference")
-    inference_from_args(
-        ["-start", "2021-10-10", "-end", "2022-10-11", "--samples", "10", "--mini-epoch", "0"]
-        + [
+    main(
+        [
+            "-start",
+            "2021-10-10",
+            "-end",
+            "2022-10-11",
+            "--samples",
+            "10",
+            "--mini-epoch",
+            "0",
             "--from-run-id",
             run_id,
             "--run-id",
