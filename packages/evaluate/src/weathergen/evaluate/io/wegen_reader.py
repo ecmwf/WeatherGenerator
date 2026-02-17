@@ -698,10 +698,8 @@ class WeatherGenMergeReader(Reader):
         eval_cfg: dict,
         run_id: str,
         private_paths: dict | None = None,
-        /,
         regions: list[str] | None = None,
         metrics: list[str] | None = None,
-        *,
         reader_type: str = "zarr",
     ):
         """
