@@ -153,7 +153,7 @@ data_loading :
 training_config:
   
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["student_teacher"] # ["student_teacher", "physical_loss"]  
+  training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
   num_mini_epochs: 1
   samples_per_mini_epoch: 64
@@ -188,6 +188,14 @@ training_config:
       eps : 2e-08
 
   losses : {
+    "physical": {
+        type: LossPhysical,
+        weight: 1.0,
+        loss_fcts: {
+          "mse": {},
+        },
+        target_and_aux_calc: "Physical",
+    },
     "latent_diff": {
         type: LossLatentDiffusion,
         weight: 1.0,
@@ -204,6 +212,8 @@ training_config:
       },
     }
 
+
+    
   forecast :
       time_step: 06:00:00
       num_steps: 1
