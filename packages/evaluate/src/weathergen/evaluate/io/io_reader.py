@@ -305,6 +305,11 @@ class Reader:
                 "String format for sample in config must be 'digit-digit' or 'all'"
             )
             samples = list(range(int(samples.split("-")[0]), int(samples.split("-")[1]) + 1))
+        if isinstance(ensemble, str) and ensemble not in {"all", "mean"}:
+            assert re.match(r"^\d+-\d+$", ensemble), (
+                "String format for sample in config must be 'digit-digit' or 'all'"
+            )
+            ensemble = list(range(int(ensemble.split("-")[0]), int(ensemble.split("-")[1]) + 1))
 
         return DataAvailability(
             score_availability=True,

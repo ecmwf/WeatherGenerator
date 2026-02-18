@@ -174,6 +174,10 @@ def get_reader(
         reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
     elif reader_type == "merge":
         reader = WeatherGenMergeReader(run, run_id, private_paths)
+    elif reader_type == "jsonmerge":
+        reader = WeatherGenMergeReader(
+            run, run_id, private_paths, region, metric, reader_type="json"
+        )
     else:
         raise ValueError(f"Unknown reader type: {reader_type}")
     return reader
@@ -379,7 +383,7 @@ def evaluate_from_config(
                     )
 
     # summary plots
-    if scores_dict:
+    if scores_dict and cfg.evaluation.get("summary_plots", False):
         _logger.info("Started creating summary plots...")
         plot_summary(cfg, scores_dict, summary_dir)
 
