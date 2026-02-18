@@ -31,9 +31,8 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import get_batch_size_from_config
+from weathergen.train.utils import TRAIN, Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import TRAIN, Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -151,39 +150,35 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 match stream_info["type"]:
                     case "obs":
                         dataset = DataReaderObs
-                        datapath = cf.data_path_obs
-                        # kwargs["end"] = end_date_padded # TODO: implement the padding
                     case "anemoi":
                         dataset = DataReaderAnemoi
-                        datapath = cf.data_path_anemoi
                     case "fesom":
                         dataset = DataReaderFesom
-                        datapath = cf.data_path_fesom
                     case type_name:
-                        reader_entry = get_extra_reader(type_name, cf)
-                        if reader_entry is not None:
-                            dataset = reader_entry.constructor
-                            datapath = reader_entry.data_path
-                        else:
+                        dataset = get_extra_reader(type_name)
+                        if dataset is None:
                             msg = f"Unsupported stream type {stream_info['type']}"
                             f"for stream name '{stream_info['name']}'."
                             raise ValueError(msg)
 
-                datapath = pathlib.Path(datapath)
                 fname = pathlib.Path(fname)
                 # dont check if file exists since zarr stores might be directories
                 if fname.exists():
                     # check if fname is a valid path to allow for simple overwriting
                     filename = fname
                 else:
-                    filename = pathlib.Path(datapath) / fname
+                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
-                    if not filename.exists():  # see above
+                    if not any(filename.exists() for filename in filenames):  # see above
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
-                            f"stream '{stream_info['name']}': {filename}."
+                            f"stream '{stream_info['name']}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
+
+                    # The same dataset can exist on different locations in the filesystem,
+                    # so we need to choose here.
+                    filename = filenames[0]
 
                 ds_type = stream_info["type"]
                 if is_root():
@@ -533,7 +528,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # source data: iterate overall input steps
         input_data = []
-        for idx in range(base_idx - num_steps_input_max, base_idx + 1):
+        for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
@@ -631,7 +626,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
             target_select += ["target_values"]
-        if "student_teacher" in mode or mode == "latent_loss" in mode:
+        if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
         # remove duplicates

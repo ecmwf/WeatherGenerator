@@ -173,6 +173,10 @@ def get_reader(
         reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
     elif reader_type == "merge":
         reader = WeatherGenMergeReader(run, run_id, private_paths)
+    elif reader_type == "jsonmerge":
+        reader = WeatherGenMergeReader(
+            run, run_id, private_paths, region, metric, reader_type="json"
+        )
     else:
         raise ValueError(f"Unknown reader type: {reader_type}")
     return reader

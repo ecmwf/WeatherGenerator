@@ -138,6 +138,25 @@ run_ids :
           sample: [0, 1, 2, 3]
           ensemble: "all" #supported
 
+  #WeatherGeneratorMerge JSON example:
+  ###############################
+
+  #Example of syntax to stack multiple runs over the ensemble dimension  
+  merge_test: #<------ This is the new run_id name of the merged dataset. NB. you always need to specify one
+    type: "jsonmerge" # <------- VERY IMPORTANT
+    merge_run_ids:
+      - so67dku4
+      - c9cg8ql3
+    metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
+    label: "Merged Results"
+    results_base_dir : "./results/"
+    streams:
+      ERA5:
+        channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
+        evaluation:
+          forecast_step: [2,4,6] 
+          sample: [0, 1, 2, 3]
+          ensemble: "all" 
 
   # CSV Reader example:
   ###############################

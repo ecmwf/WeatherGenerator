@@ -81,8 +81,8 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-
 freeze_modules: ""
+load_chkpt: {}
 
 norm_type: "LayerNorm"
 
@@ -90,6 +90,9 @@ norm_type: "LayerNorm"
 
 streams_directory: "./config/streams/era5_1deg/"
 streams: ???
+
+# type of zarr_store
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore  
 
 general:
 
@@ -104,7 +107,7 @@ general:
   # model_path, 
   # run_path, 
   # path_shared_
-  
+
   multiprocessing_method: "fork"
 
   desc: ""
@@ -120,7 +123,7 @@ train_log_freq:
 # parameters for data loading
 data_loading :
 
-  num_workers: 8
+  num_workers: 12
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
@@ -199,10 +202,15 @@ validation_config:
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
-  # number of validation samples that are written to disk
-  write_num_samples: 0
-  # output streams to write; default all
-  output_streams: null
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 0,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
 
   # run validation before training starts (mainly for model development)
   validate_before_training: False
