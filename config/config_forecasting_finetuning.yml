@@ -83,7 +83,7 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-freeze_modules: ""
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
 load_chkpt: {}
 
 norm_type: "LayerNorm"
@@ -94,7 +94,7 @@ streams_directory: "./config/streams/era5_1deg_forecasting/"
 streams: ???
 
 # type of zarr_store
-zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore  
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 general:
 
@@ -109,7 +109,7 @@ general:
   # model_path, 
   # run_path, 
   # path_shared_
-
+  
   multiprocessing_method: "fork"
 
   desc: ""
@@ -136,7 +136,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 256
+  num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -148,13 +148,13 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 1e-4
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
-    policy_decay: "constant"
+    policy_decay: "cosine"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
 
@@ -185,14 +185,14 @@ training_config:
   forecast :
       time_step: 06:00:00
       offset: 1
-      num_steps: 3
+      num_steps: 8
       policy: "fixed"
 
 
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 512
+  samples_per_mini_epoch: 256
   shuffle: False
 
   start_date: 2023-10-01T00:00
@@ -237,13 +237,13 @@ wgtags:
   # Github issues are the central point when running experiment and contain 
   # links to hedgedocs, code branches, pull requests etc.
   # It is recommended to associate a run with a Github issue.
-  issue: 1124
+  issue: null
   # The name of the experiment. This is a distinctive codename for the experiment campaign being run.
   # This is expected to be the primary tag for comparing experiments in MLFlow, along with the
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: "forecast_release_model"
+  exp: null
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
