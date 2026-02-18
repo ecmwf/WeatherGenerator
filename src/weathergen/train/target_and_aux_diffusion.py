@@ -5,11 +5,12 @@ import torch
 from weathergen.datasets.batch import ModelBatch
 from weathergen.model.model import ModelParams
 from weathergen.train.target_and_aux_module_base import (
-    PhysicalTargetAndAux,
+    TargetAndAuxModuleBase,
+    TargetAuxOutput,
 )
 
 
-class DiffusionLatentTargetEncoder(PhysicalTargetAndAux):
+class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
     def __init__(self, model):
         # Todo: make sure this is a frozen clone or forward without gradients in compute()
         self.encoder = model.encoder
@@ -27,11 +28,16 @@ class DiffusionLatentTargetEncoder(PhysicalTargetAndAux):
             batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
         )  # TODO: adjust for multiple streams
 
+        #TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():
             tokens, posteriors = self.encoder(model_params=model_params, batch=batch)
+        #NOTE: must not set to train afterwards unless it was already in train
 
-        target_aux_output = super().compute(istep, batch, model_params, model)
+        output_idxs = batch.get_output_idxs()
+        assert len(output_idxs) > 0
 
+        target_aux_output = TargetAuxOutput(batch.get_output_len(), output_idxs)
+        
         # TODO: currently hard-coding 0
         target_aux_output.add_latent_target(0, "diffusion_latent", tokens)
 

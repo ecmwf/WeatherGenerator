@@ -130,6 +130,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             c_in * x, fstep=fstep, noise_emb=noise_emb
         )  # Eq. (7) in EDM paper
 
+
     def inference(
         self,
         fstep: int,
