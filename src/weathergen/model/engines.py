@@ -304,12 +304,13 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, batch_lens, use_reentrant):
+    def forward(self, tokens, batch_lens, use_reentrant, coords=None):
         for block in self.ae_aggregation_blocks:
+            aux_info = None
             if isinstance(block, MultiSelfAttentionHeadVarlen):
                 tokens = block(tokens, x_lens=batch_lens)
             else:
-                tokens = block(tokens)
+                tokens = block(tokens, coords, aux_info)
         return tokens
 
 
@@ -345,6 +346,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.rope_2D,
                     )
                 )
             else:
@@ -360,6 +362,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.rope_2D,
                     )
                 )
             # MLP block
@@ -379,9 +382,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
-    def forward(self, tokens):
+    def forward(self, tokens, coords=None):
+        aux_info = None
         for block in self.ae_global_blocks:
-            tokens = block(tokens)
+            tokens = block(tokens, coords, aux_info)
         return tokens
 
 
@@ -416,6 +420,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            with_2d_rope=self.cf.rope_2D,
                         )
                     )
                 else:
@@ -432,6 +437,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            with_2d_rope=self.cf.rope_2D,
                         )
                     )
                 # Add MLP block
@@ -461,7 +467,7 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep):
+    def forward(self, tokens, fstep, coords=None):
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
@@ -473,7 +479,7 @@ class ForecastingEngine(torch.nn.Module):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = block(tokens)
             else:
-                tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 
