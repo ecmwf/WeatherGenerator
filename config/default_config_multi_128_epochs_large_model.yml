@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 1024
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -225,7 +225,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: True
 
 
 # test config; full test config is merge of validation and test config
