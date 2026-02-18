@@ -164,7 +164,7 @@ def get_reader(
     run_id: str,
     private_paths: dict[str, str],
     region: str | None = None,
-    metric: str | None = None
+    metric: dict[str, object] | None = None
 ):
     if reader_type == "zarr":
         reader = WeatherGenZarrReader(run, run_id, private_paths)
@@ -196,7 +196,7 @@ def _process_stream(
     private_paths: dict[str, str],
     global_plotting_opts: dict[str, object],
     regions: list[str],
-    metrics: list[str],
+    metrics: dict[str, object],
     plot_score_maps: bool,
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
     """
@@ -218,7 +218,7 @@ def _process_stream(
     regions:
         List of regions to be processed.
     metrics:
-        List of metrics to be processed.
+        Dict of metrics to be processed and their parameters.
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
     """

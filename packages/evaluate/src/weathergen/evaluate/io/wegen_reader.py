@@ -152,7 +152,7 @@ class WeatherGenReader(Reader):
         return all_channels
 
     def load_scores(
-        self, stream: str, regions: list[str], metrics: list[str]
+        self, stream: str, regions: list[str], metrics: dict[str, object]
     ) -> xr.DataArray | None:
         """
         Load multiple pre-computed scores for a given run, stream and metric and epoch.
@@ -207,8 +207,7 @@ class WeatherGenReader(Reader):
         Load a single pre-computed score for a given run, stream and metric
         """
         score_path = (
-            Path(self.results_base_dir)
-            / "evaluation"
+            Path(self.metrics_dir)
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
@@ -259,7 +258,7 @@ class WeatherGenJSONReader(WeatherGenReader):
         run_id: str,
         private_paths: dict | None = None,
         regions: list[str] | None = None,
-        metrics: list[str] | None = None,
+        metrics: dict[str, object] | None = None,
     ):
         super().__init__(eval_cfg, run_id, private_paths)
         # goes looking for the coordinates available for all streams, regions, metrics

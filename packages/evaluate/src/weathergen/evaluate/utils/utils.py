@@ -131,7 +131,6 @@ def calc_scores_per_stream(
             f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
             f" and metrics {metrics}..."
         )
-        print(metrics)
         metric_stream = xr.DataArray(
             np.full(
                 (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
@@ -311,7 +310,7 @@ def _plot_score_maps_per_stream(
     stream: str,
     region: str,
     score_data: VerifiedData,
-    metrics: list[str],
+    metrics: dict[str, object],
     fstep: int,
 ) -> None:
     """Plot 2D score maps for all metrics and channels.
@@ -354,7 +353,7 @@ def _plot_score_maps_per_stream(
     preds = score_data.prediction
 
     plot_metrics = xr.concat(
-        [get_score(score_data, m, agg_dims="sample") for m in metrics],
+        [get_score(score_data, m, agg_dims="sample", parameters=p) for m,p in metrics.items()],
         dim="metric",
         coords="minimal",
         combine_attrs="drop_conflicts",
@@ -363,7 +362,7 @@ def _plot_score_maps_per_stream(
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=metrics,
+        metric=list(metrics.keys()),
     ).compute()
 
     if "ens" in preds.dims:
@@ -559,15 +558,15 @@ def metric_list_to_json(
                         if not "scores" in data_dict:
                             data_dict = { "scores": [data_dict] }
                         for i,score_version in enumerate(data_dict["scores"]):
-                            if score_version["attrs"] == metric_now.attrs:
+                            if score_version["attrs"] == metric_data.attrs:
                                 _logger.warning(f"metric with same parameters found, replacing")
-                                data_dict["scores"][i] = metric_now.to_dict()
+                                data_dict["scores"][i] = metric_data.to_dict()
                                 break
                         else:
-                            data_dict["scores"].append(metric_now.to_dict())
+                            data_dict["scores"].append(metric_data.to_dict())
                             _logger.info(f"Appending results to {save_path}")
                 else:
-                    data_dict = {"scores":[metric_now.to_dict()]}
+                    data_dict = {"scores":[metric_data.to_dict()]}
                     _logger.info(f"Saving results to new file {save_path}")
                 with open(save_path, "w") as f:
                     json.dump(data_dict, f, indent=4)
