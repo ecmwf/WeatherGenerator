@@ -221,7 +221,7 @@ class WeatherGenReader(Reader):
 
         Returns
         -------
-        xr.DataArray | None
+        xr.DataArray or None
             DataArray of the score if found, else None.
         """
         score_path = (
@@ -230,12 +230,13 @@ class WeatherGenReader(Reader):
             f"chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
+
+        score = None
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
                 score = xr.DataArray.from_dict(data_dict)
-        else:
-            score = None
+
         return score
 
     def get_recomputable_metrics(self, metrics):
@@ -287,7 +288,10 @@ class WeatherGenJSONReader(WeatherGenReader):
         metrics: list[str] | None = None,
     ):
         super().__init__(eval_cfg, run_id, private_paths)
-        
+        self.common_coords: dict | None = None
+        self.get_common_coords(regions, metrics)
+
+    def get_common_coords(self, regions, metrics):
         # Find common coordinates across streams, regions, metrics.
         streams = list(self.streams)
         coord_names = ["sample", "forecast_step", "ens"]
@@ -351,7 +355,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         super().__init__(eval_cfg, run_id, private_paths)
 
         zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
-        # for backwards compatibility assume zarr store is local i.e. .zarr format
+        # For backwards compatibility, assume zarr store is local (.zarr format).
 
         fname_zarr = self.results_dir.joinpath(
             f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
@@ -362,9 +366,21 @@ class WeatherGenZarrReader(WeatherGenReader):
                 zarr_ext == "zip" and fname_zarr.is_file()
             ):
                 self.fname_zarr = fname_zarr
+            else:
+                _logger.error(
+                    f"Zarr file {fname_zarr} exists but has unexpected format "
+                    f"({zarr_ext}). Expected directory for 'zarr' or file for 'zip'."
+                )
+                raise FileNotFoundError(
+                    f"Zarr file {fname_zarr} has unexpected format."
+                )
         else:
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
+            _logger.error(
+                f"Zarr file {fname_zarr} does not exist."
+            )
+            raise FileNotFoundError(
+                f"Zarr file {fname_zarr} does not exist."
+            )
 
     def get_data(
         self,
@@ -408,7 +424,9 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         stream_cfg = self.get_stream(stream)
         all_channels = self.get_channels(stream)
-        _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
+        _logger.info(
+            f"RUN {self.run_id}: Processing stream {stream}..."
+        )
 
         fsteps = self.get_forecast_steps() if fsteps is None else fsteps
 
@@ -421,11 +439,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         ensemble = ensemble or self.get_ensemble(stream)
         ensemble = to_list(ensemble)
 
-        dc = DeriveChannels(
-            all_channels,
-            channels,
-            stream_cfg,
-        )
+        dc = DeriveChannels(all_channels, channels, stream_cfg)
 
         da_tars, da_preds = [], []
 

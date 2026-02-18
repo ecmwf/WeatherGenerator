@@ -72,12 +72,12 @@ class Reader(ABC):
 
         Parameters
         ----------
-        eval_cfg :
-            config with plotting and evaluation options for that run id
-        run_id :
-            run id of the model
+        eval_cfg : dict
+            Config with plotting and evaluation options for that run id.
+        run_id : str
+            Run identifier of the model
         private_paths:
-            dictionary of private paths for the supported HPC
+            Dictionary of private paths for the supported HPC
         """
         self.eval_cfg = eval_cfg
         self.run_id = run_id
