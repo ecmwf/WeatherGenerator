@@ -14,7 +14,7 @@ SEVIRI :
   loss_weight : 1.
   # masking_rate_none : 0.05
   token_size : 1024
-  max_num_targets: 5000
+  max_num_targets: 4096
   embed :
     net : transformer
     num_tokens : 1
