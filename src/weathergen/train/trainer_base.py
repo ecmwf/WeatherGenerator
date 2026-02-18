@@ -16,9 +16,6 @@ import torch.distributed as dist
 import torch.multiprocessing
 
 from weathergen.common.config import Config
-from weathergen.train.target_and_aux_diffusion import DiffusionLatentTargetEncoder
-from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
-from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.distributed import is_root
 

@@ -510,8 +510,13 @@ class Model(torch.nn.Module):
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
         num_params_fe = (
-            get_num_parameters(self.forecast_engine.net.fe_blocks
-            if cf.fe_diffusion_model else self.forecast_engine.fe_blocks) if self.forecast_engine else 0
+            get_num_parameters(
+                self.forecast_engine.net.fe_blocks
+                if cf.fe_diffusion_model
+                else self.forecast_engine.fe_blocks
+            )
+            if self.forecast_engine
+            else 0
         )
 
         mdict = self.embed_target_coords
@@ -654,6 +659,7 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
         # Empty dicts evaluate to False in python
+        # breakpoint()
         if not self.pred_heads:
             return output
 
@@ -671,6 +677,8 @@ class Model(torch.nn.Module):
         )
         tokens_nbors_lens[0] = 0
 
+        # breakpoint()
+
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
@@ -681,6 +689,7 @@ class Model(torch.nn.Module):
             t_coords_lens = [len(t) for t in t_coords]
             t_coords = torch.cat(t_coords)
 
+            # breakpoint()
             if len(t_coords) == 0:
                 continue
 
@@ -732,6 +741,7 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
+            # breakpoint()
             output.add_physical_prediction(step, stream_name, pred)
 
         return output
