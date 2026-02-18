@@ -95,6 +95,10 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ).unsqueeze(1),
             }
+
+            # if we have different masks for different variables in the same stream,
+            # we need to say the loss is computed for the OR, where if there is NO student data at all vs. if there is teacher data.
+
         elif name == "iBOT":
             """
             Important this assumes that there is 1 masked version for each global view
