@@ -193,14 +193,7 @@ training_config:
         weight: 1.0,
         target_and_aux_calc: DiffusionLatentTargetEncoder,
         loss_fcts: { "mse": { }, },
-        },
-    # "physical": {
-    #     type: LossPhysical,
-    #     target_and_aux_calc: Physical,
-    #     weight: 0,
-    #     loss_fcts: { "mse": { }, },
-    #     },
-    # }
+        }
   }
   
   model_input: {
