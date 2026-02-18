@@ -401,7 +401,10 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                        title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
+                        title=(
+                            f"{self.stream}, {var} : fstep = {self.fstep:03} "
+                            f"({format_datetime(valid_time)})"
+                        ),
                     )
                     plot_names.append(name)
 
@@ -1938,6 +1941,10 @@ def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArra
 
     # Reindex, inserting NaN for missing labels
     return da.reindex({x_dim: labels})
+
+
+def format_datetime(dt):
+    return dt.astype("datetime64[m]").astype(datetime.datetime).strftime("%Y-%m-%d T%H:%M:%S")
 
 
 def channel_sort_key(name: str) -> tuple[int, str, int]:
