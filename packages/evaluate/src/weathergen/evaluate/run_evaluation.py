@@ -39,6 +39,7 @@ from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
     merge,
     metric_list_to_json,
+    parse_metric_params,
     plot_data,
     plot_summary,
     triple_nested_dict,
@@ -163,15 +164,14 @@ def get_reader(
     run_id: str,
     private_paths: dict[str, str],
     region: str | None = None,
-    metric: str | None = None,
-    metric_parameters: dict = {}
+    metric: str | None = None
 ):
     if reader_type == "zarr":
         reader = WeatherGenZarrReader(run, run_id, private_paths)
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
     elif reader_type == "json":
-        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric, metric_parameters)
+        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
     elif reader_type == "merge":
         reader = WeatherGenMergeReader(run, run_id, private_paths)
     else:
@@ -194,7 +194,6 @@ def _process_stream(
     regions: list[str],
     metrics: list[str],
     plot_score_maps: bool,
-    metric_parameters: dict[str, object],
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
     """
     Worker function for a single stream of a single run.
@@ -221,7 +220,7 @@ def _process_stream(
     """
 
     type_ = run.get("type", "zarr")
-    reader = get_reader(type_, run, run_id, private_paths, regions, metrics, metric_parameters)
+    reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
@@ -238,8 +237,7 @@ def _process_stream(
     stream_loaded_scores, recomputable_metrics = reader.load_scores(
         stream,
         regions,
-        metrics,
-        metric_parameters
+        metrics
     )
     scores_dict = stream_loaded_scores
 
@@ -250,9 +248,9 @@ def _process_stream(
         metrics_to_compute = recomputable_metrics if recomputable_metrics else metrics
 
         stream_computed_scores = calc_scores_per_stream(
-            reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps, metric_parameters
+            reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
         )
-        metric_list_to_json(reader, stream, stream_computed_scores, regions, metric_parameters)
+        metric_list_to_json(reader, stream, stream_computed_scores, regions)
         scores_dict = merge(stream_loaded_scores, stream_computed_scores)
 
     return run_id, stream, scores_dict
@@ -278,8 +276,7 @@ def evaluate_from_config(
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
-    metrics = cfg.evaluation.metrics
-    metric_parameters = cfg.evaluation.get("metric_parameters", {})
+    metrics = parse_metric_params(cfg.evaluation.metrics)
     regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
@@ -312,7 +309,7 @@ def evaluate_from_config(
         if "streams" not in run:
             run["streams"] = default_streams
 
-        reader = get_reader(type_, run, run_id, private_paths, regions, metrics, metric_parameters)
+        reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
         for stream in reader.streams:
             tasks.append(
@@ -325,7 +322,6 @@ def evaluate_from_config(
                     "regions": regions,
                     "metrics": metrics,
                     "plot_score_maps": plot_score_maps,
-                    "metric_parameters": metric_parameters
                 }
             )
 

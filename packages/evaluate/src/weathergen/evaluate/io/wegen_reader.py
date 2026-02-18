@@ -151,7 +151,7 @@ class WeatherGenReader(Reader):
         return all_channels
 
     def load_scores(
-        self, stream: str, regions: list[str], metrics: list[str], metric_parameters: dict = {}
+        self, stream: str, regions: list[str], metrics: list[str]
     ) -> xr.DataArray | None:
         """
         Load multiple pre-computed scores for a given run, stream and metric and epoch.
@@ -179,8 +179,7 @@ class WeatherGenReader(Reader):
         local_scores = {}
         missing_metrics = {}
         for region in regions:
-            for metric in metrics:
-                parameters = metric_parameters.get(metric,{})
+            for metric, parameters in metrics.items():
                 score = self.load_single_score(stream, region, metric, parameters)
                 if score is not None:
                     available_data = self.check_availability(stream, score, mode="evaluation")
@@ -196,7 +195,7 @@ class WeatherGenReader(Reader):
                         continue
 
                 # all other cases: recompute scores
-                missing_metrics.setdefault(region, []).append(metric)
+                missing_metrics.setdefault(region, {}).update({metric:parameters})
                 continue
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
@@ -259,7 +258,6 @@ class WeatherGenJSONReader(WeatherGenReader):
         private_paths: dict | None = None,
         regions: list[str] | None = None,
         metrics: list[str] | None = None,
-        metric_parameters: dict = {}
     ):
         super().__init__(eval_cfg, run_id, private_paths)
         # goes looking for the coordinates available for all streams, regions, metrics
@@ -271,8 +269,7 @@ class WeatherGenJSONReader(WeatherGenReader):
         }  # remember who had which coords, so we can warn about it later.
         for stream in streams:
             for region in regions:
-                for metric in metrics:
-                    parameters = metric_parameters.get(metric, {})
+                for metric, parameters in metrics.items():
                     score = self.load_single_score(stream, region, metric, parameters)
                     if score is not None:
                         for name in coord_names:

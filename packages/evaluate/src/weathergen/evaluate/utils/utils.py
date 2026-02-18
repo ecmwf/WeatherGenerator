@@ -59,8 +59,7 @@ def calc_scores_per_stream(
     stream: str,
     regions: list[str],
     metrics_dict: dict,
-    plot_score_maps: bool = False,
-    metric_parameters: dict[str, object] = {},
+    plot_score_maps: bool = False
 ):
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -125,7 +124,7 @@ def calc_scores_per_stream(
             f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
             f" and metrics {metrics}..."
         )
-
+        print(metrics)
         metric_stream = xr.DataArray(
             np.full(
                 (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
@@ -135,7 +134,7 @@ def calc_scores_per_stream(
                 "sample": samples,
                 "forecast_step": fsteps,
                 "channel": channels,
-                "metric": metrics,
+                "metric": list(metrics.keys()),
                 "ens": ensemble,
             },
         )
@@ -170,8 +169,7 @@ def calc_scores_per_stream(
             # Add it only if it is not None
             valid_scores = []
 
-            for metric in metrics:
-                parameters = metric_parameters.get(metric, {})
+            for metric, parameters in metrics.items():
                 score = get_score(
                     score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord, parameters=parameters
                 )
@@ -229,8 +227,8 @@ def calc_scores_per_stream(
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
 
         # Build local dictionary for this region
-        for metric in metrics:
-            metric_data = metric_stream.sel({"metric": metric}).assign_attrs( metric_parameters.get(metric,{}) )
+        for metric, parameters in metrics.items():
+            metric_data = metric_stream.sel({"metric": metric}).assign_attrs( parameters )
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
                 reader.run_id
             ] = metric_data
@@ -454,8 +452,7 @@ def metric_list_to_json(
     reader: Reader,
     stream: str,
     metrics_dict: list[xr.DataArray],
-    regions: list[str],
-    metric_parameters: dict,
+    regions: list[str]
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -484,7 +481,6 @@ def metric_list_to_json(
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
 
     for metric, metric_stream in metrics_dict.items():
-        parameters = metric_parameters.get(metric, {})
         for region in regions:
             metric_now = metric_stream[region][stream]
             for run_id in metric_now.keys():
@@ -502,7 +498,7 @@ def metric_list_to_json(
                         if not "scores" in data_dict:
                             data_dict = { "scores": [data_dict] }
                         for i,score_version in enumerate(data_dict["scores"]):
-                            if score_version["attrs"] == parameters:
+                            if score_version["attrs"] == metric_now.attrs:
                                 _logger.warning(f"metric with same parameters found, replacing")
                                 data_dict["scores"][i] = metric_now.to_dict()
                                 break
@@ -731,3 +727,17 @@ def merge(dst: dict, src: dict) -> dict:
         else:
             dst[k] = v
     return dst
+
+def parse_metric_params(metrics):
+    ''' 
+    Convert a mixed list of str and dict metrics into a dict where the metric
+    names are the keys and the values are dicts of parameters for that metric.
+    '''
+    out = oc.DictConfig({})
+    for metric in metrics:
+        if isinstance(metric, str):
+            out = oc.OmegaConf.merge(out, {metric: {}})
+        else:
+            out = oc.OmegaConf.merge(out, metric)
+    return out
+
