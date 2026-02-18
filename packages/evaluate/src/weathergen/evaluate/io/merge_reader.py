@@ -8,16 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 # Standard library
-import json
 import logging
-from collections import defaultdict
 from pathlib import Path
 
 # Third-party
-import numpy as np
 import omegaconf as oc
 import xarray as xr
-from tqdm import tqdm
 
 # Local application / package
 from weathergen.common.config import (
@@ -25,11 +21,11 @@ from weathergen.common.config import (
     load_merge_configs,
     load_run_config,
 )
-from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
-from weathergen.evaluate.scores.score_utils import to_list
-from weathergen.evaluate.utils.derived_channels import DeriveChannels
 from weathergen.evaluate.io.wegen_reader import WeatherGenJSONReader,WeatherGenZarrReader
+
+_logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
 
 class WeatherGenMergeReader(Reader):
     def __init__(
