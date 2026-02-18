@@ -55,11 +55,11 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 8
+fe_num_blocks: 16
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: [3]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
