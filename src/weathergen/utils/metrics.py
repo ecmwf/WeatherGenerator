@@ -61,4 +61,4 @@ def get_train_metrics_path(base_path: Path, run_id: str) -> Path:
     if (base_path / run_id / "metrics.json").exists():
         return base_path / run_id / "metrics.json"
     else:
-        return base_path / run_id / f"{run_id}_train_metrics.json"
+        return base_path / f"{run_id}_train_metrics.json"
