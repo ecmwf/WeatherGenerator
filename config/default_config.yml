@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1024
+ae_local_dim_embed: 512
 ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -25,9 +25,9 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 1024
+ae_global_dim_embed: 512
 ae_global_num_blocks: 2
-ae_global_num_heads: 32
+ae_global_num_heads: 16
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 # TODO: switching to < 1 triggers triton-related issues.
@@ -38,7 +38,7 @@ ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
 ae_aggregation_num_blocks: 8
-ae_aggregation_num_heads: 32
+ae_aggregation_num_heads: 16
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
 ae_aggregation_att_dense_rate: 1.0
@@ -132,7 +132,7 @@ data_loading :
 training_config:
 
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["student_teacher"]
+  training_mode: ["masking", "student_teacher"]
 
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
@@ -171,7 +171,7 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 1e-4
+    lr_max: 1e-5
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 4096
@@ -203,14 +203,26 @@ training_config:
       weight_decay: 0.05
 
   losses : {
+    # "physical": {
+    #     enabled: False,
+    #     type: LossPhysical,
+    #     weight: 0.1,
+    #     loss_fcts: {
+    #       "mse": {
+    #         weight: 1.0,
+    #         target_source_correspondence: { 0 : { 0 : "subset"} },
+    #       },
+    #     },
+    #     target_and_aux_calc: "Physical",
+    # },
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
         weight: 1.0,
         loss_fcts : {
           "JEPA": {
-            'weight': 4, "loss_extra_args": {}, "out_dim": 1024, "head": transformer,
-            "num_blocks": 12, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 512, 
+            'weight': 4, "loss_extra_args": {}, "out_dim": 512, "head": transformer,
+            "num_blocks": 12, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 256, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
           },
@@ -249,7 +261,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.66, hl_mask: 4, rate_sampling: True},
+      masking_strategy_config : { rate : 0.66, hl_mask: 3, rate_sampling: True},
     },
   }
 
