@@ -44,9 +44,9 @@ class WeatherGenMergeReader(Reader):
         private_paths: dict
             dictionary of private paths for the supported HPC
         regions: list[str]
-            names of predefined bounding box for a region
+            names of predefined bounding box for a region (only used for WeatherGenJSONReader)
         metrics: list[str]
-            names of the metric scores to compute
+            names of the metric scores to compute (only used for WeatherGenJSONReader)
         reader_type: str
             The type of the internal reader. If zarr, WeatherGenZarrReader is used,
             WeatherGenJSONReader otherwise. Default: zarr
@@ -56,20 +56,35 @@ class WeatherGenMergeReader(Reader):
         self.metrics_dir = Path(eval_cfg.get("metrics_dir"))
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
 
-        self.readers = []
+        if not self.run_ids:
+            raise ValueError(
+                f"'merge_run_ids' must be non-empty in eval_cfg, but got: {self.run_ids}"
+            )
 
-        _logger.info(f"MERGE READERS: {self.run_ids} ...")
+        _logger.info(f"Initialising merge reader with {len(self.run_ids)} run(s): {self.run_ids}")
 
-        
+        self.readers: list[Reader] = []
 
-        for run_id in self.run_ids:
-            if reader_type == "zarr":
-                reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
-            else:
-                reader = WeatherGenJSONReader(
-                    self.eval_cfg, run_id, self.private_paths, regions, metrics
-                )
-            self.readers.append(reader)
+        for i, run_id in enumerate(self.run_ids):
+            _logger.debug(f"Creating internal reader {i+1}/{len(self.run_ids)} for run_id '{run_id}' ...")
+            try:
+                if reader_type == "zarr":
+                    reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
+                else:
+                    reader = WeatherGenJSONReader(
+                        self.eval_cfg, run_id, self.private_paths, regions, metrics
+                    )
+                self.readers.append(reader)
+            except Exception as e:
+                _logger.error(f"Failed to instantiate reader for run_id '{run_id}' with {reader_type} backend: {e}")
+                raise RuntimeError(
+                    f"Failed to create reader for run_id '{run_id}'. "
+                    f"Check configuration and data availability."
+                ) from e
+
+        _logger.info(
+            f"Successfully instantiated {len(self.readers)} internal readers of type {reader_type}."
+        )
 
     def get_data(
         self,
