@@ -25,9 +25,17 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             // The labels that will be transferred. 
-            // Operating on a whitelist for the time being
-            const LABEL_WHITELIST = ["bug", "data", "documentation", "eval", "model", "performance", "science"];
+            // Operating on a whitelist to keep the list clean.
+            const LABEL_WHITELIST = ["bug", "data", 
+            "documentation", "eval", 
+            "model", "model:inference"", "model:pretrain", "model:rollout",
+            "performance", "science"];
             const LABEL_PATHS = {
+              "packages/common": ["infra"],
+              "packages/dashboard": ["infra"],
+              "packages/evaluate": ["eval"],
+              "packages/metrics": ["infra"],
+              "packages/readers_extra": ["data"],
               "src/weathergen/model": ["model"],
             };
 
