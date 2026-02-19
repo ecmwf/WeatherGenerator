@@ -31,7 +31,7 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import TRAIN, Stage, get_batch_size_from_config
+from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
@@ -536,8 +536,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
-                # Also needed to ensure input_tokens has same length as input_data
-                # (get_tokens_windows skips empty data, causing IndexError later)
                 time_win = self.time_window_handler.window(idx)
                 rdata = spoof(
                     self.healpix_level,
@@ -560,7 +558,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
-                # Also needed to ensure output_tokens has same length as output_data
                 time_win = self.time_window_handler.window(timestep_idx)
                 rdata = spoof(
                     self.healpix_level,
