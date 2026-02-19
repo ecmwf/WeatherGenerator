@@ -590,8 +590,8 @@ class OutputBatchData:
     # optional name to use for latent pseudo-stream when yielding latent items
     latent_stream_name: str | None = None
 
-    sample_start: int
-    forecast_offset: int
+    sample_start: int = 0
+    forecast_offset: int = 0
 
     @functools.cached_property
     def samples(self):
