@@ -157,7 +157,7 @@ training_config:
       ema_beta:
         enabled: true
 
-  num_mini_epochs: 32
+  num_mini_epochs: 48
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -210,7 +210,7 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+            "num_blocks": 2, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "independent"} },
           },
@@ -222,8 +222,8 @@ training_config:
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
             ema_halflife_in_thousands: 1e-1,
-            teacher_run_id: "aev85iny",
-            teacher_mini_epoch: -1,
+            # teacher_run_id: "aev85iny",
+            # teacher_mini_epoch: -1,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },

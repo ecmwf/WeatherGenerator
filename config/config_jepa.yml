@@ -26,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 0
+ae_global_num_blocks: 2
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 12
+ae_aggregation_num_blocks: 8
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -84,6 +84,7 @@ latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
 freeze_modules: ""
+load_chkpt: { run_id: "yoqxf234", mini_epoch: -1}
 
 norm_type: "LayerNorm"
 # type of zarr_store
@@ -157,7 +158,7 @@ training_config:
       ema_beta:
         enabled: true
 
-  num_mini_epochs: 32
+  num_mini_epochs: 0 #32
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -184,14 +185,14 @@ training_config:
   optimizer:
     # Optimizer type: "adamw" (default) or "muon_adamw" (Muon for hidden weights, AdamW for embeddings/heads)
     type: "muon_adamw"
-    grad_clip: 0.1
+    grad_clip: 1.0
     weight_decay: 0.05
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.975
-      beta2 : 0.9875
-      eps : 2e-08
+      beta1 : 0.99 #75
+      beta2 : 0.99 #875
+      eps : 2e-06
     muon:
       # Learning rate multiplier for Muon relative to base LR (muon_lr = base_lr * lr_multiplier)
       lr_multiplier: 30.0
@@ -215,18 +216,20 @@ training_config:
             target_source_correspondence: {0 : {0 : "subset"} },
           },
         },
-        target_and_aux_calc: {FrozenTeacher: {
-            teacher_run_id:  "yoqxf234", # "zosrc8ti",    # Required
-            teacher_mini_epoch: -1}},
+        # target_and_aux_calc: {FrozenTeacher: {
+        #     teacher_run_id:  "aev85iny", # "zosrc8ti",    # Required
+        #     teacher_mini_epoch: -1}},
         # },
-        # target_and_aux_calc: { "EMATeacher" : 
-        #   { ema_ramp_up_ratio : null,
-        #     ema_halflife_in_thousands: 1e-1,
-        #     model_param_overrides : { 
-        #       training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
-        #     },
-        #   }
-        # }
+        target_and_aux_calc: { "EMATeacher" : 
+          { ema_ramp_up_ratio : null,
+            ema_halflife_in_thousands: 1e-1,
+            # teacher_run_id: "yoqxf234",
+            # teacher_mini_epoch: -1,
+            model_param_overrides : { 
+              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
+            },
+          }
+        }
       }
   }
   
