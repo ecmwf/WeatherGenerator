@@ -176,9 +176,12 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768,
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
+        },
+          "JEPA_L6": {
+            'weight': 4, "loss_extra_args": {}, "refinement_hidden_dim": 1024,
         },
         },
         target_and_aux_calc: { "EMATeacher" : 
