@@ -634,9 +634,14 @@ def load_streams(streams_directory: Path) -> list[Config]:
     return list(streams.values())
 
 
-def get_path_run(config: Config) -> Path:
+def get_path_run(config: Config | None = None, run_id: str | None = None) -> Path:
     """Get the current runs results_path for storing run results and logs."""
-    return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
+    if config or run_id:
+        run_id = run_id if run_id else get_run_id_from_config(config)
+    else:
+        msg = f"Missing run_id and cannot infer it from config: {config}"
+        raise ValueError(msg)
+    return _get_shared_wg_path() / "results" / run_id
 
 
 def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
