@@ -9,37 +9,28 @@
 
 from __future__ import annotations
 
-import dataclasses
-
 import torch
 
 from weathergen.datasets.batch import SampleMetaData
+from weathergen.model.engines import LatentState
 
 type StreamName = str
 
 
-@dataclasses.dataclass
 class TargetAuxOutput:
     """
     A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
     """
-
-    output_idxs: list[int]
-
-    physical: list[dict[StreamName, dict[str, torch.Tensor]]]
-    latent: list[
-        dict[
-            StreamName,
-            dict[str, list[torch.Tensor] | list[dict[str, SampleMetaData]] | list[bool]],
-        ]
-    ]
-    aux_outputs: dict[str, torch.Tensor]
-
     def __init__(self, len_target: int, output_idxs: list) -> None:
-        self.output_idxs = output_idxs
-        self.physical = [{} for _ in range(len_target)]
-        self.latent = [{} for _ in range(len_target)]
-        self.aux_outputs = {}
+        self.output_idxs: list[int] = output_idxs
+        self.physical: list[
+            dict[
+                StreamName,
+                dict[str, list[torch.Tensor] | list[dict[str, SampleMetaData]] | list[bool]],
+            ]
+        ] = [{} for _ in range(len_target)]
+        self.latent: list[dict[str, torch.Tensor | LatentState]] = [{} for _ in range(len_target)]
+        self.aux_outputs: dict[str, torch.Tensor] = {}
 
     def add_physical_target(
         self, timestep_idx: int, stream_name: StreamName, pred: torch.Tensor
