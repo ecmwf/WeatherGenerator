@@ -164,7 +164,7 @@ def get_reader(
     run_id: str,
     private_paths: dict[str, str],
     region: str | None = None,
-    metric: dict[str, object] | None = None
+    metric: dict[str, object] | None = None,
 ):
     if reader_type == "zarr":
         reader = WeatherGenZarrReader(run, run_id, private_paths)
@@ -238,11 +238,7 @@ def _process_stream(
     if not stream_dict.get("evaluation"):
         return run_id, stream, {}
 
-    stream_loaded_scores, recomputable_metrics = reader.load_scores(
-        stream,
-        regions,
-        metrics
-    )
+    stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
 
     if recomputable_metrics or (plot_score_maps and type_ == "zarr"):

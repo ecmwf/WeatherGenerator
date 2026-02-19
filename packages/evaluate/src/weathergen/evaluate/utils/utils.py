@@ -66,7 +66,7 @@ def calc_scores_per_stream(
     stream: str,
     regions: list[str],
     metrics_dict: dict,
-    plot_score_maps: bool = False
+    plot_score_maps: bool = False,
 ):
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -181,7 +181,11 @@ def calc_scores_per_stream(
 
             for metric, parameters in metrics.items():
                 score = get_score(
-                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord, parameters=parameters
+                    score_data,
+                    metric,
+                    agg_dims="ipoint",
+                    group_by_coord=group_by_coord,
+                    parameters=parameters,
                 )
                 if score is not None:
                     valid_scores.append(score)
@@ -288,7 +292,7 @@ def calc_scores_per_stream(
 
         # Build local dictionary for this region
         for metric, parameters in metrics.items():
-            metric_data = metric_stream.sel({"metric": metric}).assign_attrs( parameters )
+            metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
             # Restore metric-specific attributes from all forecast steps
             # Attributes are the same across forecast steps for a given metric
             for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
@@ -353,7 +357,7 @@ def _plot_score_maps_per_stream(
     preds = score_data.prediction
 
     plot_metrics = xr.concat(
-        [get_score(score_data, m, agg_dims="sample", parameters=p) for m,p in metrics.items()],
+        [get_score(score_data, m, agg_dims="sample", parameters=p) for m, p in metrics.items()],
         dim="metric",
         coords="minimal",
         combine_attrs="drop_conflicts",
@@ -520,10 +524,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
 
 
 def metric_list_to_json(
-    reader: Reader,
-    stream: str,
-    metrics_dict: list[xr.DataArray],
-    regions: list[str]
+    reader: Reader, stream: str, metrics_dict: list[xr.DataArray], regions: list[str]
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -553,20 +554,20 @@ def metric_list_to_json(
                 )
                 if save_path.exists():
                     _logger.info(f"{save_path} already present")
-                    with save_path.open("r") as f: 
+                    with save_path.open("r") as f:
                         data_dict = json.load(f)
-                        if not "scores" in data_dict:
-                            data_dict = { "scores": [data_dict] }
-                        for i,score_version in enumerate(data_dict["scores"]):
+                        if "scores" not in data_dict:
+                            data_dict = {"scores": [data_dict]}
+                        for i, score_version in enumerate(data_dict["scores"]):
                             if score_version["attrs"] == metric_data.attrs:
-                                _logger.warning(f"metric with same parameters found, replacing")
+                                _logger.warning("metric with same parameters found, replacing")
                                 data_dict["scores"][i] = metric_data.to_dict()
                                 break
                         else:
                             data_dict["scores"].append(metric_data.to_dict())
                             _logger.info(f"Appending results to {save_path}")
                 else:
-                    data_dict = {"scores":[metric_data.to_dict()]}
+                    data_dict = {"scores": [metric_data.to_dict()]}
                     _logger.info(f"Saving results to new file {save_path}")
                 with open(save_path, "w") as f:
                     json.dump(data_dict, f, indent=4)
@@ -799,11 +800,22 @@ def merge(dst: dict, src: dict) -> dict:
             dst[k] = v
     return dst
 
+
 def parse_metric_params(metrics):
-    ''' 
+    """
     Convert a mixed list of str and dict metrics into a dict where the metric
     names are the keys and the values are dicts of parameters for that metric.
-    '''
+    The config might read
+        metrics:
+        - fbi:
+            thresh: 280
+        - rmse
+        ...
+    In python, metrics then looks like
+        [{'fbi':{'thresh':280}},'rmse']
+    This function converts it to
+        {'fbi':{'thresh':280}, 'rmse':{}}
+    """
     out = oc.DictConfig({})
     for metric in metrics:
         if isinstance(metric, str):
@@ -811,4 +823,3 @@ def parse_metric_params(metrics):
         else:
             out = oc.OmegaConf.merge(out, metric)
     return out
-

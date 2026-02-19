@@ -107,7 +107,7 @@ def get_score(
     group_by_coord: str | None = None,
     ens_dim: str = "ens",
     compute: bool = False,
-    parameters: dict = {},
+    parameters: dict | None = None,
     **kwargs,
 ) -> xr.DataArray:
     """
@@ -138,6 +138,8 @@ def get_score(
     xr.DataArray
         Calculated score as an xarray DataArray.
     """
+    if parameters is None:
+        parameters = {}
     sc = Scores(agg_dims=agg_dims, ens_dim=ens_dim)
     score_data = sc.get_score(data, score_name, group_by_coord, parameters=parameters, **kwargs)
     if compute:
@@ -208,7 +210,7 @@ class Scores:
         score_name: str,
         group_by_coord: str | None = None,
         compute: bool = False,
-        parameters: dict = {},
+        parameters: dict | None = None,
         **kwargs,
     ):
         """
@@ -246,6 +248,8 @@ class Scores:
             Calculated score as an xarray DataArray.
 
         """
+        if parameters is None:
+            parameters = {}
         if score_name in self.det_metrics_dict.keys():
             f = self.det_metrics_dict[score_name]
             _logger.debug(f"Using deterministic metric: {score_name}")

@@ -184,4 +184,12 @@ run_ids :
           forecast_step: "all"
           sample: "all"
   
-          
+  #mertics with parameters example:
+  ###############################
+
+  #Example of syntax to pass parameters to individual metrics
+  evaluation:
+    metrics:
+    - fbi:
+        thresh: 280
+    - rmse
