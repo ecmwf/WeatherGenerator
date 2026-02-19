@@ -231,51 +231,8 @@ class WeatherGenMergeReader(Reader):
                 for metric in metrics:
                     # all other cases: recompute scores
                     missing_metrics.setdefault(region, []).append(metric)
-        else:  # JsonReader
-            # deep merge dicts
-            for reader in self.readers:
-                scores, missing = reader.load_scores(stream, regions, metrics)
-                merge(local_scores, scores)
-                merge(missing_metrics, missing)
-
-            # merge runs into one with all scores concatenated
-            for metric in local_scores.keys():
-                for region in local_scores[metric].keys():
-                    for stream in local_scores[metric][region].keys():
-                        merged_scores = []
-
-                        # list all existing score values
-                        for run_id in self.run_ids:
-                            score = local_scores[metric][region][stream].pop(run_id, None)
-                            if score is not None:
-                                merged_scores.append(score)
-
-                        # concat scores
-                        assert len(merged_scores) > 0, (
-                            f"No scores found for metric: {metric}, "
-                            f"region: {region}, stream: {stream}"
-                        )
-                        if len(merged_scores) == 1:
-                            _logger.warning(
-                                f"Only a single precomputed score found for metric: "
-                                f"{metric}, region: {region}, stream: {stream}"
-                            )
-                            local_scores[metric][region][stream].setdefault(
-                                self.run_id, merged_scores[0]
-                            )
-                        else:
-                            if len(merged_scores) < len(self.run_ids):
-                                _logger.warning(
-                                    f"Not all runs have a precomputed score for "
-                                    f"metric: {metric}, region: {region}, stream: {stream}"
-                                )
-                            local_scores[metric][region][stream].setdefault(
-                                self.run_id,
-                                xr.concat(merged_scores, dim="ens").assign_coords(
-                                    ens=range(len(self.readers))
-                                ),
-                            )
-
+        else:
+            local_scores, missing_metrics = self._load_scores_json(stream, regions, metrics)
         return local_scores, missing_metrics
 
     def get_climatology_filename(self, stream: str) -> str | None:
@@ -384,3 +341,37 @@ class WeatherGenMergeReader(Reader):
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
         return all(reader.is_regular(stream) for reader in self.readers)
+
+    def _load_scores_json(self, stream, regions, metrics):
+        "Concatenate the scores of all JSON readers"
+
+        local_scores = {}
+        missing_metrics = {}
+
+        # deep merge dicts
+        for reader in self.readers:
+            scores, missing = reader.load_scores(stream, regions, metrics)
+            merge(local_scores, scores)
+            merge(missing_metrics, missing)
+
+        # merge runs into one with all scores concatenated
+        for metric in local_scores.keys():
+            for region in local_scores[metric].keys():
+                for stream in local_scores[metric][region].keys():
+                    if len(local_scores[metric][region][stream].keys()) != len(self.run_ids):
+                        _logger.error(
+                            f"Not all runs have the requested precomputed scores for "
+                            f"metric: {metric}, region: {region}, stream: {stream}"
+                        )
+                        raise ValueError("Not all selected runs have precomputed scores.")
+
+                    scores = (
+                        local_scores[metric][region][stream].pop(run_id) for run_id in self.run_ids
+                    )
+
+                    local_scores[metric][region][stream].setdefault(
+                        self.run_id,
+                        xr.concat(scores, dim="ens").assign_coords(ens=range(len(self.readers))),
+                    )
+
+        return local_scores, missing_metrics
