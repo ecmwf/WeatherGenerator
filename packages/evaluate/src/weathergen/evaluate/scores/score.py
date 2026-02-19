@@ -122,6 +122,8 @@ def get_score(
     agg_dims : str | List[str]
         List of dimension names over which the score will be aggregated (most often averaged).
         If set to 'all', aggregation will be performed over all dimensions of the forecast data.
+    group_by_coord : str
+        Name of the coordinate to group by.
     ens_dim : str
         Name of the ensemble dimension in the forecast data. Only used for probabilistic scores.
     compute : bool
@@ -229,6 +231,8 @@ class Scores:
             VerifiedData object containing prediction and ground truth data.
         score_name : str
             Name of the score to calculate.
+        group_by_coord : str
+            Name of the coordinate to group by.
         compute : bool
             If True, the score will be computed immediately. If False, the score will be returned
             as a lazy xarray DataArray, which allows for efficient graph construction and execution.

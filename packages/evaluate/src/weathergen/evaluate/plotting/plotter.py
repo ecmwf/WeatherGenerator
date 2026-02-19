@@ -401,7 +401,10 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                        title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
+                        title=(
+                            f"{self.stream}, {var} : fstep = {self.fstep:03} "
+                            f"({format_datetime(valid_time)})"
+                        ),
                     )
                     plot_names.append(name)
 
@@ -1165,8 +1168,6 @@ class QuantilePlots:
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
 
-        _logger.info(f"Saving quantile plots to: {self.out_plot_dir}")
-
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
         Check if the lengths of data and labels match.
@@ -1708,7 +1709,6 @@ class BarPlots:
         self.cmap = plotter_cfg.get("cmap", "bwr")
         self.out_plot_dir = Path(output_basedir) / "bar_plots"
         self.baseline = plotter_cfg.get("baseline")
-        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -1941,6 +1941,10 @@ def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArra
 
     # Reindex, inserting NaN for missing labels
     return da.reindex({x_dim: labels})
+
+
+def format_datetime(dt):
+    return dt.astype("datetime64[m]").astype(datetime.datetime).strftime("%Y-%m-%d T%H:%M:%S")
 
 
 def channel_sort_key(name: str) -> tuple[int, str, int]:
