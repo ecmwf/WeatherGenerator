@@ -48,6 +48,7 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
+from weathergen.utils.output import Writer
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -55,6 +56,7 @@ from weathergen.utils.validation_io import write_output
 logger = logging.getLogger(__name__)
 
 # cfg_keys_to_filter = ["losses", "model_input", "target_input"]
+PHYSICAL_LOSS_KEY = "physical"
 
 
 class Trainer(TrainerBase):
@@ -67,7 +69,8 @@ class Trainer(TrainerBase):
         self.data_loader_validation: torch.utils.data.DataLoader | None = None
         self.dataset: MultiStreamDataSampler | None = None
         self.dataset_val: MultiStreamDataSampler | None = None
-        self.device: torch.device = None
+        self.output_writer: Writer | None = None
+        self.device: torch.device | None = None
         self.ema_model = None
         self.grad_scaler: torch.amp.GradScaler | None = None
         self.last_grad_norm = None
@@ -93,7 +96,7 @@ class Trainer(TrainerBase):
         """
         return self.world_size_original * batch_size_per_gpu
 
-    def init(self, cf: Config, devices):
+    def init(self, cf: Config, devices, use_test_config=False):
         # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
@@ -156,6 +159,10 @@ class Trainer(TrainerBase):
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
+        if use_test_config:
+            self.output_writer = Writer(cf, self.test_cfg, cf.streams)
+        else:
+            self.output_writer = Writer(cf, self.validation_cfg, cf.streams)
 
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
@@ -181,7 +188,7 @@ class Trainer(TrainerBase):
 
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
-        self.init(cf, devices)
+        self.init(cf, devices, True)
 
         cf = self.cf
         device_type = torch.accelerator.current_accelerator()
@@ -607,17 +614,23 @@ class Trainer(TrainerBase):
                             if mode_cfg.get("output", {}).get("normalized_samples", False)
                             else self.dataset_val.denormalize_target_channels
                         )
-                        # write output
-                        write_output(
-                            self.cf,
-                            mode_cfg,
-                            batch_size,
-                            mini_epoch,
-                            bidx,
-                            denormalize_data_fct,
-                            batch,
-                            preds,
-                            targets_and_auxs,
+
+                        fsteps = range(0, 1)  # TODO
+                        targets = [
+                            targets
+                            for loss_name, targets in targets_and_auxs.items()
+                            if loss_name == PHYSICAL_LOSS_KEY
+                        ]
+                        try:
+                            # targets for all physical outputs should be the same
+                            targets = targets[0]
+                        except IndexError as e:
+                            raise ValueError(
+                                f"No physical outputs under key {PHYSICAL_LOSS_KEY} configured"
+                            ) from e
+                        
+                        self.output_writer.write_batch(
+                            mini_epoch, batch, targets, preds, denormalize_data_fct, fsteps
                         )
 
                     pbar.update(batch_size)
