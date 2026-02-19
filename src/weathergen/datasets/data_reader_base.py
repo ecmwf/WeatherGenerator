@@ -188,9 +188,9 @@ class ReaderData:
         """
         return len(self.data)
 
-    def remove_nan_coords(self) -> "ReaderData":
+    def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
         """
-        Remove all data points where coords are NaN
+        Remove all data points where coords or geoinfos contain NaN
 
         Returns
         -------
@@ -199,6 +199,10 @@ class ReaderData:
         idx_valid = ~np.isnan(self.coords)
         # filter should be if any (of the two) coords is NaN
         idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
+
+        # also filter rows where any geoinfo field is NaN
+        idx_valid_geoinfos = ~np.isnan(self.geoinfos).any(axis=1)
+        idx_valid = np.logical_and(idx_valid, idx_valid_geoinfos)
 
         # apply
         return ReaderData(
