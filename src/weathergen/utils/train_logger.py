@@ -154,6 +154,7 @@ class TrainLogger:
         cols1, cols_train = get_loss_terms_per_stream(cf.streams, training_cfg)
         cols_train += ["dtime", "samples", "mse", "lr"]
         cols1 += [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
+        cols1_patterns = ["loss_avg"]
 
         # read training log data
         try:
@@ -192,7 +193,7 @@ class TrainLogger:
             )
             log_train = np.array([])
 
-        log_train_df = read_metrics(cf, run_id, "train", cols1, result_dir_base)
+        log_train_df = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
 
         # validation
         # define cols for validation
@@ -201,7 +202,8 @@ class TrainLogger:
         )
         cols2, cols_val = get_loss_terms_per_stream(cf.streams, validation_cfg)
         cols_val = ["dtime", "samples"]
-        cols2 = [_weathergen_timestamp, "num_samples"]  # , "LossLatentSSLStudentTeacher.loss_avg"]
+        cols2 = [_weathergen_timestamp, "num_samples"]
+        cols2_patterns = ["loss_avg"]
 
         # read validation log data
         try:
@@ -239,7 +241,7 @@ class TrainLogger:
                 )
             )
             log_val = np.array([])
-        metrics_val_df = read_metrics(cf, run_id, "val", cols2, result_dir_base)
+        metrics_val_df = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
 
         return Metrics(run_id, "train", log_train_df, metrics_val_df, None)
 
@@ -249,6 +251,7 @@ def read_metrics(
     run_id: RunId | None,
     stage: Stage | None,
     cols: list[str] | None,
+    cols_patterns: list[str] | None,
     results_path: Path,
 ) -> pl.DataFrame:
     """
@@ -267,6 +270,10 @@ def read_metrics(
     metrics_path = get_train_metrics_path(base_path=results_path, run_id=run_id)
     # TODO: this should be a config option
     df = read_metrics_file(metrics_path)
+
+    if cols_patterns is not None:
+        cols += [col for col in df.columns if "loss_avg" in col]
+
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
     df = df.drop("stage")
@@ -316,7 +323,7 @@ def clean_name(s: str) -> str:
         str: A new string containing only alphanumeric characters and underscores,
              in the same order and capitalization as they appeared in the input.
     """
-    return "".join(c for c in s if c.isalnum() or c == "_")
+    return "".join(c for c in s if c.isalnum() or c == "-" or c == "_")
 
 
 def get_loss_terms_per_stream(streams, stage_config):
