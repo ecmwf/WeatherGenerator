@@ -11,6 +11,7 @@
 
 import logging
 import math
+import typing
 import warnings
 
 import astropy_healpix as hp
@@ -20,6 +21,7 @@ import torch
 import torch.nn as nn
 
 from weathergen.common.config import Config
+from weathergen.common.io import ItemKey
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
@@ -74,6 +76,28 @@ class ModelOutput:
             if sample_idx is not None:
                 assert sample_idx < len(pred), "Invalid sample index."
                 pred = pred[sample_idx]
+        return pred
+
+    def get_physical_prediction_normalized(
+        self, key: ItemKey, normalizer: typing.Callable
+    ) -> np.typing.NDArray:
+        try:
+            # TODO why is there a tuple => what index should be used
+            pred = self.physical[key.forecast_step][key.stream][0][key.sample]
+        except (KeyError, IndexError) as e:
+            msg = f"Cannot find prediction data for key: {key}"
+            raise ValueError(msg) from e
+
+        # is it a performance issue if I dont convert/move the entire tensor at once?
+        pred = pred.to(torch.float32).detach().cpu().numpy()
+        pred = normalizer(key.stream, pred)
+
+        assert isinstance(pred, np.ndarray), "Invalid buffer type."
+        # TODO What to do when preds are empty,when does it occur,
+        # how does it show (empty tensor or missing key?)
+        assert len(pred) > 0
+
+        # breakpoint()
         return pred
 
     def get_latent_prediction(self, fstep: int):

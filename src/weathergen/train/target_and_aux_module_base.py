@@ -9,18 +9,32 @@
 
 from __future__ import annotations
 
+import dataclasses
+import typing
+
+import numpy as np
 import torch
 
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import LatentState
 
 type StreamName = str
+BufferType = np.float32
+DateTimeType = np.datetime64
+
+
+@dataclasses.dataclass
+class PhysicalTarget:
+    data: np.typing.NDArray[BufferType]
+    coords: np.typing.NDArray[BufferType]
+    datetimes: np.typing.NDArray[DateTimeType]
 
 
 class TargetAuxOutput:
     """
     A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
     """
+
     def __init__(self, len_target: int, output_idxs: list) -> None:
         self.output_idxs: list[int] = output_idxs
         self.physical: list[
@@ -55,6 +69,39 @@ class TargetAuxOutput:
                 assert sample_idx < len(pred), "Invalid sample index."
                 pred = pred[sample_idx]
         return pred
+
+    # TODO guarantee every buffer retrieved only once
+    def get_physical_target_normalized(
+        self, key: ItemKey, normalizer: typing.Callable
+    ) -> PhysicalTarget:
+        try:
+            stream_targets = self.physical[key.forecast_step][key.stream]
+        except (KeyError, IndexError) as e:
+            msg = f"Cannot find physical target data for key: {key}"
+            raise ValueError(msg) from e
+
+        # is it a performance issue if I dont convert/move the entire tensor at once?
+        coords = (
+            stream_targets["target_coords"][key.sample].to(torch.float32).detach().cpu().numpy()
+        )
+        times = stream_targets["target_times"][key.sample]
+
+        data = stream_targets["target"][key.sample].to(torch.float32).detach().cpu().numpy()
+        data = normalizer(key.stream, data)
+
+        assert isinstance(data, np.ndarray), "Invalid data buffer type."
+        assert isinstance(coords, np.ndarray), "Invalid coords buffer type."
+        assert isinstance(times, np.ndarray), "Invalid datetimes buffer type."
+
+        if len(coords) == 0:  # TODO can this be removed?
+            coords = np.zeros((0, 2), dtype=np.float32)
+        assert len(coords.shape) >= 2 and coords.shape[-1] >= 2, (
+            "invalid shape for coordinate buffer."
+        )
+        assert data.shape[0] == coords.shape[0] == times.shape[0], "buffer shapes should align."
+
+        # breakpoint()
+        return PhysicalTarget(data, coords, times)
 
     def get_latent_target(self, timestep_idx: int):
         return self.latent[timestep_idx]
