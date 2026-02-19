@@ -155,7 +155,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
-  num_mini_epochs: 1
+  num_mini_epochs: 25
   samples_per_mini_epoch: 64
   shuffle: True
 
@@ -167,10 +167,10 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-5
-    lr_max: 5e-5
+    lr_max: 1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
-    num_steps_warmup: 512
+    num_steps_warmup: 128
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
@@ -190,7 +190,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        weight: 1.0,
+        weight: 0.0,
         loss_fcts: {
           "mse": {},
         },
@@ -212,8 +212,6 @@ training_config:
       },
     }
 
-
-    
   forecast :
       time_step: 06:00:00
       num_steps: 1
@@ -224,7 +222,7 @@ training_config:
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 64
+  samples_per_mini_epoch: 1
   shuffle: False
 
   start_date: 2012-06-01T00:00
@@ -239,7 +237,7 @@ validation_config:
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 0,
+    num_samples: 1,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
@@ -247,7 +245,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: True
 
 
 # test config; full test config is merge of validation and test config

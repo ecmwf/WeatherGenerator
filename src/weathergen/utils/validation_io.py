@@ -8,16 +8,56 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from pathlib import Path
 
 import numpy as np
 import torch
+import xarray as xr
 
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.evaluate.plotting.plotter import Plotter
 
 _logger = logging.getLogger(__name__)
+
+
+def _normalize_channel_name(name: str) -> str:
+    return str(name).lower().replace("_", "").replace(" ", "")
+
+
+def _resolve_channel_names(stream_info, raw_channels):
+    if not raw_channels:
+        return raw_channels
+    if isinstance(raw_channels[0], str):
+        return list(raw_channels)
+
+    channel_names = None
+    if hasattr(stream_info, "val_target_channels") and stream_info.val_target_channels:
+        if isinstance(stream_info.val_target_channels[0], str):
+            channel_names = list(stream_info.val_target_channels)
+
+    if channel_names is None:
+        target_weights = getattr(stream_info, "target_channel_weights", None)
+        if isinstance(target_weights, dict):
+            channel_names = list(target_weights.keys())
+
+    if channel_names is None:
+        channel_weights = getattr(stream_info, "channel_weights", None)
+        if isinstance(channel_weights, dict):
+            channel_names = list(channel_weights.keys())
+
+    if channel_names is None:
+        return [f"ch{idx}" for idx in raw_channels]
+
+    resolved = []
+    for idx in raw_channels:
+        if 0 <= int(idx) < len(channel_names):
+            resolved.append(channel_names[int(idx)])
+        else:
+            resolved.append(f"ch{idx}")
+    return resolved
 
 
 def write_output(
@@ -159,3 +199,74 @@ def write_output(
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
+
+    # Prepare prediction data for Plotter (scatter plot expects lat/lon coords on ipoint).
+    base_plot_dir = config.get_path_run(cf) / "plots" / "validation"
+    base_plot_dir.mkdir(parents=True, exist_ok=True)
+    plotter = Plotter({"image_format": "png", "dpi_val": 150}, base_plot_dir)
+    headline_channels = {"2t", "z500", "q850", "10u", "10v"}
+
+    t_idx = 0
+    for stream_idx, stream_info in enumerate(cf.streams):
+        stream_name = stream_info["name"]
+        preds_stream = preds_all[t_idx][stream_idx]
+        coords_stream = targets_coords_all[t_idx][stream_idx]
+
+        if preds_stream.size == 0 or coords_stream.size == 0:
+            _logger.warning(f"No prediction data to plot for stream {stream_name}.")
+            continue
+
+        # Expected shape is (ens, ipoint, channel). Select first ensemble if present.
+        if preds_stream.ndim == 3:
+            preds_stream = preds_stream[0]
+        elif preds_stream.ndim != 2:
+            _logger.warning(
+                f"Unsupported prediction shape {preds_stream.shape} for stream {stream_name}."
+            )
+            continue
+
+        lat = coords_stream[:, 0]
+        lon = coords_stream[:, 1]
+        channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
+
+        da = xr.DataArray(
+            preds_stream,
+            dims=("ipoint", "channel"),
+            coords={
+                "ipoint": np.arange(preds_stream.shape[0]),
+                "channel": channels,
+                "lat": ("ipoint", lat),
+                "lon": ("ipoint", lon),
+            },
+        )
+
+        plotter.stream = stream_name
+        plotter.run_id = config.get_run_id_from_config(cf)
+        plotter.fstep = forecast_offset
+
+        selected_channels = [
+            ch for ch in channels if _normalize_channel_name(ch) in headline_channels
+        ]
+        if not selected_channels:
+            _logger.warning(
+                f"No headline channels available for plotting stream {stream_name}."
+            )
+            continue
+
+        for varname in selected_channels:
+            data = da.sel(channel=varname).dropna(dim="ipoint")
+            channel_dir = base_plot_dir / varname
+            channel_dir.mkdir(parents=True, exist_ok=True)
+            epoch_tag = f"epoch_{mini_epoch:03d}"
+            plot_name = plotter.scatter_plot(
+                data,
+                channel_dir,
+                varname=varname,
+                regionname="global",
+                tag=epoch_tag,
+                title=f"{stream_name} - {varname} (fstep {forecast_offset})",
+            )
+            src = channel_dir / f"{plot_name}.{plotter.image_format}"
+            dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
+            if src != dst and src.exists():
+                src.replace(dst)

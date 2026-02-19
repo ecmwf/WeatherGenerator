@@ -76,7 +76,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # TODO: remove after single sample experiments
         if self.cur_token is not None:
-            logger.info("checking single sampling")
+            # logger.info("checking single sampling")
             assert self.cur_token[0].shape == tokens[0].shape, (
                 "first token shape was different between iterations "
                 "– violates single sample overfitting with difference"
@@ -104,10 +104,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         n = torch.randn_like(y) * sigma
 
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
-
-        # Compute loss -- move this to a separate loss calculator
-        # weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2  # Table 1
-        # loss = weight * ((y_hat - y) ** 2)
 
     def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int) -> torch.Tensor:
         """
