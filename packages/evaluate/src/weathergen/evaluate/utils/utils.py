@@ -614,10 +614,10 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 if not plotting_log_emitted:
                     _logger.info(f"Saving bar plots to: {summary_dir}")
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
-            if metric == "qq_analysis":
-                if not plotting_log_emitted:
-                    _logger.info(f"Saving quantile plots to: {summary_dir}")
-                quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
+            # if metric == "qq_analysis":
+            #     if not plotting_log_emitted:
+            #         _logger.info(f"Saving quantile plots to: {summary_dir}")
+            #     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
             plotting_log_emitted = True
 
 
