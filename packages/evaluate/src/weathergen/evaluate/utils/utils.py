@@ -575,7 +575,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     scores_dict :
         Dictionary containing scores for each metric and stream.
     """
-    _logger.info("Plotting summary of evaluation results...")
+
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
     print_summary = cfg.evaluation.get("print_summary", False)
@@ -597,21 +597,28 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     sc_plotter = ScoreCards(plot_cfg, summary_dir)
     br_plotter = BarPlots(plot_cfg, summary_dir)
     quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
+    plotting_log_emitted = False
     for region in regions:
         for metric in metrics:
-            # Special handling for Q-Q analysis metric
-            if metric == "qq_analysis":
-                quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
-            elif eval_opt.get("summary_plots", True):
+            if eval_opt.get("summary_plots", True):
                 plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("ratio_plots", False):
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("heat_maps", False):
                 heat_maps_metric_region(metric, region, runs, scores_dict, plotter)
             if eval_opt.get("score_cards", False):
+                if not plotting_log_emitted:
+                    _logger.info(f"Saving score cards to: {summary_dir}")
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
+                if not plotting_log_emitted:
+                    _logger.info(f"Saving bar plots to: {summary_dir}")
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
+            if metric == "qq_analysis":
+                if not plotting_log_emitted:
+                    _logger.info(f"Saving quantile plots to: {summary_dir}")
+                quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
+            plotting_log_emitted = True
 
 
 ############# Utility functions ############

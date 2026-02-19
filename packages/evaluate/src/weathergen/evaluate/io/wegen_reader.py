@@ -816,7 +816,9 @@ class WeatherGenMergeReader(Reader):
         da_preds_merge = self._concat_over_ens(da_preds_merge, fsteps_merge)
 
         return ReaderOutput(
-            target=da_tars_merge, prediction=da_preds_merge, points_per_sample=points_per_sample
+            target=da_tars_merge,
+            prediction=da_preds_merge,
+            points_per_sample=points_per_sample,
         )
 
     def _concat_over_ens(self, da_merge, fsteps_merge):
