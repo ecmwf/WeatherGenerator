@@ -12,16 +12,16 @@ import logging
 from pathlib import Path
 
 # Third-party
-import omegaconf as oc
 import xarray as xr
 
 # Local application / package
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
-from weathergen.evaluate.io.wegen_reader import WeatherGenJSONReader,WeatherGenZarrReader
+from weathergen.evaluate.io.wegen_reader import WeatherGenJSONReader, WeatherGenZarrReader
 from weathergen.evaluate.utils.utils import merge
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
 
 class WeatherGenMergeReader(Reader):
     def __init__(
@@ -67,7 +67,9 @@ class WeatherGenMergeReader(Reader):
         self.readers: list[Reader] = []
 
         for i, run_id in enumerate(self.run_ids):
-            _logger.debug(f"Creating internal reader {i+1}/{len(self.run_ids)} for run_id '{run_id}' ...")
+            _logger.debug(
+                f"Creating internal reader {i + 1}/{len(self.run_ids)} for run_id '{run_id}' ..."
+            )
             try:
                 if reader_type == "zarr":
                     reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
@@ -77,7 +79,10 @@ class WeatherGenMergeReader(Reader):
                     )
                 self.readers.append(reader)
             except Exception as e:
-                _logger.error(f"Failed to instantiate reader for run_id '{run_id}' with {reader_type} backend: {e}")
+                _logger.error(
+                    f"Failed to instantiate reader for run_id '{run_id}' "
+                    f"with {reader_type} backend: {e}"
+                )
                 raise RuntimeError(
                     f"Failed to create reader for run_id '{run_id}'. "
                     f"Check configuration and data availability."
@@ -122,7 +127,8 @@ class WeatherGenMergeReader(Reader):
         ReaderOutput
             A dataclass containing:
             - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
-            - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
+            - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast
+                          step.
             - points_per_sample: xarray DataArray containing the number of points per sample,
               if `return_counts` is True.
         """
@@ -225,7 +231,7 @@ class WeatherGenMergeReader(Reader):
                 for metric in metrics:
                     # all other cases: recompute scores
                     missing_metrics.setdefault(region, []).append(metric)
-        else: #JsonReader
+        else:  # JsonReader
             # deep merge dicts
             for reader in self.readers:
                 scores, missing = reader.load_scores(stream, regions, metrics)
@@ -237,24 +243,32 @@ class WeatherGenMergeReader(Reader):
                 for region in local_scores[metric].keys():
                     for stream in local_scores[metric][region].keys():
                         merged_scores = []
-                        
-                        # list all existing score values 
+
+                        # list all existing score values
                         for run_id in self.run_ids:
                             score = local_scores[metric][region][stream].pop(run_id, None)
                             if score is not None:
                                 merged_scores.append(score)
-                        
+
                         # concat scores
-                        assert len(merged_scores) > 0,  f"No scores found for metric: {metric}, region: {region}, stream: {stream}"
+                        assert len(merged_scores) > 0, (
+                            f"No scores found for metric: {metric}, "
+                            f"region: {region}, stream: {stream}"
+                        )
                         if len(merged_scores) == 1:
-                            _logger.warning(f"Only a single precomputed score found for metric: {metric}, region: {region}, stream: {stream}")
+                            _logger.warning(
+                                f"Only a single precomputed score found for metric: "
+                                f"{metric}, region: {region}, stream: {stream}"
+                            )
                             local_scores[metric][region][stream].setdefault(
-                            self.run_id,
-                            merged_scores[0]
+                                self.run_id, merged_scores[0]
                             )
                         else:
                             if len(merged_scores) < len(self.run_ids):
-                                _logger.warning(f"Not all runs have a precomputed score for  metric: {metric}, region: {region}, stream: {stream}")
+                                _logger.warning(
+                                    f"Not all runs have a precomputed score for "
+                                    f"metric: {metric}, region: {region}, stream: {stream}"
+                                )
                             local_scores[metric][region][stream].setdefault(
                                 self.run_id,
                                 xr.concat(merged_scores, dim="ens").assign_coords(

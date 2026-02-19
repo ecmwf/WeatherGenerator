@@ -10,8 +10,8 @@
 # Standard library
 import logging
 import re
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from abc import ABC, abstractmethod, abstractproperty
 
 # Third-party
 import xarray as xr
@@ -65,8 +65,7 @@ class DataAvailability:
 
 
 class Reader(ABC):
-    def __init__(self, eval_cfg: dict, run_id: str,
-                 private_paths: dict[str, str] | None = None):
+    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict[str, str] | None = None):
         """
         Generic data reader class.
 
@@ -87,8 +86,8 @@ class Reader(ABC):
         self.global_plotting_options = eval_cfg.get("global_plotting_options", {})
 
         # Default paths if not provided
-        self.model_base_dir = eval_cfg.get("model_base_dir", None)
-        self.results_base_dir = eval_cfg.get("results_base_dir", None)
+        self.model_base_dir = eval_cfg.get("model_base_dir")
+        self.results_base_dir = eval_cfg.get("results_base_dir")
 
     def get_stream(self, stream: str):
         """
@@ -227,8 +226,7 @@ class Reader(ABC):
                 # Default to all in Zarr
                 requested[name] = reader_data[name]
                 # If file with metrics exists, must exactly match
-                if (available_data is not None
-                        and reader_data[name] != available[name]):
+                if available_data is not None and reader_data[name] != available[name]:
                     _logger.info(
                         f"Requested all {name}s for {mode}, but previous config "
                         "was a strict subset. Recomputation required."
@@ -252,8 +250,7 @@ class Reader(ABC):
                     corrected = True
 
             # Must be a subset of available_data (if provided)
-            if (available_data is not None
-                    and not requested[name] <= available[name]):
+            if available_data is not None and not requested[name] <= available[name]:
                 missing = requested[name] - available[name]
                 _logger.info(
                     f"{name.capitalize()}(s) {missing} missing in previous "
@@ -298,15 +295,13 @@ class Reader(ABC):
         """
         if mode not in ("plotting", "evaluation"):
             raise ValueError(
-                "Mode must be either 'plotting' or 'evaluation'. "
-                f"Got '{mode}' instead."
+                f"Mode must be either 'plotting' or 'evaluation'. Got '{mode}' instead."
             )
 
         stream_cfg = self.get_stream(stream)
         if not stream_cfg.get(mode, False):
             raise KeyError(
-                f"Mode '{mode}' does not exist in stream config for '{stream}'. "
-                "Please add it."
+                f"Mode '{mode}' does not exist in stream config for '{stream}'. Please add it."
             )
 
         samples = stream_cfg[mode].get("sample", None)
@@ -324,7 +319,7 @@ class Reader(ABC):
                         f"String format for {name} in config must be "
                         f"'digit-digit' or 'all'. "
                         f"Got '{value}'."
-                )
+                    )
                 start, end = map(int, value.split("-"))
                 return list(range(start, end + 1))
             return value
@@ -334,7 +329,13 @@ class Reader(ABC):
 
         # Normalize None vs "all"
         def normalize(val):
-            return None if (val == "all" or val is None) else list(val) if isinstance(val, list) else val
+            return (
+                None
+                if (val == "all" or val is None)
+                else list(val)
+                if isinstance(val, list)
+                else val
+            )
 
         return DataAvailability(
             score_availability=True,

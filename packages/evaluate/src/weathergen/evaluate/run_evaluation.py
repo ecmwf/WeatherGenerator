@@ -28,12 +28,12 @@ from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJSONReader,
     WeatherGenReader,
     WeatherGenZarrReader,
 )
-from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,

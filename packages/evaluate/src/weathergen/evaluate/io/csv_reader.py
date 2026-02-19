@@ -9,7 +9,6 @@
 
 # Standard library
 import logging
-import re
 from pathlib import Path
 
 # Third-party
@@ -50,18 +49,15 @@ class CsvReader(Reader):
         # for backward compatibility allow metric_dir to be specified
         # in the run config
 
-        assert self.metrics_dir is not None, \
-            "metrics_dir folder must be provided in the config."
+        assert self.metrics_dir is not None, "metrics_dir folder must be provided in the config."
 
         self.stream = list(eval_cfg.streams.keys())
         assert self.stream is not None, "stream must be provided in the config."
-        assert len(self.stream) == 1, \
-            "CsvReader only supports one stream."
+        assert len(self.stream) == 1, "CsvReader only supports one stream."
         self.stream = self.stream[0]
 
         self.channels = eval_cfg.streams.get(self.stream).get("channels")
-        assert self.channels is not None, \
-            "channels must be provided in the config."
+        assert self.channels is not None, "channels must be provided in the config."
 
         self.data = pd.DataFrame()
 
@@ -77,15 +73,15 @@ class CsvReader(Reader):
         self.data["level"] = self.data["level"].astype(int)
 
         self.data["channel"] = (
-            self.data["parameter"].astype(str) + "_" +
-            self.data["level"].astype(str) if "level" in self.data.columns
+            self.data["parameter"].astype(str) + "_" + self.data["level"].astype(str)
+            if "level" in self.data.columns
             else self.data["parameter"].astype(str)
         )
-        self.data["step"] = (pd.to_timedelta(self.data["step"]) /
-                             np.timedelta64(1, "h")).astype(int)
+        self.data["step"] = (pd.to_timedelta(self.data["step"]) / np.timedelta64(1, "h")).astype(
+            int
+        )
         self.samples = [0]
-        self.forecast_steps = sorted(
-            self.data["step"].dropna().unique().tolist())
+        self.forecast_steps = sorted(self.data["step"].dropna().unique().tolist())
         self.npoints_per_sample = [0]
         self.epoch = [0]
 
@@ -112,11 +108,7 @@ class CsvReader(Reader):
         return list(self.channels)  # Placeholder implementation
 
     def get_values(
-        self,
-        region: str,
-        metric: str,
-        forecast_steps: list[int],
-        channels: list[str]
+        self, region: str, metric: str, forecast_steps: list[int], channels: list[str]
     ) -> xr.DataArray:
         """
         Get score values in the right format.
@@ -159,8 +151,7 @@ class CsvReader(Reader):
         )
 
         da = da.assign_coords(
-            lead_time=("forecast_step",
-                       lead_time_map.loc[da.forecast_step.values].values)
+            lead_time=("forecast_step", lead_time_map.loc[da.forecast_step.values].values)
         )
 
         da.attrs["npoints_per_sample"] = self.npoints_per_sample
@@ -168,7 +159,7 @@ class CsvReader(Reader):
 
         return da
 
-    def load_scores(self, stream: str, regions: list[str], metrics: list[str]) -> tuple[dict,None]:
+    def load_scores(self, stream: str, regions: list[str], metrics: list[str]) -> tuple[dict, None]:
         """
         Load the existing scores for a given run, stream and metric.
 

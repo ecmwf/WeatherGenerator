@@ -47,10 +47,7 @@ class WeatherGenReader(Reader):
 
         if not self.results_base_dir:
             self.results_base_dir = get_path_run(self.inference_cfg)
-            _logger.info(
-                f"Results directory obtained from private config: "
-                f"{self.results_base_dir}"
-            )
+            _logger.info(f"Results directory obtained from private config: {self.results_base_dir}")
         else:
             _logger.info(f"Results directory parsed: {self.results_base_dir}")
 
@@ -68,9 +65,7 @@ class WeatherGenReader(Reader):
         self.results_dir = Path(self.results_base_dir)
         self.runplot_dir = Path(self.runplot_base_dir)
         self.metrics_dir = Path(
-            self.eval_cfg.get(
-                "metrics_dir", self.metrics_base_dir / "evaluation"
-            )
+            self.eval_cfg.get("metrics_dir", self.metrics_base_dir / "evaluation")
         )
 
     def get_inference_config(self):
@@ -87,24 +82,19 @@ class WeatherGenReader(Reader):
         try:
             if self.private_paths:
                 _logger.info(
-                    f"Loading config for run {self.run_id} from private paths: "
-                    f"{self.private_paths}"
+                    f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
                 )
-                config = load_merge_configs(self.private_paths, self.run_id,
-                                            self.mini_epoch)
+                config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
             else:
                 _logger.info(
                     f"Loading config for run {self.run_id} from model directory: "
                     f"{self.model_base_dir}"
                 )
-                config = load_run_config(self.run_id, self.mini_epoch,
-                                         self.model_base_dir)
+                config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
         except Exception as e:
-            _logger.warning(
-                f"Failed to load inference config: {e}. Defaulting to empty dict."
-            )
+            _logger.warning(f"Failed to load inference config: {e}. Defaulting to empty dict.")
 
-        if not isinstance(config, (dict, oc.DictConfig)):
+        if not isinstance(config, dict | oc.DictConfig):
             _logger.warning("Model config not found. inference config will be empty.")
             config = {}
         return config
@@ -162,14 +152,15 @@ class WeatherGenReader(Reader):
             A list of channel names.
         """
         _logger.debug(f"Getting channels for stream {stream}...")
-        all_channels = self.get_inference_stream_attr(
-            stream, "val_target_channels"
-        )
+        all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
         _logger.debug(f"Channels found in config: {all_channels}")
         return all_channels
 
     def load_scores(
-        self, stream: str, regions: list[str], metrics: list[str]
+        self,
+        stream: str,
+        regions: list[str],
+        metrics: list[str],
     ) -> tuple[dict, dict]:
         """
         Load multiple pre-computed scores for a given run, stream and metric
@@ -212,9 +203,7 @@ class WeatherGenReader(Reader):
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
 
-    def load_single_score(
-        self, stream: str, region: str, metric: str
-    ) -> xr.DataArray | None:
+    def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
         Load a single pre-computed score for a given run, stream and metric.
 
@@ -294,7 +283,7 @@ class WeatherGenJSONReader(WeatherGenReader):
         coord_names = ["sample", "forecast_step", "ens"]
         all_coords = {name: [] for name in coord_names}
         provenance = {name: defaultdict(list) for name in coord_names}
-        
+
         for stream in streams:
             for region in regions:
                 for metric in metrics:
@@ -306,25 +295,19 @@ class WeatherGenJSONReader(WeatherGenReader):
                             for val in vals:
                                 provenance[name][val].append((stream, region, metric))
 
-        common_coords = {
-            name: set.intersection(*all_coords[name])
-            for name in coord_names
-        }
+        common_coords = {name: set.intersection(*all_coords[name]) for name in coord_names}
 
         # Warn about any skipped coordinates
         for name in coord_names:
             skipped = set.union(*all_coords[name]) - common_coords[name]
             if skipped:
                 msg_lines = [
-                    f"Some {name}(s) were not common across streams, "
-                    f"regions, and metrics:"
+                    f"Some {name}(s) were not common across streams, regions, and metrics:"
                 ]
                 for val in skipped:
-                    msg_lines.append(
-                        f"  {val} only present in {provenance[name][val]}"
-                    )
+                    msg_lines.append(f"  {val} only present in {provenance[name][val]}")
                 _logger.warning("\n".join(msg_lines))
-    
+
         return common_coords
 
     def get_samples(self) -> set[int]:
@@ -370,16 +353,10 @@ class WeatherGenZarrReader(WeatherGenReader):
                     f"Zarr file {fname_zarr} exists but has unexpected format "
                     f"({zarr_ext}). Expected directory for 'zarr' or file for 'zip'."
                 )
-                raise FileNotFoundError(
-                    f"Zarr file {fname_zarr} has unexpected format."
-                )
+                raise FileNotFoundError(f"Zarr file {fname_zarr} has unexpected format.")
         else:
-            _logger.error(
-                f"Zarr file {fname_zarr} does not exist."
-            )
-            raise FileNotFoundError(
-                f"Zarr file {fname_zarr} does not exist."
-            )
+            _logger.error(f"Zarr file {fname_zarr} does not exist.")
+            raise FileNotFoundError(f"Zarr file {fname_zarr} does not exist.")
 
     def get_data(
         self,
@@ -423,9 +400,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         stream_cfg = self.get_stream(stream)
         all_channels = self.get_channels(stream)
-        _logger.info(
-            f"RUN {self.run_id}: Processing stream {stream}..."
-        )
+        _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
 
         fsteps = self.get_forecast_steps() if fsteps is None else fsteps
 
@@ -737,7 +712,9 @@ class WeatherGenZarrReader(WeatherGenReader):
 
             # Optional: verify consistency across a second sample/forecast step
             sample_idx2 = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
-            fstep_idx2 = zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
+            fstep_idx2 = (
+                zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
+            )
             if sample_idx2 == sample_idx and fstep_idx2 == fstep_idx:
                 # Only one unique sample/step; assume consistency
                 _logger.debug("Only one sample and one forecast step; using it for grid check.")
@@ -750,8 +727,10 @@ class WeatherGenZarrReader(WeatherGenReader):
                     _logger.debug("Second sample/step missing lat/lon or not 1D.")
                     return False
 
-                if not (np.allclose(lat2.values, lat_vals, rtol=1e-5, atol=1e-8) and
-                        np.allclose(lon2.values, lon_vals, rtol=1e-5, atol=1e-8)):
+                if not (
+                    np.allclose(lat2.values, lat_vals, rtol=1e-5, atol=1e-8)
+                    and np.allclose(lon2.values, lon_vals, rtol=1e-5, atol=1e-8)
+                ):
                     _logger.debug("Lat/lon grids differ between samples.")
                     return False
 
@@ -770,9 +749,10 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     """
     Force all samples to share the same ipoint order.
 
-    This function aligns the spatial ordering (lat/lon/ipoint) of all samples to that of the first sample,
-    ensuring consistent spatial coordinates for subsequent concatenation. It is essential for regular-grid
-    (gridded) data where spatial order matters but may differ across samples.
+    This function aligns the spatial ordering (lat/lon/ipoint) of all samples
+    to that of the first sample, ensuring consistent spatial coordinates for
+    subsequent concatenation. It is essential for regular-grid (gridded) data
+    where spatial order matters but may differ across samples.
 
     Parameters
     ----------
@@ -786,7 +766,8 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
 
     Notes
     -----
-    - All input DataArrays must share identical lat/lon values (though possibly in different orders).
+    - All input DataArrays must share identical lat/lon values
+        (though possibly in different orders).
     - Enforces consistent ipoint indexing after alignment (0..N-1).
     - Preserves and aligns all other coordinates and data variables.
     """
