@@ -23,10 +23,8 @@ class CfParser:
         grid_type : str
             Type of grid ('regular' or 'gaussian').
         """
-
         for k, v in kwargs.items():
             setattr(self, k, v)
-
         self.config = config
         self.file_extension = _get_file_extension(self.output_format)
         self.fstep_hours = np.timedelta64(self.fstep_hours, "h")

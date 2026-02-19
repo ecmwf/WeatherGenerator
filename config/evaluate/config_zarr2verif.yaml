@@ -39,8 +39,8 @@ variables:
     level_type: sfc
 
 
-  mlsp:
-    var: msl
+  msl:
+    var: mslp
     long: Mean sea level pressure
     wg_unit:  {CERRA:   Pa,
                MEPS:    Pa,
@@ -53,8 +53,8 @@ variables:
     level_type: sfc
 
 
-  wind:
-    var: 10si # derived channel
+  10si:
+    var: wind # derived channel
     long: wind speed
     wg_unit:  {CERRA:   m/s,
                MEPS:    m/s,
@@ -69,43 +69,51 @@ variables:
 
 coordinates:
     sfc:
-        valid_time: valid_time
+        valid_time: time
         lat: latitude
         lon: longitude
         stream: stream
         forecast_step: leadtime
         forecast_reference_time: forecast_reference_time
         ncells: ncells
-    #pl:
+    pl:
       #not needed
+        pressure_level: pressure
+        valid_time: time
+        lat: latitude
+        lon: longitude
+        stream: stream
+        forecast_step: leadtime
+        forecast_reference_time: forecast_reference_time
+        ncells: ncells
 
 dimensions:
     valid_time:
-      wg: valid_time
       verif: time
+      std: time
     lat: 
-      wg: latitude
       verif: latitude
+      std: latitude
       verif_unit: degrees_north
     lon: 
-      wg: longitude
       verif: longitude
+      std: longitude
       verif_unit: degrees_east
     pressure_level:
-      wg: pressure
       verif: pressure
+      std: pressure
       verif_unit: hPa
     forecast_reference_time: 
-      wg: forecast_reference_time
       verif: forecast_reference_time
+      std: forecast_reference_time
     forecast_step:
-      wg: leadtime
-      verif: forecast_period
+      verif: leadtime
+      std: forecast_period
       long: time since forecast_reference_time
       verif_unit: hours
     stream:
-      wg: stream
       verif: stream
+      std: stream
     ncells:
-      wg: ncells
       verif: ncells
+      std: ncells

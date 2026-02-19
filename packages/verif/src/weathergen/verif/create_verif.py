@@ -318,7 +318,7 @@ def main():
     method_factory = Interpolator_factory(args.method)
 
     with ZarrIO(args.zarrfile, read_only=True) as zarrio:
-        streams = get_streams(zarrio, args.streams)
+        streams = get_streams(zarrio, "ERA5")
 
         t_start = time()
 

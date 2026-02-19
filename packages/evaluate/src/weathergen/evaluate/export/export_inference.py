@@ -182,9 +182,30 @@ def parse_args(args: list) -> argparse.Namespace:
         help="Type of grid to regrid to (only used if --regrid-degree is specified)",
     )
 
+    parser.add_argument(
+        "-b",
+        "--obs",
+        help= "observation file for creating verif files"
+    )
+
+    parser.add_argument(
+        "-m",
+        "--method",
+        default="2d",
+        choices=["2d", "lat_lon", "nearest"],
+        help="Interpolation method used for verif. Default: 2d_interpolation",
+    )
+
+    parser.add_argument(
+        "--verif-template",
+        default="verif/%S/%V/verif_%S_%V_%M.nc",
+        help="Template for the output nc filenames, default will be to create output/verif/%S/%V \
+              repertories where %S, %V, %d are replaced by the streams, variable and date",
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
-        _logger.warning(f"Unknown arguments: {unknown_args}")
+        _logger.warning(f"Unknown arguments: {unknown_args}") 
     return args
 
 
@@ -205,9 +226,8 @@ def export_from_args(args: list) -> None:
         args : List of command line arguments.
     """
     args = parse_args(sys.argv[1:])
-
     # Load configuration
-    if args.format == "verif":
+    if args.output_format == "verif":
         config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2verif.yaml")
     else:
         config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")

@@ -7,7 +7,9 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import Regridder, find_pl
+from weathergen.evaluate.export.reshape import find_pl, get_grid_points, get_obs_coordinates, Interpolator_factory
+from weathergen.evaluate.export.preprocess import compute_mslp, compute_precip
+
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -15,9 +17,11 @@ _logger.setLevel(logging.INFO)
 """
 Usage:
 
-uv run export --run-id ciga1p9c --stream ERA5 
---output-dir ./test_output1 
---format verif --samples 1 2  --fsteps 1 2 3
+uv run export --run-id wgp6fowx --stream ERA5 \
+--output-dir ../test_output1 \
+--format verif --samples 1 2  --fsteps 1 2 3 \
+--obs /p/project1/weatherai/myhre1/metno_observations_v3.nc \
+--method 2d
 """
 
 
@@ -45,9 +49,18 @@ class VerifParser(CfParser):
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-        super().__init__(config=config, grid_type=self.grid_type)
+        super().__init__(config=config)
+
+        if not hasattr(self, "obs"):
+            raise ValueError("Observation data required for creating verif compliant NetCDFs")        
 
         self.mapping = config.get("variables", {})
+
+        # add extra attributes
+        self.obs = xr.open_dataset(self.obs)
+        lat, lon, _ = get_obs_coordinates(self.obs)
+        self.obs_coords = np.column_stack((lat.values, lon.values))
+        self.zarr_coords = None
 
     def process_sample(
         self,
@@ -64,51 +77,69 @@ class VerifParser(CfParser):
         -------
             None
         """
-        for var in self.channels:
-            da_var = []
-            for result in fstep_iterator_results:
-                if result is None:
-                    continue
+        required_channels = ["10u", "10v", "sp", "2t", "msl"]
+        self.channels = list(set(self.channels) & set(required_channels))
+        da_fs = []
+        for result in fstep_iterator_results:
+            if result is None:
+                continue
 
-                result = result.as_xarray().squeeze()
-                result = result.sel(channel=var)
-                result = self.reshape(result)
-                da_fs.append(result)
+            result = result.as_xarray().squeeze()
+            result = result.sel(channel=self.channels)
+            result = self.preprocess(result)
+            result = self.reshape(result)
+            da_fs.append(result)
 
-            _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {self.data_type}.")
-            _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
+        _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {self.data_type}.")
 
-            if da_fs:
-                da_fs = self.concatenate(da_fs)
-                da_fs = self.assign_frt(da_fs, ref_time)
-                da_fs = self.add_attrs(da_fs)
-                da_fs = self.add_metadata(da_fs)
-                da_fs = self.add_encoding(da_fs)
-                self.save(da_fs, ref_time)
+        if da_fs:
+            if self.zarr_coords is None:
+                self.zarr_coords = get_grid_points(da_fs[0])
+                self.zarr_dt = self.get_zarr_dt(da_fs[0])
 
+            
+            da_fs = self.concatenate(da_fs)
+            da_fs = self.assign_frt(da_fs, ref_time)
+            da_fs = self.add_attrs(da_fs)
+            da_fs = self.add_metadata(da_fs)
+            da_fs = self.add_encoding(da_fs)
+            for verif_var in self.mapping.keys():
+                da_var = self.regrid(da_fs, verif_var)
+                obs_result = self.obs_preprocess(ref_time, verif_var)
+                self.save(da_var, obs_result, ref_time, verif_var)
+                _logger.info(f"Saved {verif_var} data for {ref_time} to \
+                {self.output_format} in {self.output_dir}.")
+
+    def get_zarr_dt(self, ds):
+        zarr_dt = (
+            ds.source_interval_end.values - ds.source_interval_start.values
+        )
+        zarr_dt = zarr_dt.astype("timedelta64[h]")
+        return zarr_dt
+    
     def get_output_filename(self, forecast_ref_time: np.datetime64, stream:str, variable:str) -> Path:
         """
-        Generate output filename based on date
-
-        Parameters
-        ----------
-            forecast_ref_time : Forecast reference time to include in the filename.
-
-        Returns
-        -------
-            Full path to the output file.
+        Create output directories for the verif files
+        and return path to output file
+        Args:
+            stream (string)
+            variables (list[string])
+            outfiles (string): template for the output files
+        Outputs:
+            None
         """
-
-        frt = np.datetime_as_string(forecast_ref_time, unit="h")
-        out_fname = (
-            Path(self.output_dir) / "verif" / stream / variable / frt
+        outfile = Path(
+            self.verif_template.replace("%S", self.stream)
+            .replace("%V", variable)
+            .replace("%M", self.method)
+            .replace("%D", self.data_type)
         )
-        # create nested output directories
-        pathdir = out_fname.parent
+        outfile = Path(self.output_dir) / outfile
+        pathdir = outfile.parent
+        _logger.info(f"Output directory: {pathdir}")
         pathdir.mkdir(exist_ok=True, parents=True)
-
-        return out_fname
-
+        return outfile
+    
     def reshape(self, data: xr.DataArray) -> xr.Dataset:
         """
         Reshape dataset while preserving grid structure (regular or Gaussian).
@@ -164,25 +195,67 @@ class VerifParser(CfParser):
 
         return reshaped_dataset
 
-    def regrid(self, ds: xr.Dataset) -> xr.Dataset:
+
+    def obs_preprocess(self, ref_time, verif_var):
+        obs_data = self.obs
+        mapped_info = self.mapping.get(verif_var, {})        
+        obs_name = mapped_info.get("obs_name", {})
+        if verif_var == "mslp":
+            obs_data[obs_name].values = compute_mslp(obs_data, ref_time)
+        if verif_var == "tp":
+            obs_data[obs_name].sel(time = ref_time).values = compute_precip(obs_data, self.zarr_dt, ref_time)
+        else:
+            pass
+
+        return obs_data[obs_name]
+    
+    def preprocess(self, ds: xr.Dataset) -> xr.Dataset:
         """
-        Regrid a single xarray Dataset to specified grid type and degree.
+        Preprocess variables and only keep relevant ones
+        """
+        if all(["10u", "10v"]) in self.channels:
+            u = ds.sel(channel='10u')
+            v = ds.sel(channel='10v')
+            # hypotenuese
+            wind_speed =  xr.apply_ufunc(
+                np.hypot, u, v, dask="parallelized", output_dtypes=[ds.dtype]
+            ).astype("float32")
+            wind_speed = wind_speed.expand_dims(channel=['10si'])
+            if ds.chunks:
+                wind_speed = wind_speed.chunk({"ipoint": ds.chunks[ds.get_axis_num("ipoint")][0], "channel": 1})
+            new_ds = xr.concat([ds, wind_speed], dim="channel")
+            new_ds.attrs = ds.attrs
+
+            # remove unnecessary
+            new_ds = new_ds.drop_sel(channel = ['10u', '10v'])
+            return new_ds
+        else:
+            return ds
+
+    def regrid(self, ds: xr.Dataset, verif_var) -> xr.Dataset:
+        """
+        Regrid a single xarray Datas                                                           v               vvbet using specific method.
         Parameters
         ----------
-            output_grid_type : Type of grid to regrid to (e.g., 'regular_ll').
-            degree : Degree of the grid; for regular grids, this is the lat/lon degree spacing;
-                     for Gaussian grids, this is the N number (e.g., 63 for N63).
+            ds: native xarray Dataset
         Returns
         -------
             Regridded xarray Dataset.
         """
-        if self.regrid_degree is None or self.regrid_type is None:
-            _logger.info("No regridding specified, skipping regridding step.")
-            return ds
-        nc_regridder = Regridder(ds, output_grid_type=self.regrid_type, degree=self.regrid_degree)
+        try:
+            ds_var = ds[verif_var]
+        except KeyError as e:
+            _logger.info(f"{verif_var} not available in WeatherGenerator output: {e}")
+            return
+        method_factory = Interpolator_factory(self.method)
+        interpolator = method_factory.get_interpolator(self.zarr_coords, self.obs_coords)
+        
+        for idx in range(len(ds_var.time.values)):
+            interpolator.interpolate(
+                ds_var.values[:,idx]
+            )
+        return ds_var
 
-        regrid_ds = nc_regridder.regrid_ds()
-        return regrid_ds
 
     def concatenate(
         self,
@@ -250,8 +323,7 @@ class VerifParser(CfParser):
 
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
-
-        n_hours = self.fstep_hours.astype("int64")
+        n_hours = self.fstep_hours.astype('int64')
         ds["forecast_step"] = ds["forecast_step"] * n_hours
         return ds
 
@@ -266,12 +338,7 @@ class VerifParser(CfParser):
         -------
             xarray Dataset with CF-compliant variable attributes.
         """
-
-        if self.grid_type == "gaussian":
-            variables = self._attrs_gaussian_grid(ds)
-        else:
-            variables = self._attrs_regular_grid(ds)
-
+        variables = self._attrs_gaussian_grid(ds)
         dataset = xr.merge(variables.values())
         dataset.attrs = ds.attrs
         return dataset
@@ -279,7 +346,7 @@ class VerifParser(CfParser):
     def add_encoding(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Add time encoding to the dataset variables.
-        Add aux coordinates to forecast_period
+        Add aux coordinates to leadtime
 
         Parameters
         ----------
@@ -293,20 +360,20 @@ class VerifParser(CfParser):
             "calendar": "gregorian",
         }
 
-        if "valid_time" in ds.coords:
-            ds["valid_time"].encoding.update(time_encoding)
+        if "time" in ds.coords:
+            ds["time"].encoding.update(time_encoding)
 
         if "forecast_reference_time" in ds.coords:
             ds["forecast_reference_time"].encoding.update(time_encoding)
 
-        if "forecast_period" in ds.coords:
-            ds["forecast_period"].encoding.update({"coordinates": "forecast_reference_time"})
+        if "leadtime" in ds.coords:
+            ds["leadtime"].encoding.update({"coordinates": "forecast_reference_time"})
 
         return ds
 
     def _attrs_gaussian_grid(self, ds: xr.Dataset) -> xr.Dataset:
         """
-        Assign CF-compliant attributes to variables in a Gaussian grid dataset.
+        Assign CF-compliant attributes to variables in a gaussian grid dataset.
         Parameters
         ----------
             ds : xr.Dataset
@@ -316,19 +383,28 @@ class VerifParser(CfParser):
             xr.Dataset
                 Dataset with CF-compliant variable attributes.
         """
+        unit_conversion = {"kg/m^2": 1.0, "Pa": 1.0, "K": 1.0, "m/s": 1.0, "m": 1000.0}
+
         variables = {}
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
         for var_name, da in ds.data_vars.items():
             mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
+            mapped_units = mapped_info.get("wg_unit", {})
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
+            wg_unit = mapped_units.get(self.stream, "DEFAULT")
+            verif_unit = mapped_info.get("verif_unit", None)
+            if wg_unit != verif_unit:
+                #perform unit conversion
+                da.values = da.values * unit_conversion[wg_unit]
+            
             attributes = {
-                "standard_name": mapped_info.get("std", var_name),
-                "units": mapped_info.get("std_unit", "unknown"),
+                "units": verif_unit,
             }
+
             if "long" in mapped_info:
                 attributes["long_name"] = mapped_info["long"]
             variables[mapped_name] = xr.DataArray(
@@ -338,53 +414,6 @@ class VerifParser(CfParser):
                 attrs=attributes,
                 name=mapped_name,
             )
-
-        return variables
-
-    def _attrs_regular_grid(self, ds: xr.Dataset) -> xr.Dataset:
-        """
-        Assign CF-compliant attributes to variables in a regular grid dataset.
-        Parameters
-        ----------
-            ds : xr.Dataset
-                Input dataset.
-        Returns
-        -------
-            xr.Dataset
-                Dataset with CF-compliant variable attributes.
-        """
-        variables = {}
-        dims_cfg = self.config.get("dimensions", {})
-        ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
-        dims_list = ["pressure", "latitude", "longitude", "valid_time"]
-        for var_name, da in ds.data_vars.items():
-            mapped_info = self.mapping.get(var_name, {})
-            mapped_name = mapped_info.get("var", var_name)
-            dims = dims_list.copy()
-            if mapped_info.get("level_type") == "sfc":
-                dims.remove("pressure")
-
-            coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
-
-            attributes = {
-                "standard_name": mapped_info.get("std", var_name),
-                "units": mapped_info.get("std_unit", "unknown"),
-            }
-            if "long" in mapped_info:
-                attributes["long_name"] = mapped_info["long"]
-            variables[mapped_name] = xr.DataArray(
-                data=da.values,
-                dims=dims,
-                coords={**coords, "valid_time": ds["valid_time"].values},
-                attrs=attributes,
-                name=mapped_name,
-            )
-            if da.encoding.get("coordinates"):
-                variables[mapped_name].encoding["coordinates"] = (
-                    da.encoding["coordinates"]
-                    .replace(" lat ", " latitude ")
-                    .replace(" lon ", " longitude "),
-                )
 
         return variables
 
@@ -409,13 +438,13 @@ class VerifParser(CfParser):
         ds_attrs = {}
 
         for dim_name, meta in dim_cfg.items():
-            wg_name = meta.get("wg", dim_name)
+            wg_name = meta.get("verif", dim_name)
             if dim_name in ds.dims and dim_name != wg_name:
                 ds = ds.rename_dims({dim_name: wg_name})
 
             dim_attrs = {"standard_name": meta.get("std", wg_name)}
-            if meta.get("std_unit"):
-                dim_attrs["units"] = meta["std_unit"]
+            if meta.get("verif_unit"):
+                dim_attrs["units"] = meta["verif_unit"]
             if meta.get("long"):
                 dim_attrs["long_name"] = meta["long"]
             ds_attrs[wg_name] = dim_attrs
@@ -451,41 +480,6 @@ class VerifParser(CfParser):
 
         return coords
 
-    def _add_grid_attrs(self, ds: xr.Dataset, grid_info: dict | None = None) -> xr.Dataset:
-        """
-        Add Gaussian grid metadata following CF conventions.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            Dataset to add metadata to
-        grid_info : dict, optional
-            Dictionary with grid information:
-            - 'N': Gaussian grid number (e.g., N320)
-            - 'reduced': Whether it's a reduced Gaussian grid
-
-        Returns
-        -------
-        xr.Dataset
-            Dataset with added grid metadata
-        """
-
-        if self.grid_type != "gaussian":
-            return ds
-
-        # ds = ds.copy()
-        # Add grid mapping information
-        ds.attrs["grid_type"] = "gaussian"
-
-        # If grid info provided, add it
-        if grid_info:
-            ds.attrs["gaussian_grid_number"] = grid_info.get("N", "unknown")
-            ds.attrs["gaussian_grid_type"] = (
-                "reduced" if grid_info.get("reduced", False) else "regular"
-            )
-
-        return ds
-
     def add_metadata(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Add CF conventions to the dataset attributes.
@@ -498,7 +492,7 @@ class VerifParser(CfParser):
             xarray Dataset with CF conventions added to attributes.
         """
         # ds = ds.copy()
-        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id} using stream {self.stream} and {self.variable}"
+        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id} using stream {self.stream}"
         ds.attrs["institution"] = "WeatherGenerator Project"
         ds.attrs["source"] = "WeatherGenerator v0.0"
         ds.attrs["history"] = (
@@ -510,7 +504,7 @@ class VerifParser(CfParser):
         ds = ds.drop_vars("stream")
         return ds
 
-    def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
+    def save(self, ds: xr.Dataset, obs_result, forecast_ref_time: np.datetime64, verif_var) -> None:
         """
         Save the dataset to a NetCDF file.
 
@@ -524,7 +518,12 @@ class VerifParser(CfParser):
         -------
             None
         """
-        out_fname = self.get_output_filename(forecast_ref_time)
+        lat, lon, alt = get_obs_coordinates(self.obs)
+        if ds is None:
+            merged = xr.merge([obs_result, lat, lon, alt])
+        else:
+            merged = xr.merge([ds, obs_result, lat, lon, alt])
+        out_fname = self.get_output_filename(forecast_ref_time, self.stream, verif_var)
         _logger.info(f"Saving to {out_fname}.")
-        ds.to_netcdf(out_fname)
+        merged.to_netcdf(out_fname)
         _logger.info(f"Saved NetCDF file to {out_fname}.")
