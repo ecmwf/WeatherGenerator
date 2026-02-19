@@ -730,8 +730,6 @@ class WeatherGenMergeReader(Reader):
 
         _logger.info(f"MERGE READERS: {self.run_ids} ...")
 
-        
-
         for run_id in self.run_ids:
             if reader_type == "zarr":
                 reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
@@ -879,7 +877,7 @@ class WeatherGenMergeReader(Reader):
                 for metric in metrics:
                     # all other cases: recompute scores
                     missing_metrics.setdefault(region, []).append(metric)
-        else: #JsonReader
+        else:  # JsonReader
             # deep merge dicts
             for reader in self.readers:
                 scores, missing = reader.load_scores(stream, regions, metrics)

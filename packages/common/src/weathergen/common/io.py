@@ -588,7 +588,7 @@ class OutputBatchData:
     latents: list[list[dict]]
 
     # optional name to use for latent pseudo-stream when yielding latent items
-    latent_stream_name: typing.Optional[str] = None
+    latent_stream_name: str | None = None
 
     sample_start: int
     forecast_offset: int
@@ -821,7 +821,9 @@ class OutputBatchData:
                 data = arr
                 channels = [f"{lname}_{i}" for i in range(data.shape[1])]
 
-            ds = OutputDataset(lname, key, source_interval, data, times, coords, geoinfo, channels, [])
+            ds = OutputDataset(
+                lname, key, source_interval, data, times, coords, geoinfo, channels, []
+            )
             datasets.append(ds)
 
         item = type("LatentItem", (object,), {})()

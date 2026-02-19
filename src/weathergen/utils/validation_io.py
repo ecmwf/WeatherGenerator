@@ -165,7 +165,12 @@ def write_output(
                 per_sample = {}
                 for lname, lval in latent_pred.items():
                     if isinstance(lval, LatentState):
-                        for field in ("z_pre_norm", "patch_tokens", "register_tokens", "class_token"):
+                        for field in (
+                            "z_pre_norm",
+                            "patch_tokens",
+                            "register_tokens",
+                            "class_token",
+                        ):
                             tensor = getattr(lval, field)
                             per_sample[f"{lname}_{field}"] = (
                                 tensor[i_sample].detach().to(fp32).cpu().numpy()
