@@ -236,16 +236,31 @@ class WeatherGenMergeReader(Reader):
             for metric in local_scores.keys():
                 for region in local_scores[metric].keys():
                     for stream in local_scores[metric][region].keys():
-                        scores = (
-                            local_scores[metric][region][stream].pop(run_id)
-                            for run_id in self.run_ids
-                        )
-                        local_scores[metric][region][stream].setdefault(
+                        merged_scores = []
+                        
+                        # list all existing score values 
+                        for run_id in self.run_ids:
+                            score = local_scores[metric][region][stream].pop(run_id, None)
+                            if score is not None:
+                                merged_scores.append(score)
+                        
+                        # concat scores
+                        assert len(merged_scores) > 0,  f"No scores found for metric: {metric}, region: {region}, stream: {stream}"
+                        if len(merged_scores) == 1:
+                            _logger.warning(f"Only a single precomputed score found for metric: {metric}, region: {region}, stream: {stream}")
+                            local_scores[metric][region][stream].setdefault(
                             self.run_id,
-                            xr.concat(scores, dim="ens").assign_coords(
-                                ens=range(len(self.readers))
-                            ),
-                        )
+                            merged_scores[0]
+                            )
+                        else:
+                            if len(merged_scores) < len(self.run_ids):
+                                _logger.warning(f"Not all runs have a precomputed score for  metric: {metric}, region: {region}, stream: {stream}")
+                            local_scores[metric][region][stream].setdefault(
+                                self.run_id,
+                                xr.concat(merged_scores, dim="ens").assign_coords(
+                                    ens=range(len(self.readers))
+                                ),
+                            )
 
         return local_scores, missing_metrics
 
