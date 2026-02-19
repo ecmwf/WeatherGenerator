@@ -727,7 +727,7 @@ class WeatherGenMergeReader(Reader):
         """
         super().__init__(eval_cfg, run_id, private_paths)
         self.run_ids = eval_cfg.get("merge_run_ids", [])
-        self.metrics_dir = Path(eval_cfg.get("metrics_dir"))
+        self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir"))
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
 
         self.readers = []

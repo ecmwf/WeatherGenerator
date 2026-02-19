@@ -55,11 +55,11 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 8
+fe_num_blocks: 16
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: [3]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
@@ -83,14 +83,14 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
-freeze_modules: ""
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
 load_chkpt: {}
 
 norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
+streams_directory: "./config/streams/era5_1deg_forecasting/"
 streams: ???
 
 # type of zarr_store
@@ -136,7 +136,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 64
+  num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -148,13 +148,13 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 1e-4
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
-    policy_decay: "constant"
+    policy_decay: "cosine"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
 
@@ -185,7 +185,7 @@ training_config:
   forecast :
       time_step: 06:00:00
       offset: 1
-      num_steps: 2
+      num_steps: 8
       policy: "fixed"
 
 
