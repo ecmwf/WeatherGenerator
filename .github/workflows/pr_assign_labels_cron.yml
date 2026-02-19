@@ -4,7 +4,9 @@ on:
   schedule:
     - cron: '0 * * * *'  # Every hour
   workflow_dispatch:      # Allow manual triggering
-
+  push:
+    branches:
+      - "tjh/dev/1877-pr-labels"
 permissions:
   pull-requests: write
 #  contents: write
