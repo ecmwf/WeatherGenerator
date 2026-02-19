@@ -92,6 +92,22 @@ class Trainer(TrainerBase):
         """
         return self.world_size_original * batch_size_per_gpu
 
+    def consolidate_configs(self, cf):
+        # get training config and remove disabled options (e.g. because of overrides)
+        self.training_cfg = cf.get("training_config")
+        self.training_cfg = filter_config_by_enabled(self.training_cfg, cfg_keys_to_filter)
+        assert len(self.training_cfg.model_input.keys()) != 0, (
+            "You probably have no loss term enabled"
+        )
+        # validation and test configs are training configs, updated by specified keys
+        self.validation_cfg = get_active_stage_config(
+            self.training_cfg, cf.get("validation_config", {}), cfg_keys_to_filter
+        )
+        # test cfg is derived from validation cfg with specified keys overwritten
+        self.test_cfg = get_active_stage_config(
+            self.validation_cfg, cf.get("test_config", {}), cfg_keys_to_filter
+        )
+
     def init(self, cf: Config, devices):
         # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
@@ -110,21 +126,8 @@ class Trainer(TrainerBase):
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
-        # get training config and remove disabled options (e.g. because of overrides)
-        self.training_cfg = cf.get("training_config")
-        self.training_cfg = filter_config_by_enabled(self.training_cfg, cfg_keys_to_filter)
-        assert len(self.training_cfg.model_input.keys()) != 0, (
-            "You probably have no loss term enabled"
-        )
-
-        # validation and test configs are training configs, updated by specified keys
-        self.validation_cfg = get_active_stage_config(
-            self.training_cfg, cf.get("validation_config", {}), cfg_keys_to_filter
-        )
-        # test cfg is derived from validation cfg with specified keys overwritten
-        self.test_cfg = get_active_stage_config(
-            self.validation_cfg, cf.get("test_config", {}), cfg_keys_to_filter
-        )
+        # merge different configs and obtain final ones that are used
+        self.consolidate_configs(cf)
 
         # batch sizes
         self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)
@@ -181,6 +184,9 @@ class Trainer(TrainerBase):
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
         self.init(cf, devices)
+
+        # merge different configs and obtain final ones that are used
+        self.consolidate_configs(cf)
 
         cf = self.cf
         device_type = torch.accelerator.current_accelerator()
