@@ -63,6 +63,10 @@ class EMATeacher(TargetAndAuxModuleBase):
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
 
+            # Passthrough L6 refinement targets (identity processing, not a separate loss entry)
+            if "JEPA_L6" in outputs:
+                targets["JEPA_L6"] = outputs["JEPA_L6"]
+
             # collect target meta-information for selected samples
             aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
 
@@ -96,7 +100,7 @@ def get_target_postprocessing(target_losses: list[str], training_cfg, **kwargs):
                 student_temp=conf["loss_extra_args"]["student_temp"],
                 teacher_style=conf["teacher_style"],
             )
-        elif loss_name in ("JEPA", "JEPA_L6"):
+        elif loss_name == "JEPA":
             return_dict[loss_name] = JEPATargetProcessing()
         else:
             # We skip losses that are not handled by the EMATeacher

@@ -31,7 +31,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
     It provides both the main loss for backpropagation and detailed loss metrics for logging.
     """
 
-    valid_loss_names = set(["DINO", "iBOT", "JEPA", "JEPA_L6"])
+    valid_loss_names = set(["DINO", "iBOT", "JEPA"])
 
     def __init__(self, cf: DictConfig, mode_cfg: DictConfig, stage: Stage, device: str, **losses):
         LossModuleBase.__init__(self)
@@ -46,6 +46,13 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             name: (local_conf["weight"], get_loss_function_ssl(name), local_conf["loss_extra_args"])
             for name, local_conf in losses.items()
         }
+
+        # Extract JEPA L6 refinement config (baked into JEPA entry, not a separate loss)
+        self.jepa_refinement_weight = None
+        if "JEPA" in losses and losses["JEPA"].get("refinement") is not None:
+            self.jepa_refinement_weight = losses["JEPA"]["refinement"].get(
+                "weight", losses["JEPA"]["weight"]
+            )
 
     def compute_loss(self, preds, targets, metadata) -> LossValues:
         # gradient loss
@@ -72,6 +79,23 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
             loss = loss + (weight * loss_value)
             losses_all[name] = loss_value.item()
+
+            # L6 hierarchical refinement loss (sub-loss of JEPA)
+            if (
+                name == "JEPA"
+                and self.jepa_refinement_weight is not None
+                and "JEPA_L6" in preds
+                and "JEPA_L6" in targets
+            ):
+                preds_l6 = self.gather_preds_for_loss(
+                    "JEPA_L6", preds["JEPA_L6"], output_info, target2source_matching_idxs
+                )
+                targets_l6 = self.gather_targets_for_loss(
+                    "JEPA_L6", targets["JEPA_L6"], target_info, target2source_matching_idxs
+                )
+                l6_value = loss_fn(**preds_l6, **targets_l6).mean()
+                loss = loss + (self.jepa_refinement_weight * l6_value)
+                losses_all["JEPA_L6"] = l6_value.item()
 
         return LossValues(loss=loss, losses_all=losses_all, stddev_all={})
 
@@ -324,7 +348,7 @@ def get_loss_function_ssl(name):
         return ibot_loss
     elif name == "DINO":
         return dino_loss
-    elif name in ("JEPA", "JEPA_L6"):
+    elif name == "JEPA":
         return jepa_loss
     else:
         raise NotImplementedError(

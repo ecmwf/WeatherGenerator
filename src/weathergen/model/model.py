@@ -512,6 +512,14 @@ class Model(torch.nn.Module):
                         use_class_token=False,
                         use_patch_token=True,
                     )
+                    ref_conf = loss_conf.get("refinement")
+                    if ref_conf is not None:
+                        dim_embed = loss_conf.get("out_dim", cf.ae_global_dim_embed)
+                        hidden_dim = ref_conf.get("hidden_dim", dim_embed // 2)
+                        self.refinement_engine = RefinementEngine(
+                            dim_embed=dim_embed,
+                            hidden_dim=hidden_dim,
+                        )
                 elif loss == "DINO":
                     self.latent_heads[loss] = self._create_latent_pred_head(
                         cf,
@@ -519,14 +527,6 @@ class Model(torch.nn.Module):
                         loss_conf,
                         use_class_token=True,
                         use_patch_token=False,
-                    )
-                elif loss == "JEPA_L6":
-                    jepa_conf = ssl_target_losses.loss_fcts["JEPA"]
-                    dim_embed = jepa_conf.get("out_dim", cf.ae_global_dim_embed)
-                    hidden_dim = loss_conf.get("refinement_hidden_dim", dim_embed // 2)
-                    self.refinement_engine = RefinementEngine(
-                        dim_embed=dim_embed,
-                        hidden_dim=hidden_dim,
                     )
 
         return self
