@@ -132,9 +132,9 @@ class VerifParser(CfParser):
             self.verif_template.replace("%S", self.stream)
             .replace("%V", variable)
             .replace("%M", self.method)
-            .replace("%D", self.data_type)
+            .replace("%D", self.data_type + str(forecast_ref_time))
         )
-        outfile = Path(self.output_dir) / outfile
+        outfile = Path(self.output_dir) /  outfile
         pathdir = outfile.parent
         _logger.info(f"Output directory: {pathdir}")
         pathdir.mkdir(exist_ok=True, parents=True)
@@ -213,7 +213,7 @@ class VerifParser(CfParser):
         """
         Preprocess variables and only keep relevant ones
         """
-        if all(["10u", "10v"]) in self.channels:
+        if set(["10u", "10v"]).issubset(self.channels):
             u = ds.sel(channel='10u')
             v = ds.sel(channel='10v')
             # hypotenuese
