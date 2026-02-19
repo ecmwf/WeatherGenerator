@@ -31,6 +31,7 @@ from weathergen.model.engines import (
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
     LatentState,
+    RefinementEngine,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -331,6 +332,7 @@ class Model(torch.nn.Module):
         self.num_register_tokens = cf.num_register_tokens
         self.latent_heads = None
         self.latent_pre_norm = None
+        self.refinement_engine = None
         # auxiliary tokens
         self.class_token_idxs = list(
             range(cf.num_register_tokens, cf.num_register_tokens + cf.num_class_tokens)
@@ -518,6 +520,14 @@ class Model(torch.nn.Module):
                         use_class_token=True,
                         use_patch_token=False,
                     )
+                elif loss == "JEPA_L6":
+                    jepa_conf = ssl_target_losses.loss_fcts["JEPA"]
+                    dim_embed = jepa_conf.get("out_dim", cf.ae_global_dim_embed)
+                    hidden_dim = loss_conf.get("refinement_hidden_dim", dim_embed // 2)
+                    self.refinement_engine = RefinementEngine(
+                        dim_embed=dim_embed,
+                        hidden_dim=hidden_dim,
+                    )
 
         return self
 
@@ -668,6 +678,11 @@ class Model(torch.nn.Module):
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
             output.add_latent_prediction(step, name, head(latent_state))
+
+        # Hierarchical refinement: L5 → L6
+        if self.refinement_engine is not None and "JEPA" in output.latent[step]:
+            jepa_l5 = output.latent[step]["JEPA"]
+            output.add_latent_prediction(step, "JEPA_L6", self.refinement_engine(jepa_l5))
 
         return output
 

@@ -96,7 +96,7 @@ def get_target_postprocessing(target_losses: list[str], training_cfg, **kwargs):
                 student_temp=conf["loss_extra_args"]["student_temp"],
                 teacher_style=conf["teacher_style"],
             )
-        elif loss_name == "JEPA":
+        elif loss_name in ("JEPA", "JEPA_L6"):
             return_dict[loss_name] = JEPATargetProcessing()
         else:
             # We skip losses that are not handled by the EMATeacher

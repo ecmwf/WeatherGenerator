@@ -483,6 +483,44 @@ class ForecastingEngine(torch.nn.Module):
         return tokens
 
 
+class RefinementEngine(torch.nn.Module):
+    """Refines parent-level (L5) embeddings to child-level (L6) embeddings.
+
+    Each parent HEALPix cell has 4 children in NESTED ordering.
+    Produces child = parent + MLP(parent + child_pos_embed), a residual refinement.
+    """
+
+    def __init__(self, dim_embed: int, hidden_dim: int) -> None:
+        super().__init__()
+        self.num_children = 4  # HEALPix: each parent has 4 children
+        self.child_pos_embed = torch.nn.Parameter(torch.randn(self.num_children, dim_embed) * 0.02)
+        self.refine = torch.nn.Sequential(
+            torch.nn.LayerNorm(dim_embed),
+            torch.nn.Linear(dim_embed, hidden_dim),
+            torch.nn.GELU(),
+            torch.nn.Linear(hidden_dim, dim_embed),
+        )
+        # Initialize final linear near-zero so refinement starts as ~identity
+        torch.nn.init.normal_(self.refine[-1].weight, std=0.001)
+        torch.nn.init.zeros_(self.refine[-1].bias)
+
+    def forward(self, parent_embeddings: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            parent_embeddings: (B, N_parent, D) — L5 cell embeddings
+        Returns:
+            child_embeddings: (B, N_parent * 4, D) — L6 cell embeddings
+        """
+        B, N, D = parent_embeddings.shape  # noqa: N806
+        # Expand each parent to 4 children: (B, N, 4, D)
+        parent_exp = parent_embeddings.unsqueeze(2).expand(B, N, self.num_children, D)
+        # Add child positional embeddings (4 distinct learned positions)
+        child_input = parent_exp + self.child_pos_embed  # broadcasts over B, N
+        # Residual refinement: child = parent + offset
+        child_embeddings = parent_exp + self.refine(child_input)
+        return child_embeddings.reshape(B, N * self.num_children, D)
+
+
 class EnsPredictionHead(torch.nn.Module):
     def __init__(
         self,

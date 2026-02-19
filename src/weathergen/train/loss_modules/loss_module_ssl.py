@@ -31,7 +31,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
     It provides both the main loss for backpropagation and detailed loss metrics for logging.
     """
 
-    valid_loss_names = set(["DINO", "iBOT", "JEPA"])
+    valid_loss_names = set(["DINO", "iBOT", "JEPA", "JEPA_L6"])
 
     def __init__(self, cf: DictConfig, mode_cfg: DictConfig, stage: Stage, device: str, **losses):
         LossModuleBase.__init__(self)
@@ -124,6 +124,25 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
             }
+        elif name == "JEPA_L6":
+            return {
+                "student_patches_masked": torch.stack(
+                    [
+                        p
+                        for p, info in zip(preds, metadata, strict=False)
+                        if "JEPA" in info.global_params["loss"]
+                    ],
+                    dim=0,
+                ),
+                "student_masks": torch.stack(
+                    [
+                        info.mask.repeat_interleave(4, dim=-1)
+                        for info in metadata
+                        if "JEPA" in info.global_params["loss"]
+                    ],
+                    dim=0,
+                ).unsqueeze(1),
+            }
         elif name == "DINO":
             local2global_dino_student = []
             for student_indices in target2source_matching_idxs:
@@ -172,6 +191,25 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                 ),
                 "teacher_masks": torch.stack(
                     [info.mask for info in metadata if "JEPA" in info.global_params["loss"]],
+                    dim=0,
+                ).unsqueeze(1),
+            }
+        elif name == "JEPA_L6":
+            return {
+                "teacher_patches_masked": torch.stack(
+                    [
+                        p
+                        for p, info in zip(targets, metadata, strict=True)
+                        if "JEPA" in info.global_params["loss"]
+                    ],
+                    dim=0,
+                ),
+                "teacher_masks": torch.stack(
+                    [
+                        info.mask.repeat_interleave(4, dim=-1)
+                        for info in metadata
+                        if "JEPA" in info.global_params["loss"]
+                    ],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -286,7 +324,7 @@ def get_loss_function_ssl(name):
         return ibot_loss
     elif name == "DINO":
         return dino_loss
-    elif name == "JEPA":
+    elif name in ("JEPA", "JEPA_L6"):
         return jepa_loss
     else:
         raise NotImplementedError(
