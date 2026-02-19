@@ -6,6 +6,7 @@ on:
   workflow_dispatch:      # Allow manual triggering
   push:
     branches:
+      # Trying on the dev branch.
       - "tjh/dev/1877-pr-labels"
 permissions:
   pull-requests: write
@@ -115,12 +116,12 @@ jobs:
               // --- Apply labels ---
               if (labelsToAdd.size > 0) {
                 console.log(`  Adding labels to PR #${pr.number}: ${[...labelsToAdd].join(", ")}`);
-                //await github.rest.issues.addLabels({
-                //  owner: context.repo.owner,
-                //  repo: context.repo.repo,
-                //  issue_number: pr.number,
-                //  labels: [...labelsToAdd],
-                //});
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: [...labelsToAdd],
+                });
               } else {
                 console.log(`  No labels to add for PR #${pr.number}.`);
               }
