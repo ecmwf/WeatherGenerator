@@ -10,6 +10,7 @@
 CERRA :
   type : anemoi
   filenames : ['cerra-rr-an-oper-se-al-ec-mars-5p5km-1985-2023-3h-v2.zarr']
+  geoinfo_channels : ['orog', 'lsm']
   diagnostic: True
   stream_id : 1
   loss_weight : 1.

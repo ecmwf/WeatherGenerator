@@ -82,7 +82,7 @@ latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
 
-freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*ERA5.*"
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
 load_chkpt: {run_id: zosrc8ti}
 
 norm_type: "LayerNorm"
@@ -91,6 +91,8 @@ norm_type: "LayerNorm"
 
 streams_directory: "./config/streams/era5_cerra/"
 streams: ???
+
+zarr_store: zip
 
 general:
 
@@ -132,7 +134,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 32
+  num_mini_epochs: 64
   samples_per_mini_epoch: 4096
   shuffle: True
 

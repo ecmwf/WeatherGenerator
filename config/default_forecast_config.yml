@@ -92,6 +92,8 @@ norm_type: "LayerNorm"
 streams_directory: "./config/streams/era5_1deg/"
 streams: ???
 
+zarr_store: zip
+
 general:
 
   # mutable parameters
@@ -211,6 +213,16 @@ validation_config:
 
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
+test_config:
+
+  shuffle: False
+
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+
+  output: 
+    normalized_samples: False
+
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val
