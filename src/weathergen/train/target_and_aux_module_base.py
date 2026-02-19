@@ -10,15 +10,24 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 
+import numpy as np
 import torch
 
+from weathergen.common.io import ItemKey
 from weathergen.model.engines import LatentState
 
 type StreamName = str
 
 
 @dataclasses.dataclass
+class PhysicalTarget:
+    data: np.typing.NDArray[np.float32]
+    coords: np.typing.NDArray[np.float32]
+    datetimes: np.typing.NDArray[np.datetime64]
+
+
 class TargetAuxOutput:
     """
     A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
@@ -57,6 +66,44 @@ class TargetAuxOutput:
                 assert sample_idx < len(pred), "Invalid sample index."
                 pred = pred[sample_idx]
         return pred
+
+    def get_physical_target_normalized(
+        self, key: ItemKey, normalizer: typing.Callable
+    ) -> PhysicalTarget:
+        try:
+            stream_targets = self.physical[key.forecast_step][key.stream]
+        except (KeyError, IndexError) as e:
+            msg = f"Cannot find physical target data for key: {key}"
+            raise ValueError(msg) from e
+
+        if not stream_targets["is_spoof"][key.sample]:
+            # is it a performance issue if I dont convert/move the entire tensor at once?
+            coords = (
+                stream_targets["target_coords"][key.sample].to(torch.float32).detach().cpu().numpy()
+            )
+            times = stream_targets["target_times"][key.sample]
+
+            data = stream_targets["target"][key.sample].to(torch.float32).detach().cpu().numpy()
+            data = normalizer(key.stream, data)
+
+        else:  # => empty/missing target
+            coords = np.empty([0, *stream_targets["target_coords"][key.sample].shape[1:]])
+            target_times = stream_targets["target_times"][key.sample]
+            times = np.empty([0, *target_times.shape[1:]], dtype=target_times.dtype)
+            data = np.empty([0, *stream_targets["target"][key.sample].shape[1:]])
+
+        assert isinstance(data, np.ndarray), "Invalid data buffer type."  # noqa: TID251
+        assert isinstance(coords, np.ndarray), "Invalid coords buffer type."  # noqa: TID251
+        assert isinstance(times, np.ndarray), "Invalid datetimes buffer type."  # noqa: TID251
+
+        if len(coords) == 0:  # TODO can this be removed?
+            coords = np.zeros((0, 2), dtype=np.float32)
+        assert len(coords.shape) >= 2 and coords.shape[-1] >= 2, (
+            "invalid shape for coordinate buffer."
+        )
+        assert data.shape[0] == coords.shape[0] == times.shape[0], "buffer shapes should align."
+
+        return PhysicalTarget(data, coords, times)
 
     def get_latent_target(self, timestep_idx: int):
         return self.latent[timestep_idx]
