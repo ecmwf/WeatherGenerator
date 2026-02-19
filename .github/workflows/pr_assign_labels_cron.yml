@@ -28,7 +28,7 @@ jobs:
             // Operating on a whitelist to keep the list clean.
             const LABEL_WHITELIST = ["bug", "data", 
             "documentation", "eval", 
-            "model", "model:inference"", "model:pretrain", "model:rollout",
+            "model", "model:inference", "model:pretrain", "model:rollout",
             "performance", "science"];
             const LABEL_PATHS = {
               "packages/common": ["infra"],
