@@ -60,21 +60,27 @@ class TokenizerMasking(Tokenizer):
         Tokenize data (to amortize over the different views that are generated)
 
         """
-
-        tok_spacetime = stream_info.get("tokenize_spacetime", False)
-        tok = tokenize_spacetime if tok_spacetime else tokenize_space
-        hl = self.healpix_level
-        token_size = stream_info["token_size"]
-
-        tokens = []
+        tokens: list[tuple[list[list[torch.Tensor | None]], list[list[int]]]] = []
         for rdata in data:
             # skip empty data
             if rdata.is_empty():
                 continue
             # tokenize data
-            idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens
-            )
+            if stream_info.get("tokenize_spacetime", False):
+                idxs_cells, idxs_cells_lens = tokenize_spacetime(
+                    readerdata_to_torch(rdata),
+                    stream_info["token_size"],
+                    self.healpix_level,
+                    pad_tokens,
+                )
+            else:
+                idxs_cells, idxs_cells_lens = tokenize_space(
+                    readerdata_to_torch(rdata),
+                    stream_info["token_size"],
+                    self.healpix_level,
+                    pad_tokens,
+                )
+
             tokens += [(idxs_cells, idxs_cells_lens)]
 
         return tokens
