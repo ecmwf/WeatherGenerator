@@ -286,10 +286,9 @@ class WeatherGenJSONReader(WeatherGenReader):
         metrics: list[str] | None = None,
     ):
         super().__init__(eval_cfg, run_id, private_paths)
-        self.common_coords: dict | None = None
-        self.get_common_coords(regions, metrics)
+        self.common_coords: dict = self._compute_common_coords(regions, metrics)
 
-    def get_common_coords(self, regions, metrics):
+    def _compute_common_coords(self, regions: list[str], metrics: list[str]) -> dict:
         # Find common coordinates across streams, regions, metrics.
         streams = list(self.streams)
         coord_names = ["sample", "forecast_step", "ens"]
@@ -307,14 +306,14 @@ class WeatherGenJSONReader(WeatherGenReader):
                             for val in vals:
                                 provenance[name][val].append((stream, region, metric))
 
-        self.common_coords = {
+        common_coords = {
             name: set.intersection(*all_coords[name])
             for name in coord_names
         }
 
         # Warn about any skipped coordinates
         for name in coord_names:
-            skipped = set.union(*all_coords[name]) - self.common_coords[name]
+            skipped = set.union(*all_coords[name]) - common_coords[name]
             if skipped:
                 msg_lines = [
                     f"Some {name}(s) were not common across streams, "
@@ -325,6 +324,8 @@ class WeatherGenJSONReader(WeatherGenReader):
                         f"  {val} only present in {provenance[name][val]}"
                     )
                 _logger.warning("\n".join(msg_lines))
+    
+        return common_coords
 
     def get_samples(self) -> set[int]:
         return self.common_coords["sample"]
