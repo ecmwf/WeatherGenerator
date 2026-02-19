@@ -29,7 +29,6 @@ from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
-from weathergen.evaluate.utils.utils import merge
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -225,9 +224,8 @@ class WeatherGenReader(Reader):
             DataArray of the score if found, else None.
         """
         score_path = (
-            Path(self.metrics_dir) /
-            f"{self.run_id}_{stream}_{region}_{metric}_"
-            f"chkpt{self.mini_epoch:05d}.json"
+            Path(self.metrics_dir)
+            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
 

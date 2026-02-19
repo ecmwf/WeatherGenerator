@@ -18,6 +18,7 @@ import xarray as xr
 # Local application / package
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.io.wegen_reader import WeatherGenJSONReader,WeatherGenZarrReader
+from weathergen.evaluate.utils.utils import merge
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -53,7 +54,7 @@ class WeatherGenMergeReader(Reader):
         """
         super().__init__(eval_cfg, run_id, private_paths)
         self.run_ids = eval_cfg.get("merge_run_ids", [])
-        self.metrics_dir = Path(eval_cfg.get("metrics_dir"))
+        self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir"))
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
 
         if not self.run_ids:
