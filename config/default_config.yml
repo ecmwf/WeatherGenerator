@@ -153,7 +153,7 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 1e-5
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 512
@@ -164,7 +164,7 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 1.0
+    grad_clip: 0.1
     weight_decay: 0.1
     log_grad_norms: False
     adamw :

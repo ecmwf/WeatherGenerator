@@ -742,7 +742,7 @@ class Model(torch.nn.Module):
                     )
                     # final prediction head to map back to physical space
                     head = self.pred_heads[stream_name]
-                    ens_size = 8
+                    ens_size = 1
                     if isinstance(head, GMMPredictionHead):
                         # 1) raw params
                         raw_logits, raw_means, raw_log_scales = head(tc_tokens)
@@ -753,14 +753,14 @@ class Model(torch.nn.Module):
 
                         # 3) sample to [ens, N, C] to keep compatibility with logging/denorm
 
-                        if self.training:
+                        if True: # self.training:
                             # Return samples + params so the loss can consume the GMM
                             pred = (pi.unsqueeze(0), mu.unsqueeze(0), sigma.unsqueeze(0))
                         else:
                             # Sampling only for eval/logging
                             pred = self.gmm_helpers[stream_name].sample(
                                 pi, mu, sigma, num_samples=ens_size
-                            )  # [S, N, C]
+                            ).unsqueeze(0)  # [S, N, C]
 
                     else:
                         # final prediction head to map back to physical space
