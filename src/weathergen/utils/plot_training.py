@@ -20,6 +20,7 @@ import numpy as np
 import yaml
 
 import weathergen.common.config as config
+from weathergen.train.utils import TRAIN, VAL
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
@@ -211,12 +212,12 @@ def plot_lr(
         x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
         data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
-        plt.plot(
-            run_data.train[x_col],
-            run_data.train[data_cols],
-            linestyle,
-            color=colors[j % len(colors)],
-        )
+        x_vals = run_data.train[x_col]
+        y_vals = np.array(run_data.train[data_cols])
+        mask = y_vals > 1000.0
+        y_vals[mask] = 0.0  # np.nan
+
+        plt.plot(x_vals, y_vals, linestyle, color=colors[j % len(colors)])
         legend_str += [
             ("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
         ]
@@ -318,7 +319,7 @@ def plot_utilization(
     plt.close()
 
 
-def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, x_scale_log=False):
+def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN, x_scale_log=False):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
@@ -329,18 +330,25 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, x_scale_log=False):
 
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        x_vals = np.array(run_data.train["num_samples"])
-        y_vals = np.array(run_data.train["loss_avg_mean"])
+        # import code; code.interact( local=locals())
+        if stage == TRAIN:
+            x_vals = np.array(run_data.train["num_samples"])
+            y_vals = np.array(run_data.train["loss_avg_mean"])
+        elif stage == VAL:
+            x_vals = np.array(run_data.val["num_samples"])
+            y_vals = np.array(run_data.val["LossLatentSSLStudentTeacher.loss_avg"])
+        else:
+            assert False
+
         plt.plot(
             x_vals,
             y_vals,
             color=colors[i_run % len(colors)],
         )
-        legend_str += [run_id + " : " + runs_ids[run_id][1]]
-        # ("R" if runs_active[j] else "X")
-        # + " : "
-        # run_id + ", " + col + " : " + runs_ids[run_id][1]
-        # ]
+        # legend_str += [ run_id + " : " + runs_ids[run_id][1]]
+        legend_str += [
+            ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
+        ]
 
     plt.legend(legend_str)
     plt.grid(True, which="both", ls="-")
@@ -355,7 +363,7 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, x_scale_log=False):
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
 
-    plt_fname = plot_dir / f"{rstr}avg.png"
+    plt_fname = plot_dir / f"{rstr}{str(stage)}_avg.png"
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -734,7 +742,8 @@ def plot_train(args=None):
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # plot average loss
-    plot_loss_avg(out_dir, runs_ids, runs_data)
+    plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=TRAIN)
+    # plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=VAL)
 
     # # plot performance
     # plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)

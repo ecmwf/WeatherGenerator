@@ -27,6 +27,7 @@ import weathergen.common.config as config
 from weathergen.train.utils import Stage, cfg_keys_to_filter, flatten_dict, get_active_stage_config
 from weathergen.utils.distributed import ddp_average
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
+from weathergen.utils.utils import is_stream_forcing
 
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
@@ -200,7 +201,7 @@ class TrainLogger:
         )
         cols2, cols_val = get_loss_terms_per_stream(cf.streams, validation_cfg)
         cols_val = ["dtime", "samples"]
-        cols2 = [_weathergen_timestamp, "num_samples"]
+        cols2 = [_weathergen_timestamp, "num_samples"]  # , "LossLatentSSLStudentTeacher.loss_avg"]
 
         # read validation log data
         try:
@@ -324,6 +325,8 @@ def get_loss_terms_per_stream(streams, stage_config):
     """
     cols, cols_stage = [], []
     for si in streams:
+        if is_stream_forcing(si):
+            continue
         for _, loss_config in stage_config.get("losses", {}).items():
             if loss_config.get("type", "LossPhysical") == "LossPhysical":
                 for lname, _ in loss_config.loss_fcts.items():
