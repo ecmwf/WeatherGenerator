@@ -23,9 +23,9 @@ from pathlib import Path
 
 import omegaconf
 import pytest
-from weathergen.evaluate.run_evaluation import evaluate_from_config
 
-from weathergen.run_train import inference_from_args, train_with_args
+from weathergen.evaluate.run_evaluation import evaluate_from_config
+from weathergen.run_train import main
 from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
@@ -58,15 +58,15 @@ def test_train_multi_stream(setup, test_run_id):
     """Test training with multiple streams including gridded and observation data."""
     logger.info(f"test_train_multi_stream with run_id {test_run_id} {WEATHERGEN_HOME}")
 
-    train_with_args(
-        f"--base-config={WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml".split()
-        + [
+    main(
+        [
+            "train",
+            f"--base-config={WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml",
             "--run-id",
             test_run_id,
-        ],
-        f"{WEATHERGEN_HOME}/integration_tests/streams_multi/",
+        ]
     )
-
+   
     infer_multi_stream(test_run_id)
     # evaluate_multi_stream_results(test_run_id)
     assert_metrics_file_exists(test_run_id)
@@ -78,9 +78,17 @@ def test_train_multi_stream(setup, test_run_id):
 def infer_multi_stream(run_id):
     """Run inference for multi-stream model."""
     logger.info("run multi-stream inference")
-    inference_from_args(
-        ["-start", "2021-10-10", "-end", "2022-10-11", "--samples", "10", "--mini-epoch", "0"]
-        + [
+    main(
+        [
+            "inference",
+            "-start",
+            "2021-10-10",
+            "-end",
+            "2022-10-11",
+            "--samples",
+            "10",
+            "--mini-epoch",
+            "0",
             "--from-run-id",
             run_id,
             "--run-id",
