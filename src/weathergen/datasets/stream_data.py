@@ -196,7 +196,7 @@ class StreamData:
         idx = torch.isnan(self.source_tokens_cells[step])
         self.source_tokens_cells[step][idx] = self.mask_value
 
-    def add_target(
+    def add_target(  # TODO what is the diffference to add_target_values???
         self,
         fstep: int,
         targets: list,

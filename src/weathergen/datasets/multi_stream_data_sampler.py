@@ -479,6 +479,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             modes :
             stream_data :
             base_idx: Time index for this sample
+                => no its tidx (index of n-th target mask, no info of the time index for this sample
+                was used in creating tidx)
             num_forecast_steps: Number of forecast steps
             stream_info: Stream configuration dict
             stream_ds: List of dataset readers for this stream
@@ -683,7 +685,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 tidx: int = source_to_target[sidx].item()
                 sdata = self._build_stream_data(
                     source_select,
-                    tidx, # Why use not idx here?
+                    tidx,  # Why use not idx here?
                     num_forecast_steps,
                     stream_info,
                     source_masks.metadata[sidx].params.get("num_steps_input", 1),
@@ -749,6 +751,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
         # create new shuffeling
+        # should return permutations instead of relying on self.perms
         self.reset()
 
         # bidx is used to count the #batches that have been emitted

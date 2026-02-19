@@ -37,9 +37,11 @@ class TargetAuxOutput:
     ) -> None:
         self.physical[timestep_idx][stream_name] = pred
 
+    # currently unused?
     def add_latent_target(self, timestep_idx: int, latent_name: str, pred: torch.Tensor) -> None:
         self.latent[timestep_idx][latent_name] = pred
 
+    # is broken => pred[sample_idx] must be pred["target"][sample_idx]
     def get_physical_target(
         self,
         timestep_idx: int,
