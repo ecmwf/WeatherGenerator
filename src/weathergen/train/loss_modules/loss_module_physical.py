@@ -18,7 +18,7 @@ from omegaconf import DictConfig
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
-from weathergen.utils.train_logger import TRAIN, VAL, Stage
+from weathergen.train.utils import TRAIN, VAL, Stage
 
 _logger = logging.getLogger(__name__)
 
