@@ -144,9 +144,7 @@ def calc_scores_per_stream(
                 lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
             )
 
-        # lead_time_map = {}
-
-        for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
+        for (fstep, tars), (_, preds) in tqdm(zip(da_tars.items(), da_preds.items(), strict=False), total=len(da_tars), desc=f"Computing scores for {reader.run_id} - stream {stream} and region {region}"):
             if preds.sizes.get("ipoint") == 0:
                 _logger.warning(
                     f"No data for stream {stream} at fstep {fstep} in region {region}. Skipping."

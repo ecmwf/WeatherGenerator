@@ -438,7 +438,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                 # faster processing
                 if self.is_regular(stream):
-                    # Efficient concatenation for regular grid                   
+                    # Efficient concatenation for regular grid      
                     da_preds_fs = _split_by_valid_time(da_preds_fs)
                     da_tars_fs  = _split_by_valid_time(da_tars_fs)
 
@@ -456,6 +456,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             da_tars_dict, da_preds_dict = {}, {}
             i = 1 
             for _, (fstep, da_t, da_p) in enumerate(zip(fsteps_final, da_tars, da_preds,  strict=True)):
+    
                 if type(fstep) == list and len(fstep) > 1:  # regular grid with lead times
                     for t, p in zip(da_t, da_p, strict=True):
                         t, p = _select_channels(t,p,  stream, channels, stream_cfg)
@@ -675,89 +676,86 @@ def _split_by_valid_time(arrays: list[xr.DataArray]) -> list[xr.DataArray]:
     list[xr.DataArray]
         List of DataArrays, one per unique lead_time, with samples stacked along 'sample' dimension
     """
-    # Collect all lead_times and build mapping
-    lead_time_map = {}  # lead_time -> list of (array_idx, valid_time_mask)
+    # Pre-compute all lead times and build index in single pass
+    lead_time_groups = {}  # lead_time -> list of (arr_idx, ipoint_indices)
     
-    for arr_idx, da in enumerate(arrays):
+    unique_valid_times = [ np.unique(da.valid_time.values) for da in arrays ]
+    if len(unique_valid_times) == len(arrays) and all(len(uvt) == 1 for uvt in unique_valid_times):
+        _logger.debug("All arrays have a single unique valid_time. Skipping splitting by valid_time.")
+        return arrays
+        
+    for arr_idx, da in tqdm(enumerate(arrays), total=len(arrays), desc="Splitting by valid time"):
         vt = da.valid_time.values
         sis = da.source_interval_start.values
         
-        # Calculate lead_time for each valid_time
+        # Calculate lead_time once
         if vt.ndim > 1:
-            sis_expanded = sis[:, np.newaxis] if sis.ndim == 1 else sis
-            lead_times = vt - sis_expanded
+            lead_times = vt - (sis[:, np.newaxis] if sis.ndim == 1 else sis)
+            # Flatten and get unique lead times with their ipoint indices
+            valid_mask = ~np.isnat(lead_times)
+            for i in range(lead_times.shape[0]):
+                row_leads = lead_times[i][valid_mask[i]]
+                row_ipoints = np.where(valid_mask[i])[0]
+                for lead, ipoint in zip(row_leads, row_ipoints):
+                    lead_time_groups.setdefault(lead, []).append((arr_idx, i, ipoint))
         else:
             lead_times = vt - sis
-        
-        # Group by unique lead_times (excluding NaT)
-        unique_leads = np.unique(lead_times[~np.isnat(lead_times)])
-        for lead in unique_leads:
-            if lead not in lead_time_map:
-                lead_time_map[lead] = []
-            lead_time_map[lead].append((arr_idx, lead))
+            valid_mask = ~np.isnat(lead_times)
+            valid_leads = lead_times[valid_mask]
+            valid_ipoints = np.where(valid_mask)[0]
+            for lead, ipoint in zip(valid_leads, valid_ipoints):
+                lead_time_groups.setdefault(lead, []).append((arr_idx, 0, ipoint))
     
-    # Sort lead_times and create output arrays
-    sorted_leads = sorted(lead_time_map.keys())
+    # Get reference grid from first array for alignment
+    ref_lat = arrays[0].lat.values
+    ref_lon = arrays[0].lon.values
+    ref_sort_idx = np.lexsort((ref_lon, ref_lat))
+    ref_lat_sorted = ref_lat[ref_sort_idx]
+    ref_lon_sorted = ref_lon[ref_sort_idx]
+    
+    # Process each lead time
+    sorted_leads = sorted(lead_time_groups.keys())
     out = []
     
     for forecast_step, lead in enumerate(sorted_leads, start=1):
-        per_sample = []
+        # Group by array index to minimize selections
+        array_groups = {}
+        for arr_idx, sample_idx, ipoint in lead_time_groups[lead]:
+            array_groups.setdefault(arr_idx, {}).setdefault(sample_idx, []).append(ipoint)
         
-        for arr_idx, _ in lead_time_map[lead]:
+        per_sample = []
+        for arr_idx, sample_dict in array_groups.items():
             da = arrays[arr_idx]
-            vt = da.valid_time.values
-            sis = da.source_interval_start.values
             
-            # Calculate lead_time
-            if vt.ndim > 1:
-                sis_expanded = sis[:, np.newaxis] if sis.ndim == 1 else sis
-                lead_times = vt - sis_expanded
-            else:
-                lead_times = vt - sis
-            
-            # Create mask for this specific lead_time
-            mask = lead_times == lead
-            
-            # Select ipoints matching this lead_time
-            if mask.ndim == 2:
-                # For 2D case (sample, ipoint), select along ipoint dimension
-                ipoint_mask = mask.any(axis=0)
-            else:
-                ipoint_mask = mask
-            
-            da_subset = da.isel(ipoint=ipoint_mask)
-            
-            # Ensure sample dimension exists
-            if "sample" not in da_subset.dims:
-                da_subset = da_subset.expand_dims(sample=[da.sample.values.item()])
-            
-            per_sample.append(da_subset)
-    
-        # Concatenate all samples for this lead_time
-        if per_sample:
-            # Remap ipoints to match first sample's lat/lon
-            ref_lat = per_sample[0].lat.values
-            ref_lon = per_sample[0].lon.values
-            ref_idx = np.lexsort((ref_lon, ref_lat))
-            
-            aligned_samples = []
-            for da in per_sample:
-                idx = np.lexsort((da.lon.values, da.lat.values))
-                da = da.isel(ipoint=idx).assign_coords(
-                    ipoint=np.arange(da.sizes['ipoint']),
-                    lat=("ipoint", ref_lat[ref_idx]),
-                    lon=("ipoint", ref_lon[ref_idx])
+            for sample_idx, ipoint_list in sample_dict.items():
+                # Single selection operation
+                ipoint_arr = np.array(ipoint_list)
+                da_subset = da.isel(ipoint=ipoint_arr)
+                
+                # Align to reference grid
+                sort_idx = np.lexsort((da_subset.lon.values, da_subset.lat.values))
+                da_subset = da_subset.isel(ipoint=sort_idx).assign_coords(
+                    ipoint=np.arange(len(ipoint_arr)),
+                    lat=("ipoint", ref_lat_sorted[:len(ipoint_arr)]),
+                    lon=("ipoint", ref_lon_sorted[:len(ipoint_arr)])
                 )
-                aligned_samples.append(da)
-            per_sample = aligned_samples
+                
+                # Ensure sample dimension
+                if "sample" not in da_subset.dims:
+                    sample_val = da.sample.values.item() if da.sample.ndim == 0 else sample_idx
+                    da_subset = da_subset.expand_dims(sample=[sample_val])
+                
+                per_sample.append(da_subset)
+        
+        if per_sample:
+            # Single concat operation
             combined = xr.concat(per_sample, dim="sample")
-            # Reset ipoint to be contiguous 0-based index
-            n_ipoints = combined.sizes['ipoint']
-            combined = combined.assign_coords(ipoint=np.arange(n_ipoints))
-            # Add forecast_step coordinate
-            combined = combined.assign_coords(forecast_step=forecast_step)
+            combined = combined.assign_coords(
+                ipoint=np.arange(combined.sizes['ipoint']),
+                forecast_step=forecast_step
+            )
             out.append(combined)
- 
+    
     return out
 
 def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
@@ -819,8 +817,8 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     """
 
     # Pick first sample as reference
-    ref_lat = ref[0][0].lat
-    ref_lon = ref[0][0].lon
+    ref_lat = ref[0].lat
+    ref_lon = ref[0].lon
 
     sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
     npoints = sort_idx.size
