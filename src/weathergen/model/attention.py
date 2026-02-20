@@ -561,7 +561,6 @@ class MultiSelfAttentionHead(torch.nn.Module):
                 latent_space_dim=dim_embed, noise_emb_dim=512, dtype=self.dtype
             )
 
-
     def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x

@@ -180,7 +180,7 @@ def init_model_and_shard(
 
     return model, model_params
 
-    
+
 def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:

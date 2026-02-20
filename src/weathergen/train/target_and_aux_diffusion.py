@@ -28,16 +28,16 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
             batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
         )  # TODO: adjust for multiple streams
 
-        #TODO: check if there are scenarios where the encoder needs to be set to eval
+        # TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():
             tokens, posteriors = self.encoder(model_params=model_params, batch=batch)
-        #NOTE: must not set to train afterwards unless it was already in train
+        # NOTE: must not set to train afterwards unless it was already in train
 
         output_idxs = batch.get_output_idxs()
         assert len(output_idxs) > 0
 
         target_aux_output = TargetAuxOutput(batch.get_output_len(), output_idxs)
-        
+
         # TODO: currently hard-coding 0
         target_aux_output.add_latent_target(0, "diffusion_latent", tokens)
 
