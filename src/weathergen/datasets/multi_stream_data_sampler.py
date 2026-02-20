@@ -7,11 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import logging
 import pathlib
 
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
@@ -243,11 +245,54 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level, stage))
 
+        self._effective_masking_cfgs = self._build_effective_masking_cfgs()
+
         self.mini_epoch = 0
 
         self.rng = None
         self.perms = None
         self.perms_num_forecast_steps = None
+
+    def _build_effective_masking_cfgs(self) -> dict[StreamName, Config]:
+        """Pre-compute per-stream effective masking configs.
+
+        For streams without a ``masking_override`` key the global ``mode_cfg``
+        is reused as-is.  When a stream provides ``masking_override``, we
+        deep-copy ``model_input`` and ``target_input`` from ``mode_cfg`` and
+        merge the overrides into each strategy entry's ``masking_strategy``
+        and ``masking_strategy_config``.
+
+        Only ``masking_strategy`` and ``masking_strategy_config`` are
+        overridable — structural keys (``num_samples``, ``num_steps_input``)
+        stay consistent across streams for batch assembly.
+        """
+        cfgs: dict[StreamName, Config] = {}
+        for stream_info in self.streams:
+            name = stream_info["name"]
+            override = stream_info.get("masking_override", None)
+            if override is None:
+                cfgs[name] = self.mode_cfg
+            else:
+                effective = copy.deepcopy(self.mode_cfg)
+                for section_key in ("model_input", "target_input"):
+                    section_override = override.get(section_key, None)
+                    if section_override is None:
+                        continue
+                    section = effective.get(section_key, None)
+                    if section is None:
+                        continue
+                    for _strategy_name, strategy_cfg in section.items():
+                        if "masking_strategy" in section_override:
+                            strategy_cfg["masking_strategy"] = section_override["masking_strategy"]
+                        if "masking_strategy_config" in section_override:
+                            strategy_cfg["masking_strategy_config"] = OmegaConf.merge(
+                                strategy_cfg.get("masking_strategy_config", OmegaConf.create({})),
+                                section_override["masking_strategy_config"],
+                            )
+                cfgs[name] = effective
+                if is_root():
+                    logger.info(f"Stream '{name}' using masking override: {override}")
+        return cfgs
 
     def advance(self):
         """
@@ -387,7 +432,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 rdata = input_data[-(step + 1)]
                 token_data = input_tokens[-(step + 1)]
 
-                # skip time steps with empty data; 
+                # skip time steps with empty data;
                 # this can happen when the dataset has a start date that is after base_idx - num_steps_input
                 if token_data is None:
                     continue
@@ -542,7 +587,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
 
-            if rdata.is_empty(): # and self._stage == TRAIN:
+            if rdata.is_empty():  # and self._stage == TRAIN:
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
@@ -564,7 +609,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
-            if rdata.is_empty(): # and self._stage == TRAIN:
+            if rdata.is_empty():  # and self._stage == TRAIN:
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(timestep_idx)
@@ -582,21 +627,26 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     def _get_source_target_masks(self, training_mode):
         """
-        Generate source and target masks for all streams
+        Generate source and target masks for all streams.
+
+        Each stream uses its own effective masking config (which may include
+        per-stream ``masking_override`` merged on top of the global config).
         """
 
         masks = {}
         for stream_info in self.streams:
+            stream_name = stream_info["name"]
+            stage_cfg = self._effective_masking_cfgs[stream_name]
             # Build source and target sample masks
-            masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
+            masks[stream_name] = self.tokenizer.build_samples_for_stream(
                 training_mode,
                 self.num_healpix_cells,
-                self.mode_cfg,
+                stage_cfg,
                 stream_info,
             )
             # identical for all streams
-            num_target_samples = len(masks[stream_info["name"]][0])
-            num_source_samples = len(masks[stream_info["name"]][1])
+            num_target_samples = len(masks[stream_name][0])
+            num_source_samples = len(masks[stream_name][1])
 
         return masks, num_source_samples, num_target_samples
 
