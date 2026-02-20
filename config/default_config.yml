@@ -170,7 +170,7 @@ training_config:
   window_offset_prediction : 0
   
   learning_rate_scheduling :
-    lr_start: 1e-6
+    lr_start: 1e-7
     lr_max: 1e-5
     lr_final_decay: 1e-6
     lr_final: 0.0
@@ -203,18 +203,18 @@ training_config:
       weight_decay: 0.05
 
   losses : {
-    # "physical": {
-    #     enabled: False,
-    #     type: LossPhysical,
-    #     weight: 0.1,
-    #     loss_fcts: {
-    #       "mse": {
-    #         weight: 1.0,
-    #         target_source_correspondence: { 0 : { 0 : "subset"} },
-    #       },
-    #     },
-    #     target_and_aux_calc: "Physical",
-    # },
+    "physical": {
+        enabled: True,
+        type: LossPhysical,
+        weight: 0.01,
+        loss_fcts: {
+          "mse": {
+            weight: 1.0,
+            target_source_correspondence: { 0 : { 0 : "subset"} },
+          },
+        },
+        target_and_aux_calc: "Physical",
+    },
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
@@ -233,7 +233,7 @@ training_config:
         # },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 1e-0,
+            ema_halflife_in_thousands: 3e-1,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
