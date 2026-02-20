@@ -24,13 +24,16 @@ import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
+from weathergen.model.engines import LatentState
 from weathergen.model.model_interface import (
     get_target_aux_calculator,
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
+from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
@@ -81,6 +84,7 @@ class Trainer(TrainerBase):
         self.batch_size_per_gpu = -1
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
+        self.collapse_monitor: CollapseMonitor | None = None
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -151,6 +155,10 @@ class Trainer(TrainerBase):
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
+
+        # Initialize collapse monitor for SSL training
+        collapse_config = self.training_cfg.get("collapse_monitoring", {})
+        self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -232,6 +240,9 @@ class Trainer(TrainerBase):
 
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
+
+        # Update collapse monitor device
+        self.collapse_monitor.device = self.device
 
         # create data loaders
         self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
@@ -507,9 +518,16 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
+            # Compute collapse monitoring metrics
+            if self.collapse_monitor.should_compute(self.cf.general.istep):
+                self._compute_collapse_metrics(preds, targets_and_auxs)
+
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
+                # Log collapse metrics
+                if self.collapse_monitor.should_log(self.cf.general.istep):
+                    self._log_collapse_metrics(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
@@ -781,3 +799,155 @@ class Trainer(TrainerBase):
                 logger.info("\n")
 
             self.t_start = time.time()
+
+    def _compute_collapse_metrics(self, preds, targets_and_auxs) -> None:
+        """
+        Extract latent tensors from predictions and targets, then compute collapse metrics.
+
+        This method extracts the student and teacher latent representations from the
+        model outputs. It supports two modes:
+
+        1. SSL training (JEPA/DINO/iBOT): Extracts latents from SSL-specific keys
+        2. Forecasting: Extracts latents from 'latent_state' at each forecast step
+
+        For forecasting, a list of latent tensors is passed to enable per-step metrics.
+        """
+        student_latent: torch.Tensor | list[torch.Tensor] | None = None
+        teacher_latent: torch.Tensor | list[torch.Tensor] | None = None
+        prototype_probs = None
+        ema_beta = None
+        loss_type = None
+
+        # Helper to extract tensor from various latent formats
+        def extract_latent_tensor(
+            latent_data: torch.Tensor | LatentState | list | dict | None,
+        ) -> torch.Tensor | None:
+            """Extract tensor from various latent data formats."""
+            if latent_data is None:
+                return None
+            if isinstance(latent_data, torch.Tensor):
+                return latent_data
+            if isinstance(latent_data, LatentState):
+                # Use patch_tokens as the primary latent representation
+                # For forecast steps > 0, patch_tokens is None, so fall back to z_pre_norm
+                if latent_data.patch_tokens is not None:
+                    return latent_data.patch_tokens
+                if latent_data.z_pre_norm is not None:
+                    # z_pre_norm includes register/class tokens, extract patch tokens only
+                    # This assumes the same token layout as patch_tokens
+                    return latent_data.z_pre_norm
+                return None
+            if isinstance(latent_data, list) and len(latent_data) > 0:
+                return extract_latent_tensor(latent_data[0])
+            if isinstance(latent_data, dict):
+                # Try common keys
+                for key in ["latent", "patch_tokens", "z_pre_norm"]:
+                    if key in latent_data:
+                        return extract_latent_tensor(latent_data[key])
+            return None
+
+        # Find SSL loss type and extract teacher latents
+        for _loss_name, target_aux in targets_and_auxs.items():
+            if not hasattr(target_aux, "latent") or not target_aux.latent:
+                continue
+
+            # Handle both list[dict] and dict formats
+            if isinstance(target_aux.latent, list):
+                target_latent_dict = target_aux.latent[0] if target_aux.latent else {}
+            else:
+                target_latent_dict = target_aux.latent
+
+            # Try SSL-specific keys first
+            for ssl_type in ["JEPA", "DINO", "iBOT"]:
+                if ssl_type in target_latent_dict:
+                    loss_type = ssl_type
+                    teacher_latent = extract_latent_tensor(target_latent_dict[ssl_type])
+                    break
+
+        # Extract student latents from predictions
+        if preds.latent and len(preds.latent) > 0:
+            # First, try SSL-specific keys (JEPA/DINO/iBOT) from first step
+            pred_latent_dict = preds.latent[0]
+            for ssl_type in ["JEPA", "DINO", "iBOT"]:
+                if ssl_type in pred_latent_dict:
+                    student_latent = extract_latent_tensor(pred_latent_dict[ssl_type])
+                    loss_type = ssl_type
+                    break
+
+            # If no SSL keys found, extract from latent_state for all forecast steps
+            if student_latent is None:
+                student_latents_list: list[torch.Tensor] = []
+                for step_latent_dict in preds.latent:
+                    if "latent_state" in step_latent_dict:
+                        step_tensor = extract_latent_tensor(step_latent_dict["latent_state"])
+                        if step_tensor is not None:
+                            student_latents_list.append(step_tensor)
+
+                # Use list if multiple steps, single tensor otherwise
+                if len(student_latents_list) > 1:
+                    student_latent = student_latents_list
+                    n_steps = len(student_latents_list)
+                    logger.debug(f"Collapse monitor - forecasting mode: {n_steps} steps")
+                elif len(student_latents_list) == 1:
+                    student_latent = student_latents_list[0]
+
+        # Get EMA beta from target_and_aux_calculators
+        for _calc_name, calculator in self.target_and_aux_calculators.items():
+            if isinstance(calculator, EMATeacher):
+                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+                step = batch_size_total * self.cf.general.istep
+                ema_beta = calculator.get_current_beta(step)
+                break
+
+        # Debug logging
+        if student_latent is not None:
+            if isinstance(student_latent, list):
+                shapes = [t.shape for t in student_latent]
+                logger.debug(f"Collapse monitor - student (list): {len(shapes)} steps")
+            else:
+                logger.debug(f"Collapse monitor - student: shape={student_latent.shape}")
+        else:
+            logger.debug("Collapse monitor - student_latent is None")
+
+        if teacher_latent is not None:
+            if isinstance(teacher_latent, list):
+                logger.debug(f"Collapse monitor - teacher (list): {len(teacher_latent)} steps")
+            else:
+                shape = teacher_latent.shape if isinstance(teacher_latent, torch.Tensor) else "N/A"
+                logger.debug(f"Collapse monitor - teacher: shape={shape}")
+
+        # Compute metrics if we have valid student latent
+        has_valid_latent = student_latent is not None and (
+            isinstance(student_latent, torch.Tensor)
+            or (isinstance(student_latent, list) and len(student_latent) > 0)
+        )
+
+        if has_valid_latent:
+            # Prepare teacher latent (must match student format if provided)
+            teacher_for_metrics = None
+            if teacher_latent is not None:
+                is_valid_tensor = isinstance(teacher_latent, torch.Tensor)
+                is_valid_list = isinstance(teacher_latent, list) and len(teacher_latent) > 0
+                if is_valid_tensor or is_valid_list:
+                    teacher_for_metrics = teacher_latent
+
+            self.collapse_monitor.compute_metrics(
+                student_latent=student_latent,
+                teacher_latent=teacher_for_metrics,
+                prototype_probs=prototype_probs,
+                ema_beta=ema_beta,
+                loss_type=loss_type,
+            )
+        else:
+            logger.debug(
+                f"Collapse monitor - skipping compute_metrics: "
+                f"student_latent is {'None' if student_latent is None else type(student_latent)}"
+            )
+
+    def _log_collapse_metrics(self, stage: Stage) -> None:
+        """
+        Log cached collapse monitoring metrics.
+        """
+        metrics = self.collapse_monitor.get_cached_metrics()
+        if metrics and is_root():
+            self.train_logger.log_metrics(stage, metrics)
