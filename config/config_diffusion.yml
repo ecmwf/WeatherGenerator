@@ -55,7 +55,7 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 16
+fe_num_blocks: 1
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -223,7 +223,7 @@ training_config:
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 16
+  samples_per_mini_epoch: 15
   shuffle: False
 
   start_date: 2012-06-01T00:00

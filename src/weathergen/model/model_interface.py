@@ -203,19 +203,13 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         meta_sharded_sd = model.state_dict()
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
-            # Skip loading forecast engine weights from checkpoint
-            if param_name.startswith("forecast_engine."):
-                logger.info(f"Skipping loading of forecast engine parameter: {param_name}. It will be initialized from scratch.")
-                continue
             sharded_meta_param = meta_sharded_sd.get(param_name)
-            if sharded_meta_param is None:
-                logger.warning(f"Parameter '{param_name}' not found in model state_dict. Available keys: {list(meta_sharded_sd.keys())}")
-                raise RuntimeError(f"sharded_meta_param is None for '{param_name}'. Checkpoint/model mismatch or missing weights. If you intend to skip loading this parameter, add logic to skip it.")
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 sharded_meta_param.device_mesh,
                 sharded_meta_param.placements,
             )
+            # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
             maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)

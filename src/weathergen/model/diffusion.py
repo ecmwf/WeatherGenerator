@@ -93,13 +93,9 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
-        # TODO: add correct eta from meta_info
         eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
-        # eta = torch.randn(1).to(device=tokens.device)
-        # eta = torch.tensor([metadata.noise_level_rn]).to(device=tokens.device)
 
-        # Compute sigma (noise level) from eta
-        # noise = torch.randn(y.shape, device=y.device)  # now eta from MultiStreamDataSampler
+        # Compute sigma (noise level) from eta and create noise tensor
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
 
