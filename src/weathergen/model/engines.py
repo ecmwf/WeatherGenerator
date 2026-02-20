@@ -273,6 +273,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             else:
@@ -308,7 +309,7 @@ class QueryAggregationEngine(torch.nn.Module):
         for block in self.ae_aggregation_blocks:
             aux_info = None
             if isinstance(block, MultiSelfAttentionHeadVarlen):
-                tokens = block(tokens, x_lens=batch_lens)
+                tokens = block(tokens, x_lens=batch_lens, coords=coords)
             else:
                 tokens = block(tokens, coords, aux_info)
         return tokens

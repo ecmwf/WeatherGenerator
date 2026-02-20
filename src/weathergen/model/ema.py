@@ -54,9 +54,7 @@ class EMAModel:
         ema_keys = set(self.ema_model.state_dict().keys())
         needs_strip = not any(k in ema_keys for k in maybe_sharded_sd)
         if needs_strip:
-            maybe_sharded_sd = {
-                k.removeprefix("module."): v for k, v in maybe_sharded_sd.items()
-            }
+            maybe_sharded_sd = {k.removeprefix("module."): v for k, v in maybe_sharded_sd.items()}
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
         self.ema_model.eval()
 
