@@ -601,7 +601,6 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                # print(batch.samples[0].meta_info)
                 tokens = self.forecast_engine(tokens, step, batch.samples[0].meta_info)
 
             # decoder predictions

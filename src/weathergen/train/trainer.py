@@ -266,8 +266,6 @@ class Trainer(TrainerBase):
         else:
             self.validate_with_ema = False
         self.ema_model = None
-        # validate_with_ema is incompatible with student-teacher
-        self.validate_with_ema = False  # TODO remove for testing only
         if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
                 cf,

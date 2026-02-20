@@ -454,12 +454,30 @@ class ForecastingEngine(torch.nn.Module):
                     self.fe_blocks.append(
                         torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
                     )
+        
+        # def init_weights_final(m):
+        #     if isinstance(m, torch.nn.Linear):
+        #         torch.nn.init.normal_(m.weight, mean=0, std=0.001)
+        #         if m.bias is not None:
+        #             torch.nn.init.normal_(m.bias, mean=0, std=0.001)
 
+        # self.fe_blocks.append(
+        #     MLP(
+        #         self.cf.ae_global_dim_embed,
+        #         self.cf.ae_global_dim_embed,
+        #         with_residual=True,
+        #         dropout_rate=self.cf.fe_dropout_rate,
+        #         norm_type=self.cf.norm_type,
+        #         dim_aux=dim_aux,
+        #         norm_eps=self.cf.mlp_norm_eps,
+        #         with_noise_conditioning=self.cf.fe_diffusion_model,
+        #     )
+        # )
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
-                torch.nn.init.normal_(m.weight, mean=0, std=0.001)
+                torch.nn.init.normal_(m.weight, mean=0, std=0.1)
                 if m.bias is not None:
-                    torch.nn.init.normal_(m.bias, mean=0, std=0.001)
+                    torch.nn.init.normal_(m.bias, mean=0, std=0.1)
 
         for block in self.fe_blocks:
             block.apply(init_weights_final)
@@ -479,8 +497,8 @@ class ForecastingEngine(torch.nn.Module):
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
-
-                # predict residual to last time step if requested
+            
+        # predict residual to last time step if requested
         forecast_residual = self.cf.get("forecast_residual", False)
         if forecast_residual:
             tokens_in = tokens
