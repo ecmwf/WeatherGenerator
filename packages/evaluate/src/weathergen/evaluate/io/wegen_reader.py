@@ -529,7 +529,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         vt = da["valid_time"]
         sis = da["source_interval_start"]
 
-        vt_reduced = vt.min(dim=[d for d in vt.dims if d != sample_dim])
+        vt_reduced = vt.min(dim=[d for d in vt.dims])
 
         lead_time = vt_reduced - sis
 
