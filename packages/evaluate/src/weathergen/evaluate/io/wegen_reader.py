@@ -68,7 +68,7 @@ class WeatherGenReader(Reader):
         self.metrics_dir = Path(
             self.eval_cfg.get("metrics_dir", self.metrics_base_dir / "evaluation")
         )
-    
+
     def get_inference_config(self):
         """
         load the config associated to the inference run (different from the eval_cfg which
@@ -410,7 +410,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                     else:
                         _logger.debug(f"Selecting ensemble members {ensemble}.")
                         pred = pred.sel(ens=ensemble)
-                    
+
                     pred = pred.squeeze()
                     target = target.squeeze()
 
@@ -422,7 +422,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                     da_tars_fs.append(target.persist())
                     da_preds_fs.append(pred.persist())
-                    
+
                 if not da_tars_fs:
                     _logger.info(
                         f"[{self.run_id} - {stream}] No valid data found for fstep {fstep}."
@@ -438,31 +438,34 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                 # faster processing
                 if self.is_regular(stream):
-                    # Efficient concatenation for regular grid      
+                    # Efficient concatenation for regular grid
                     da_preds_fs = _split_by_valid_time(da_preds_fs)
-                    da_tars_fs  = _split_by_valid_time(da_tars_fs)
+                    da_tars_fs = _split_by_valid_time(da_tars_fs)
 
-                    da_tars_fs  = _force_consistent_grids(da_tars_fs)
+                    da_tars_fs = _force_consistent_grids(da_tars_fs)
                     da_preds_fs = _force_consistent_grids(da_preds_fs)
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
-                    da_tars_fs  = [xr.concat(da_tars_fs, dim="ipoint")]
+                    da_tars_fs = [xr.concat(da_tars_fs, dim="ipoint")]
                     da_preds_fs = [xr.concat(da_preds_fs, dim="ipoint")]
-           
+
                 da_tars.append([da for da in da_tars_fs])
                 da_preds.append([da for da in da_preds_fs])
-            
+
             # Safer than a list
             da_tars_dict, da_preds_dict = {}, {}
-            i = 1 
-            for _, (fstep, da_t, da_p) in enumerate(zip(fsteps_final, da_tars, da_preds,  strict=True)):
-    
-                if type(fstep) == list and len(fstep) > 1:  # regular grid with lead times
+            i = 1
+            for _, (fstep, da_t, da_p) in enumerate(
+                zip(fsteps_final, da_tars, da_preds, strict=True)
+            ):
+                if isinstance(fstep, list) and len(fstep) > 1:  # regular grid with lead times
                     for t, p in zip(da_t, da_p, strict=True):
-                        t, p = _select_channels(t,p,  stream, channels, stream_cfg)
+                        t, p = _select_channels(t, p, stream, channels, stream_cfg)
                         t = t.assign_coords(forecast_step=i)
                         p = p.assign_coords(forecast_step=i)
-                        t = _add_lead_time_coord(t) #TODO: move somewhere else into another loop maybe. but 2 loops is slow? 
+                        t = _add_lead_time_coord(
+                            t
+                        )  # TODO: move somewhere else into another loop maybe. but 2 loops is slow?
                         p = _add_lead_time_coord(p)
                         p = _scale_z_channels(p, stream)
                         t = _scale_z_channels(t, stream)
@@ -473,10 +476,8 @@ class WeatherGenZarrReader(WeatherGenReader):
                     da_t, da_p = _select_channels(da_t, da_p, stream, channels, stream_cfg)
                     da_tars_dict[int(fstep)] = da_t
                     da_preds_dict[int(fstep)] = da_p
-            
-            return ReaderOutput(
-                target= da_tars_dict, prediction=da_preds_dict
-            )
+
+            return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
 
     ######## reader utils ########
 
@@ -514,16 +515,14 @@ class WeatherGenZarrReader(WeatherGenReader):
     def get_forecast_substep_valid_times(self, stream: str) -> set[str]:
         """Get the set of forecast times from the Zarr file."""
         if not self.is_regular(stream):
-            _logger.warning(
-                f"Stream {stream} is not regular. Forecast times cannot be retrieved."
-            )
+            _logger.warning(f"Stream {stream} is not regular. Forecast times cannot be retrieved.")
             return set()
-        
+
         with zarrio_reader(self.fname_zarr) as zio:
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
             unique_lead = np.unique(dummy.valid_time.data)
-        return set(str(lt) for lt in unique_lead)   
-        
+        return set(str(lt) for lt in unique_lead)
+
     def get_ensemble(self, stream: str | None = None) -> list[str]:
         """Get the list of ensemble member names for a given stream from the config.
         Parameters
@@ -585,52 +584,52 @@ class WeatherGenZarrReader(WeatherGenReader):
 
 ################### Helper functions ########################
 
-def _select_channels(da_tar: xr.DataArray, da_pred: xr.DataArray, stream,  
-                        channels, stream_cfg) -> tuple[xr.DataArray, xr.DataArray]:
-        """
-        Preprocess the data by scaling z channels if needed and adding lead_time coordinate.
 
-        Parameters
-        ----------
-        da_tar :
-            Input DataArray to preprocess.
-        da_pred :
-            Input DataArray to preprocess.
-        stream:
-            Stream name, used to determine if z channels need to be scaled.
-        channels:
-            List of channels to select.
-        stream_cfg:
-            Stream configuration dictionary, used to determine if derived channels need to be computed.
-        Returns
-        -------
-            Data arrays with selected channels and added derived channels if applicable.
-        """
-        assert da_pred.channel.values.tolist() == da_tar.channel.values.tolist(), "Channels in prediction and target do not match."
+def _select_channels(
+    da_tar: xr.DataArray, da_pred: xr.DataArray, stream, channels, stream_cfg
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """
+    Preprocess the data by scaling z channels if needed and adding lead_time coordinate.
 
-        all_channels = da_tar.channel.values
+    Parameters
+    ----------
+    da_tar :
+        Input DataArray to preprocess.
+    da_pred :
+        Input DataArray to preprocess.
+    stream:
+        Stream name, used to determine if z channels need to be scaled.
+    channels:
+        List of channels to select.
+    stream_cfg:
+        Stream configuration dictionary, used to determine if derived channels need to be computed.
+    Returns
+    -------
+        Data arrays with selected channels and added derived channels if applicable.
+    """
+    assert da_pred.channel.values.tolist() == da_tar.channel.values.tolist(), (
+        "Channels in prediction and target do not match."
+    )
 
-        if set(channels) != set(all_channels):
+    all_channels = da_tar.channel.values
 
-            _logger.debug(
-                f"Restricting targets and predictions to channels {channels} "
-                f"for stream {stream}..."
-            )
+    if set(channels) != set(all_channels):
+        _logger.debug(
+            f"Restricting targets and predictions to channels {channels} for stream {stream}..."
+        )
 
-            dc = DeriveChannels(
-                all_channels,
-                channels,
-                stream_cfg,
-            )
+        dc = DeriveChannels(
+            all_channels,
+            channels,
+            stream_cfg,
+        )
 
-            da_tar, da_pred, channels = dc.get_derived_channels(
-                da_tar, da_pred
-            )
+        da_tar, da_pred, channels = dc.get_derived_channels(da_tar, da_pred)
 
-            da_tar = da_tar.sel(channel=channels)
-            da_pred = da_pred.sel(channel=channels)
+        da_tar = da_tar.sel(channel=channels)
+        da_pred = da_pred.sel(channel=channels)
 
-        return da_pred, da_tar
+    return da_pred, da_tar
 
 
 def _scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:
@@ -662,32 +661,36 @@ def _scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:
 
 def _split_by_valid_time(arrays: list[xr.DataArray]) -> list[xr.DataArray]:
     """
-    Split arrays by valid_time and stack by sample, creating separate arrays for each unique lead_time.
-    
+    Split arrays by valid_time and stack by sample, creating separate
+    arrays for each unique lead_time.
+
     Lead_time is calculated as: valid_time - source_interval_start
-    
+
     Parameters
     ----------
     arrays : list[xr.DataArray]
         List of DataArrays, each containing multiple valid_times per sample
-        
+
     Returns
     -------
     list[xr.DataArray]
-        List of DataArrays, one per unique lead_time, with samples stacked along 'sample' dimension
+        List of DataArrays, one per unique lead_time, with samples
+        stacked along 'sample' dimension
     """
     # Pre-compute all lead times and build index in single pass
     lead_time_groups = {}  # lead_time -> list of (arr_idx, ipoint_indices)
-    
-    unique_valid_times = [ np.unique(da.valid_time.values) for da in arrays ]
+
+    unique_valid_times = [np.unique(da.valid_time.values) for da in arrays]
     if len(unique_valid_times) == len(arrays) and all(len(uvt) == 1 for uvt in unique_valid_times):
-        _logger.debug("All arrays have a single unique valid_time. Skipping splitting by valid_time.")
+        _logger.debug(
+            "All arrays have a single unique valid_time. Skipping splitting by valid_time."
+        )
         return arrays
-        
+
     for arr_idx, da in tqdm(enumerate(arrays), total=len(arrays), desc="Splitting by valid time"):
         vt = da.valid_time.values
         sis = da.source_interval_start.values
-        
+
         # Calculate lead_time once
         if vt.ndim > 1:
             lead_times = vt - (sis[:, np.newaxis] if sis.ndim == 1 else sis)
@@ -696,67 +699,67 @@ def _split_by_valid_time(arrays: list[xr.DataArray]) -> list[xr.DataArray]:
             for i in range(lead_times.shape[0]):
                 row_leads = lead_times[i][valid_mask[i]]
                 row_ipoints = np.where(valid_mask[i])[0]
-                for lead, ipoint in zip(row_leads, row_ipoints):
+                for lead, ipoint in zip(row_leads, row_ipoints, strict=False):
                     lead_time_groups.setdefault(lead, []).append((arr_idx, i, ipoint))
         else:
             lead_times = vt - sis
             valid_mask = ~np.isnat(lead_times)
             valid_leads = lead_times[valid_mask]
             valid_ipoints = np.where(valid_mask)[0]
-            for lead, ipoint in zip(valid_leads, valid_ipoints):
+            for lead, ipoint in zip(valid_leads, valid_ipoints, strict=False):
                 lead_time_groups.setdefault(lead, []).append((arr_idx, 0, ipoint))
-    
+
     # Get reference grid from first array for alignment
     ref_lat = arrays[0].lat.values
     ref_lon = arrays[0].lon.values
     ref_sort_idx = np.lexsort((ref_lon, ref_lat))
     ref_lat_sorted = ref_lat[ref_sort_idx]
     ref_lon_sorted = ref_lon[ref_sort_idx]
-    
+
     # Process each lead time
     sorted_leads = sorted(lead_time_groups.keys())
     out = []
-    
+
     for forecast_step, lead in enumerate(sorted_leads, start=1):
         # Group by array index to minimize selections
         array_groups = {}
         for arr_idx, sample_idx, ipoint in lead_time_groups[lead]:
             array_groups.setdefault(arr_idx, {}).setdefault(sample_idx, []).append(ipoint)
-        
+
         per_sample = []
         for arr_idx, sample_dict in array_groups.items():
             da = arrays[arr_idx]
-            
+
             for sample_idx, ipoint_list in sample_dict.items():
                 # Single selection operation
                 ipoint_arr = np.array(ipoint_list)
                 da_subset = da.isel(ipoint=ipoint_arr)
-                
+
                 # Align to reference grid
                 sort_idx = np.lexsort((da_subset.lon.values, da_subset.lat.values))
                 da_subset = da_subset.isel(ipoint=sort_idx).assign_coords(
                     ipoint=np.arange(len(ipoint_arr)),
-                    lat=("ipoint", ref_lat_sorted[:len(ipoint_arr)]),
-                    lon=("ipoint", ref_lon_sorted[:len(ipoint_arr)])
+                    lat=("ipoint", ref_lat_sorted[: len(ipoint_arr)]),
+                    lon=("ipoint", ref_lon_sorted[: len(ipoint_arr)]),
                 )
-                
+
                 # Ensure sample dimension
                 if "sample" not in da_subset.dims:
                     sample_val = da.sample.values.item() if da.sample.ndim == 0 else sample_idx
                     da_subset = da_subset.expand_dims(sample=[sample_val])
-                
+
                 per_sample.append(da_subset)
-        
+
         if per_sample:
             # Single concat operation
             combined = xr.concat(per_sample, dim="sample")
             combined = combined.assign_coords(
-                ipoint=np.arange(combined.sizes['ipoint']),
-                forecast_step=forecast_step
+                ipoint=np.arange(combined.sizes["ipoint"]), forecast_step=forecast_step
             )
             out.append(combined)
-    
+
     return out
+
 
 def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     """
@@ -775,8 +778,10 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     Returns
     -------
         Returns a DataArray with the lead_time coordinate added.
-    
-    NB. Need to be used AFTER splitting by valid_time and stacking by sample, so that all valid_times within a sample are the same and we can assign a single lead_time per sample.
+
+    NB. Need to be used AFTER splitting by valid_time and stacking by sample,
+    so that all valid_times within a sample are the same and we can assign a
+    single lead_time per sample.
 
     """
     vt = da["valid_time"].values
@@ -786,10 +791,15 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
         sis_expanded = sis[:, np.newaxis] if sis.ndim == 1 else sis
         lead_time_values = vt - sis_expanded
         # Get unique lead_time per sample, verify consistency
-        lead_times = [np.unique(lead_time_values[i][~np.isnat(lead_time_values[i])]) 
-                      for i in range(lead_time_values.shape[0])]
+        lead_times = [
+            np.unique(lead_time_values[i][~np.isnat(lead_time_values[i])])
+            for i in range(lead_time_values.shape[0])
+        ]
         if any(len(lt) != 1 for lt in lead_times):
-            raise ValueError(f"Inconsistent lead_time values within samples for forecast_step {da.forecast_step.values}")
+            raise ValueError(
+                "Inconsistent lead_time values within samples for "
+                f"forecast_step {da.forecast_step.values}"
+            )
         lead_time_per_sample = np.array([lt[0] for lt in lead_times])
     else:
         lead_time_values = vt - sis
@@ -798,10 +808,14 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     # Verify all samples have same lead_time for this forecast_step
     unique_lead = np.unique(lead_time_per_sample)
     if len(unique_lead) != 1:
-        raise ValueError(f"Multiple lead_time values across samples for forecast_step {da.forecast_step.values}: {unique_lead}")
-    
+        raise ValueError(
+            "Multiple lead_time values across samples for "
+            f"forecast_step {da.forecast_step.values}: {unique_lead}"
+        )
+
     da = da.assign_coords(lead_time=unique_lead[0])
     return da
+
 
 def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     """
@@ -835,10 +849,11 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
 
         if "sample" not in a_sorted.dims:
             a_sorted = a_sorted.expand_dims(sample=[i])
-      
+
         aligned.append(a_sorted)
 
-    return aligned #xr.concat(aligned, dim="sample")
+    return aligned  # xr.concat(aligned, dim="sample")
+
 
 class WeatherGenMergeReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):

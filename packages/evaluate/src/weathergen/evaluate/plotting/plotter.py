@@ -607,7 +607,7 @@ class Plotter:
                         image_paths += names
 
                     if image_paths:
-                        image_paths=sorted(image_paths)
+                        image_paths = sorted(image_paths)
                         images = [Image.open(path) for path in image_paths]
                         images[0].save(
                             f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",
@@ -877,16 +877,17 @@ class LinePlots:
         parts = ["compare", tag]
         name = "_".join(filter(None, parts))
 
-        #TODO: generalise this for other x_dims by instroducing a "units" entry int he function if needed
-        xunits = "hr" if x_dim == "lead_time" else None 
+        # TODO: generalise this for other x_dims by instroducing a "units"
+        # entry in the function if needed
+        xunits = "hr" if x_dim == "lead_time" else None
         self._plot_base(fig, name, x_dim, y_dim, print_summary, xunits=xunits)
 
     def _plot_base(
         self,
         fig: plt.Figure,
         name: str,
-        x_dim: str, 
-        y_dim: str, 
+        x_dim: str,
+        y_dim: str,
         print_summary: bool = False,
         line: float | None = None,
         vlines: bool = False,
@@ -923,8 +924,12 @@ class LinePlots:
             None
         """
 
-        plt.xlabel("".join(c if c.isalnum() else " " for c in x_dim)  + (f" [{xunits}]" if xunits else ""))
-        plt.ylabel("".join(c if c.isalnum() else " " for c in y_dim)  + (f" [{yunits}]" if yunits else ""))
+        plt.xlabel(
+            "".join(c if c.isalnum() else " " for c in x_dim) + (f" [{xunits}]" if xunits else "")
+        )
+        plt.ylabel(
+            "".join(c if c.isalnum() else " " for c in y_dim) + (f" [{yunits}]" if yunits else "")
+        )
 
         plt.title(title if title is not None else " ".join(c if c.isalnum() else " " for c in name))
         plt.legend(frameon=False)

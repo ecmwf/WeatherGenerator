@@ -144,7 +144,11 @@ def calc_scores_per_stream(
                 lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
             )
 
-        for (fstep, tars), (_, preds) in tqdm(zip(da_tars.items(), da_preds.items(), strict=False), total=len(da_tars), desc=f"Computing scores for {reader.run_id} - stream {stream} and region {region}"):
+        for (fstep, tars), (_, preds) in tqdm(
+            zip(da_tars.items(), da_preds.items(), strict=False),
+            total=len(da_tars),
+            desc=f"Computing scores for {reader.run_id} - stream {stream} and region {region}",
+        ):
             if preds.sizes.get("ipoint") == 0:
                 _logger.warning(
                     f"No data for stream {stream} at fstep {fstep} in region {region}. Skipping."
@@ -152,7 +156,7 @@ def calc_scores_per_stream(
                 continue
 
             _logger.debug(f"Verifying data for stream {stream}...")
-    
+
             preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
 
             if region != "global":
@@ -186,7 +190,7 @@ def calc_scores_per_stream(
             ]
             if not valid_scores:
                 continue
-           
+
             combined_metrics = xr.concat(valid_scores, dim="metric")
             combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
             combined_metrics = combined_metrics.compute()
@@ -201,11 +205,11 @@ def calc_scores_per_stream(
             }
             if "ens" in combined_metrics.dims:
                 criteria["ens"] = combined_metrics.ens.values
-            
+
             metric_stream.loc[criteria] = combined_metrics
             if "lead_time" in combined_metrics.coords:
                 metric_stream.coords["lead_time"].loc[{"forecast_step": int(fstep)}] = (
-                    combined_metrics.coords["lead_time"].values.astype('timedelta64[h]').astype(int)
+                    combined_metrics.coords["lead_time"].values.astype("timedelta64[h]").astype(int)
                 )
 
             if is_regular and plot_score_maps:
@@ -215,7 +219,7 @@ def calc_scores_per_stream(
                 )
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-    
+
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
