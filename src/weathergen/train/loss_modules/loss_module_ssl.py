@@ -240,7 +240,7 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
     # expand/repeat teacher_masks to match number of student samples
     teacher_patches = teacher_patches_masked.expand((mask.shape[0], -1, -1))
     # compute loss
-    loss = F.l1_loss(student_patches_masked[mask], teacher_patches[mask])
+    loss = F.smooth_l1_loss(student_patches_masked[mask], teacher_patches[mask], beta=0.2)
     loss = loss * masks_weight[mask]
 
     return loss.sum()  # / student_masks.shape[0]

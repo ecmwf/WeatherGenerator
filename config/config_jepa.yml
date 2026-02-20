@@ -76,6 +76,7 @@ attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
+2d_rope: True
 
 latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
@@ -91,8 +92,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/multi_dataset_pretraining/"
 streams: ???
 
 general:
@@ -173,14 +173,14 @@ training_config:
   time_window_step: 06:00:00
   time_window_len: 06:00:00
 
-  window_offset_prediction : 0
+  window_offset_prediction : 1
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 1e-5
     lr_final_decay: 1e-6
     lr_final: 0.0
-    num_steps_warmup: 512
+    num_steps_warmup: 4096
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
@@ -205,13 +205,13 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+            "num_blocks": 4, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
         },
         },
         target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : null,
+          { ema_ramp_up_ratio : 0.05,
             ema_halflife_in_thousands: 1e-1,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
@@ -229,7 +229,7 @@ training_config:
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
-        rate : 0.6,
+        rate : 0.4,
         rate_sampling: False
       },
     },
@@ -239,7 +239,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+      masking_strategy_config : { rate : 0.85, hl_mask: 0, rate_sampling: False },
     },
   }
 
