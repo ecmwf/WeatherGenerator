@@ -304,12 +304,13 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, batch_lens, use_reentrant):
+    def forward(self, tokens, batch_lens, use_reentrant, coords=None):
         for block in self.ae_aggregation_blocks:
+            aux_info = None
             if isinstance(block, MultiSelfAttentionHeadVarlen):
                 tokens = block(tokens, x_lens=batch_lens)
             else:
-                tokens = block(tokens)
+                tokens = block(tokens, coords, aux_info)
         return tokens
 
 
@@ -345,6 +346,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             else:
@@ -360,6 +362,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             # MLP block
@@ -379,9 +382,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
-    def forward(self, tokens):
+    def forward(self, tokens, coords=None):
+        aux_info = None
         for block in self.ae_global_blocks:
-            tokens = block(tokens)
+            tokens = block(tokens, coords, aux_info)
         return tokens
 
 
@@ -400,79 +404,75 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
-        global_rate = int(1 / self.cf.forecast_att_dense_rate)
-        if mode_cfg.get("forecast", {}).get("policy") is not None:
-            for i in range(self.cf.fe_num_blocks):
-                # Alternate between global and local attention
-                if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
-                    self.fe_blocks.append(
-                        MultiSelfAttentionHead(
-                            self.cf.ae_global_dim_embed,
-                            num_heads=self.cf.fe_num_heads,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
-                            with_flash=self.cf.with_flash_attention,
-                            norm_type=self.cf.norm_type,
-                            dim_aux=dim_aux,
-                            norm_eps=self.cf.norm_eps,
-                            attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_noise_conditioning=self.cf.fe_diffusion_model,
-                        )
-                    )
-                else:
-                    self.fe_blocks.append(
-                        MultiSelfAttentionHeadLocal(
-                            self.cf.ae_global_dim_embed,
-                            num_heads=self.cf.fe_num_heads,
-                            qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
-                            block_factor=self.cf.ae_global_block_factor,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
-                            with_flash=self.cf.with_flash_attention,
-                            norm_type=self.cf.norm_type,
-                            dim_aux=dim_aux,
-                            norm_eps=self.cf.norm_eps,
-                            attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_noise_conditioning=self.cf.fe_diffusion_model,
-                        )
-                    )
-                # Add MLP block
-                self.fe_blocks.append(
-                    MLP(
-                        self.cf.ae_global_dim_embed,
-                        self.cf.ae_global_dim_embed,
-                        with_residual=True,
-                        dropout_rate=self.cf.fe_dropout_rate,
-                        norm_type=self.cf.norm_type,
-                        dim_aux=dim_aux,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        with_noise_conditioning=self.cf.fe_diffusion_model,
-                    )
-                )
-                # Optionally, add LayerNorm after i-th layer
-                if i in self.cf.get("fe_layer_norm_after_blocks", []):
-                    self.fe_blocks.append(
-                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
-                    )
+        # global_rate = int(1 / self.cf.forecast_att_dense_rate)
+        # if mode_cfg.get("forecast", {}).get("policy") is not None:
+        #     for i in range(self.cf.fe_num_blocks):
+        #         # Alternate between global and local attention
+        #         if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
+        #             self.fe_blocks.append(
+        #                 MultiSelfAttentionHead(
+        #                     self.cf.ae_global_dim_embed,
+        #                     num_heads=self.cf.fe_num_heads,
+        #                     dropout_rate=self.cf.fe_dropout_rate,
+        #                     with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+        #                     with_flash=self.cf.with_flash_attention,
+        #                     norm_type=self.cf.norm_type,
+        #                     dim_aux=dim_aux,
+        #                     norm_eps=self.cf.norm_eps,
+        #                     attention_dtype=get_dtype(self.cf.attention_dtype),
+        #                     with_noise_conditioning=self.cf.fe_diffusion_model,
+        #                     with_2d_rope=self.cf.get("rope_2D", False),
+        #                 )
+        #             )
+        #         else:
+        #             self.fe_blocks.append(
+        #                 MultiSelfAttentionHeadLocal(
+        #                     self.cf.ae_global_dim_embed,
+        #                     num_heads=self.cf.fe_num_heads,
+        #                     qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
+        #                     block_factor=self.cf.ae_global_block_factor,
+        #                     dropout_rate=self.cf.fe_dropout_rate,
+        #                     with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+        #                     with_flash=self.cf.with_flash_attention,
+        #                     norm_type=self.cf.norm_type,
+        #                     dim_aux=dim_aux,
+        #                     norm_eps=self.cf.norm_eps,
+        #                     attention_dtype=get_dtype(self.cf.attention_dtype),
+        #                     with_noise_conditioning=self.cf.fe_diffusion_model,
+        #                     with_2d_rope=self.cf.get("rope_2D", False),
+        #                 )
+        #             )
+        #         # Add MLP block
+        #         self.fe_blocks.append(
+        #             MLP(
+        #                 self.cf.ae_global_dim_embed,
+        #                 self.cf.ae_global_dim_embed,
+        #                 with_residual=True,
+        #                 dropout_rate=self.cf.fe_dropout_rate,
+        #                 norm_type=self.cf.norm_type,
+        #                 dim_aux=dim_aux,
+        #                 norm_eps=self.cf.mlp_norm_eps,
+        #                 with_noise_conditioning=self.cf.fe_diffusion_model,
+        #             )
+        #         )
+        #         # Optionally, add LayerNorm after i-th layer
+        #         if i in self.cf.get("fe_layer_norm_after_blocks", []):
+        #             self.fe_blocks.append(
+        #                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+        #             )
         
-        # def init_weights_final(m):
-        #     if isinstance(m, torch.nn.Linear):
-        #         torch.nn.init.normal_(m.weight, mean=0, std=0.001)
-        #         if m.bias is not None:
-        #             torch.nn.init.normal_(m.bias, mean=0, std=0.001)
-
-        # self.fe_blocks.append(
-        #     MLP(
-        #         self.cf.ae_global_dim_embed,
-        #         self.cf.ae_global_dim_embed,
-        #         with_residual=True,
-        #         dropout_rate=self.cf.fe_dropout_rate,
-        #         norm_type=self.cf.norm_type,
-        #         dim_aux=dim_aux,
-        #         norm_eps=self.cf.mlp_norm_eps,
-        #         with_noise_conditioning=self.cf.fe_diffusion_model,
-        #     )
-        # )
+        self.fe_blocks.append(
+            MLP(
+                self.cf.ae_global_dim_embed,
+                self.cf.ae_global_dim_embed,
+                with_residual=True,
+                dropout_rate=self.cf.fe_dropout_rate,
+                norm_type=self.cf.norm_type,
+                dim_aux=dim_aux,
+                norm_eps=self.cf.mlp_norm_eps,
+                with_noise_conditioning=self.cf.fe_diffusion_model,
+            )
+        )
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.1)
@@ -488,6 +488,7 @@ class ForecastingEngine(torch.nn.Module):
         fstep: int,
         meta_info: SampleMetaData = None,
         noise_emb: torch.Tensor = None,
+        coords: torch.Tensor = None,
     ) -> torch.Tensor:
 
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
@@ -512,13 +513,13 @@ class ForecastingEngine(torch.nn.Module):
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = block(tokens)
                 else:
-                    tokens = block(tokens, noise_emb, aux_info)
+                    tokens = block(tokens, coords, noise_emb, aux_info)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
-                    tokens = checkpoint(block, tokens, aux_info, use_reentrant=False)
+                    tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
 

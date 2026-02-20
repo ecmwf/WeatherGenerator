@@ -15,6 +15,14 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.layers import LinearNormConditioning
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
+from weathergen.model.positional_encoding import rotary_pos_emb_2d
+
+"""
+Attention blocks used by WeatherGenerator.
+
+Some blocks optionally apply 2D RoPE. When enabled, the caller must provide per-token 2D
+coordinates aligned with the token order (lat, lon in radians).
+"""
 
 
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
@@ -199,6 +207,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         with_noise_conditioning=False,  # should only be True for diffusion model
+        with_2d_rope=False,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -206,6 +215,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
         self.with_residual = with_residual
+        self.with_2d_rope = with_2d_rope
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -248,18 +258,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         if with_noise_conditioning:
             self.noise_conditioning = LinearNormConditioning(dim_embed, dtype=self.dtype)
 
-    def forward(self, *args):
-        # NOTE: Hotfix for TargetPredictionEngineClassic forward pass for attn. block, MLP...
-        x = args[0]
-        if len(args) == 2:
-            ada_ln_aux = args[1]
-        elif len(args) > 2:
-            ada_ln_aux = args[-1]
-            emb = args[1] if self.noise_conditioning else None
-        else:
-            ada_ln_aux = None
-            emb = None
-
+    def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
@@ -272,6 +271,11 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
         vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
+
+        if self.with_2d_rope:
+            if coords is None:
+                raise ValueError("coords must be provided when with_2d_rope=True")
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
@@ -508,6 +512,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         with_noise_conditioning=False,  # should only be True for diffusion model
+        with_2d_rope=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -516,6 +521,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.softcap = softcap
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
+        self.with_2d_rope = with_2d_rope
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -555,18 +561,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
                 latent_space_dim=dim_embed, noise_emb_dim=512, dtype=self.dtype
             )
 
-    def forward(self, *args):
-        # NOTE: Hotfix for TargetPredictionEngineClassic forward pass for attn. block, MLP...
-        x = args[0]
-        if len(args) == 2:
-            ada_ln_aux = args[1]
-        elif len(args) > 2:
-            ada_ln_aux = args[-1]
-            emb = args[1] if self.noise_conditioning else None
-        else:
-            ada_ln_aux = None
-            emb = None
 
+    def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
         x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
@@ -581,6 +577,11 @@ class MultiSelfAttentionHead(torch.nn.Module):
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
+
+        if self.with_2d_rope:
+            if coords is None:
+                raise ValueError("coords must be provided when with_2d_rope=True")
+            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=2)
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0

@@ -60,7 +60,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.cur_token = None  # TODO: re move after single sample experiments
 
     def forward(
-        self, tokens: torch.Tensor, fstep: int, meta_info: dict[str, SampleMetaData]
+        self, tokens: torch.Tensor, fstep: int, meta_info: dict[str, SampleMetaData], coords: torch.Tensor = None
     ) -> torch.Tensor:
         """
         Model forward call during training. Unpacks the conditioning c = [x_{t-k}, ..., x_{t}], the

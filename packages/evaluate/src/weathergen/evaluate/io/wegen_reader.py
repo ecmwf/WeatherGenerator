@@ -206,8 +206,7 @@ class WeatherGenReader(Reader):
         Load a single pre-computed score for a given run, stream and metric
         """
         score_path = (
-            Path(self.results_base_dir)
-            / "evaluation"
+            Path(self.metrics_dir)
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
@@ -723,14 +722,12 @@ class WeatherGenMergeReader(Reader):
         """
         super().__init__(eval_cfg, run_id, private_paths)
         self.run_ids = eval_cfg.get("merge_run_ids", [])
-        self.metrics_dir = Path(eval_cfg.get("metrics_dir"))
+        self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir"))
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
 
         self.readers = []
 
         _logger.info(f"MERGE READERS: {self.run_ids} ...")
-
-        
 
         for run_id in self.run_ids:
             if reader_type == "zarr":
@@ -818,7 +815,9 @@ class WeatherGenMergeReader(Reader):
         da_preds_merge = self._concat_over_ens(da_preds_merge, fsteps_merge)
 
         return ReaderOutput(
-            target=da_tars_merge, prediction=da_preds_merge, points_per_sample=points_per_sample
+            target=da_tars_merge,
+            prediction=da_preds_merge,
+            points_per_sample=points_per_sample,
         )
 
     def _concat_over_ens(self, da_merge, fsteps_merge):
@@ -879,7 +878,7 @@ class WeatherGenMergeReader(Reader):
                 for metric in metrics:
                     # all other cases: recompute scores
                     missing_metrics.setdefault(region, []).append(metric)
-        else: #JsonReader
+        else:  # JsonReader
             # deep merge dicts
             for reader in self.readers:
                 scores, missing = reader.load_scores(stream, regions, metrics)
