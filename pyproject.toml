@@ -249,7 +249,8 @@ torch = [
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
-anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", branch = "feature/zarr3" }
+# branch = "feature/zarr3"
+anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", rev = "e254d878eb9154b6414955f6f56dfad2cf8fdf39"}
 
 [tool.pytest.ini_options]
 log_cli = true
