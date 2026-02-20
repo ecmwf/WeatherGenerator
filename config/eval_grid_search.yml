@@ -1,0 +1,376 @@
+global_plotting_options:
+  image_format : "png"
+  dpi_val : 300
+  ERA5:
+    marker_size: 4
+
+evaluation:
+  metrics  : ["froct", "rmse"]
+  regions: ["global"]
+  summary_plots : true
+  summary_dir: "./plots/"
+  print_summary: false
+  log_scale: false
+  add_grid: true
+
+run_ids :
+
+  # =========================
+  # Table 1 — lr 5e-5, w-dec 0.05
+  # =========================
+
+  al5jmoi0:
+    label: "lr5e-5, w-dec 0.05, beta2 0.8, None, v1"
+    epoch: 0
+    rank: 0
+    streams:
+      ERA5:
+        channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+        evaluation: { sample: "all", forecast_step: "all" }
+
+#   xutnaywh:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.8, None, v2"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   i7acv0yu:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.8, None, v3"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   xmg0ucid:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.8, AIFS, v1"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   fs98l3di:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.8, AIFS, v2"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   sidhp3ew:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.8, AIFS, v3"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   pugcyq5f:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.9, None, v1"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   mktulv3h:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.9, None, v2"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   nm5efvkc:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.9, None, v3"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   b745hgpl:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.9, AIFS, v1"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   tfjsyvm4:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.9, AIFS, v2"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   r9lrx0g8:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.9, AIFS, v3"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   ts3d9qi2:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.95, None, v1"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   c6crje4w:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.95, None, v2"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   fgfsaz17:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.95, None, v3"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   i4bitdwv:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.95, AIFS, v1"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   y6zvdowr:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.95, AIFS, v2"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   kg5zuyiv:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.95, AIFS, v3"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   t9o2j31k:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.99, None, v1"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   equ02ane:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.99, None, v2"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   m60skfyg:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.99, None, v3"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   o7oqwf0x:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.99, AIFS, v1"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   br3myf6z:
+#     label: "lr5e-5, w-dec 0.05, beta2 0.99, AIFS, v3"
+#     epoch: 0
+#     rank: 0
+#     streams:
+#       ERA5:
+#         channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"]
+#         evaluation: { sample: "all", forecast_step: "all" }
+# 
+#   # =========================
+#   # Table 2 — lr 1e-4, w-dec 0.1
+#   # =========================
+# 
+#   yk1hl3yf:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.8, None, v1"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   iwesz6rc:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.8, None, v2"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   wg9kh87s:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.8, None, v3"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   j8x5negb:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.8, AIFS, v1"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   ave9gc5b:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.8, AIFS, v2"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   i1k20up8:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.8, AIFS, v3"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   ojywt6di:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.9, None, v1"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   rhdxwbgm:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.9, None, v2"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   oqrekh56:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.9, None, v3"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   b6lv75b4:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.9, AIFS, v1"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   llukibd4:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.9, AIFS, v2"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   arjkmavn:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.9, AIFS, v3"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   wz68pdho:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.95, None, v1"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   ecfza0kt:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.95, None, v2"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   cl1s4rex:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.95, None, v3"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   f0j9o3zd:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.95, AIFS, v1"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   x9jhnq4v:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.95, AIFS, v2"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   zvxc7i12:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.95, AIFS, v3"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   amnjzuxc:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.99, None, v1"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   ofzyg34h:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.99, None, v2"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   r35xku7w:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.99, None, v3"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   u8ohjz6c:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.99, AIFS, v1"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   yel28d69:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.99, AIFS, v2"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
+#   a1vxdnip:
+#     label: "lr1e-4, w-dec 0.1, beta2 0.99, AIFS, v3"
+#     epoch: 0
+#     rank: 0
+#     streams: { ERA5: { channels: ["2t","10u","10v","q_850","t_850","u_850","v_850","z_500"], evaluation: { sample: "all", forecast_step: "all" } } }
+# 
