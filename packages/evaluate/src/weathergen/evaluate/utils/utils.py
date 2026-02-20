@@ -139,7 +139,12 @@ def calc_scores_per_stream(
             },
         )
 
-        lead_time_map = {}
+        if "lead_time" in da_preds[fsteps[0]].coords:
+            metric_stream = metric_stream.assign_coords(
+                lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
+            )
+
+        # lead_time_map = {}
 
         for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
             if preds.sizes.get("ipoint") == 0:
@@ -171,7 +176,7 @@ def calc_scores_per_stream(
 
             for metric in metrics:
                 score = get_score(
-                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord #agg_dims="ipoint"
+                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
                 )
                 if score is not None:
                     valid_scores.append(score)
@@ -200,12 +205,10 @@ def calc_scores_per_stream(
                 criteria["ens"] = combined_metrics.ens.values
             
             metric_stream.loc[criteria] = combined_metrics
-
-            lead_time_map[fstep] = (
-                np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
-                if "lead_time" in combined_metrics.coords
-                else None
-            )
+            if "lead_time" in combined_metrics.coords:
+                metric_stream.coords["lead_time"].loc[{"forecast_step": int(fstep)}] = (
+                    combined_metrics.coords["lead_time"].values.astype('timedelta64[h]').astype(int)
+                )
 
             if is_regular and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
@@ -213,18 +216,8 @@ def calc_scores_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
                 )
 
-        if all(lead_time_map[f] is not None for f in lead_time_map):
-            lead_time_values = np.array(
-                [lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values]
-            ).squeeze()
-
-            if lead_time_values.shape == metric_stream.forecast_step.shape:
-                metric_stream = metric_stream.assign_coords(
-                    lead_time=("forecast_step", lead_time_values)
-                )
-
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-        breakpoint()
+    
         # Build local dictionary for this region
         for metric in metrics:
             local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
