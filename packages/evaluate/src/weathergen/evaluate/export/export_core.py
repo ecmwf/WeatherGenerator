@@ -169,6 +169,16 @@ def get_ref_times(fname_zarr, stream, samples, fstep_hours) -> list[np.datetime6
             ref_times.append(ref_time)
     return ref_times
 
+def get_streams(stream, fname_zarr):
+    with zarrio_reader(fname_zarr) as zio:
+        zio_streams =  zio.streams
+    streams = (
+        zio_streams
+        if stream is None
+        else [stream]
+    )
+    return streams
+
 
 def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     """
@@ -230,30 +240,31 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     fname_zarr = get_model_results(run_id, epoch, rank)
     fsteps = get_fsteps(fsteps, fname_zarr)
     samples = get_samples(samples, fname_zarr)
-    grid_type = get_grid_type(data_type, stream, fname_zarr)
-    channels = get_channels(channels, stream, fname_zarr)
-    ref_times = get_ref_times(fname_zarr, stream, samples, fstep_hours)
+    streams = get_streams(stream, fname_zarr)
+    for stream in streams:
+        grid_type = get_grid_type(data_type, stream, fname_zarr)
+        channels = get_channels(channels, stream, fname_zarr)
+        ref_times = get_ref_times(fname_zarr, stream, samples, fstep_hours)
+        kwargs["stream"] = stream
+        kwargs["grid_type"] = grid_type
+        kwargs["channels"] = channels
+        kwargs["data_type"] = data_type
 
-    kwargs["grid_type"] = grid_type
-    kwargs["channels"] = channels
-    kwargs["data_type"] = data_type
+        with Pool(processes=n_processes, maxtasksperchild=5) as pool:
+            parser = CfParserFactory.get_parser(config=config, **kwargs)
 
-    with Pool(processes=n_processes, maxtasksperchild=5) as pool:
-        parser = CfParserFactory.get_parser(config=config, **kwargs)
+            for s_idx, sample in enumerate(tqdm(samples)):
+                ref_time = ref_times[s_idx]
+                step_tasks = [
+                    (sample, fstep, run_id, stream, data_type, epoch, rank) for fstep in fsteps
+                ]
 
-        for s_idx, sample in enumerate(tqdm(samples)):
-            ref_time = ref_times[s_idx]
+                results_iterator = pool.imap_unordered(get_data_worker, step_tasks, chunksize=1)
 
-            step_tasks = [
-                (sample, fstep, run_id, stream, data_type, epoch, rank) for fstep in fsteps
-            ]
+                parser.process_sample(
+                    results_iterator,
+                    ref_time=ref_time,
+                )
 
-            results_iterator = pool.imap_unordered(get_data_worker, step_tasks, chunksize=1)
-
-            parser.process_sample(
-                results_iterator,
-                ref_time=ref_time,
-            )
-
-        pool.terminate()
-        pool.join()
+            pool.terminate()
+            pool.join()
