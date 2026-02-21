@@ -261,9 +261,11 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
         else:
             assert False
 
+        mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
+
         plt.plot(
-            x_vals,
-            y_vals,
+            x_vals[mask],
+            y_vals[mask],
             color=colors[i_run % len(colors)],
         )
         # legend_str += [ run_id + " : " + runs_ids[run_id][1]]
@@ -365,10 +367,11 @@ def plot_loss_per_stream(
                     for col in data_cols:
                         x_vals = np.array(run_data_mode[x_col])
                         y_data = np.array(run_data_mode[col])
+                        mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_data))
 
                         plt.plot(
-                            x_vals,
-                            y_data,
+                            x_vals[mask],
+                            y_data[mask],
                             linestyle,
                             color=colors[j % len(colors)],
                             alpha=alpha,
@@ -403,9 +406,10 @@ def plot_loss_per_stream(
         for line in legend.get_lines():
             line.set(alpha=1.0)
         plt.grid(True, which="both", ls="-")
-        plt.yscale("log")
         # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
-        plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
+        # plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
+        plt.ylim([0.95 * min_val, 1.025 * max_val])
+        plt.yscale("log")
         if x_scale_log:
             plt.xscale("log")
         plt.title(stream_name)
@@ -593,7 +597,7 @@ def plot_train(args=None):
         "--errors",
         "-e",
         dest="errors",
-        default=["loss_avg"],
+        default=["loss_avg", "mse"],
         type=str,
         nargs="+",
         help="List of errors to plot",
@@ -653,7 +657,10 @@ def plot_train(args=None):
 
     # read logged data
 
-    runs_data = [TrainLogger.read(run_id, model_path=model_base_dir) for run_id in runs_ids]
+    runs_data = [
+        TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
+        for run_id in runs_ids
+    ]
 
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
