@@ -271,11 +271,11 @@ validation_config:
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
-    streams: null,
+    # streams: all,
   }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: 8
   
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
