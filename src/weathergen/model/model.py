@@ -656,7 +656,7 @@ class Model(torch.nn.Module):
                     tokens,
                     step,
                     meta_info=batch.samples[0].meta_info,
-                    coords=model_params.rope_coords
+                    coords=model_params.rope_coords,
                 )
 
             # decoder predictions
