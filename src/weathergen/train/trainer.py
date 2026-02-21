@@ -946,5 +946,6 @@ class Trainer(TrainerBase):
         Log cached collapse monitoring metrics.
         """
         metrics = self.collapse_monitor.get_cached_metrics()
+        metrics["num_samples"] = self.cf.general.istep
         if metrics and is_root():
             self.train_logger.log_metrics(stage, metrics)
