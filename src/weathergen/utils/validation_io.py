@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -248,9 +247,7 @@ def write_output(
             ch for ch in channels if _normalize_channel_name(ch) in headline_channels
         ]
         if not selected_channels:
-            _logger.warning(
-                f"No headline channels available for plotting stream {stream_name}."
-            )
+            _logger.warning(f"No headline channels available for plotting stream {stream_name}.")
             continue
 
         for varname in selected_channels:
