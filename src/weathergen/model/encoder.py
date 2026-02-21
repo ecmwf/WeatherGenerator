@@ -326,3 +326,6 @@ class EncoderModule(torch.nn.Module):
         ).flatten(1, 2)
 
         return tokens_global, posteriors
+
+    def reset_parameters(self):
+        return
