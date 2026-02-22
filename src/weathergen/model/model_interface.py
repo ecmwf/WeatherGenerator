@@ -11,6 +11,7 @@
 
 import itertools
 import logging
+from pathlib import Path
 
 import omegaconf
 import torch
@@ -178,7 +179,15 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
     """
 
-    path_run = get_path_model(run_id=run_id)
+    # If `run_id` is actually a full path provided by the user, use it directly.
+    # This mirrors the behaviour used in `config.load_run_config`.
+    user_defined_path = Path(cf.model_path) / run_id
+    if user_defined_path .exists():
+        path_run = user_defined_path
+        logger.info(f"Using user provided path for loading checkpoint: {path_run}")
+    else:
+        path_run = get_path_model(run_id=run_id)
+        logger.info(f"Using user provided path for loading checkpoint: {path_run}")
     mini_epoch_id = (
         f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
     )
