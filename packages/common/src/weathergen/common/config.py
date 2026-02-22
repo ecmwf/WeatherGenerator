@@ -648,6 +648,22 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
     else:
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
+
+    # If a user provided `model_path` in the config, prefer it when the
+    # directory for the requested run exists. Otherwise fall back to the
+    # shared models directory.
+    if config is not None:
+        model_path = config.get("model_path", None)
+        if model_path:
+            path_run = Path(model_path) / run_id
+            if path_run.exists():
+                _logger.info(f"Using user provided model path: {path_run}")
+                return path_run
+            else:
+                _logger.info(
+                    f"User provided model path does not exist, falling back: {path_run}"
+                )
+
     return _get_shared_wg_path() / "models" / run_id
 
 
