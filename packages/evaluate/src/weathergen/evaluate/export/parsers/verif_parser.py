@@ -8,9 +8,13 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import find_pl, get_grid_points, get_obs_coordinates, Interpolator_factory
 from weathergen.evaluate.export.preprocess import compute_mslp, compute_precip
-
+from weathergen.evaluate.export.reshape import (
+    InterpolatorFactory,
+    find_pl,
+    get_grid_points,
+    get_obs_coordinates,
+)
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -53,7 +57,7 @@ class VerifParser(CfParser):
         super().__init__(config=config)
 
         if not hasattr(self, "obs"):
-            raise ValueError("Observation data required for creating verif compliant NetCDFs")        
+            raise ValueError("Observation data required for creating verif compliant NetCDFs")
 
         self.mapping = config.get("variables", {})
 
@@ -78,6 +82,13 @@ class VerifParser(CfParser):
         -------
             None
         """
+        # check ref_time exists in the obs data
+        if ref_time not in self.obs.time.values:
+            _logger.warning(
+                f"Reference time {ref_time} not found in observation data. Skipping sample."
+            )
+            return
+
         required_channels = ["10u", "10v", "sp", "2t", "msl"]
         self.channels = list(set(self.channels) & set(required_channels))
         da_fs = []
@@ -100,33 +111,39 @@ class VerifParser(CfParser):
                 self.zarr_coords = get_grid_points(da_fs[0])
                 self.zarr_dt = self.get_zarr_dt(da_fs[0])
 
-            
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
+
             for verif_var in self.mapping.keys():
-                mapped_info = self.mapping.get(verif_var, {})
-                wg_var = mapped_info.get("var", None)
-                da_var = self.regrid(da_fs, wg_var, valid_times)
+                da_var = self.regrid(da_fs, verif_var, valid_times)
                 if da_var is None:
                     continue
                 da_var = self.add_encoding(da_var)
                 obs_result = self.obs_preprocess(valid_times, verif_var)
                 obs_result = self.add_encoding(obs_result)
                 merged = self.merge(da_var, obs_result)
-                merged = self.add_metadata(merged,verif_var)
+                merged = self.add_metadata(merged, verif_var)
                 self.save(merged, ref_time, verif_var)
-                _logger.info(f"Saved {verif_var} data for {ref_time} to \
-                {self.output_format} in {self.output_dir}.")
 
-    def get_zarr_dt(self, ds):
-        zarr_dt = (
-            ds.source_interval_end.values - ds.source_interval_start.values
-        )
+    def get_zarr_dt(self, ds: xr.Dataset) -> np.timedelta64:
+        """
+        Compute the time difference between forecast steps in hours from the WG output dataset.
+        Parameters
+        ----------
+            ds : xr.Dataset
+                Input dataset from which to compute the time difference.
+        Returns
+        -------
+            np.timedelta64
+                Time difference between forecast steps in hours.
+        """
+        zarr_dt = ds.source_interval_end.values - ds.source_interval_start.values
         zarr_dt = zarr_dt.astype("timedelta64[h]")
+
         return zarr_dt
-    
-    def get_output_filename(self, forecast_ref_time: np.datetime64, variable:str) -> Path:
+
+    def get_output_filename(self, forecast_ref_time: np.datetime64, variable: str) -> Path:
         """
         Create output directories for the verif files
         and return path to output file
@@ -141,14 +158,14 @@ class VerifParser(CfParser):
             self.verif_template.replace("%S", self.stream)
             .replace("%V", variable)
             .replace("%M", self.method)
-            .replace("%D", self.data_type + str(forecast_ref_time))
+            .replace("%D", self.data_type + np.datetime_as_string(forecast_ref_time, unit="h"))
         )
-        outfile = Path(self.output_dir) /  outfile
+        outfile = Path(self.output_dir) / outfile
         pathdir = outfile.parent
         _logger.info(f"Output directory: {pathdir}")
         pathdir.mkdir(exist_ok=True, parents=True)
         return outfile
-    
+
     def reshape(self, data: xr.DataArray) -> xr.Dataset:
         """
         Reshape dataset while preserving grid structure (regular or Gaussian).
@@ -204,51 +221,78 @@ class VerifParser(CfParser):
 
         return reshaped_dataset
 
-
-    def obs_preprocess(self, valid_times, verif_var):
+    def obs_preprocess(self, valid_times: list[np.datetime64], verif_var: str) -> xr.DataArray:
+        """
+        Preprocess the observation data for the given variable and valid times.
+        This includes computing derived variables like MSLP and total precipitation if needed.
+        Parameters
+        ----------
+            valid_times : list of np.datetime64
+                List of valid times for which to preprocess the observation data.
+            verif_var : str
+                The variable for which to preprocess the observation data (e.g., 'mslp', 'tp').
+        Returns
+        -------
+            xr.DataArray
+                Preprocessed observation data for the specified variable and valid times.
+        """
         obs_data = self.obs
-        mapped_info = self.mapping.get(verif_var, {})        
+        mapped_info = self.mapping.get(verif_var, {})
         obs_name = mapped_info.get("obs_name", {})
         if verif_var == "mslp":
             for vtime in valid_times:
-                obs_data[obs_name].sel(time = valid_times).values = compute_mslp(obs_data, vtime)
+                obs_data[obs_name].sel(time=valid_times).values = compute_mslp(obs_data, vtime)
         if verif_var == "tp":
             for vtime in valid_times:
-                obs_data[obs_name].sel(time = vtime).values = compute_precip(obs_data, self.zarr_dt, vtime)
+                obs_data[obs_name].sel(time=vtime).values = compute_precip(
+                    obs_data, self.zarr_dt, vtime
+                )
         else:
             pass
-    
-        new_xarray = obs_data[obs_name].sel(time = valid_times)
+
+        new_xarray = obs_data[obs_name].sel(time=valid_times)
         new_xarray.name = "obs"
 
         return new_xarray
-    
+
     def preprocess(self, ds: xr.Dataset) -> xr.Dataset:
         """
-        Preprocess variables and only keep relevant ones
+        Preprocess variables and only keep relevant ones for WG output
+        Parameters
+        ----------
+            ds : xr.Dataset
+
+
+        Returns
+        -------
+            xr.Dataset
         """
         if set(["10u", "10v"]).issubset(self.channels):
-            u = ds.sel(channel='10u')
-            v = ds.sel(channel='10v')
+            u = ds.sel(channel="10u")
+            v = ds.sel(channel="10v")
             # hypotenuese
-            wind_speed =  xr.apply_ufunc(
+            wind_speed = xr.apply_ufunc(
                 np.hypot, u, v, dask="parallelized", output_dtypes=[ds.dtype]
             ).astype("float32")
-            wind_speed = wind_speed.expand_dims(channel=['10si'])
+            wind_speed = wind_speed.expand_dims(channel=["10si"])
             if ds.chunks:
-                wind_speed = wind_speed.chunk({"ipoint": ds.chunks[ds.get_axis_num("ipoint")][0], "channel": 1})
+                wind_speed = wind_speed.chunk(
+                    {"ipoint": ds.chunks[ds.get_axis_num("ipoint")][0], "channel": 1}
+                )
             new_ds = xr.concat([ds, wind_speed], dim="channel")
             new_ds.attrs = ds.attrs
 
             # remove unnecessary
-            new_ds = new_ds.drop_sel(channel = ['10u', '10v'])
+            new_ds = new_ds.drop_sel(channel=["10u", "10v"])
             return new_ds
         else:
             return ds
 
-    def regrid(self, ds: xr.Dataset, verif_var, valid_times) -> xr.Dataset:
+    def regrid(
+        self, ds: xr.Dataset, verif_var: str, valid_times: list[np.datetime64]
+    ) -> xr.Dataset:
         """
-        Regrid a single xarray Datas                                                           v               vvbet using specific method.
+        Regrid a single xarray Dataset using specific method.
         Parameters
         ----------
             ds: native xarray Dataset
@@ -256,69 +300,58 @@ class VerifParser(CfParser):
         -------s
             Regridded xarray Dataset.
         """
+        mapped_info = self.mapping.get(verif_var, {})
+        wg_var = mapped_info.get("var", None)
+
         try:
-            ds_var = ds[verif_var]
+            ds_var = ds[wg_var]
         except KeyError as e:
-            _logger.info(f"{verif_var} not available in WeatherGenerator output: {e}")
+            _logger.info(f"{wg_var} not available in WeatherGenerator output: {e}")
             return
         # set coords
         new_coords = ds_var.coords.copy()
-        new_coords.update(
-            {"location": self.obs.location.values}
-        )
+        new_coords.update({"location": self.obs.location.values})
         new_coords._drop_coords(["ncells"])
 
         # set attrs
         attrs = ds_var.attrs.copy()
         with contextlib.suppress(KeyError):
-            del attrs["ncells"]#
+            del attrs["ncells"]  #
 
         original_shape = ds_var.shape
         new_shape = list(original_shape)
         pos = ds_var.dims.index("ncells")
         new_shape[pos] = self.obs.location.shape[0]
-        #rearrange to be time,location
-        order = [1,0]
+        # rearrange to be time,location
+        order = [1, 0]
         new_shape = [new_shape[x] for x in order]
 
-        fcstdata = np.ndarray(new_shape, dtype=np.float32)
+        fcstdata = np.empty(new_shape, dtype=np.float32)
 
-        #set interpolation method           
-        method_factory = Interpolator_factory(self.method)
+        # set interpolation method
+        method_factory = InterpolatorFactory(self.method)
         interpolator = method_factory.get_interpolator(self.zarr_coords, self.obs_coords)
 
-        #fix lat, lon
+        # fix lat, lon
         latitude_da = xr.DataArray(
-                self.obs.latitude.values,
-                dims=["location"],
-                attrs=ds_var.latitude.attrs
-            )
+            self.obs.latitude.values, dims=["location"], attrs=ds_var.latitude.attrs
+        )
         longitude_da = xr.DataArray(
-                self.obs.longitude.values,
-                dims=["location"],
-                attrs=ds_var.longitude.attrs
-            )
-        
+            self.obs.longitude.values, dims=["location"], attrs=ds_var.longitude.attrs
+        )
+
         for idx in range(len(valid_times)):
-            
-            regrid_values = interpolator.interpolate(
-                ds_var.values[:,idx]
-            )
-            fcstdata[idx,:] = regrid_values
+            regrid_values = interpolator.interpolate(ds_var.values[:, idx])
+            fcstdata[idx, :] = regrid_values
 
         regridded_var = xr.DataArray(
-                fcstdata,
-                dims=["time", "location"],
-                coords={
-                      **new_coords,
-                        "latitude": latitude_da,
-                        "longitude": longitude_da
-                },
-                name="fcst",
-                attrs = attrs
-            )
+            fcstdata,
+            dims=["time", "location"],
+            coords={**new_coords, "latitude": latitude_da, "longitude": longitude_da},
+            name="fcst",
+            attrs=attrs,
+        )
         return regridded_var
-
 
     def concatenate(
         self,
@@ -386,7 +419,7 @@ class VerifParser(CfParser):
 
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
-        n_hours = self.fstep_hours.astype('int64')
+        n_hours = self.fstep_hours.astype("int64")
         ds["forecast_step"] = ds["forecast_step"] * n_hours
         return ds
 
@@ -445,12 +478,14 @@ class VerifParser(CfParser):
         -------
             xarray Dataset with CF conventions added to attributes.
         """
-        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id}, variable {verif_var} using stream {self.stream}"
+        ds.attrs["title"] = (
+            f"WeatherGenerator Output for {self.run_id}, variable {verif_var} "
+            f"using stream {self.stream}"
+        )
         ds.attrs["institution"] = "WeatherGenerator Collaboration"
         ds.attrs["source"] = "WeatherGenerator v0.0"
-        ds.attrs["history"] = (
-            "Created using the verif_parser on "
-            + np.datetime_as_string(np.datetime64("now"), unit="s")
+        ds.attrs["history"] = "Created using the verif_parser on " + np.datetime_as_string(
+            np.datetime64("now"), unit="s"
         )
         ds.attrs["Conventions"] = "verif_1.0.0"
         # drop stream now it's in folder layout
@@ -484,9 +519,9 @@ class VerifParser(CfParser):
             wg_unit = mapped_units.get(self.stream, "DEFAULT")
             verif_unit = mapped_info.get("verif_unit", None)
             if wg_unit != verif_unit:
-                #perform unit conversion
+                # perform unit conversion
                 da.values = da.values * unit_conversion[wg_unit]
-            
+
             attributes = {
                 "units": verif_unit,
             }
@@ -571,8 +606,7 @@ class VerifParser(CfParser):
         merged = xr.merge([ds, obs_ds, lat, lon, alt])
         return merged
 
-
-    def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64, verif_var) -> None:
+    def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64, verif_var: str) -> None:
         """
         Save the dataset to a NetCDF file.
 
@@ -590,3 +624,7 @@ class VerifParser(CfParser):
         _logger.info(f"Saving to {out_fname}.")
         ds.to_netcdf(out_fname)
         _logger.info(f"Saved NetCDF file to {out_fname}.")
+        _logger.info(
+            f"Saved {verif_var} data for {forecast_ref_time} to"
+            f" {self.output_format} in {self.output_dir}."
+        )

@@ -31,7 +31,7 @@ class CfParserFactory:
         _parser_map = {
             "netcdf": (NetcdfParser, ["grid_type"]),
             "quaver": (QuaverParser, ["grid_type", "channels", "template"]),
-            "verif":  (VerifParser, ["obs", "method", "verif_template"])
+            "verif": (VerifParser, ["obs", "method", "verif_template"]),
         }
 
         fmt = kwargs.get("output_format")
