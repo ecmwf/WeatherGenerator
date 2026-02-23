@@ -21,16 +21,14 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
     check_reader_data,
-    str_to_timedelta,
 )
 
 _logger = logging.getLogger(__name__)
 
 
-# TODO make this datareader works with multiple datasets in ZARR format
 class DataReaderEObs(DataReaderTimestep):
     """
-    Data reader for gridded Zarr datasets with regular lat/lon structure.
+    Data reader for gridded Zarr datasets from CMEMS GREP with regular lat/lon structure.
 
     This reader handles datasets stored as Zarr with dimensions (time, latitude, longitude)
     and converts the gridded data to point-wise format required by the framework.
@@ -133,7 +131,7 @@ class DataReaderEObs(DataReaderTimestep):
 
         # Handle frequency override from stream_info
         if "frequency" in self._stream_info:
-            period = str_to_timedelta(self._stream_info["frequency"])
+            period = self._stream_info["frequency"]
 
         # Re-initialize parent class with correct time info
         super().__init__(
@@ -263,6 +261,8 @@ class DataReaderEObs(DataReaderTimestep):
 
         # Return channels and their indices in the original list
         indices = [available_vars.index(ch) for ch in selected]
+        _logger.info(f"_select_channels(): Selected channels after filtering: {selected}")
+        _logger.info(f"_select_channels(): Corresponding indices in available_vars: {indices}")
         return selected, indices
 
     def _load_statistics(self, channels: list[str]) -> None:
@@ -340,11 +340,20 @@ class DataReaderEObs(DataReaderTimestep):
         ReaderData
             Data structure containing coords, geoinfos, data, and datetimes
         """
+        _logger.info(
+            f"Requesting data for index {idx} with channel indices {channels_idx} in stream '{self._stream_info['name']}'"
+        )
         self._lazy_init()
 
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
+        _logger.info(
+            f"Retrieving data for time indices {t_idxs} in stream '{self._stream_info['name']}'"
+        )
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+            _logger.info(
+                f"No valid data for the requested time window in stream '{self._stream_info['name']}'"
+            )
             return ReaderData.empty(
                 num_data_fields=len(channels_idx),
                 num_geo_fields=len(self.geoinfo_idx),
@@ -352,7 +361,10 @@ class DataReaderEObs(DataReaderTimestep):
 
         # Get the actual channel names
         all_channels = sorted(set(self.source_channels + self.target_channels))
+        _logger.info(f"Available channels in dataset: {all_channels}")
         selected_channels = [all_channels[i] for i in channels_idx]
+        _logger.info(f"Selected channel indices: {channels_idx}")
+        _logger.info(f"Selected channels for retrieval: {selected_channels}")
 
         # Extract data for selected timesteps and channels
         data_arrays = []
@@ -360,18 +372,34 @@ class DataReaderEObs(DataReaderTimestep):
 
         for t_idx in t_idxs:
             if t_idx < 0 or t_idx >= len(self.ds.coords["time"]):
+                _logger.info(
+                    f"Time index {t_idx} out of bounds for stream '{self._stream_info['name']}'"
+                )
                 continue
 
             # Extract data for this timestep
             timestep_data = []
             for ch in selected_channels:
+                _logger.info(
+                    f"Extracting {ch} at time index {t_idx} for stream '{self._stream_info['name']}'"
+                )
                 # Load data using isel for efficient indexing
                 var_data = self.ds[ch].isel(time=t_idx).values.astype(np.float32)
+                _logger.info(
+                    f"Extracted data shape for {ch} at time index {t_idx}: {var_data.shape}"
+                )
                 # Flatten spatial dimensions (lat, lon) -> (n_points,)
                 var_data_flat = var_data.flatten()
+                _logger.info(
+                    f"Flattened data shape for {ch} at time index {t_idx}: {var_data_flat.shape}"
+                )
                 timestep_data.append(var_data_flat)
+                _logger.info(f"Appended data for {ch} at time index {t_idx} to timestep data list")
 
             # Stack channels: (n_points, n_channels)
+            _logger.info(
+                f"Stacking data for time index {t_idx} with shape {(self.n_points, len(selected_channels))}"
+            )
             timestep_data = np.stack(timestep_data, axis=1)
             data_arrays.append(timestep_data)
 
@@ -380,6 +408,9 @@ class DataReaderEObs(DataReaderTimestep):
             datetimes_list.extend([dt] * self.n_points)
 
         if len(data_arrays) == 0:
+            _logger.info(
+                f"No valid data found for the requested time window in stream '{self._stream_info['name']}'"
+            )
             return ReaderData.empty(
                 num_data_fields=len(channels_idx),
                 num_geo_fields=len(self.geoinfo_idx),
