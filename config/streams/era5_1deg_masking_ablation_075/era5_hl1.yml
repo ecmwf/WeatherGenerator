@@ -1,0 +1,39 @@
+# ERA5 variables with correlation length → hl_mask=1 at multiplier=0.75
+# Smoothest fields: 2t, t_50, and a few geopotential levels.
+# L_corr range: ~2300-2800 km × 0.75 → target scale 1700-2100 km
+
+ERA5_planetary :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  stream_id : 0
+  source : ['2t', 't_50', 'z_50', 'z_100', 'z_500']
+  target : ['2t', 't_50', 'z_50', 'z_100', 'z_500']
+  # 't_50' matches t_500 (hl2), 'z_100' matches z_1000 (hl2)
+  source_exclude : ['t_500', 'z_1000']
+  target_exclude : ['t_500', 'z_1000']
+  loss_weight : 1.
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 8
+  tokenize_spacetime : True
+  max_num_targets : -1
+  masking_override :
+    target_input :
+      masking_strategy_config :
+        hl_mask : 1
+  embed :
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1

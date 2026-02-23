@@ -1,0 +1,50 @@
+# ERA5 variables with correlation length → hl_mask=2 at multiplier=0.75
+# Smooth-synoptic fields: most geopotential, most temperature, surface vars,
+# some upper moisture, u_50, u_100, v_150.
+# L_corr range: ~1000-2000 km × 0.75 → target scale 750-1500 km
+
+ERA5_smooth :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  stream_id : 1
+  source : ['2d', 'msl', 'skt', 'sp',
+            'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_600', 'z_700', 'z_850', 'z_925', 'z_1000',
+            't_100', 't_200', 't_250', 't_300', 't_400', 't_500', 't_600', 't_700', 't_850', 't_925', 't_1000',
+            'q_50', 'q_100', 'q_1000',
+            'u_50', 'u_100',
+            'v_150']
+  target : ['2d', 'msl', 'skt', 'sp',
+            'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_600', 'z_700', 'z_850', 'z_925', 'z_1000',
+            't_100', 't_200', 't_250', 't_300', 't_400', 't_500', 't_600', 't_700', 't_850', 't_925', 't_1000',
+            'q_50', 'q_100', 'q_1000',
+            'u_50', 'u_100',
+            'v_150']
+  # 'q_50' matches q_500 (hl4), 'u_50' matches u_500 (hl3), 'u_100' matches u_1000 (hl3)
+  source_exclude : ['q_500', 'u_500', 'u_1000']
+  target_exclude : ['q_500', 'u_500', 'u_1000']
+  loss_weight : 1.
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 8
+  tokenize_spacetime : True
+  max_num_targets : -1
+  masking_override :
+    target_input :
+      masking_strategy_config :
+        hl_mask : 2
+  embed :
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1
