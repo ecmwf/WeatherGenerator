@@ -45,7 +45,7 @@ from weathergen.common.logger import init_loggers
 
 _logger = logging.getLogger(__name__)
 
-def extract_filepaths(netcdf_paths: list):
+def extract_filepaths(netcdf_paths: list) -> list:
     """
     Extracts filepaths from a list of netcdf paths.
     If a directory is given, all files in the directory are returned.
@@ -72,7 +72,7 @@ def extract_filepaths(netcdf_paths: list):
         return glob.glob(glob_path)
 
 
-def psd_from_config(cfg: dict):
+def psd_from_config(cfg: dict) -> None:
     """
     Main function that controls power spectra density plotting.
     Parameters
@@ -147,7 +147,7 @@ def parse_args(args: list) -> None:
         type=str,
         nargs="+",
         help="List of regions to plot (e.g., 'ShortGlobe', 'N-Mid-Lats'). If None, uses all",
-        choices=["ShortGlobe", "N-Mid-Lats", "S-Mid-Lats", "Tropics"],
+        choices=["FullGlobe", "ShortGlobe", "N-Mid-Lats", "S-Mid-Lats", "Tropics"],
         default=["ShortGlobe"],
     )
 

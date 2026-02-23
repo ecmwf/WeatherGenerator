@@ -7,7 +7,10 @@
 # ///
 
 """
-Adapted from Martin Willet's code for power spectra for use with the WeatherGenerator model
+Adapted from Martin Willet's code for zonal power spectra for use with the WeatherGenerator model.
+It takes 1D Fourier transforms along the longitude dimension of the data, using an upper and lower longitude as regional bounds. 
+It produces log-log plots of the spectra and semilogx plots of the ratio of the spectra to a reference (e.g., observations or reanalysis). 
+The script is designed to be flexible and can be used to plot spectra for different diagnostics, regions, and forecast times.
 """
 
 import logging
@@ -166,7 +169,10 @@ diags = {
 }
 
 
-def add_levels(weathergen_diags, plevels):
+def add_levels(weathergen_diags: dict, plevels: list) -> None:
+    """
+    Add levels to the diagnostics dictionary.
+    Based on whether they are pressure level of surface variables"""
     for var_dict in weathergen_diags:
         if weathergen_diags[var_dict]["levtype"] == "pressure":
             weathergen_diags[var_dict]["levels"] = plevels
@@ -174,7 +180,7 @@ def add_levels(weathergen_diags, plevels):
             weathergen_diags[var_dict]["levels"] = [0]
 
 
-def psd(ht):
+def psd(ht: np.typing.NDArray) -> np.typing.NDArray:
     """
     Returns a power spectrum density for the positive non-zero frequencies
     Assumes ht has an even number of points
@@ -188,7 +194,7 @@ def psd(ht):
     return psd
 
 
-def old_cubepsd(cube, dimension="longitude"):
+def old_cubepsd(cube: iris.cube.Cube, dimension: str = "longitude") -> np.typing.NDArray:
     """
     Returns a power spectrum density for a cube
     Assumes that cube.data has an even number of points in dimension dim
@@ -210,7 +216,7 @@ def old_cubepsd(cube, dimension="longitude"):
     return field_psd
 
 
-def cubepsd(cubes, dimension="longitude"):
+def cubepsd(cubes: iris.cube.CubeList | iris.cube.Cube, dimension: str = "longitude") -> np.typing.NDArray:
     """
     Returns a power spectrum density for a cube
     Assumes that cube.data has an even number of points in dimension dim
@@ -243,7 +249,7 @@ def cubepsd(cubes, dimension="longitude"):
     return field_psd
 
 
-def addwvns(axes):
+def addwvns(axes: plt.Axes) -> None:
     """
     Adds lines of equal wavenumber to plots
     """
@@ -267,10 +273,7 @@ def addwvns(axes):
         )
         axes.text(wvn / 360.0, ytxt, f"n{wvn:3.0f}", rotation="vertical")
 
-    return None
-
-
-def addlengths(axes, region):
+def addlengths(axes: plt.Axes, region: dict) -> None:
     """
     Adds lines of equal spatial scale in km to plots
     """
@@ -306,10 +309,7 @@ def addlengths(axes, region):
         )
         axes.text(flengths[ilength], ytxt, f"{lengths[ilength]:5.0f}km", rotation="vertical")
 
-    return None
-
-
-def addidealslope(axes, slope, defxs=None, defy0=10.0):
+def addidealslope(axes: plt.Axes, slope: float, defxs: list | None = None, defy0: float = 10.0) -> None:
     """
     Adds an idealised slope to a log-log spectra plot
     """
@@ -323,10 +323,7 @@ def addidealslope(axes, slope, defxs=None, defy0=10.0):
     axes.plot(slopexs, slopeys, color="black", lw=2.0, scalex=False, scaley=False)
     axes.text(xtxt, ytxt, "$k^{" + str(slope) + "}$", fontsize="xx-large", weight="bold")
 
-    return None
-
-
-def calcposfreq(cube, dimension="longitude"):
+def calcposfreq(cube: iris.cube.Cube, dimension: str = "longitude") -> np.typing.NDArray:
     """
     Given a cube and dimension returns the positive frequencies
     Assumes gridpoints are evenly spaced
@@ -342,7 +339,7 @@ def calcposfreq(cube, dimension="longitude"):
     return posfreq
 
 
-def region_constraint(region):
+def region_constraint(region: dict) -> tuple[iris.Constraint, iris.Constraint]:
     """
     Given a region definition, returns a longitude and latitude constraint
     """
@@ -365,7 +362,7 @@ def region_constraint(region):
     return lat_constraint, lon_constraint
 
 
-def tidy_plot(axes, plttitle, ylabel, ylims, region):
+def tidy_plot(axes: plt.Axes, plttitle: str, ylabel: str, ylims: list, region: dict) -> None:
     """
     Add plots stuff common to all plots
     """
@@ -379,26 +376,23 @@ def tidy_plot(axes, plttitle, ylabel, ylims, region):
     addwvns(axes)
     addlengths(axes, region)
 
-    return None
-
 
 def setuppage():
     plt.rc("figure", figsize=(8.27, 11.69))
     plt.subplots_adjust(hspace=0.3)
     # plt.rcParams['font.size']=11
     plt.rcParams["font.size"] = 13
-    return None
 
 
 def plot_psds(
-    comparison_dict,
-    regkeys,
-    diagkeys,
-    usencname=False,
-    fc_times=None,
-    fname=None,
-    outdir=None,
-    plevels=None,
+    comparison_dict: dict,
+    regkeys: list,
+    diagkeys: list,
+    usencname: bool = False,
+    fc_times: list | None = None,
+    fname: str | None = None,
+    outdir: str | None = None,
+    plevels: list | None = None,
 ):
     """
     Calculates and plots power spectra
