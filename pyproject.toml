@@ -28,7 +28,6 @@ dependencies = [
  "weathergen-common",
  "weathergen-evaluate",
  "weathergen-readers-extra",
- "weathergen-verif"
 ]
 
 
@@ -226,7 +225,6 @@ weathergen-common = { workspace = true }
 weathergen-evaluate = { workspace = true }
 weathergen-metrics = { workspace = true }
 weathergen-readers-extra = { workspace = true }
-weathergen-verif = { workspace = true }
 
 
 flash-attn = [

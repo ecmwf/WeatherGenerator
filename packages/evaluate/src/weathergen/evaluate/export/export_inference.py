@@ -181,11 +181,7 @@ def parse_args(args: list) -> argparse.Namespace:
         help="Type of grid to regrid to (only used if --regrid-degree is specified)",
     )
 
-    parser.add_argument(
-        "-b",
-        "--obs",
-        help= "observation file for creating verif files"
-    )
+    parser.add_argument("-b", "--obs", help="observation file for creating verif files")
 
     parser.add_argument(
         "-m",
@@ -199,12 +195,13 @@ def parse_args(args: list) -> argparse.Namespace:
         "--verif-template",
         default="verif/%S/%V/verif_%S_%V_%M_%D.nc",
         help="Template for the output nc filenames, default will be to create output/verif/%S/%V \
-              repertories where %S, %V, %M, %D are replaced by the streams, variable, method and date",
+              repertories where %S, %V, %M, %D are replaced by the "
+        "streams, variable, method and date",
     )
 
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
-        _logger.warning(f"Unknown arguments: {unknown_args}") 
+        _logger.warning(f"Unknown arguments: {unknown_args}")
     return args
 
 

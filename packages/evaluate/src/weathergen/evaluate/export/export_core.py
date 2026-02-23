@@ -169,14 +169,11 @@ def get_ref_times(fname_zarr, stream, samples, fstep_hours) -> list[np.datetime6
             ref_times.append(ref_time)
     return ref_times
 
+
 def get_streams(stream, fname_zarr):
     with zarrio_reader(fname_zarr) as zio:
-        zio_streams =  zio.streams
-    streams = (
-        zio_streams
-        if stream is None
-        else [stream]
-    )
+        zio_streams = zio.streams
+    streams = zio_streams if stream is None else [stream]
     return streams
 
 
