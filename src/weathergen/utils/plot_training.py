@@ -20,6 +20,7 @@ import numpy as np
 import yaml
 
 import weathergen.common.config as config
+from weathergen.train.utils import TRAIN, VAL
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
@@ -211,12 +212,12 @@ def plot_lr(
         x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
         data_cols = list(filter(lambda c: "learning_rate" in c, run_data.train.columns))
 
-        plt.plot(
-            run_data.train[x_col],
-            run_data.train[data_cols],
-            linestyle,
-            color=colors[j % len(colors)],
-        )
+        x_vals = run_data.train[x_col]
+        y_vals = np.array(run_data.train[data_cols])
+        mask = y_vals > 1000.0
+        y_vals[mask] = 0.0  # np.nan
+
+        plt.plot(x_vals, y_vals, linestyle, color=colors[j % len(colors)])
         legend_str += [
             ("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
         ]
@@ -243,104 +244,33 @@ def plot_lr(
     plt.close()
 
 
-####################################################################################################
-def plot_utilization(
-    runs_ids: dict[str, list],
-    runs_data: list[Metrics],
-    runs_active: list[bool],
-    plot_dir: Path,
-    x_axis: str = "samples",
-):
-    """
-    Plot compute utilization of training runs.
-
-    Parameters
-    ----------
-    runs_ids : dict
-        dictionary with run ids as keys and list of SLURM job ids and descriptions as values
-    runs_data : list
-        list of Metrics objects containing the training data
-    runs_active : list
-        list of booleans indicating whether the run is still active
-    plot_dir : Path
-        directory to save the plots
-    x_axis : str
-        x-axis strings used in the column names (options: "samples", "dtime")
-    """
-    prop_cycle = plt.rcParams["axes.prop_cycle"]
-    colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
-    _fig = plt.figure(figsize=(10, 7), dpi=300)
-
-    linestyles = ["-", "--", ".-"]
-
-    legend_str = []
-    for j, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if run_data.train.is_empty():
-            continue
-
-        x_col = next(filter(lambda c: x_axis in c, run_data.train.columns))
-        data_cols = run_data.system.columns[1:]
-
-        for ii, col in enumerate(data_cols):
-            plt.plot(
-                run_data.train[x_col],
-                run_data.system[col],
-                linestyles[ii],
-                color=colors[j % len(colors)],
-            )
-            legend_str += [
-                ("R" if runs_active[j] else "X")
-                + " : "
-                + run_id
-                + ", "
-                + col
-                + " : "
-                + runs_ids[run_id][1]
-            ]
-
-    if len(legend_str) < 1:
-        _logger.warning("Could not find any data for utilization plot")
-        return
-
-    plt.legend(legend_str)
-    plt.grid(True, which="both", ls="-")
-    # plt.yscale( 'log')
-    plt.title("utilization")
-    plt.ylabel("percentage utilization")
-    plt.xlabel(x_axis)
-    plt.tight_layout()
-    rstr = "".join([f"{r}_" for r in runs_ids])
-
-    # save the plot
-    plt_fname = plot_dir / f"{rstr}utilization.png"
-    _logger.info(f"Saving utilization plot to '{plt_fname}'")
-    plt.savefig(plt_fname)
-    plt.close()
-
-
-def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, x_scale_log=False):
+def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN, x_scale_log=False):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
-    # # legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
-    # for line in legend.get_lines():
-    #     line.set(alpha=1.0)
     _fig = plt.figure(figsize=(10, 7), dpi=300)
 
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        x_vals = np.array(run_data.train["num_samples"])
-        y_vals = np.array(run_data.train["loss_avg_mean"])
+        if stage == TRAIN:
+            x_vals = np.array(run_data.train["num_samples"])
+            y_vals = np.array(run_data.train["loss_avg_mean"])
+        elif stage == VAL:
+            x_vals = np.array(run_data.val["num_samples"])
+            # y_vals = np.array(run_data.val["LossLatentSSLStudentTeacher.loss_avg"])
+            y_vals = np.array(run_data.val["loss_avg_mean"])
+        else:
+            assert False
+
         plt.plot(
             x_vals,
             y_vals,
             color=colors[i_run % len(colors)],
         )
-        legend_str += [run_id + " : " + runs_ids[run_id][1]]
-        # ("R" if runs_active[j] else "X")
-        # + " : "
-        # run_id + ", " + col + " : " + runs_ids[run_id][1]
-        # ]
+        # legend_str += [ run_id + " : " + runs_ids[run_id][1]]
+        legend_str += [
+            ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
+        ]
 
     plt.legend(legend_str)
     plt.grid(True, which="both", ls="-")
@@ -355,7 +285,7 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, x_scale_log=False):
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
 
-    plt_fname = plot_dir / f"{rstr}avg.png"
+    plt_fname = plot_dir / f"{rstr}{str(stage)}_avg.png"
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -369,7 +299,7 @@ def plot_loss_per_stream(
     runs_active: list[bool],
     stream_names: list[str],
     plot_dir: Path,
-    errs: list[str] | None = None,
+    errs: list[str],
     x_axis: str = "samples",
     x_type: str = "step",
     x_scale_log: bool = False,
@@ -401,9 +331,6 @@ def plot_loss_per_stream(
         whether to use log scale for x-axis
     """
 
-    if errs is None:
-        errs = ["mse"]
-
     modes = [modes] if type(modes) is not list else modes
     # repeat colors when train and val is plotted simultaneously
     prop_cycle = plt.rcParams["axes.prop_cycle"]
@@ -431,7 +358,6 @@ def plot_loss_per_stream(
                     # find the col of the request x-axis (e.g. samples)
                     x_col = next(filter(lambda c: x_axis in c, run_data_mode.columns))
                     # find the cols of the requested metric (e.g. mse) for all streams
-                    # TODO: fix captialization
                     data_cols = filter(
                         lambda c: err in c and stream_name.lower() in c.lower(),
                         run_data_mode.columns,
@@ -474,7 +400,7 @@ def plot_loss_per_stream(
         if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
             continue
 
-        legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
+        legend = plt.legend(legend_str)  # , loc="upper right" if not x_scale_log else "lower left")
         for line in legend.get_lines():
             line.set(alpha=1.0)
         plt.grid(True, which="both", ls="-")
@@ -665,6 +591,15 @@ def plot_train(args=None):
         help="List of streams to plot",
     )
     parser.add_argument(
+        "--errors",
+        "-e",
+        dest="errors",
+        default=["loss_avg"],
+        type=str,
+        nargs="+",
+        help="List of errors to plot",
+    )
+    parser.add_argument(
         "--x_type",
         "-x",
         dest="x_type",
@@ -734,10 +669,7 @@ def plot_train(args=None):
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
 
     # plot average loss
-    plot_loss_avg(out_dir, runs_ids, runs_data)
-
-    # # plot performance
-    # plot_utilization(runs_ids, runs_data, runs_active, plot_dir=out_dir)
+    plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=TRAIN)
 
     # compare different runs
     plot_loss_per_stream(
@@ -746,6 +678,7 @@ def plot_train(args=None):
         runs_data,
         runs_active,
         streams,
+        errs=args.errors,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
@@ -756,6 +689,7 @@ def plot_train(args=None):
         runs_data,
         runs_active,
         streams,
+        errs=args.errors,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
@@ -766,6 +700,7 @@ def plot_train(args=None):
         runs_data,
         runs_active,
         streams,
+        errs=args.errors,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         plot_dir=out_dir,
