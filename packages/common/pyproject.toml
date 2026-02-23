@@ -13,7 +13,7 @@ dependencies = [
     "omegaconf~=2.3.0",
     "pyyaml",
     "tqdm",
-    "gitpython"
+    "gitpython~=3.1.44"
 ]
 
 [dependency-groups]
