@@ -195,7 +195,6 @@ def write_output(
         source_channels,
         geoinfo_channels,
         latents=latents_all,
-        latent_stream_name=latent_stream_name,
         sample_start=sample_start,
         forecast_offset=forecast_offset,
     )
