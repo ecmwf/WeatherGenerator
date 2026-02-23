@@ -1,0 +1,48 @@
+# ERA5 variables with correlation length → hl_mask=3 at multiplier=0.25
+# These are the smoothest fields: geopotential (all levels), surface vars,
+# some upper-level temperature/moisture, and u_50.
+# L_corr range: ~1700-2800 km × 0.25 → target scale 425-700 km
+
+ERA5_smooth :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  stream_id : 0
+  source : ['2d', '2t', 'msl', 'skt', 'sp',
+            'z_',
+            'q_50', 'q_100', 'q_1000',
+            't_50', 't_100', 't_250', 't_300', 't_400', 't_925', 't_1000',
+            'u_50']
+  target : ['2d', '2t', 'msl', 'skt', 'sp',
+            'z_',
+            'q_50', 'q_100', 'q_1000',
+            't_50', 't_100', 't_250', 't_300', 't_400', 't_925', 't_1000',
+            'u_50']
+  # Exclude longer variable names that are false-positive substring matches
+  source_exclude : ['q_500', 't_500', 'u_500']
+  target_exclude : ['q_500', 't_500', 'u_500']
+  loss_weight : 1.
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 8
+  tokenize_spacetime : True
+  max_num_targets : -1
+  masking_override :
+    target_input :
+      masking_strategy_config :
+        hl_mask : 3
+  embed :
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1

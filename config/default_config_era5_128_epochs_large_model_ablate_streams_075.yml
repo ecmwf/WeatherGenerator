@@ -187,7 +187,7 @@ training_config:
       num_samples: 1,
       num_steps_input: 1,
       masking_strategy_config : { 
-        rate : 0.6,
+        rate : 0.7,
         hl_mask: 0,
         rate_sampling: False
       },
@@ -198,7 +198,7 @@ training_config:
     "prediction_target" : {
       masking_strategy: "healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+      masking_strategy_config : { rate : 0.7, hl_mask: 0, rate_sampling: False },
     },
   }
 

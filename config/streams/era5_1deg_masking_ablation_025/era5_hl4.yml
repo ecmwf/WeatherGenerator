@@ -1,0 +1,49 @@
+# ERA5 variables with correlation length → hl_mask=4 at multiplier=0.25
+# Synoptic-scale fields: mid-level temperature, some winds, moisture,
+# and surface geopotential (z).
+# L_corr range: ~970-1580 km × 0.25 → target scale 242-395 km
+
+ERA5_synoptic :
+  type : anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  stream_id : 1
+  source : ['t_200', 't_500', 't_600', 't_700', 't_850',
+            'q_300',
+            'u_100', 'u_150', 'u_400',
+            'v_150', 'v_200', 'v_250', 'v_400',
+            'z']
+  target : ['t_200', 't_500', 't_600', 't_700', 't_850',
+            'q_300',
+            'u_100', 'u_150', 'u_400',
+            'v_150', 'v_200', 'v_250', 'v_400',
+            'z']
+  # 'z' substring matches all z_* — exclude them to keep only surface z
+  # 'u_100' matches u_1000 — exclude it
+  source_exclude : ['z_', 'u_1000']
+  target_exclude : ['z_', 'u_1000']
+  loss_weight : 1.
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 8
+  tokenize_spacetime : True
+  max_num_targets : -1
+  masking_override :
+    target_input :
+      masking_strategy_config :
+        hl_mask : 4
+  embed :
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1

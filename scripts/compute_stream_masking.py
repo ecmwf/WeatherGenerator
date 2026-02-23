@@ -53,10 +53,13 @@ EARTH_RADIUS_KM = 6371.0
 class DatasetInfo:
     """Minimal container for data loaded from a dataset."""
 
-    lats: NDArray[np.float64]  # [n_points] radians
-    lons: NDArray[np.float64]  # [n_points] radians
+    lats: NDArray[np.float64] | None  # [n_points] radians
+    lons: NDArray[np.float64] | None  # [n_points] radians
     data: dict[str, NDArray]  # var_name -> [n_times, n_points]
     period_hours: float | None = None
+    lats_ragged: list[NDArray[np.float64]] | None = None  # per-time [n_points_t]
+    lons_ragged: list[NDArray[np.float64]] | None = None  # per-time [n_points_t]
+    data_ragged: dict[str, list[NDArray]] | None = None  # var_name -> list[n_points_t]
 
 
 @dataclass
@@ -114,14 +117,30 @@ def load_anemoi(
     for ch, idx in var_indices.items():
         values = []
         for ti in time_indices:
-            row = ds[int(ti)]  # shape [n_vars, n_points] or [n_points, n_vars]
-            if row.ndim == 2:
-                if row.shape[0] == len(all_vars):
-                    values.append(row[idx])
-                else:
-                    values.append(row[:, idx])
-            else:
+            row = ds[int(ti)]  # common shapes: [n_vars, n_points], [n_vars, 1, n_points]
+            row = np.asarray(row)
+            if row.ndim == 1:
                 values.append(row)
+                continue
+
+            var_axis = None
+            for axis, dim in enumerate(row.shape):
+                if dim == len(all_vars):
+                    var_axis = axis
+                    break
+
+            if var_axis is None:
+                raise ValueError(
+                    "Could not locate variable axis in anemoi sample with shape "
+                    f"{row.shape} (n_vars={len(all_vars)})"
+                )
+
+            var_slice = np.take(row, idx, axis=var_axis)
+            var_slice = np.squeeze(var_slice)
+            if var_slice.ndim > 1:
+                var_slice = var_slice.reshape(-1)
+            values.append(var_slice)
+
         data[ch] = np.stack(values, axis=0)
 
     period = None
@@ -139,6 +158,7 @@ def load_zarr_columnar(
     data_cols: list[str] | None,
     n_time_samples: int,
     seed: int,
+    max_points_per_time: int | None = 50_000,
 ) -> DatasetInfo:
     """Load from a zarr store with named lat/lon columns."""
     import zarr
@@ -146,26 +166,121 @@ def load_zarr_columnar(
     store = zarr.open(path, mode="r")
     rng = np.random.default_rng(seed)
 
-    lats = np.deg2rad(np.asarray(store[lat_col]))
-    lons = np.deg2rad(np.asarray(store[lon_col]))
+    if lat_col in store and lon_col in store:
+        lats = np.deg2rad(np.asarray(store[lat_col]))
+        lons = np.deg2rad(np.asarray(store[lon_col]))
+
+        if data_cols is None:
+            skip = {lat_col, lon_col, "time", "datetime", "date"}
+            data_cols = [k for k in store.keys() if k not in skip]
+
+        # Determine time dimension
+        first_arr = np.asarray(store[data_cols[0]])
+        if first_arr.ndim == 1:
+            # No time dimension
+            data = {col: np.asarray(store[col])[np.newaxis, :] for col in data_cols}
+        else:
+            n_times_total = first_arr.shape[0]
+            n_samples = min(n_time_samples, n_times_total)
+            time_indices = rng.choice(n_times_total, size=n_samples, replace=False)
+            time_indices.sort()
+            data = {col: np.asarray(store[col])[time_indices] for col in data_cols}
+
+        return DatasetInfo(lats=lats, lons=lons, data=data)
+
+    # Observation-style zarr with a single data table and column metadata
+    if "data" not in store:
+        raise ValueError(
+            "Zarr store does not contain lat/lon arrays or a 'data' table."
+        )
+
+    data_arr = store["data"]
+    colnames = list(data_arr.attrs.get("colnames", []))
+    if not colnames:
+        raise ValueError("Zarr 'data' array missing 'colnames' metadata.")
+
+    if lat_col in colnames:
+        lat_idx = colnames.index(lat_col)
+    else:
+        lat_idx = int(data_arr.attrs.get("lat_idx", [None])[0])
+    if lon_col in colnames:
+        lon_idx = colnames.index(lon_col)
+    else:
+        lon_idx = int(data_arr.attrs.get("lon_idx", [None])[0])
+
+    if lat_idx is None or lon_idx is None:
+        raise ValueError(
+            "Could not determine lat/lon column indices for observation table."
+        )
 
     if data_cols is None:
-        skip = {lat_col, lon_col, "time", "datetime", "date"}
-        data_cols = [k for k in store.keys() if k not in skip]
-
-    # Determine time dimension
-    first_arr = np.asarray(store[data_cols[0]])
-    if first_arr.ndim == 1:
-        # No time dimension
-        data = {col: np.asarray(store[col])[np.newaxis, :] for col in data_cols}
+        data_idxs = data_arr.attrs.get("data_idxs")
+        if data_idxs is None:
+            skip = {lat_col, lon_col, "time", "datetime", "date"}
+            data_idxs = [i for i, name in enumerate(colnames) if name not in skip]
+        data_cols = [colnames[i] for i in data_idxs]
+        data_indices = list(data_idxs)
     else:
-        n_times_total = first_arr.shape[0]
-        n_samples = min(n_time_samples, n_times_total)
-        time_indices = rng.choice(n_times_total, size=n_samples, replace=False)
-        time_indices.sort()
-        data = {col: np.asarray(store[col])[time_indices] for col in data_cols}
+        missing = [c for c in data_cols if c not in colnames]
+        if missing:
+            raise ValueError(f"Requested columns not found in data table: {missing}")
+        data_indices = [colnames.index(c) for c in data_cols]
 
-    return DatasetInfo(lats=lats, lons=lons, data=data)
+    idx_key = next((k for k in store.keys() if k.startswith("idx_")), None)
+    if idx_key is None:
+        raise ValueError("Observation zarr missing time index array (idx_*).")
+
+    idx = np.asarray(store[idx_key])
+    n_rows = data_arr.shape[0]
+    n_times_total = len(idx)
+    end_idx = np.concatenate([idx[1:], np.array([n_rows], dtype=idx.dtype)])
+    counts = end_idx - idx
+    valid_times = np.where(counts >= 2)[0]
+    if len(valid_times) == 0:
+        raise ValueError("No valid time slices found in observation zarr table.")
+
+    n_samples = min(n_time_samples, len(valid_times))
+    time_indices = rng.choice(valid_times, size=n_samples, replace=False)
+    time_indices.sort()
+
+    lats_list: list[NDArray[np.float64]] = []
+    lons_list: list[NDArray[np.float64]] = []
+    data_list: dict[str, list[NDArray]] = {col: [] for col in data_cols}
+
+    for ti in time_indices:
+        start = int(idx[ti])
+        end = int(end_idx[ti])
+        if end <= start:
+            continue
+        rows = np.asarray(data_arr[start:end])
+        if rows.ndim != 2:
+            raise ValueError(f"Observation rows expected 2D, got {rows.shape}")
+
+        lats = np.deg2rad(rows[:, lat_idx])
+        lons = np.deg2rad(rows[:, lon_idx])
+
+        if max_points_per_time is not None and len(lats) > max_points_per_time:
+            sample = rng.choice(len(lats), size=max_points_per_time, replace=False)
+            lats = lats[sample]
+            lons = lons[sample]
+            rows = rows[sample]
+
+        lats_list.append(lats)
+        lons_list.append(lons)
+        for col, cidx in zip(data_cols, data_indices):
+            data_list[col].append(rows[:, cidx])
+
+    if not lats_list:
+        raise ValueError("No valid time slices found in observation zarr table.")
+
+    return DatasetInfo(
+        lats=None,
+        lons=None,
+        data={},
+        lats_ragged=lats_list,
+        lons_ragged=lons_list,
+        data_ragged=data_list,
+    )
 
 
 def load_xarray(
@@ -232,6 +347,47 @@ def load_xarray(
 
 
 # ---------------------------------------------------------------------------
+# Anomaly / detrending helpers
+# ---------------------------------------------------------------------------
+
+
+def _standardize_structured(data: NDArray) -> NDArray:
+    """Per-point temporal standardization: remove time-mean, divide by time-std.
+
+    This removes the climatological spatial pattern (latitude gradients, land-sea
+    contrast, orographic effects) so that the autocorrelation reflects the
+    correlation structure of *weather anomalies* rather than the smooth background
+    climate.  Without this, fields with strong gradients (tp, q, 2t) show
+    artificially long correlation lengths.
+    """
+    time_mean = np.nanmean(data, axis=0)  # [n_points]
+    anomalies = data - time_mean[None, :]
+    time_std = np.nanstd(data, axis=0)  # [n_points]
+    time_std = np.where(time_std < 1e-12, 1.0, time_std)
+    return anomalies / time_std[None, :]
+
+
+def _standardize_ragged(data_list: list[NDArray]) -> list[NDArray]:
+    """Per-snapshot spatial standardization for ragged unstructured data.
+
+    Since each time slice may have different observation locations, we cannot
+    compute a per-point temporal mean.  Instead, we remove the spatial mean and
+    normalise by the spatial std within each snapshot.  This removes the gross
+    large-scale gradient for each time step.
+    """
+    result: list[NDArray] = []
+    for values in data_list:
+        values = np.asarray(values, dtype=np.float64)
+        mean_val = np.nanmean(values)
+        std_val = np.nanstd(values)
+        if std_val < 1e-12:
+            result.append(values - mean_val)
+        else:
+            result.append((values - mean_val) / std_val)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Spatial autocorrelation
 # ---------------------------------------------------------------------------
 
@@ -273,6 +429,25 @@ def compute_spatial_autocorr(
     bin_corr : binned correlation values
     """
     rng = np.random.default_rng(seed)
+    data = np.asarray(data)
+    if data.ndim == 1:
+        data = data[np.newaxis, :]
+    elif data.ndim != 2:
+        raise ValueError(
+            "Expected data with shape [n_times, n_points], "
+            f"got array with shape {data.shape}"
+        )
+
+    n_points_expected = len(lats)
+    if data.shape[1] != n_points_expected and data.shape[0] == n_points_expected:
+        data = data.T
+
+    if data.shape[1] != n_points_expected:
+        raise ValueError(
+            "Data spatial dimension does not match lat/lon length: "
+            f"data.shape={data.shape}, n_points={n_points_expected}"
+        )
+
     n_times, n_points = data.shape
 
     # Sample random pairs of (time, point_i, point_j)
@@ -350,12 +525,139 @@ def compute_spatial_autocorr(
     return l_corr_km, bin_centers, bin_corr
 
 
+def compute_spatial_autocorr_unstructured(
+    data_list: list[NDArray],
+    lats_list: list[NDArray],
+    lons_list: list[NDArray],
+    max_lag_km: float = 3000.0,
+    n_bins: int = 50,
+    n_sample_pairs: int = 100_000,
+    seed: int = 42,
+) -> tuple[float, NDArray, NDArray]:
+    """Compute spatial autocorrelation for ragged per-time observations."""
+    rng = np.random.default_rng(seed)
+    if not (len(data_list) == len(lats_list) == len(lons_list)):
+        raise ValueError("Ragged data, lat, and lon lists must have the same length.")
+
+    n_times = len(data_list)
+    if n_times == 0:
+        logger.warning("No time samples available for autocorrelation estimation")
+        return 500.0, np.array([]), np.array([])
+
+    sizes = np.array([len(lats) for lats in lats_list], dtype=int)
+    valid_times = np.where(sizes >= 2)[0]
+    if len(valid_times) == 0:
+        logger.warning("Too few points per time for autocorrelation estimation")
+        return 500.0, np.array([]), np.array([])
+
+    weights = sizes[valid_times] * (sizes[valid_times] - 1)
+    if weights.sum() == 0:
+        logger.warning("Too few valid pairs for autocorrelation estimation")
+        return 500.0, np.array([]), np.array([])
+
+    time_samples = rng.choice(
+        valid_times, size=n_sample_pairs, replace=True, p=weights / weights.sum()
+    )
+
+    distances_list: list[NDArray] = []
+    vals_i_list: list[NDArray] = []
+    vals_j_list: list[NDArray] = []
+
+    for t in np.unique(time_samples):
+        count = int(np.sum(time_samples == t))
+        lats = lats_list[t]
+        lons = lons_list[t]
+        vals = np.asarray(data_list[t])
+        if vals.ndim != 1:
+            vals = vals.reshape(-1)
+        n_points = len(vals)
+        if n_points < 2:
+            continue
+
+        idx_i = rng.integers(0, n_points, size=count)
+        idx_j = rng.integers(0, n_points, size=count)
+        same = idx_i == idx_j
+        while same.any():
+            idx_j[same] = rng.integers(0, n_points, size=int(same.sum()))
+            same = idx_i == idx_j
+
+        distances = haversine_km(lats[idx_i], lons[idx_i], lats[idx_j], lons[idx_j])
+        distances_list.append(distances)
+        vals_i_list.append(vals[idx_i])
+        vals_j_list.append(vals[idx_j])
+
+    if not distances_list:
+        logger.warning("Too few valid pairs for autocorrelation estimation")
+        return 500.0, np.array([]), np.array([])
+
+    distances = np.concatenate(distances_list)
+    vals_i = np.concatenate(vals_i_list)
+    vals_j = np.concatenate(vals_j_list)
+
+    in_range = distances <= max_lag_km
+    distances = distances[in_range]
+    vals_i = vals_i[in_range]
+    vals_j = vals_j[in_range]
+
+    if len(distances) < 100:
+        logger.warning("Too few valid pairs for autocorrelation estimation")
+        return 500.0, np.array([]), np.array([])
+
+    nan_mask = np.isnan(vals_i) | np.isnan(vals_j)
+    if nan_mask.any():
+        keep = ~nan_mask
+        distances = distances[keep]
+        vals_i = vals_i[keep]
+        vals_j = vals_j[keep]
+
+    if len(distances) < 100:
+        logger.warning("Too few non-NaN pairs for autocorrelation estimation")
+        return 500.0, np.array([]), np.array([])
+
+    bin_edges = np.linspace(0, max_lag_km, n_bins + 1)
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    bin_indices = np.digitize(distances, bin_edges) - 1
+    bin_indices = np.clip(bin_indices, 0, n_bins - 1)
+
+    global_mean = np.nanmean(np.concatenate([vals_i, vals_j]))
+    global_var = np.nanvar(np.concatenate([vals_i, vals_j]))
+
+    if global_var < 1e-12:
+        logger.warning("Near-zero variance, defaulting correlation length")
+        return 500.0, bin_centers, np.zeros(n_bins)
+
+    bin_corr = np.full(n_bins, np.nan)
+    bin_counts = np.zeros(n_bins, dtype=int)
+
+    for b in range(n_bins):
+        mask = bin_indices == b
+        count = int(mask.sum())
+        bin_counts[b] = count
+        if count < 30:
+            continue
+        vi = vals_i[mask]
+        vj = vals_j[mask]
+        cov = np.mean((vi - global_mean) * (vj - global_mean))
+        bin_corr[b] = cov / global_var
+
+    l_corr_km = _fit_correlation_length(bin_centers, bin_corr, bin_counts)
+
+    return l_corr_km, bin_centers, bin_corr
+
+
 def _fit_correlation_length(
     bin_centers: NDArray, bin_corr: NDArray, bin_counts: NDArray
 ) -> float:
     """Fit correlation length from binned correlation data.
 
-    Tries log-linear regression first, falls back to 1/e threshold crossing.
+    Strategy (in priority order):
+    1. **1/e threshold crossing** – model-free, most robust for non-exponential
+       decays (e.g., precipitation, wind).
+    2. **Integrated correlation scale** – L_eff = ∫ max(ρ(r), 0) dr, robust
+       average that accounts for the full shape of the correlation function.
+    3. **Log-linear (exponential) fit** – weighted regression on log(ρ) vs. d.
+       Only used as last resort because it can overestimate L_corr when the
+       correlation function has a steep initial decline followed by a long tail.
     """
     default_l_corr = 500.0
     min_bin_count = 30
@@ -368,10 +670,26 @@ def _fit_correlation_length(
         logger.warning("Too few valid bins for correlation fit, using default")
         return default_l_corr
 
-    # Log-linear regression: log(corr) = -d/L => slope = -1/L
+    # --- Method 1: 1/e threshold crossing (most robust) ---
+    threshold = 1.0 / np.e
+    for i in range(len(valid_corr) - 1):
+        if valid_corr[i] >= threshold > valid_corr[i + 1]:
+            frac = (valid_corr[i] - threshold) / (valid_corr[i] - valid_corr[i + 1])
+            l_corr = valid_centers[i] + frac * (valid_centers[i + 1] - valid_centers[i])
+            if 10.0 < l_corr < 20000.0:
+                return l_corr
+
+    # --- Method 2: Integrated correlation scale ---
+    # L_eff = ∫ max(ρ(r), 0) dr  (trapezoidal integration over valid bins)
+    positive_corr = np.maximum(valid_corr, 0.0)
+    if len(valid_centers) >= 2:
+        l_eff = float(np.trapezoid(positive_corr, valid_centers))
+        if 10.0 < l_eff < 20000.0:
+            return l_eff
+
+    # --- Method 3: Log-linear (exponential) fit ---
     log_corr = np.log(valid_corr)
     try:
-        # Weighted by bin count for robustness
         weights = np.sqrt(bin_counts[valid].astype(float))
         coeffs = np.polyfit(valid_centers, log_corr, 1, w=weights)
         slope = coeffs[0]
@@ -381,14 +699,6 @@ def _fit_correlation_length(
                 return l_corr
     except (np.linalg.LinAlgError, ValueError):
         pass
-
-    # Fallback: find 1/e threshold crossing
-    threshold = 1.0 / np.e
-    for i in range(len(valid_corr) - 1):
-        if valid_corr[i] >= threshold > valid_corr[i + 1]:
-            # Linear interpolation
-            frac = (valid_corr[i] - threshold) / (valid_corr[i] - valid_corr[i + 1])
-            return valid_centers[i] + frac * (valid_centers[i + 1] - valid_centers[i])
 
     logger.warning("Could not determine correlation length, using default")
     return default_l_corr
@@ -417,12 +727,12 @@ def correlation_length_to_hl_mask(
 
     Returns
     -------
-    hl_mask : integer HEALPix level for masking (0 to healpix_level-1)
+    hl_mask : integer HEALPix level for masking (0 to healpix_level)
     """
     target_km = l_corr_km * multiplier
     # HEALPix cell size at level l: approx 4000 / 2^l km
     # (12 base pixels, area = 4*pi*R^2/Npix, side ~ sqrt(area))
-    for hl in range(healpix_level - 1, -1, -1):
+    for hl in range(healpix_level, -1, -1):
         n_pix = 12 * 4**hl
         cell_area_km2 = (4 * np.pi * EARTH_RADIUS_KM**2) / n_pix
         cell_size_km = np.sqrt(cell_area_km2)
@@ -441,6 +751,19 @@ def group_by_hl_mask(var_results: dict[str, VarResult]) -> dict[int, list[str]]:
     groups: dict[int, list[str]] = {}
     for name, result in var_results.items():
         groups.setdefault(result.hl_mask, []).append(name)
+    return dict(sorted(groups.items()))
+
+
+def group_by_hl_mask_for_multiplier(
+    var_results: dict[str, VarResult],
+    healpix_level: int,
+    multiplier: float,
+) -> dict[int, list[str]]:
+    """Group variables by hl_mask for a given correlation multiplier."""
+    groups: dict[int, list[str]] = {}
+    for name, result in var_results.items():
+        hl = correlation_length_to_hl_mask(result.l_corr_km, healpix_level, multiplier)
+        groups.setdefault(hl, []).append(name)
     return dict(sorted(groups.items()))
 
 
@@ -524,8 +847,17 @@ def analyse_dataset(
     lon_col: str = "lon",
     lat_var: str = "latitude",
     lon_var: str = "longitude",
+    max_points_per_time: int | None = 50_000,
+    detrend: bool = True,
 ) -> tuple[dict[str, VarResult], dict[int, list[str]]]:
     """Run the full analysis pipeline.
+
+    Parameters
+    ----------
+    detrend : bool
+        If True (default), remove the climatological spatial pattern before
+        computing autocorrelation.  This prevents large-scale gradients
+        (latitude, orography) from inflating correlation lengths.
 
     Returns
     -------
@@ -538,7 +870,13 @@ def analyse_dataset(
         ds_info = load_anemoi(dataset_path, n_time_samples, channels, seed)
     elif dataset_type in ("fesom", "obs"):
         ds_info = load_zarr_columnar(
-            dataset_path, lat_col, lon_col, channels, n_time_samples, seed
+            dataset_path,
+            lat_col,
+            lon_col,
+            channels,
+            n_time_samples,
+            seed,
+            max_points_per_time=max_points_per_time,
         )
     elif dataset_type in ("xarray", "cams", "eobs", "iconart", "iconesm"):
         ds_info = load_xarray(
@@ -547,20 +885,61 @@ def analyse_dataset(
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
-    logger.info(
-        f"Loaded {len(ds_info.data)} variables, "
-        f"{next(iter(ds_info.data.values())).shape[0]} time samples, "
-        f"{len(ds_info.lats)} spatial points"
-    )
+    if ds_info.data_ragged is not None:
+        n_times = len(ds_info.lats_ragged or [])
+        avg_points = int(np.mean([len(x) for x in ds_info.lats_ragged or [0]]))
+        logger.info(
+            f"Loaded {len(ds_info.data_ragged)} variables, {n_times} time samples, "
+            f"avg {avg_points} points/time (ragged)"
+        )
+    else:
+        logger.info(
+            f"Loaded {len(ds_info.data)} variables, "
+            f"{next(iter(ds_info.data.values())).shape[0]} time samples, "
+            f"{len(ds_info.lats)} spatial points"
+        )
+
+    # Standardize to anomalies if requested
+    if detrend:
+        logger.info("Detrending: computing anomaly autocorrelation (climatology removed)")
+        if ds_info.data_ragged is not None:
+            for var_name in ds_info.data_ragged:
+                ds_info.data_ragged[var_name] = _standardize_ragged(
+                    ds_info.data_ragged[var_name]
+                )
+        else:
+            for var_name in ds_info.data:
+                ds_info.data[var_name] = _standardize_structured(ds_info.data[var_name])
+    else:
+        logger.info("No detrending: computing raw-field autocorrelation")
 
     # Compute autocorrelation per variable
     var_results: dict[str, VarResult] = {}
-    for var_name, var_data in ds_info.data.items():
+    if ds_info.data_ragged is not None:
+        assert ds_info.lats_ragged is not None
+        assert ds_info.lons_ragged is not None
+        data_items = ds_info.data_ragged.items()
+    else:
+        data_items = ds_info.data.items()
+
+    for var_name, var_data in data_items:
         logger.info(f"Computing autocorrelation for '{var_name}'...")
-        l_corr, bin_centers, bin_corr = compute_spatial_autocorr(
-            var_data, ds_info.lats, ds_info.lons,
-            n_sample_pairs=n_sample_pairs, seed=seed,
-        )
+        if ds_info.data_ragged is not None:
+            l_corr, bin_centers, bin_corr = compute_spatial_autocorr_unstructured(
+                var_data,
+                ds_info.lats_ragged,
+                ds_info.lons_ragged,
+                n_sample_pairs=n_sample_pairs,
+                seed=seed,
+            )
+        else:
+            l_corr, bin_centers, bin_corr = compute_spatial_autocorr(
+                var_data,
+                ds_info.lats,
+                ds_info.lons,
+                n_sample_pairs=n_sample_pairs,
+                seed=seed,
+            )
         hl = correlation_length_to_hl_mask(l_corr, healpix_level, correlation_multiplier)
         var_results[var_name] = VarResult(
             name=var_name,
@@ -598,6 +977,10 @@ def main(argv: list[str] | None = None) -> None:
         "--correlation-multiplier", type=float, default=1.5,
         help="Multiplier for mapping L_corr -> mask block size",
     )
+    parser.add_argument(
+        "--correlation-multipliers", type=float, nargs="*", default=None,
+        help="Optional list of multipliers to print separate suggestions",
+    )
     parser.add_argument("--healpix-level", type=int, default=5, help="Training grid HEALPix level")
     parser.add_argument("--output", default=None, help="Output YAML file path")
     parser.add_argument("--seed", type=int, default=42, help="RNG seed")
@@ -606,6 +989,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--lon-col", default="lon", help="Longitude column name (zarr)")
     parser.add_argument("--lat-var", default="latitude", help="Latitude variable name (xarray)")
     parser.add_argument("--lon-var", default="longitude", help="Longitude variable name (xarray)")
+    parser.add_argument(
+        "--max-points-per-time",
+        type=int,
+        default=50_000,
+        help="Max points per time slice for unstructured observations",
+    )
+    parser.add_argument(
+        "--no-detrend",
+        action="store_true",
+        help="Disable anomaly standardization (use raw fields for autocorrelation)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -624,6 +1018,8 @@ def main(argv: list[str] | None = None) -> None:
         lon_col=args.lon_col,
         lat_var=args.lat_var,
         lon_var=args.lon_var,
+        max_points_per_time=args.max_points_per_time,
+        detrend=not args.no_detrend,
     )
 
     # Output results to stdout
@@ -632,25 +1028,38 @@ def main(argv: list[str] | None = None) -> None:
 
         sys.stdout.write(msg + "\n")
 
+    mode = "anomaly" if not args.no_detrend else "raw"
     _write("\n" + "=" * 50)
-    _write("Per-variable autocorrelation analysis")
+    _write(f"Per-variable autocorrelation analysis (mode={mode})")
     _write("=" * 50)
     _write(format_results_table(var_results))
     _write()
-    _write("=" * 50)
-    _write("Suggested stream groupings")
-    _write("=" * 50)
-    _write(format_groupings(groups))
-    _write()
+    multipliers = args.correlation_multipliers or [args.correlation_multiplier]
+    yaml_sections: list[str] = []
 
-    yaml_output = generate_yaml_snippets(groups)
-    _write("=" * 50)
-    _write("YAML masking_override snippets")
-    _write("=" * 50)
-    _write(yaml_output)
+    for multiplier in multipliers:
+        if multiplier == args.correlation_multiplier:
+            groups_for_multiplier = groups
+        else:
+            groups_for_multiplier = group_by_hl_mask_for_multiplier(
+                var_results, args.healpix_level, multiplier
+            )
+
+        _write("=" * 50)
+        _write(f"Suggested stream groupings (multiplier={multiplier:g})")
+        _write("=" * 50)
+        _write(format_groupings(groups_for_multiplier))
+        _write()
+
+        yaml_output = generate_yaml_snippets(groups_for_multiplier)
+        _write("=" * 50)
+        _write(f"YAML masking_override snippets (multiplier={multiplier:g})")
+        _write("=" * 50)
+        _write(yaml_output)
+        yaml_sections.append(f"# Multiplier: {multiplier:g}\n{yaml_output.strip()}")
 
     if args.output:
-        Path(args.output).write_text(yaml_output)
+        Path(args.output).write_text("\n\n".join(yaml_sections) + "\n")
         _write(f"\nYAML written to {args.output}")
 
 
