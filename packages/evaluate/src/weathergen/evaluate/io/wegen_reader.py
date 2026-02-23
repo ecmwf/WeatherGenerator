@@ -42,6 +42,7 @@ class WeatherGenReader(Reader):
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
         self.rank = eval_cfg.get("rank", 0)
+
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
 
@@ -61,77 +62,81 @@ class WeatherGenReader(Reader):
 
         self.step_hrs = self.inference_cfg.get("step_hrs", 1)
 
-        self.results_dir, self.runplot_dir = (
-            Path(self.results_base_dir),
-            Path(self.runplot_base_dir),
-        )
         # for backward compatibility allow metric_dir to be specified in the run config
+        self.results_dir = Path(self.results_base_dir)
+        self.runplot_dir = Path(self.runplot_base_dir)
         self.metrics_dir = Path(
             self.eval_cfg.get("metrics_dir", self.metrics_base_dir / "evaluation")
         )
 
     def get_inference_config(self):
         """
-        load the config associated to the inference run (different from the eval_cfg which
-        contains plot and evaluaiton options.)
+        Load the config associated to the inference run (different from the
+        eval_cfg which contains plot and evaluation options.)
 
         Returns
         -------
-        dict
-            configuration file from the inference run
+        config: dict
+            Configuration file from the inference run
         """
-        if self.private_paths:
-            _logger.info(
-                f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
-            )
-            config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
-        else:
-            _logger.info(
-                f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
-            )
-            config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
+        config = {}
+        try:
+            if self.private_paths:
+                _logger.info(
+                    f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
+                )
+                config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
+            else:
+                _logger.info(
+                    f"Loading config for run {self.run_id} from model directory: "
+                    f"{self.model_base_dir}"
+                )
+                config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
+        except Exception as e:
+            _logger.warning(f"Failed to load inference config: {e}. Defaulting to empty dict.")
 
-        if type(config) not in [dict, oc.DictConfig]:
+        if not isinstance(config, dict | oc.DictConfig):
             _logger.warning("Model config not found. inference config will be empty.")
             config = {}
         return config
 
     def get_climatology_filename(self, stream: str) -> str | None:
         """
-        Get the climatology filename for a given stream from the inference configuration.
+        Get the climatology filename for a given stream from the inference
+        configuration.
+
         Parameters
         ----------
-        stream :
+        stream : str
             Name of the data stream.
+
         Returns
         -------
-            Climatology filename if specified, otherwise None.
+        path: str | None
+            Full climatology path if available, otherwise None.
         """
-
         stream_dict = self.get_stream(stream)
 
         clim_data_path = stream_dict.get("climatology_path", None)
         if not clim_data_path:
             clim_base_dir = self.inference_cfg.get("data_path_aux", None)
-
             clim_fn = next(
                 (
                     item.get("climatology_filename")
-                    for item in self.inference_cfg["streams"]
+                    for item in self.inference_cfg.get("streams", [])
                     if item.get("name") == stream
                 ),
                 None,
             )
-
             if clim_base_dir and clim_fn:
-                clim_data_path = Path(clim_base_dir).join(clim_fn)
+                clim_data_path = Path(clim_base_dir) / clim_fn
             else:
                 _logger.warning(
                     f"No climatology path specified for stream {stream}. Setting climatology to "
                     "NaN. Add 'climatology_path' to evaluation config to use metrics like ACC."
                 )
 
-        return clim_data_path
+        return str(clim_data_path) if clim_data_path else None
 
     def get_channels(self, stream: str) -> list[str]:
         """
@@ -139,11 +144,12 @@ class WeatherGenReader(Reader):
 
         Parameters
         ----------
-        stream :
+        stream : str
             The name of the stream to get channels for.
 
         Returns
         -------
+        all_channels: list[str]
             A list of channel names.
         """
         _logger.debug(f"Getting channels for stream {stream}...")
@@ -152,37 +158,39 @@ class WeatherGenReader(Reader):
         return all_channels
 
     def load_scores(
-        self, stream: str, regions: list[str], metrics: list[str]
-    ) -> xr.DataArray | None:
+        self,
+        stream: str,
+        regions: list[str],
+        metrics: list[str],
+    ) -> tuple[dict, dict]:
         """
-        Load multiple pre-computed scores for a given run, stream and metric and epoch.
+        Load multiple pre-computed scores for a given run, stream and metric
+        and epoch.
 
         Parameters
         ----------
-        reader :
-            Reader object containing all info for a specific run_id
-        stream :
+        stream : str
             Stream name.
-        regions :
+        regions : list[str]
             Region names.
-        metrics :
+        metrics : list[str]
             Metric names.
 
         Returns
         -------
-        xr.DataArray
-            The metric DataArray.
-        computable_metrics:
-            dictionary of regions and metrics that can be recomputed
-            (empty for JSONreader).
+        tuple[dict, dict]
+            - local_scores: dictionary of available scores.
+            - recomputable_missing_metrics: dictionary of regions and metrics
+              that must be recomputed (empty for JSON reader).
         """
-
         local_scores = {}
         missing_metrics = {}
         for region in regions:
             for metric in metrics:
                 score = self.load_single_score(stream, region, metric)
-                if score is not None:
+                if score is None:
+                    missing_metrics.setdefault(region, []).append(metric)
+                else:
                     available_data = self.check_availability(stream, score, mode="evaluation")
                     if available_data.score_availability:
                         score = score.sel(
@@ -193,51 +201,63 @@ class WeatherGenReader(Reader):
                         local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
                             stream, {}
                         )[self.run_id] = score
-                        continue
-
-                # all other cases: recompute scores
-                missing_metrics.setdefault(region, []).append(metric)
-                continue
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
 
     def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
         """
-        Load a single pre-computed score for a given run, stream and metric
+        Load a single pre-computed score for a given run, stream and metric.
+
+        Returns
+        -------
+        score: xr.DataArray or None
+            DataArray of the score if found, else None.
         """
         score_path = (
             Path(self.metrics_dir)
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
+
+        score = None
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
                 score = xr.DataArray.from_dict(data_dict)
-        else:
-            score = None
+
         return score
 
-    def get_recomputable_metrics(self, metrics):
-        """determine whether given metrics can be re-computed."""
+    def get_recomputable_metrics(self, metrics: dict)-> dict:
+        """
+        Determine which metrics can be recomputed.
+
+        Parameters
+        ----------
+        metrics : dict
+            Dictionary mapping regions to missing metrics.
+
+        Returns
+        -------
+        metrics: dict
+            Same as input
+        """
         return metrics
 
-    def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
+    def get_inference_stream_attr(self, stream_name: str, key: str, default=None) :
         """
         Get the value of a key for a specific stream from the a model config.
 
         Parameters:
         ------------
-            config:
-                The full configuration dictionary.
-            stream_name:
+            stream_name: str
                 The name of the stream (e.g. 'ERA5').
-            key:
+            key: str
                 The key to look up (e.g. 'tokenize_spacetime').
             default: Optional
                 Value to return if not found (default: None).
 
         Returns:
+        ------------
             The parameter value if found, otherwise the default.
         """
         for stream in self.inference_cfg.get("streams", []):
@@ -256,13 +276,15 @@ class WeatherGenJSONReader(WeatherGenReader):
         metrics: list[str] | None = None,
     ):
         super().__init__(eval_cfg, run_id, private_paths)
-        # goes looking for the coordinates available for all streams, regions, metrics
-        streams = list(self.eval_cfg.streams.keys())
+        self.common_coords: dict = self._compute_common_coords(regions, metrics)
+
+    def _compute_common_coords(self, regions: list[str], metrics: list[str]) -> dict:
+        # Find common coordinates across streams, regions, metrics.
+        streams = list(self.streams)
         coord_names = ["sample", "forecast_step", "ens"]
-        all_coords = {name: [] for name in coord_names}  # collect all available coordinates
-        provenance = {
-            name: defaultdict(list) for name in coord_names
-        }  # remember who had which coords, so we can warn about it later.
+        all_coords = {name: [] for name in coord_names}
+        provenance = {name: defaultdict(list) for name in coord_names}
+
         for stream in streams:
             for region in regions:
                 for metric in metrics:
@@ -273,15 +295,21 @@ class WeatherGenJSONReader(WeatherGenReader):
                             all_coords[name].append(vals)
                             for val in vals:
                                 provenance[name][val].append((stream, region, metric))
-        self.common_coords = {name: set.intersection(*all_coords[name]) for name in coord_names}
-        # issue warnings for skipped coords
+
+        common_coords = {name: set.intersection(*all_coords[name]) for name in coord_names}
+
+        # Warn about any skipped coordinates
         for name in coord_names:
-            skipped = set.union(*all_coords[name]) - self.common_coords[name]
+            skipped = set.union(*all_coords[name]) - common_coords[name]
             if skipped:
-                message = [f"Some {name}(s) were not common among streams, regions and metrics:"]
+                msg_lines = [
+                    f"Some {name}(s) were not common across streams, regions, and metrics:"
+                ]
                 for val in skipped:
-                    message.append(f" {val} only in {provenance[name][val]}")
-                _logger.warning("\n".join(message))
+                    msg_lines.append(f"  {val} only present in {provenance[name][val]}")
+                _logger.warning("\n".join(msg_lines))
+
+        return common_coords
 
     def get_samples(self) -> set[int]:
         return self.common_coords["sample"]
@@ -310,19 +338,26 @@ class WeatherGenZarrReader(WeatherGenReader):
         super().__init__(eval_cfg, run_id, private_paths)
 
         zarr_ext = self.inference_cfg.get("zarr_store", "zarr")
-        # for backwards compatibility assume zarr store is local i.e. .zarr format
+        # For backwards compatibility, assume zarr store is local (.zarr format).
 
         fname_zarr = self.results_dir.joinpath(
             f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
         )
+
         if fname_zarr.exists():
             if (zarr_ext == "zarr" and fname_zarr.is_dir()) or (
                 zarr_ext == "zip" and fname_zarr.is_file()
             ):
                 self.fname_zarr = fname_zarr
+            else:
+                _logger.error(
+                    f"Zarr file {fname_zarr} exists but has unexpected format "
+                    f"({zarr_ext}). Expected directory for 'zarr' or file for 'zip'."
+                )
+                raise FileNotFoundError(f"Zarr file {fname_zarr} has unexpected format.")
         else:
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
+            _logger.error(f"Zarr file {fname_zarr} does not exist.")
+            raise FileNotFoundError(f"Zarr file {fname_zarr} does not exist.")
 
     def get_data(
         self,
@@ -356,51 +391,45 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         Returns
         -------
-        ReaderOutput
+        out: ReaderOutput
             A dataclass containing:
             - target: Dictionary of xarray DataArrays for targets, indexed by forecast step.
             - prediction: Dictionary of xarray DataArrays for predictions, indexed by forecast step.
             - points_per_sample: xarray DataArray containing the number of points per sample,
               if `return_counts` is True.
         """
-        # get type of zarr store
+        stream_cfg = self.get_stream(stream)
+        all_channels = self.get_channels(stream)
+        _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
+
+        fsteps = self.get_forecast_steps() if fsteps is None else fsteps
+
+        # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
+        fsteps = sorted([int(fstep) for fstep in fsteps])
+        samples = samples or sorted([int(sample) for sample in self.get_samples()])
+        channels = channels or stream_cfg.get("channels", all_channels)
+        channels = to_list(channels)
+
+        ensemble = ensemble or self.get_ensemble(stream)
+        ensemble = to_list(ensemble)
+
+        dc = DeriveChannels(all_channels, channels, stream_cfg)
+
+        da_tars, da_preds = [], []
+
+        if return_counts:
+            points_per_sample = xr.DataArray(
+                np.full((len(fsteps), len(samples)), np.nan),
+                coords={"forecast_step": fsteps, "sample": samples},
+                dims=("forecast_step", "sample"),
+                name=f"points_per_sample_{stream}",
+            )
+        else:
+            points_per_sample = None
+
+        fsteps_final = []
 
         with zarrio_reader(self.fname_zarr) as zio:
-            stream_cfg = self.get_stream(stream)
-            all_channels = self.get_channels(stream)
-            _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
-
-            fsteps = self.get_forecast_steps() if fsteps is None else fsteps
-
-            # TODO: Avoid conversion of fsteps and sample to integers (as obtained from the ZarrIO)
-            fsteps = sorted([int(fstep) for fstep in fsteps])
-            samples = samples or sorted([int(sample) for sample in self.get_samples()])
-            channels = channels or stream_cfg.get("channels", all_channels)
-            channels = to_list(channels)
-
-            ensemble = ensemble or self.get_ensemble(stream)
-            ensemble = to_list(ensemble)
-
-            dc = DeriveChannels(
-                all_channels,
-                channels,
-                stream_cfg,
-            )
-
-            da_tars, da_preds = [], []
-
-            if return_counts:
-                points_per_sample = xr.DataArray(
-                    np.full((len(fsteps), len(samples)), np.nan),
-                    coords={"forecast_step": fsteps, "sample": samples},
-                    dims=("forecast_step", "sample"),
-                    name=f"points_per_sample_{stream}",
-                )
-            else:
-                points_per_sample = None
-
-            fsteps_final = []
-
             for fstep in fsteps:
                 _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
                 da_tars_fs, da_preds_fs, pps = [], [], []
@@ -609,45 +638,108 @@ class WeatherGenZarrReader(WeatherGenReader):
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
 
-    # TODO: improve this
     def is_regular(self, stream: str) -> bool:
-        """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
+        """
+        Determine if the stream’s spatial grid is regular (lat/lon evenly spaced).
+
         Parameters
         ----------
         stream :
-            The name of the stream to get channels for.
+            The name of the stream.
 
         Returns
         -------
-            True if the stream is regularly spaced. False otherwise.
+        bool
+            True if lat/lon grids are consistent and regularly spaced across all samples,
+            False otherwise.
         """
-        _logger.debug(f"Checking regular spacing for stream {stream}...")
+        _logger.debug(f"Checking regular spacing for stream '{stream}'...")
 
-        with zarrio_reader(self.fname_zarr) as zio:
-            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
+        # Early exit: if stream not found or no samples/forecast steps
+        try:
+            with zarrio_reader(self.fname_zarr) as zio:
+                if stream not in zio.streams:
+                    _logger.debug(f"Stream '{stream}' not found in Zarr. Treating as irregular.")
+                    return False
+                if not zio.samples or not zio.forecast_steps:
+                    _logger.debug("No samples or forecast steps found. Treating as irregular.")
+                    return False
 
-            sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
-            fstep_idx = (
-                zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
-            )
-            dummy1 = zio.get_data(sample_idx, stream, fstep_idx)
+                sample_idx = zio.samples[0]
+                fstep_idx = zio.forecast_steps[0]
+                dummy = zio.get_data(sample_idx, stream, fstep_idx)
+                da = dummy.prediction.as_xarray()
 
-        da = dummy.prediction.as_xarray()
-        da1 = dummy1.prediction.as_xarray()
-
-        if (
-            da["lat"].shape != da1["lat"].shape
-            or da["lon"].shape != da1["lon"].shape
-            or not (
-                np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values))
-                and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
-            )
-        ):
-            _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
+                # Extract lat/lon; exit if missing or not 1D
+                lat = da.get("lat")
+                lon = da.get("lon")
+                if lat is None or lon is None:
+                    _logger.debug("Missing lat/lon coordinates in prediction data.")
+                    return False
+                lat = lat.squeeze()
+                lon = lon.squeeze()
+                if lat.ndim != 1 or lon.ndim != 1:
+                    _logger.debug("Lat/lon not 1D. Irregular scatter grid.")
+                    return False
+        except Exception as e:
+            _logger.debug(f"Exception during initial lat/lon check: {e}")
             return False
 
-        _logger.debug("Latitude and longitude coordinates are regularly spaced.")
-        return True
+        # Verify regular spacing for lat and lon (monotonic, uniform step size)
+        try:
+            lat_vals = np.asarray(lat.values)
+            lon_vals = np.asarray(lon.values)
+
+            # Monotonicity check
+            if not (np.all(np.diff(lat_vals) > 0) or np.all(np.diff(lat_vals) < 0)):
+                _logger.debug("Latitude is not monotonically increasing or decreasing.")
+                return False
+            if not (np.all(np.diff(lon_vals) > 0) or np.all(np.diff(lon_vals) < 0)):
+                _logger.debug("Longitude is not monotonically increasing or decreasing.")
+                return False
+
+            # Uniform spacing check for lat (allow tolerance for floating point noise)
+            dlat = np.diff(lat_vals)
+            if not np.allclose(dlat, dlat[0], rtol=1e-5, atol=1e-8):
+                _logger.debug("Latitude spacing is non-uniform.")
+                return False
+
+            # Uniform spacing check for lon
+            dlon = np.diff(lon_vals)
+            if not np.allclose(dlon, dlon[0], rtol=1e-5, atol=1e-8):
+                _logger.debug("Longitude spacing is non-uniform.")
+                return False
+
+            # Optional: verify consistency across a second sample/forecast step
+            sample_idx2 = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
+            fstep_idx2 = (
+                zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
+            )
+            if sample_idx2 == sample_idx and fstep_idx2 == fstep_idx:
+                # Only one unique sample/step; assume consistency
+                _logger.debug("Only one sample and one forecast step; using it for grid check.")
+            else:
+                dummy2 = zio.get_data(sample_idx2, stream, fstep_idx2)
+                da2 = dummy2.prediction.as_xarray()
+                lat2 = da2.get("lat").squeeze()
+                lon2 = da2.get("lon").squeeze()
+                if lat2 is None or lon2 is None or lat2.ndim != 1 or lon2.ndim != 1:
+                    _logger.debug("Second sample/step missing lat/lon or not 1D.")
+                    return False
+
+                if not (
+                    np.allclose(lat2.values, lat_vals, rtol=1e-5, atol=1e-8)
+                    and np.allclose(lon2.values, lon_vals, rtol=1e-5, atol=1e-8)
+                ):
+                    _logger.debug("Lat/lon grids differ between samples.")
+                    return False
+
+            _logger.debug(f"Stream '{stream}' has a regular grid.")
+            return True
+
+        except Exception as e:
+            _logger.debug(f"Exception during regular-spacing validation: {e}")
+            return False
 
 
 ################### Helper functions ########################
@@ -657,38 +749,65 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     """
     Force all samples to share the same ipoint order.
 
+    This function aligns the spatial ordering (lat/lon/ipoint) of all samples
+    to that of the first sample, ensuring consistent spatial coordinates for
+    subsequent concatenation. It is essential for regular-grid (gridded) data
+    where spatial order matters but may differ across samples.
+
     Parameters
     ----------
-    ref:
-       Input dataset
+    ref: list[xr.DataArray]
+        List of xarray DataArrays, each representing one sample. Must have at least one element.
     Returns
     -------
-        Returns a Dataset where all samples have the same lat lon and ipoint ordering
+    xr.DataArray
+        A concatenated DataArray across the 'sample' dimension, where each sample's ipoint indices
+        have been reordered to match the sorted lat/lon order of the first sample.
+
+    Notes
+    -----
+    - All input DataArrays must share identical lat/lon values
+        (though possibly in different orders).
+    - Enforces consistent ipoint indexing after alignment (0..N-1).
+    - Preserves and aligns all other coordinates and data variables.
     """
+    if not ref:
+        raise ValueError("_force_consistent_grids requires at least one input DataArray.")
 
-    # Pick first sample as reference
-    ref_lat = ref[0].lat
-    ref_lon = ref[0].lon
+    # Determine the reference sorting using the first sample's lat/lon
+    ref_lat = ref[0]["lat"].values
+    ref_lon = ref[0]["lon"].values
+    sort_idx = np.lexsort((ref_lon, ref_lat))
 
-    sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
-    npoints = sort_idx.size
-    aligned = []
-    samples = []
-    for i, a in enumerate(ref):
-        a_sorted = a.isel(ipoint=sort_idx)
-        samples.append(a_sorted.sample.values)
-        a_sorted = a_sorted.assign_coords(
-            ipoint=np.arange(npoints),
-            lat=("ipoint", ref_lat.values[sort_idx]),
-            lon=("ipoint", ref_lon.values[sort_idx]),
+    # Precompute aligned coordinates for efficiency
+    n_points = len(sort_idx)
+    aligned_lat = ref_lat[sort_idx]
+    aligned_lon = ref_lon[sort_idx]
+    aligned_ipoint = np.arange(n_points)
+
+    # Reorder and align each sample
+    aligned_samples = []
+    for idx, sample in enumerate(ref):
+        # Sort ipoint dimension by reference order
+        sorted_sample = sample.isel(ipoint=sort_idx)
+
+        # Reassign coordinates to enforce consistent ipoint and spatial coord values
+        aligned_sample = sorted_sample.assign_coords(
+            ipoint=aligned_ipoint,
+            lat=("ipoint", aligned_lat),
+            lon=("ipoint", aligned_lon),
         )
 
-        if "sample" not in a_sorted.dims:
-            a_sorted = a_sorted.expand_dims(sample=[i])
+        # Ensure 'sample' dimension exists for concat; if missing, expand
+        if "sample" not in aligned_sample.dims:
+            aligned_sample = aligned_sample.expand_dims(sample=[idx])
 
-        aligned.append(a_sorted)
+        # Explicitly update the sample coordinate
+        aligned_sample = aligned_sample.assign_coords(sample=[idx])
+        aligned_samples.append(aligned_sample)
 
-    return xr.concat(aligned, dim="sample").assign_coords({"sample": samples})
+    # Concatenate along the sample dimension
+    return xr.concat(aligned_samples, dim="sample")
 
 
 class WeatherGenMergeReader(Reader):
