@@ -36,6 +36,9 @@ type DType = np.float32
 type NPDT64 = datetime64
 type ArrayType = zarr.Array | np.NDArray[DType]
 
+# pseudo-stream name for latent outputs
+LATENT_STREAM = "latent"
+
 _logger = logging.getLogger(__name__)
 
 

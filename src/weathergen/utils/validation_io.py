@@ -112,6 +112,9 @@ def write_output(
 
     # output stream names to be written, use specified ones or all if nothing specified
     stream_names = [stream.name for stream in cf.streams]
+    # include known pseudo-stream names (e.g. latent) so they are treated as known
+    if io.LATENT_STREAM not in stream_names:
+        stream_names.append(io.LATENT_STREAM)
     if val_cfg.get("output").get("streams") is not None:
         output_stream_names = val_cfg.output.streams
     else:
@@ -122,7 +125,7 @@ def write_output(
     latent_stream_name = None
     output_streams = {}
     for name in output_stream_names:
-        if name == "latent":
+        if name == io.LATENT_STREAM:
             latent_stream_name = name
             continue
         if name not in stream_names:
