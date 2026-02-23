@@ -720,7 +720,7 @@ def common_ranges(
         )
         bias_maps_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
 
-    return maps_config, oc.DictConfig(bias_maps_config)
+    return maps_config, bias_maps_config
 
 
 def calc_val(x: xr.DataArray, bound: str) -> list[float]:
