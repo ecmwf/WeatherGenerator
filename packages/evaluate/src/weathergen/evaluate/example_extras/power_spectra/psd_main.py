@@ -1,9 +1,12 @@
-#!/usr/bin/env -S uv run
+#!/usr/bin/env -S uv run --env-file ./packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/.psd_env --script
 # /// script
 # dependencies = [
-#   "omegaconf",
-#   "weathergen-common"
+#   "cf-units",
+#   "scitools-iris>=3.11",
+#   "weathergen-common",
+#   "omegaconf"
 # ]
+#
 # [tool.uv.sources]
 # weathergen-common = { path = "../../../../../../common" }
 # ///

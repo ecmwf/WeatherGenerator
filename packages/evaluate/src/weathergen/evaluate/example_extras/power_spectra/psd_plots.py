@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.10"
-# dependencies = [
-#   "scitools-iris",
-# ]
-# ///
-
 """
 Adapted from Martin Willet's code for zonal power spectra for use with the WeatherGenerator model.
 It takes 1D Fourier transforms along the longitude dimension of the data, using an upper and lower longitude as regional bounds. 
@@ -17,8 +9,10 @@ import logging
 import warnings
 
 import iris
+import iris.cube
 import matplotlib.pyplot as plt
 import numpy as np
+
 
 _logger = logging.getLogger(__name__)
 warnings.simplefilter(action="ignore", category=FutureWarning)
