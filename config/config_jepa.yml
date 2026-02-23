@@ -120,23 +120,11 @@ general:
   run_history: []
 
 # logging frequency in the training loop (in number of batches)
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
-
-# parameters for data loading
-data_loading :
-
-  num_workers: 12
-  rng_seed: ???
-
-
-# config for training
-training_config:
-
-  # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["student_teacher"]
+  log_grad_norms: False
 
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
@@ -167,6 +155,19 @@ training_config:
       ema_beta:
         enabled: true
 
+# parameters for data loading
+data_loading :
+
+  num_workers: 12
+  rng_seed: ???
+
+
+# config for training
+training_config:
+
+  # training_mode: "masking", "student_teacher", "latent_loss"
+  training_mode: ["student_teacher"]
+
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
@@ -194,7 +195,6 @@ training_config:
   optimizer:
     grad_clip: 1.0
     weight_decay: 0.1
-    log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.975

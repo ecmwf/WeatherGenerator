@@ -145,7 +145,7 @@ class Trainer(TrainerBase):
         self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
         cf.world_size_original = self.world_size_original
 
-        self.log_grad_norms = self.training_cfg.optimizer.get("log_grad_norms", False)
+        self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 
         # create output directory
         if is_root():
@@ -155,7 +155,7 @@ class Trainer(TrainerBase):
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
         # Initialize collapse monitor for SSL training
-        collapse_config = self.training_cfg.get("collapse_monitoring", {})
+        collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
     def get_target_aux_calculators(self, mode_cfg):
@@ -810,4 +810,5 @@ class Trainer(TrainerBase):
         """
         metrics = self.collapse_monitor.get_cached_metrics()
         if metrics and is_root():
+            metrics["num_samples"] = self.cf.general.istep
             self.train_logger.log_metrics(stage, metrics)
