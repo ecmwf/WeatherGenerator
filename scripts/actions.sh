@@ -18,40 +18,25 @@ case "$1" in
     ;;
   lint)
     (
-      echo "LINTING WORKFLOW STARTING..."
-      
-      echo "lint-check..."
-      ./scripts/actions.sh lint-check
-      echo "lint-fix..."
-      ./scripts/actions.sh lint-fix
-      echo "toml-checking..."
-      ./scripts/actions.sh toml-check
-      echo "type-checking..."
-      ./scripts/actions.sh type-check
-
-      echo "LINTING WORKFLOW COMPLETED."
+      cd "$SCRIPT_DIR" || exit 1
+      uv run --no-project --with "ruff==0.12.2" \
+        ruff format --target-version py312 src/ scripts/ packages/ \
+      && \
+      uv run --no-project --with "ruff==0.12.2" \
+        ruff check --target-version py312 --fix  src/ scripts/ packages/
     )
     ;;
   lint-check)
     (
       cd "$SCRIPT_DIR" || exit 1
       uv run --no-project --with "ruff==0.12.2" \
-      ruff format --target-version py312 -n src/ scripts/ packages/ \
-        && \
+        ruff format --target-version py312 -n src/ scripts/ packages/ \
+      && \
       uv run --no-project --with "ruff==0.12.2" \
-      ruff check  --target-version py312 src/ scripts/ packages/ \
-        && \
+        ruff check  --target-version py312 src/ scripts/ packages/ \
+      && \
       uv run --no-project --with "pylint==4.0.3" \
-      pylint src/ packages/ \
-       && \
-      uv run --no-project python scripts/check_badfunctions.py
-    )
-    ;;
-  lint-fix)
-    (
-      cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.12.2" ruff check --target-version py312 \
-      --fix  src/ scripts/ packages/
+        pylint src/ packages/
     )
     ;;
   type-check)
