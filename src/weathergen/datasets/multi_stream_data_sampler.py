@@ -12,9 +12,10 @@ import pathlib
 
 import numpy as np
 import torch
-
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
+from weathergen.readers_extra.registry import get_extra_reader
+
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
@@ -30,7 +31,6 @@ from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     get_tokens_lens,
 )
-from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import TRAIN, Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 
@@ -114,6 +114,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.output_offset = self.forecast_cfg.get("offset", 0)
             self.time_step = self.forecast_cfg.get("time_step", np.timedelta64(0, "ms"))
             self.forecast_policy = self.forecast_cfg.get("policy", None)
+            self.fstep_probabilities = self.forecast_cfg.get("fstep_probabilities", 0)
 
             # forecast step
             self.list_num_forecast_steps = np.array(
@@ -240,6 +241,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if cf.data_loading.rng_seed > cf.data_loading.num_workers
             else cf.data_loading.rng_seed * 97
         )
+        # Keep a rank-independent copy for forecast step sampling (FSDP compatibility)
+        self._base_rng_seed = self.data_loader_rng_seed
 
         self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level, stage))
 
@@ -285,13 +288,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # value in worker_workset()
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
 
-        fsm = (
-            self.list_num_forecast_steps[
+        if self.forecast_policy == "random" or self.forecast_policy == "sequential_prob":
+            fsm = self.list_num_forecast_steps.max()
+        else:
+            fsm = self.list_num_forecast_steps[
                 min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
             ]
-            if self.forecast_policy != "random"
-            else self.list_num_forecast_steps.max()
-        )
+
         if fsm > 0:
             logger.info(f"forecast_steps : {fsm}")
 
@@ -323,6 +326,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.perms = self.rng.permutation(self.perms)
 
         # forecast time steps
+        # Use a rank-independent RNG for forecast step sampling so that all
+        # FSDP/DDP ranks execute the same number of forward-pass iterations per
+        # batch (FSDP requires identical allgather sequences across ranks).
+        # Data shuffling (self.rng) stays rank-dependent for different data per rank.
+        worker_info = torch.utils.data.get_worker_info()
+        fstep_seed = (
+            self._base_rng_seed
+            * ((worker_info.id + 1) * 37 if worker_info is not None else 1)
+            * (self.mini_epoch + 13)
+            * 7
+        )
+        fstep_rng = np.random.default_rng(fstep_seed)
+
         len_dt_samples = len(self) // self.batch_size
         if self.forecast_policy is None:
             self.perms_num_forecast_steps = np.zeros(len_dt_samples, dtype=np.int64)
@@ -330,12 +346,24 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.perms_num_forecast_steps = fsm * np.ones(len_dt_samples, dtype=np.int64)
         elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
             # randint high=one-past
-            self.perms_num_forecast_steps = self.rng.integers(
+            self.perms_num_forecast_steps = fstep_rng.integers(
                 low=self.list_num_forecast_steps.min(),
                 high=fsm + 1,
                 size=len_dt_samples,
                 dtype=np.int64,
             )
+        elif self.forecast_policy == "sequential_prob":
+            assert np.isclose(sum(self.fstep_probabilities), 1.0), "Probabilities must sum to 1.0"
+
+            # Sample steps, then clamp to <= fsm
+            sampled_steps = fstep_rng.choice(
+                self.list_num_forecast_steps,
+                size=len_dt_samples,
+                p=self.fstep_probabilities,
+                replace=True,
+            )
+            self.perms_num_forecast_steps = np.clip(sampled_steps, 0, fsm)
+            self.perms_num_forecast_steps = self.perms_num_forecast_steps.astype(np.int64)
         else:
             assert False
 
