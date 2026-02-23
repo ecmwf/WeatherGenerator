@@ -442,6 +442,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     if not isinstance(plot_maps, bool):
         raise TypeError("plot_maps must be a boolean.")
 
+    plot_bias_maps = plot_settings.get("plot_bias_maps", False)
+    if not isinstance(plot_bias_maps, bool):
+        raise TypeError("plot_bias_maps must be a boolean.")
+
     plot_target = plot_settings.get("plot_target", True)
     if not isinstance(plot_target, bool):
         raise TypeError("plot_target must be a boolean.")
@@ -473,7 +477,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     # get common ranges across all run_ids
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
-    maps_config = common_ranges(
+    maps_config, bias_maps_config = common_ranges(
         da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
     )
 
@@ -493,6 +497,12 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
                     plotter.create_maps_per_sample(
                         tars, plot_chs, data_selection, "targets", maps_config
                     )
+
+                if plot_bias_maps:
+                    plotter.create_maps_per_sample(
+                        preds - tars, plot_chs, data_selection, "bias", bias_maps_config
+                    )
+
                 for ens in available_data.ensemble:
                     preds_ens = (
                         preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
@@ -520,7 +530,8 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
         if plot_target:
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
-
+        if plot_bias_maps:
+            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "bias")
     return
 
 
@@ -653,10 +664,10 @@ def common_ranges(
     data_tars: list[dict],
     data_preds: list[dict],
     plot_chs: list[str],
-    maps_config: oc.dictconfig.DictConfig,
-) -> oc.dictconfig.DictConfig:
+    global_plotting_opts_stream: oc.dictconfig.DictConfig,
+) -> tuple[oc.dictconfig.DictConfig, oc.dictconfig.DictConfig]:
     """
-    Calculate common ranges per stream and variables.
+    Calculate common ranges per stream and variables, and symmetric bias ranges.
 
     Parameters
     ----------
@@ -666,14 +677,18 @@ def common_ranges(
         the (prediction) list of dictionaries with the forecasteps and respective xarray
     plot_chs:
         the variables to be plotted as given by the configuration file
-    maps_config:
-        the global plotting configuration
+    global_plotting_opts_stream:
+        the global plotting configuration for the stream as given by the configuration file, which
+        may or may not include predefined ranges for some variables.
     Returns
     -------
     maps_config :
-        the global plotting configuration with the ranges added and included for each variable (and
-        for each stream).
+        the global plotting configuration with the ranges added and included for each variable.
+    bias_maps_config :
+        per-variable symmetric ranges (vmin = -abs_max, vmax = abs_max) for bias (preds - tars).
     """
+    maps_config = global_plotting_opts_stream.copy()
+    bias_maps_config = global_plotting_opts_stream.copy()
     for var in plot_chs:
         if var in maps_config:
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
@@ -694,7 +709,18 @@ def common_ranges(
 
             maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
 
-    return maps_config
+        # Compute symmetric bias (preds - tars) ranges
+
+        bias_vals = [
+            (p - t).sel(channel=var).values
+            for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
+        ]
+        abs_max = float(
+            max(abs(np.concatenate(bias_vals).max()), abs(np.concatenate(bias_vals).min()))
+        )
+        bias_maps_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
+
+    return maps_config, oc.DictConfig(bias_maps_config)
 
 
 def calc_val(x: xr.DataArray, bound: str) -> list[float]:
