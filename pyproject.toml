@@ -27,7 +27,7 @@ dependencies = [
  "anemoi-datasets",
  "weathergen-common",
  "weathergen-evaluate",
- "weathergen-readers-extra",
+ "weathergen-readers-extra"
 ]
 
 
@@ -44,7 +44,6 @@ inference = "weathergen.run_train:inference"
 evaluate = "weathergen.evaluate.run_evaluation:evaluate"
 plot_train = "weathergen.utils.plot_training:plot_train"
 export = "weathergen.evaluate.export.export_inference:export"
-create_verif = "weathergen.verif.create_verif:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -266,7 +265,6 @@ members = [
    "packages/evaluate",
    "packages/metrics",
    "packages/readers_extra",
-   "packages/verif",
 # Explicitly not depending on 'packages/dashboard' : this causes issues when deploying
 # the streamlit dashboard.
 ]
