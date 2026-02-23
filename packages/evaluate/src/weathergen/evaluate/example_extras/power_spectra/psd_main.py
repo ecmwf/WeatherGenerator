@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --env-file ./packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/.psd_env --script
+#!/usr/bin/env -S uv run --env-file ./packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/.psd_env --script # noqa: E501
 # /// script
 # dependencies = [
 #   "cf-units",
@@ -32,6 +32,7 @@ uv run export --run-id <INFERENCE_ID> --stream ERA5 \
 --output-dir ../output_nc --format netcdf --regrid-degree 1 \
 --regrid-type regular_ll
 """
+
 import argparse
 import glob
 import logging
@@ -47,6 +48,7 @@ from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 
 _logger = logging.getLogger(__name__)
+
 
 def extract_filepaths(netcdf_paths: list) -> list:
     """
@@ -212,7 +214,7 @@ def construct_config_from_run_id(run_id: str, args: argparse.Namespace) -> DictC
         "output_dir": Path(args.output_dir),
         "comparisons": {
             "target": {"netcdf_paths": [f"{args.export_dir}/targ*.nc"]},
-            run_id: {"netcdf_paths": [f"{args.export_dir}/pred*.nc"]}
+            run_id: {"netcdf_paths": [f"{args.export_dir}/pred*.nc"]},
         },
     }
     run_id_config = DictConfig(run_id_config)

@@ -1,8 +1,11 @@
 """
 Adapted from Martin Willet's code for zonal power spectra for use with the WeatherGenerator model.
-It takes 1D Fourier transforms along the longitude dimension of the data, using an upper and lower longitude as regional bounds. 
-It produces log-log plots of the spectra and semilogx plots of the ratio of the spectra to a reference (e.g., observations or reanalysis). 
-The script is designed to be flexible and can be used to plot spectra for different diagnostics, regions, and forecast times.
+It takes 1D Fourier transforms along the longitude dimension of the data, using an
+    upper and lower longitude as regional bounds.
+It produces log-log plots of the spectra and semilogx plots of the ratio of the spectra
+    to a reference (e.g., observations or reanalysis).
+The script is designed to be flexible and can be used to plot spectra for different
+    diagnostics, regions, and forecast times.
 """
 
 import logging
@@ -12,7 +15,6 @@ import iris
 import iris.cube
 import matplotlib.pyplot as plt
 import numpy as np
-
 
 _logger = logging.getLogger(__name__)
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -210,7 +212,9 @@ def old_cubepsd(cube: iris.cube.Cube, dimension: str = "longitude") -> np.typing
     return field_psd
 
 
-def cubepsd(cubes: iris.cube.CubeList | iris.cube.Cube, dimension: str = "longitude") -> np.typing.NDArray:
+def cubepsd(
+    cubes: iris.cube.CubeList | iris.cube.Cube, dimension: str = "longitude"
+) -> np.typing.NDArray:
     """
     Returns a power spectrum density for a cube
     Assumes that cube.data has an even number of points in dimension dim
@@ -267,6 +271,7 @@ def addwvns(axes: plt.Axes) -> None:
         )
         axes.text(wvn / 360.0, ytxt, f"n{wvn:3.0f}", rotation="vertical")
 
+
 def addlengths(axes: plt.Axes, region: dict) -> None:
     """
     Adds lines of equal spatial scale in km to plots
@@ -303,7 +308,10 @@ def addlengths(axes: plt.Axes, region: dict) -> None:
         )
         axes.text(flengths[ilength], ytxt, f"{lengths[ilength]:5.0f}km", rotation="vertical")
 
-def addidealslope(axes: plt.Axes, slope: float, defxs: list | None = None, defy0: float = 10.0) -> None:
+
+def addidealslope(
+    axes: plt.Axes, slope: float, defxs: list | None = None, defy0: float = 10.0
+) -> None:
     """
     Adds an idealised slope to a log-log spectra plot
     """
@@ -316,6 +324,7 @@ def addidealslope(axes: plt.Axes, slope: float, defxs: list | None = None, defy0
 
     axes.plot(slopexs, slopeys, color="black", lw=2.0, scalex=False, scaley=False)
     axes.text(xtxt, ytxt, "$k^{" + str(slope) + "}$", fontsize="xx-large", weight="bold")
+
 
 def calcposfreq(cube: iris.cube.Cube, dimension: str = "longitude") -> np.typing.NDArray:
     """
@@ -584,9 +593,7 @@ def plot_psds(
                                 plt.legend()
                         except Exception as e:
                             _logger.error(e)
-                            _logger.error(
-                                f"Plotting power spectra failed for {testfile}"
-                            )
+                            _logger.error(f"Plotting power spectra failed for {testfile}")
                             failed_string += f"{testfile}"
                     plt.savefig(outdir / figname)
                     plt.close()
