@@ -112,9 +112,6 @@ def write_output(
 
     # output stream names to be written, use specified ones or all if nothing specified
     stream_names = [stream.name for stream in cf.streams]
-    # include known pseudo-stream names (e.g. latent) so they are treated as known
-    if io.LATENT_STREAM not in stream_names:
-        stream_names.append(io.LATENT_STREAM)
     if val_cfg.get("output").get("streams") is not None:
         output_stream_names = val_cfg.output.streams
     else:
@@ -122,16 +119,9 @@ def write_output(
 
     # Allow a pseudo-stream name 'latent' to enable latent writing while
     # skipping it from the physical streams mapping.
-    latent_stream_name = None
-    output_streams = {}
-    for name in output_stream_names:
-        if name == io.LATENT_STREAM:
-            latent_stream_name = name
-            continue
-        if name not in stream_names:
-            _logger.warning(f"Configured output stream {name} is unknown. Skipping.")
-            continue
-        output_streams[name] = stream_names.index(name)
+    output_streams = {name: stream_names.index(name) for name in output_stream_names}
+    if io.LATENT_STREAM in output_stream_names:
+        output_streams[io.LATENT_STREAM] = None
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
@@ -156,31 +146,7 @@ def write_output(
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
-    # collect latent outputs per forecast step and per sample (optional)
-    latents_all = []
-    if latent_stream_name is not None:
-        for t_idx in timestep_idxs:
-            latents_all.append([])
-            latent_pred = model_output.get_latent_prediction(t_idx)
-            # latent_pred is a dict mapping latent_name -> tensor or LatentState
-            n_samples = len(sample_idxs)
-            for i_sample in range(n_samples):
-                per_sample = {}
-                for lname, lval in latent_pred.items():
-                    if isinstance(lval, LatentState):
-                        for field in (
-                            "z_pre_norm",
-                            "patch_tokens",
-                            "register_tokens",
-                            "class_token",
-                        ):
-                            tensor = getattr(lval, field)
-                            per_sample[f"{lname}_{field}"] = (
-                                tensor[i_sample].detach().to(fp32).cpu().numpy()
-                            )
-                    else:
-                        per_sample[lname] = lval[i_sample].detach().to(fp32).cpu().numpy()
-                latents_all[-1].append(per_sample)
+    latents_all = get_latent_output(batch, model_output) if io.LATENT_STREAM in output_streams else None
 
     data = io.OutputBatchData(
         sources,
@@ -201,3 +167,46 @@ def write_output(
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
+        for latent in data.latent_items():
+            zio.write_zarr(latent)
+
+
+def get_latent_output(batch, model_output):
+    """
+    Interface for getting latent states
+    """
+
+    # collect latent outputs per forecast step and per sample
+    fp32 = torch.float32
+
+    timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
+
+    sample_idxs = [
+        list(sample.streams_data.values())[0].sample_idx
+        for sample in batch.get_source_samples().get_samples()
+    ]
+
+    latents_all: list[list[dict]] = []
+    for t_idx in timestep_idxs:
+        latents_all.append([])
+        latent_pred = model_output.get_latent_prediction(t_idx)
+        n_samples = len(sample_idxs)
+        for i_sample in range(n_samples):
+            per_sample: dict = {}
+            for lname, lval in latent_pred.items():
+                if isinstance(lval, LatentState):
+                    for field in (
+                        "z_pre_norm",
+                        "patch_tokens",
+                        "register_tokens",
+                        "class_token",
+                    ):
+                        tensor = getattr(lval, field)
+                        per_sample[f"{lname}_{field}"] = (
+                            tensor[i_sample].detach().to(fp32).cpu().numpy()
+                        )
+                else:
+                    per_sample[lname] = lval[i_sample].detach().to(fp32).cpu().numpy()
+            latents_all[-1].append(per_sample)
+
+    return latents_all

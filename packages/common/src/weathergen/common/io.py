@@ -590,9 +590,6 @@ class OutputBatchData:
     # each entry is a dict mapping latent_name -> ndarray
     latents: list[list[dict]]
 
-    # optional name to use for latent pseudo-stream when yielding latent items
-    latent_stream_name: str | None = LATENT_STREAM
-
     sample_start: int = 0
     forecast_offset: int = 0
 
@@ -618,10 +615,11 @@ class OutputBatchData:
         ):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
 
-        # additionally yield latent output items if a latent stream name was provided
-        if self.latent_stream_name is not None and self.latents:
+    def latent_items(self):
+        """Additionally yield latent output items if a latent stream name was provided"""
+        if self.latents:
             for s, fo_s in itertools.product(self.samples, self.forecast_steps):
-                key = ItemKey(int(s), int(fo_s), self.latent_stream_name)
+                key = ItemKey(int(s), int(fo_s), LATENT_STREAM)
                 latent_item = self._make_latent_item(key)
                 if latent_item is not None:
                     yield latent_item
