@@ -21,6 +21,7 @@ import torch.nn as nn
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -35,6 +36,7 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
+from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
 
@@ -89,6 +91,7 @@ class ModelParams(torch.nn.Module):
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
+        self.batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
 
         ### POSITIONAL EMBEDDINGS ###
         len_token_seq = 1024
@@ -103,6 +106,25 @@ class ModelParams(torch.nn.Module):
             dtype=self.dtype,
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
+
+        ### ROPE COORDS ###
+        self.rope_2D = cf.get("rope_2D", False)
+        if self.rope_2D:
+            self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
+            total_tokens = (
+                self.num_healpix_cells + self.num_extra_tokens
+            ) * cf.ae_local_num_queries
+            self.register_buffer(
+                "rope_coords",
+                torch.zeros(
+                    self.batch_size_per_gpu,
+                    total_tokens,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+        else:
+            self.rope_coords = None
 
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
@@ -161,28 +183,57 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
-        self.pe_global.data.fill_(0.0)
-        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
-        self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
-            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 0::2] += (
-            torch.sin(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+
+        if self.rope_2D:
+            # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
+            # Shape: (num_healpix_cells, ae_local_num_queries, 2)
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(self.batch_size_per_gpu, 1, 1)
+            offset = self.num_extra_tokens * cf.ae_local_num_queries
+            self.rope_coords.data.fill_(0.0)
+            self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
+
+            # Clear pe_global when using 2D RoPE
+            self.pe_global.data.fill_(0.0)
+        else:
+            # Original pe_global initialization
+            self.pe_global.data.fill_(0.0)
+            xs = (
+                2.0
+                * np.pi
+                * torch.arange(0, dim_embed, 2, device=self.pe_global.device)
+                / dim_embed
             )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
-        self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
-            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
-        )
-        self.pe_global.data[..., 1::2] += (
-            torch.cos(
-                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
+            self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
+                torch.outer(
+                    8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs
+                )
             )
-            .unsqueeze(1)
-            .repeat((1, cf.ae_local_num_queries, 1))
-        )
+            self.pe_global.data[..., 0::2] += (
+                torch.sin(
+                    torch.outer(
+                        torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs
+                    )
+                )
+                .unsqueeze(1)
+                .repeat((1, cf.ae_local_num_queries, 1))
+            )
+            self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
+                torch.outer(
+                    8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs
+                )
+            )
+            self.pe_global.data[..., 1::2] += (
+                torch.cos(
+                    torch.outer(
+                        torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs
+                    )
+                )
+                .unsqueeze(1)
+                .repeat((1, cf.ae_local_num_queries, 1))
+            )
 
         # healpix neighborhood structure
 
@@ -588,7 +639,7 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step)
+                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
