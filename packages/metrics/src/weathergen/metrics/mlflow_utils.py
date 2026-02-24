@@ -41,6 +41,7 @@ class MlFlowUpload:
             "stage": phase,
             "project": project_name,
             "uploader": get_platform_env().get_hpc_user() or "unknown",
+            "organization": get_platform_env().get_hpc_user_org() or "unknown",
             "completion_status": "success",
         }
         if from_run_id:

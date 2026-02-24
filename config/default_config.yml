@@ -140,7 +140,7 @@ data_loading :
 
 # config for training
 training_config:
-  
+
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
