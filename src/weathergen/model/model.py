@@ -614,6 +614,31 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
+    def forward_latent(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
+        """Forward pass of the model
+
+        Tokens are processed through the model components, which were defined in the create method.
+        Args:
+            model_params : Query and embedding parameters
+            batch
+        Returns:
+            A list containing all prediction results
+        """
+
+        output = ModelOutput(batch.get_output_len())
+
+        tokens, posteriors = self.encoder(model_params, batch)
+        output.add_latent_prediction(0, "posteriors", posteriors)
+
+        # recover batch dimension and separate input_steps
+
+        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+        # collapse along input step dimension
+        tokens = tokens.reshape(shape).sum(axis=1)
+
+        return tokens, output
+    
+
     def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
         """Forward pass of the model
 

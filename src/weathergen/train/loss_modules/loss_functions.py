@@ -292,10 +292,11 @@ def cosine_latitude(target_coords, min_value=1e-3, max_value=1.0):
     return (max_value - min_value) * np.cos(latitudes_radian) + min_value
 
 
-def gamma_decay(num_forecast_steps, gamma):
+def gamma_decay(num_forecast_steps, gamma, forecast_max, forecast_min=0):
     fsteps = np.arange(num_forecast_steps)
     weights = gamma**fsteps
-    return weights * (len(fsteps) / np.sum(weights))
+    weights_min_to_max = weights[forecast_min:forecast_max]
+    return weights_min_to_max * (len(fsteps) / np.sum(weights))
 
 
 def student_teacher_softmax(student_patches, teacher_patches, student_temp):

@@ -91,13 +91,13 @@ class LossPhysical(LossModuleBase):
 
         return stream_info_loss_weight, weights_channels
 
-    def _get_output_step_weights(self, len_forecast_steps):
+    def _get_output_step_weights(self, len_forecast_steps, forecast_max, forecast_min=0):
         timestep_weight_config = self.mode_cfg.get("forecast", {}).get("timestep_weight", {})
         if len(timestep_weight_config) == 0:
             return [1.0 for _ in range(len_forecast_steps)]
         weights_timestep_fct = getattr(loss_fns, list(timestep_weight_config.keys())[0])
         decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
-        return weights_timestep_fct(len_forecast_steps, decay_factor)
+        return weights_timestep_fct(len_forecast_steps, decay_factor, forecast_max, forecast_min)
 
     def _get_location_weights(self, stream_info, target_coords):
         location_weight_type = stream_info.get("location_weight", None)
@@ -161,7 +161,7 @@ class LossPhysical(LossModuleBase):
 
         return loss_lfct, losses_chs
 
-    def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, metadata, **kwargs) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
         stream data.
@@ -202,6 +202,15 @@ class LossPhysical(LossModuleBase):
         losses_all = defaultdict(dict)
 
         source2target_idxs, output_info, target2source_idxs, target_info = metadata
+        
+        if "forecast_min" in kwargs and "forecast_max" in kwargs:
+            forecast_min = kwargs['forecast_min']
+            forecast_max = kwargs['forecast_max']
+        elif "forecast_min" not in kwargs and "forecast_max" not in kwargs:
+            forecast_min = self.forecast_offset
+            forecast_max = targets.num_forecast_steps
+        else:
+            assert False,"either both forecast_min and forecast_max should be in kwargs or none should be in kwargs"
 
         # TODO: iterate over batch dimension
         for stream_info in self.cf.streams:
@@ -218,7 +227,9 @@ class LossPhysical(LossModuleBase):
             stream_loss_weight, weights_channels = self._get_weights(stream_info)
 
             # TODO: make nicer
-            output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
+            output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs), forecast_max, forecast_min)
+            print(f"-----------------output_step_loss_weights--------------------------{output_step_loss_weights}------------")
+            print(f"----{len(targets.physical)}--------------{len(targets.output_idxs)}-----------------{forecast_max-forecast_min}")
             if len(targets.physical) - len(targets.output_idxs) > 0:
                 output_step_loss_weights.insert(0, None)
 
@@ -226,7 +237,7 @@ class LossPhysical(LossModuleBase):
             loss_stream = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_timesteps = 0
             for timestep_idx, (preds_cur, target_cur) in enumerate(
-                zip(preds.physical, targets.physical, strict=True)
+                    zip(preds.physical[forecast_min:forecast_max], targets.physical[forecast_min:forecast_max], strict=True)
             ):
                 preds_batch = preds_cur.get(stream_name, [])
                 if not preds_batch:
@@ -240,6 +251,8 @@ class LossPhysical(LossModuleBase):
                 targets_is_spoof = target_cur[stream_name]["is_spoof"]
 
                 output_step_weight = output_step_loss_weights[timestep_idx]
+
+                print(f"----------------------{output_step_weight}--------------------------")
 
                 # loss_timestep: loss for given timestep
                 loss_timestep = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -316,6 +329,8 @@ class LossPhysical(LossModuleBase):
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
+                        print(f"---------loss_lfct-------------{loss_lfct}------------------------")
+                        print(f"------output_step_weight.............{output_step_weight}---------")
                         loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
                         loss_st_corr = loss_st_corr + loss_cur_w
                         ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0

@@ -123,7 +123,7 @@ general:
 train_log_freq:
   terminal: 10
   metrics: 20
-  checkpoint: 250
+  checkpoint: 40
 
 # parameters for data loading
 data_loading :
@@ -195,6 +195,7 @@ training_config:
       num_steps: 2
       offset: 1
       policy: "fixed"
+      forecast_chunk_size: 10
 
 
 # validation config; full validation config is merge of training and validation config
