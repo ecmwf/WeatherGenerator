@@ -59,7 +59,7 @@ fe_num_blocks: 1
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_diffusion_model: False
+fe_diffusion_model: True
 fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -72,7 +72,7 @@ sigma_min: 0.002
 sigma_max: 50000
 sigma_data: 1.7  # 0.5, but std of tokens is 1.7
 rho: 7
-p_mean: 3.0  # -1.2
+p_mean: 1.2  # -1.2
 p_std: 1.2  # 1.2
 # Encoder weights (set to null to not load a pretrained encoder)
 # chkpt_encoder_weights: "./models/dhb9q2yo/dhb9q2yo_chkpt00126.chkpt"
