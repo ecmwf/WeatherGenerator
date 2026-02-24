@@ -47,6 +47,7 @@ class Writer:
         }
         self._forecast_offset = val_cfg.forecast.offset
         self._cf: Config = config  # used for zarr output path lookup => improve
+        self._sample_start = 0
 
     def write_batch(
         self,
@@ -77,6 +78,8 @@ class Writer:
     ) -> typing.Generator[ItemKey, None, None]:
         """Iterate over possible output items"""
         streams: list[str] = self._streams.keys()
+        len_samples = len(samples)
+        samples = (self._sample_start + sample for sample in samples)
 
         # The order of iteration is important here:
         # streams is the outermost and samples the innermost loop variable
@@ -85,16 +88,19 @@ class Writer:
             streams, forecast_steps, samples
         ):
             yield ItemKey(sample_idx, forecast_step, stream)
+        
+        self._sample_start += len_samples
 
     def extract(self, data: _BatchOutputData, key: ItemKey) -> OutputItem:
-        data_invariants = self._get_invariants(key)
+        raw_key = ItemKey(key.sample-self._sample_start, key.forecast_step, key.stream)
+        data_invariants = self._get_invariants(raw_key)
 
         source, target, prediction = None, None, None
         if key.with_source:
-            source = data.extract_source(key).as_dataset(key, data_invariants)
+            source = data.extract_source(raw_key).as_dataset(key, data_invariants)
         if key.with_target(self._forecast_offset):
-            target = data.extract_target(key).as_dataset(key, data_invariants)
-            prediction = data.extract_prediction(key).as_dataset(key, data_invariants)
+            target = data.extract_target(raw_key).as_dataset(key, data_invariants)
+            prediction = data.extract_prediction(raw_key).as_dataset(key, data_invariants)
 
         return OutputItem(
             key,
