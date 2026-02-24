@@ -29,7 +29,7 @@ from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.wegen_reader import (
-    WeatherGenJSONReader,
+    WeatherGenJsonReader,
     WeatherGenMergeReader,
     WeatherGenReader,
     WeatherGenZarrReader,

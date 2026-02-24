@@ -265,7 +265,7 @@ class WeatherGenReader(Reader):
         return default
 
 
-class WeatherGenJSONReader(WeatherGenReader):
+class WeatherGenJsonReader(WeatherGenReader):
     def __init__(
         self,
         eval_cfg: dict,
