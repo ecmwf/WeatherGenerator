@@ -757,6 +757,7 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     ----------
     ref: list[xr.DataArray]
         List of xarray DataArrays, each representing one sample. Must have at least one element.
+        
     Returns
     -------
     xr.DataArray
