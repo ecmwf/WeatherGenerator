@@ -79,6 +79,12 @@ class ModelOutput:
     def get_latent_prediction(self, fstep: int):
         return self.latent[fstep]
 
+    def empty_physical_prediction(self, forecast_steps):
+        self.physical = [{} for _ in range(forecast_steps)]
+
+    def empty_latent_prediction(self, forecast_steps):
+        self.latent = [{} for _ in range(forecast_steps)]
+
 
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""

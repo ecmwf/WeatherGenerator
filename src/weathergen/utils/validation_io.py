@@ -21,8 +21,7 @@ _logger = logging.getLogger(__name__)
 
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
-):
+    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out, **kwargs):
     """
     Interface for writing model output
     """
@@ -42,10 +41,18 @@ def write_output(
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
+
+    if "forecast_min" in kwargs and "forecast_max" in kwargs:
+        forecast_min = kwargs['forecast_min']
+        forecast_max = kwargs['forecast_max']
+    else:
+        forecast_min = val_cfg.get("window_offset_prediction", 0)
+        forecast_max = max(1, val_cfg.get("forecast", {}).get("num_steps", 1))
+    
     targets_lens = []
 
     # TODO Maybe stopping at forecast_steps explained #1657
-    for t_idx in timestep_idxs:
+    for t_idx in range(forecast_min, forecast_max):
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
@@ -155,6 +162,8 @@ def write_output(
         geoinfo_channels,
         sample_start,
         forecast_offset,
+        forecast_min,
+        forecast_max
     )
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():

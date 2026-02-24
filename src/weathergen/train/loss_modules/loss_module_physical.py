@@ -228,11 +228,8 @@ class LossPhysical(LossModuleBase):
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs), forecast_max, forecast_min)
-            print(f"-----------------output_step_loss_weights--------------------------{output_step_loss_weights}------------")
-            print(f"----{len(targets.physical)}--------------{len(targets.output_idxs)}-----------------{forecast_max-forecast_min}")
             if len(targets.physical) - len(targets.output_idxs) > 0:
                 output_step_loss_weights.insert(0, None)
-
             # loss_stream: loss for given stream
             loss_stream = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_timesteps = 0
@@ -250,10 +247,7 @@ class LossPhysical(LossModuleBase):
                 targets_params = target_cur[stream_name]["target_metda_data"]
                 targets_is_spoof = target_cur[stream_name]["is_spoof"]
 
-                output_step_weight = output_step_loss_weights[timestep_idx]
-
-                print(f"----------------------{output_step_weight}--------------------------")
-
+                output_step_weight = output_step_loss_weights[timestep_idx+forecast_min]
                 # loss_timestep: loss for given timestep
                 loss_timestep = torch.tensor(0.0, device=self.device, requires_grad=True)
                 ctr_batch = 0
@@ -329,8 +323,6 @@ class LossPhysical(LossModuleBase):
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
-                        print(f"---------loss_lfct-------------{loss_lfct}------------------------")
-                        print(f"------output_step_weight.............{output_step_weight}---------")
                         loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
                         loss_st_corr = loss_st_corr + loss_cur_w
                         ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0

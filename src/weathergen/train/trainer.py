@@ -607,17 +607,19 @@ class Trainer(TrainerBase):
                                         bidx,
                                         denormalize_data_fct,
                                         batch,
-                                        preds,
+                                        output,
                                         targets_and_auxs,
                                         forecast_min=forecast_min,
                                         forecast_max=forecast_max
                                     )
-                    output.empty_physical_prediction(len(batch.get_output_idxs))
-                    pbar.update(batch_size)
-                    forecast_min = forecast_max
+                                print(f"-----------done with writing------------------")
+                                output.empty_physical_prediction(len(output.physical))
+                                output.empty_latent_prediction(len(output.physical))
+                                pbar.update(batch_size)
+                                forecast_min = forecast_max
 
-                    if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
-                        break
+                                if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
+                                    break
 
                 self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)
