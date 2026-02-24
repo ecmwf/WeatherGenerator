@@ -111,7 +111,7 @@ run_ids :
     merge_run_ids:
       - so67dku4
       - c9cg8ql3
-    metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
+    merge_metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
     label: "Merged Results"
     results_base_dir : "./results/"
     streams:
@@ -147,7 +147,7 @@ run_ids :
     merge_run_ids:
       - so67dku4
       - c9cg8ql3
-    metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
+    merge_metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
     label: "Merged Results"
     results_base_dir : "./results/"
     streams:
