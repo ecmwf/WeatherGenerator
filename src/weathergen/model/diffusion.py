@@ -60,7 +60,11 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.cur_token = None  # TODO: re move after single sample experiments
 
     def forward(
-        self, tokens: torch.Tensor, fstep: int, meta_info: dict[str, SampleMetaData], coords: torch.Tensor = None
+        self,
+        tokens: torch.Tensor,
+        fstep: int,
+        meta_info: dict[str, SampleMetaData],
+        coords: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Model forward call during training. Unpacks the conditioning c = [x_{t-k}, ..., x_{t}], the
@@ -118,7 +122,9 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
-        return c_skip * x + c_out * self.net(c_in * x, fstep=fstep, noise_emb=noise_emb)  # Eq. (7) in EDM paper
+        return c_skip * x + c_out * self.net(
+            c_in * x, fstep=fstep, noise_emb=noise_emb
+        )  # Eq. (7) in EDM paper
 
     def inference(
         self,
@@ -139,7 +145,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             / (num_steps - 1)
             * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
         ) ** self.rho
-        t_steps = torch.cat([self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])])  # t_N = 0
+        t_steps = torch.cat(
+            [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+        )  # t_N = 0
 
         # Main sampling loop.
         x_next = x * t_steps[0]

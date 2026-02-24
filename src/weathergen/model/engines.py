@@ -490,7 +490,6 @@ class ForecastingEngine(torch.nn.Module):
         noise_emb: torch.Tensor = None,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
-
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
         # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         if self.training:
@@ -498,7 +497,7 @@ class ForecastingEngine(torch.nn.Module):
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
-            
+
         # predict residual to last time step if requested
         forecast_residual = self.cf.get("forecast_residual", False)
         if forecast_residual:

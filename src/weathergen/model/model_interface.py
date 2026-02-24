@@ -180,7 +180,7 @@ def init_model_and_shard(
 
     return model, model_params
 
-    
+
 def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
@@ -200,10 +200,30 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
 
     is_model_sharded = cf.with_ddp and cf.with_fsdp
     if is_model_sharded:
+        # model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
+        # params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
+        # if model_has_prefix_module and not params_has_prefix_module:
+        #     # add "module." prefix
+        #     params_temp = {}
+        #     for k in params.keys():
+        #         params_temp["module." + k] = params[k]
+        #     params = params_temp
+        # elif not model_has_prefix_module and params_has_prefix_module:
+        #     # remove "module." prefix
+        #     params_temp = {}
+        #     for k in params.keys():
+        #         params_temp[k.replace("module.", "")] = params[k]
+        #     params = params_temp
+
         meta_sharded_sd = model.state_dict()
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
+            if (
+                sharded_meta_param is None
+                or type(sharded_meta_param) is not torch.distributed.tensor.DTensor
+            ):
+                continue
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 sharded_meta_param.device_mesh,
@@ -309,8 +329,22 @@ def get_target_aux_calculator(
     # create target_and_aux_calc
     if target_and_aux_calc == "Physical":
         target_aux = PhysicalTargetAndAux(loss_cfg, model)
+
     elif target_and_aux_calc == "DiffusionLatentTargetEncoder":
-        target_aux = DiffusionLatentTargetEncoder(model)
+        model, _ = init_model_and_shard(
+            cf,
+            dataset,
+            cf.get("load_chkpt", {}).get("run_id", None),
+            cf.get("load_chkpt", {}).get("epoch", -1),
+            "student",
+            device,
+            with_ddp=False,
+            with_fsdp=False,
+            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
+        )
+        target_aux = DiffusionLatentTargetEncoder(
+            model, is_model_sharded=(cf.with_ddp and cf.with_fsdp)
+        )
     elif target_and_aux_calc == "EMATeacher":
         # work around for problems with FSDP2
         assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"
