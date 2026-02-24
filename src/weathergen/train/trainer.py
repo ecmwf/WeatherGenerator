@@ -29,6 +29,7 @@ from weathergen.model.model_interface import (
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
+from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -81,6 +82,7 @@ class Trainer(TrainerBase):
         self.batch_size_per_gpu = -1
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
+        self.collapse_monitor: CollapseMonitor | None = None
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -143,7 +145,7 @@ class Trainer(TrainerBase):
         self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
         cf.world_size_original = self.world_size_original
 
-        self.log_grad_norms = self.training_cfg.optimizer.get("log_grad_norms", False)
+        self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 
         # create output directory
         if is_root():
@@ -151,6 +153,10 @@ class Trainer(TrainerBase):
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
+
+        # Initialize collapse monitor for SSL training
+        collapse_config = cf.train_logging.get("collapse_monitoring", {})
+        self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -232,6 +238,9 @@ class Trainer(TrainerBase):
 
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
+
+        # Update collapse monitor device
+        self.collapse_monitor.device = self.device
 
         # create data loaders
         self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
@@ -507,9 +516,22 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
+            # Compute collapse monitoring metrics
+            if self.collapse_monitor.should_compute(self.cf.general.istep):
+                self.collapse_monitor._compute_collapse_metrics(
+                    self.cf,
+                    batch_size_total,
+                    self.target_and_aux_calculators,
+                    preds,
+                    targets_and_auxs,
+                )
+
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
                 self._log(TRAIN)
+                # Log collapse metrics
+                if self.collapse_monitor.should_log(self.cf.general.istep):
+                    self._log_collapse_metrics(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
@@ -781,3 +803,12 @@ class Trainer(TrainerBase):
                 logger.info("\n")
 
             self.t_start = time.time()
+
+    def _log_collapse_metrics(self, stage: Stage) -> None:
+        """
+        Log cached collapse monitoring metrics.
+        """
+        metrics = self.collapse_monitor.get_cached_metrics()
+        if metrics and is_root():
+            metrics["num_samples"] = self.cf.general.istep
+            self.train_logger.log_metrics(stage, metrics)
