@@ -563,6 +563,29 @@ class Trainer(TrainerBase):
 
                     batch.to_device(self.device)
 
+                    # denormalization function for data
+                    denormalize_data_fct = (
+                        (lambda x0, x1: x1)
+                        if mode_cfg.get("output", {}).get("normalized_samples", False)
+                        else self.dataset_val.denormalize_target_channels
+                    )
+
+                    # Prepare for streaming or standard write
+                    step_callback = None
+                    streaming_writer = None
+                    if bidx < num_samples_write:
+                        step_callback, streaming_writer = write_output(
+                            self.cf,
+                            mode_cfg,
+                            batch_size,
+                            mini_epoch,
+                            bidx,
+                            denormalize_data_fct,
+                            batch,
+                            None,  # model_output (will be computed below)
+                            self.target_and_aux_calculators_val,
+                        )
+
                     # evaluate model
                     with torch.autocast(
                         device_type=f"cuda:{cf.local_rank}",
@@ -573,11 +596,13 @@ class Trainer(TrainerBase):
                             preds = self.model(
                                 self.model_params,
                                 batch.get_source_samples(),
+                                step_callback=step_callback,
                             )
                         else:
                             preds = self.ema_model.forward_eval(
                                 self.model_params,
                                 batch.get_source_samples(),
+                                step_callback=step_callback,
                             )
 
                         targets_and_auxs = {}
@@ -596,15 +621,11 @@ class Trainer(TrainerBase):
                         metadata=extract_batch_metadata(batch),
                     )
 
-                    # log output
-                    if bidx < num_samples_write:
-                        # denormalization function for data
-                        denormalize_data_fct = (
-                            (lambda x0, x1: x1)
-                            if mode_cfg.get("output", {}).get("normalized_samples", False)
-                            else self.dataset_val.denormalize_target_channels
-                        )
-                        # write output
+                    # For streaming mode, flush remaining steps
+                    if streaming_writer is not None:
+                        streaming_writer.flush()
+                    # For non-streaming mode, now write the complete output
+                    elif bidx < num_samples_write:
                         write_output(
                             self.cf,
                             mode_cfg,
