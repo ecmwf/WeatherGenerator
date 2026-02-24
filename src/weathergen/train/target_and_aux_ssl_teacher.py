@@ -71,6 +71,10 @@ class EncoderTeacher(TargetAndAuxModuleBase):
             module.to(device)
         return self
 
+    def get_current_beta(self, cur_step: int) -> float:
+        beta = self.ema_model.get_current_beta(cur_step)
+        return beta
+
 
 class EMATeacher(EncoderTeacher):
     """SSL teacher using exponential moving average of student weights."""
@@ -96,7 +100,7 @@ class EMATeacher(EncoderTeacher):
 
     def get_current_beta(self, cur_step: int) -> float:
         """Return the current EMA interpolation beta for monitoring."""
-        return self.ema_model.get_current_beta(cur_step, self.batch_size)
+        return self.ema_model.get_current_beta(cur_step)
 
 
 class FrozenTeacher(EncoderTeacher):

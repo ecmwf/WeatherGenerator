@@ -9,6 +9,7 @@
 
 import numpy as np
 import torch
+from torch.utils.checkpoint import checkpoint
 
 from weathergen.model.attention import MultiSelfAttentionHead
 from weathergen.model.layers import MLP
@@ -141,7 +142,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         x = peh(self.embed(x_in.transpose(-2, -1)))
 
         for layer in self.layers:
-            x = layer(x)
+            x = checkpoint(layer,x, use_reentrant=False)
 
         # read out
         if self.unembed_mode == "full":
