@@ -28,9 +28,8 @@ class SampleMetaData:
 
 
 class Sample:
-
     def __init__(self, streams: dict) -> None:
-        self.meta_info: dict[str, SampleMetaData] = {}        
+        self.meta_info: dict[str, SampleMetaData] = {}
         self.streams_data: dict[str, StreamData | None] = {}
 
         for stream_info in streams:

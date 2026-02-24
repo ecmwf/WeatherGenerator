@@ -90,11 +90,13 @@ class Writer:
             streams, forecast_steps, samples
         ):
             yield ItemKey(sample_idx, forecast_step, stream)
-        
+
         self._sample_start += len_samples
 
     def extract(self, data: _BatchOutputData, key: ItemKey, fstep_start: int) -> OutputItem:
-        raw_key = ItemKey(key.sample-self._sample_start, key.forecast_step-fstep_start, key.stream)
+        raw_key = ItemKey(
+            key.sample - self._sample_start, key.forecast_step - fstep_start, key.stream
+        )
         data_invariants = self._get_invariants(raw_key)
 
         source, target, prediction = None, None, None
@@ -109,8 +111,8 @@ class Writer:
             self._forecast_offset,  # TODO nice: maybe drop it?
             target,
             prediction,
-            source
-        )        
+            source,
+        )
 
     def _get_invariants(self, key: ItemKey) -> _DataInvariants:
         # TODO unify DTRange and TimeRange classes
@@ -148,7 +150,7 @@ class _BatchOutputData:
             np.asarray(source.coords),
             np.asarray(source.geoinfos),
         )
-    
+
     @property
     def samples(self):
         # TODO check: data._batch.source_samples.samples
