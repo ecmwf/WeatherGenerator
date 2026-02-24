@@ -56,22 +56,24 @@ class Writer:
         targets: TargetAuxOutput,
         predictions: ModelOutput,
         normalizer: typing.Callable,
-        fsteps: range,
+        fstep_start: int,
     ) -> None:
         data = _BatchOutputData(batch, targets, predictions, normalizer)
+        fstep_range = range(fstep_start, len(predictions.physical))
         # TODO: nice: get result path differently
         with zarrio_writer(get_path_results(self._cf, mini_epoch)) as zio:
-            for subset in self.itemize(data, fsteps):
+            for subset in self.itemize(data, fstep_range):
                 zio.write_zarr(subset)
 
     def itemize(
         self, data: _BatchOutputData, fstep_range: range
     ) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
+        fstep_start = min(fstep_range)
 
         # TODO: check: filter for empty items?
         for key in self.keys(fstep_range, data.samples):
-            yield self.extract(data, key)
+            yield self.extract(data, key, fstep_start)
 
     def keys(
         self, forecast_steps: range, samples: list[int]
@@ -91,8 +93,8 @@ class Writer:
         
         self._sample_start += len_samples
 
-    def extract(self, data: _BatchOutputData, key: ItemKey) -> OutputItem:
-        raw_key = ItemKey(key.sample-self._sample_start, key.forecast_step, key.stream)
+    def extract(self, data: _BatchOutputData, key: ItemKey, fstep_start: int) -> OutputItem:
+        raw_key = ItemKey(key.sample-self._sample_start, key.forecast_step-fstep_start, key.stream)
         data_invariants = self._get_invariants(raw_key)
 
         source, target, prediction = None, None, None

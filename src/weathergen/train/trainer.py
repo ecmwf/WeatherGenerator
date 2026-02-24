@@ -615,7 +615,7 @@ class Trainer(TrainerBase):
                             else self.dataset_val.denormalize_target_channels
                         )
 
-                        fsteps = range(0, 1)  # TODO
+                        fstep_start = 0
                         targets = [
                             targets
                             for loss_name, targets in targets_and_auxs.items()
@@ -630,7 +630,7 @@ class Trainer(TrainerBase):
                             ) from e
                         
                         self.output_writer.write_batch(
-                            mini_epoch, batch, targets, preds, denormalize_data_fct, fsteps
+                            mini_epoch, batch, targets, preds, denormalize_data_fct, fstep_start
                         )
 
                     pbar.update(batch_size)
