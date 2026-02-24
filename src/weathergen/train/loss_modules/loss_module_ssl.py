@@ -75,6 +75,15 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
 
         return LossValues(loss=loss, losses_all=losses_all, stddev_all={})
 
+    def _expand_mask_for_queries(self, mask: torch.Tensor) -> torch.Tensor:
+        num_queries = int(self.cf.get("ae_local_num_queries", 1))
+        if num_queries <= 1:
+            return mask
+        num_cells = 12 * 4 ** int(self.cf.get("healpix_level", 0))
+        if mask.shape[-1] != num_cells:
+            return mask
+        return mask.repeat_interleave(num_queries, dim=-1)
+
     def gather_preds_for_loss(self, name, preds, metadata, target2source_matching_idxs):
         if name == "JEPA":
             """
@@ -91,7 +100,11 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask for info in metadata if "JEPA" in info.global_params["loss"]],
+                    [
+                        self._expand_mask_for_queries(info.mask)
+                        for info in metadata
+                        if "JEPA" in info.global_params["loss"]
+                    ],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -112,7 +125,11 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "student_masks": torch.stack(
-                    [info.mask for info in metadata if "iBOT" in info.global_params["loss"]],
+                    [
+                        self._expand_mask_for_queries(info.mask)
+                        for info in metadata
+                        if "iBOT" in info.global_params["loss"]
+                    ],
                     dim=0,
                 ).unsqueeze(1),
                 "student_class_masked": torch.stack(
@@ -171,7 +188,11 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
-                    [info.mask for info in metadata if "JEPA" in info.global_params["loss"]],
+                    [
+                        self._expand_mask_for_queries(info.mask)
+                        for info in metadata
+                        if "JEPA" in info.global_params["loss"]
+                    ],
                     dim=0,
                 ).unsqueeze(1),
             }
@@ -191,7 +212,11 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
                 "teacher_masks": torch.stack(
-                    [info.mask for info in metadata if "iBOT" in info.global_params["loss"]],
+                    [
+                        self._expand_mask_for_queries(info.mask)
+                        for info in metadata
+                        if "iBOT" in info.global_params["loss"]
+                    ],
                     dim=0,
                 ).unsqueeze(1),
                 "teacher_class_masked": torch.stack(

@@ -111,9 +111,9 @@ class ModelParams(torch.nn.Module):
         self.rope_2D = cf.get("rope_2D", False)
         if self.rope_2D:
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
-            total_tokens = (
-                self.num_healpix_cells + self.num_extra_tokens
-            ) * cf.ae_local_num_queries
+            total_tokens = self.num_extra_tokens + (
+                self.num_healpix_cells * cf.ae_local_num_queries
+            )
             self.register_buffer(
                 "rope_coords",
                 torch.zeros(
@@ -202,7 +202,7 @@ class ModelParams(torch.nn.Module):
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
             coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(self.batch_size_per_gpu, 1, 1)
-            offset = self.num_extra_tokens * cf.ae_local_num_queries
+            offset = self.num_extra_tokens
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
 
@@ -247,7 +247,7 @@ class ModelParams(torch.nn.Module):
         self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
 
         # precompute for varlen attention
-        self.q_cells_lens.data.fill_(1)
+        self.q_cells_lens.data.fill_(cf.ae_local_num_queries)
         self.q_cells_lens.data[0] = 0
 
         # ensure all params have grad set to False
@@ -707,7 +707,10 @@ class Model(torch.nn.Module):
         tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
         # TODO: precompute in model_params?
         tokens_nbors_lens = torch.full(
-            (s[0] * s[1] + 1,), fill_value=9, dtype=torch.int32, device=tokens_nbors.device
+            (s[0] * s[1] + 1,),
+            fill_value=9 * self.cf.ae_local_num_queries,
+            dtype=torch.int32,
+            device=tokens_nbors.device,
         )
         tokens_nbors_lens[0] = 0
 
