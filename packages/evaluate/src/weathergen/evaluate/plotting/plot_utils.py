@@ -188,7 +188,11 @@ def _assign_time_coord(selected_data: list[xr.DataArray]) -> tuple[xr.DataArray,
         ):
             selected_data[i] = data.swap_dims({"forecast_step": "lead_time"})
         else:
-            return selected_data, "forecast_step"
+            _logger.warning(
+                "lead_time coordinate is not compatible with forecast_step for all plotted data; "
+                "using forecast_step as x-axis."
+            )
+            time_dim = "forecast_step"
     return selected_data, time_dim
 
 
