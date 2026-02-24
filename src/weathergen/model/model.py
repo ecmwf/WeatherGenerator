@@ -614,7 +614,9 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
-    def forward(self, model_params: ModelParams, batch: ModelBatch, step_callback=None) -> ModelOutput:
+    def forward(
+        self, model_params: ModelParams, batch: ModelBatch, step_callback=None
+    ) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -650,7 +652,7 @@ class Model(torch.nn.Module):
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
-            
+
             # invoke callback for streaming output if provided
             if step_callback is not None:
                 step_callback(step, output)

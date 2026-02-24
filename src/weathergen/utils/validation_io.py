@@ -80,10 +80,15 @@ def _process_timestep(t_idx, dn_data, model_output, target_aux_out, cf):
         if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
             preds = model_output.get_physical_prediction(t_idx, sname)
             preds_shape = preds[0].shape if preds else (1, 1, 1)
-            preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in range(len(preds) if preds else 1)]
+            preds_s = [
+                np.zeros((preds_shape[0], 0, preds_shape[2]))
+                for _ in range(len(preds) if preds else 1)
+            ]
             targets_s = [np.zeros((0, preds_shape[2])) for _ in range(len(preds) if preds else 1)]
             t_coords_s = [np.zeros((0, 2)) for _ in range(len(preds) if preds else 1)]
-            t_times_s = [np.array([]).astype("datetime64[ns]") for _ in range(len(preds) if preds else 1)]
+            t_times_s = [
+                np.array([]).astype("datetime64[ns]") for _ in range(len(preds) if preds else 1)
+            ]
         else:
             preds = model_output.get_physical_prediction(t_idx, sname)
             targets = target_aux_out.physical[t_idx][sname]["target"]
@@ -113,20 +118,32 @@ def _process_timestep(t_idx, dn_data, model_output, target_aux_out, cf):
 class StreamingOutputWriter:
     """Manages streaming output writing with callback mechanism."""
 
-    def __init__(self, cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out):
+    def __init__(
+        self,
+        cf,
+        val_cfg,
+        batch_size,
+        mini_epoch,
+        batch_idx,
+        dn_data,
+        batch,
+        model_output,
+        target_aux_out,
+    ):
         self.cf = cf
         self.val_cfg = val_cfg
         self.dn_data = dn_data
         self.model_output = model_output
-        
+
         # Extract physical target_aux
         outputs_physical = [
-            loss_name for loss_name, loss_term in val_cfg.losses.items() 
+            loss_name
+            for loss_name, loss_term in val_cfg.losses.items()
             if loss_term.type == "LossPhysical"
         ]
         assert len(outputs_physical) == 1
         self.target_aux_out = target_aux_out[outputs_physical[0]]
-        
+
         # Prepare batch data once
         (
             self.sources,
@@ -137,33 +154,41 @@ class StreamingOutputWriter:
             self.geoinfo_channels,
             self.sample_start,
         ) = _prepare_batch_data(cf, val_cfg, batch_size, batch_idx, batch)
-        
+
         # Streaming config
         self.streaming_cfg = val_cfg.get("output", {}).get("streaming", {})
-        self.write_freq = self.streaming_cfg.get("num_steps", 1) if self.streaming_cfg.get("num_steps") else 1
-        
+        self.write_freq = (
+            self.streaming_cfg.get("num_steps", 1) if self.streaming_cfg.get("num_steps") else 1
+        )
+
         # Accumulate steps before writing
         self.accumulated_steps = []
         self._zarrio_writer = None
 
     def create_callback(self):
         """Create and return the step callback for model.forward()."""
+
         def callback(step, output):
             self.accumulated_steps.append(step)
             # Write when we have accumulated enough steps
             if len(self.accumulated_steps) >= self.write_freq:
                 self._write_accumulated_steps()
                 self.accumulated_steps = []
+
         return callback
 
     def _write_accumulated_steps(self):
         """Write the accumulated steps to zarr."""
         if self._zarrio_writer is None:
-            self._zarrio_writer = zarrio_writer(config.get_path_results(self.cf, self.val_cfg.mini_epoch)).__enter__()
+            self._zarrio_writer = zarrio_writer(
+                config.get_path_results(self.cf, self.val_cfg.mini_epoch)
+            ).__enter__()
 
         for t_idx in self.accumulated_steps:
             preds_step, targets_step, targets_coords_step, targets_times_step, targets_lens_step = (
-                _process_timestep(t_idx, self.dn_data, self.model_output, self.target_aux_out, self.cf)
+                _process_timestep(
+                    t_idx, self.dn_data, self.model_output, self.target_aux_out, self.cf
+                )
             )
 
             if len(preds_step) == 0 or np.array([p.shape[1] for p in preds_step]).sum() == 0:
@@ -200,10 +225,11 @@ def write_output(
     cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
 ):
     """Write model output with optional streaming based on config."""
-    
+
     # TODO: how to handle multiple physical loss terms
     outputs_physical = [
-        loss_name for loss_name, loss_term in val_cfg.losses.items() 
+        loss_name
+        for loss_name, loss_term in val_cfg.losses.items()
         if loss_term.type == "LossPhysical"
     ]
     assert len(outputs_physical) == 1
@@ -214,22 +240,35 @@ def write_output(
     streaming_enabled = streaming_cfg.get("enabled", False)
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
-    
+
     if streaming_enabled:
         # Create streaming writer and return callback for use in model.forward()
         writer = StreamingOutputWriter(
-            cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, 
-            model_output, target_aux_out
+            cf,
+            val_cfg,
+            batch_size,
+            mini_epoch,
+            batch_idx,
+            dn_data,
+            batch,
+            model_output,
+            target_aux_out,
         )
         # Update mini_epoch in val_cfg (needed for zarr path)
         val_cfg.mini_epoch = mini_epoch
-        
+
         # Return callback for model.forward() to use
         return writer.create_callback(), writer
     else:
         # Standard non-streaming: process all steps and write together
         forecast_offset = timestep_idxs[0]
-        preds_all, targets_all, targets_coords_all, targets_times_all, targets_lens_all = [], [], [], [], []
+        preds_all, targets_all, targets_coords_all, targets_times_all, targets_lens_all = (
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
 
         for t_idx in timestep_idxs:
             preds_step, targets_step, targets_coords_step, targets_times_step, targets_lens_step = (
@@ -275,5 +314,5 @@ def write_output(
             with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
                 for subset in data.items():
                     zio.write_zarr(subset)
-        
+
         return None, None
