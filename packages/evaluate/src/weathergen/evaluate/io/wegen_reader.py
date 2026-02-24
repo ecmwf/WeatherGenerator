@@ -80,24 +80,23 @@ class WeatherGenReader(Reader):
             Configuration file from the inference run
         """
         config = {}
-        try:
-            if self.private_paths:
-                _logger.info(
-                    f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
-                )
-                config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
-            else:
-                _logger.info(
-                    f"Loading config for run {self.run_id} from model directory: "
-                    f"{self.model_base_dir}"
-                )
-                config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
-        except Exception as e:
-            _logger.warning(f"Failed to load inference config: {e}. Defaulting to empty dict.")
 
+        if self.private_paths:
+            _logger.info(
+                f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
+            )
+            config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
+        else:
+            _logger.info(
+                f"Loading config for run {self.run_id} from model directory: "
+                f"{self.model_base_dir}"
+            )
+            config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
+        
         if not isinstance(config, dict | oc.DictConfig):
             _logger.warning("Model config not found. inference config will be empty.")
             config = {}
+            
         return config
 
     def get_climatology_filename(self, stream: str) -> str | None:
