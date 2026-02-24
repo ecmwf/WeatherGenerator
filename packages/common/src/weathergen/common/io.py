@@ -353,6 +353,7 @@ class OutputItem:
             self._append_dataset(self.source, "source")
 
         if self.key.with_target(forecast_offset):
+            # TODO requiring target data currently prevents predictions with unknowable target
             self._append_dataset(self.target, "target")
             self._append_dataset(self.prediction, "prediction")
 
