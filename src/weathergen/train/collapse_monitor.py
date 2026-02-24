@@ -29,16 +29,15 @@ References:
 
 from __future__ import annotations
 
-import torch
-
 import logging
 from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
-from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
-from weathergen.model.engines import LatentState
+import torch
 
+from weathergen.model.engines import LatentState
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 
 logger = logging.getLogger(__name__)
 
