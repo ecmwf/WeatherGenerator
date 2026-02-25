@@ -405,74 +405,74 @@ class ForecastingEngine(torch.nn.Module):
         self.fe_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
-        if mode_cfg.get("forecast", {}).get("policy") is not None:
-            for i in range(self.cf.fe_num_blocks):
-                # Alternate between global and local attention
-                if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
-                    self.fe_blocks.append(
-                        MultiSelfAttentionHead(
-                            self.cf.ae_global_dim_embed,
-                            num_heads=self.cf.fe_num_heads,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
-                            with_flash=self.cf.with_flash_attention,
-                            norm_type=self.cf.norm_type,
-                            dim_aux=dim_aux,
-                            norm_eps=self.cf.norm_eps,
-                            attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_noise_conditioning=self.cf.fe_diffusion_model,
-                            with_2d_rope=self.cf.get("rope_2D", False),
-                        )
-                    )
-                else:
-                    self.fe_blocks.append(
-                        MultiSelfAttentionHeadLocal(
-                            self.cf.ae_global_dim_embed,
-                            num_heads=self.cf.fe_num_heads,
-                            qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
-                            block_factor=self.cf.ae_global_block_factor,
-                            dropout_rate=self.cf.fe_dropout_rate,
-                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
-                            with_flash=self.cf.with_flash_attention,
-                            norm_type=self.cf.norm_type,
-                            dim_aux=dim_aux,
-                            norm_eps=self.cf.norm_eps,
-                            attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_noise_conditioning=self.cf.fe_diffusion_model,
-                            with_2d_rope=self.cf.get("rope_2D", False),
-                        )
-                    )
-                # Add MLP block
-                self.fe_blocks.append(
-                    MLP(
-                        self.cf.ae_global_dim_embed,
-                        self.cf.ae_global_dim_embed,
-                        with_residual=True,
-                        dropout_rate=self.cf.fe_dropout_rate,
-                        norm_type=self.cf.norm_type,
-                        dim_aux=dim_aux,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        with_noise_conditioning=self.cf.fe_diffusion_model,
-                    )
-                )
-                # Optionally, add LayerNorm after i-th layer
-                if i in self.cf.get("fe_layer_norm_after_blocks", []):
-                    self.fe_blocks.append(
-                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
-                    )
+        # if mode_cfg.get("forecast", {}).get("policy") is not None:
+        #     for i in range(self.cf.fe_num_blocks):
+        #         # Alternate between global and local attention
+        #         if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
+        #             self.fe_blocks.append(
+        #                 MultiSelfAttentionHead(
+        #                     self.cf.ae_global_dim_embed,
+        #                     num_heads=self.cf.fe_num_heads,
+        #                     dropout_rate=self.cf.fe_dropout_rate,
+        #                     with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+        #                     with_flash=self.cf.with_flash_attention,
+        #                     norm_type=self.cf.norm_type,
+        #                     dim_aux=dim_aux,
+        #                     norm_eps=self.cf.norm_eps,
+        #                     attention_dtype=get_dtype(self.cf.attention_dtype),
+        #                     with_noise_conditioning=self.cf.fe_diffusion_model,
+        #                     with_2d_rope=self.cf.get("rope_2D", False),
+        #                 )
+        #             )
+        #         else:
+        #             self.fe_blocks.append(
+        #                 MultiSelfAttentionHeadLocal(
+        #                     self.cf.ae_global_dim_embed,
+        #                     num_heads=self.cf.fe_num_heads,
+        #                     qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
+        #                     block_factor=self.cf.ae_global_block_factor,
+        #                     dropout_rate=self.cf.fe_dropout_rate,
+        #                     with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+        #                     with_flash=self.cf.with_flash_attention,
+        #                     norm_type=self.cf.norm_type,
+        #                     dim_aux=dim_aux,
+        #                     norm_eps=self.cf.norm_eps,
+        #                     attention_dtype=get_dtype(self.cf.attention_dtype),
+        #                     with_noise_conditioning=self.cf.fe_diffusion_model,
+        #                     with_2d_rope=self.cf.get("rope_2D", False),
+        #                 )
+        #             )
+        #         # Add MLP block
+        #         self.fe_blocks.append(
+        #             MLP(
+        #                 self.cf.ae_global_dim_embed,
+        #                 self.cf.ae_global_dim_embed,
+        #                 with_residual=True,
+        #                 dropout_rate=self.cf.fe_dropout_rate,
+        #                 norm_type=self.cf.norm_type,
+        #                 dim_aux=dim_aux,
+        #                 norm_eps=self.cf.mlp_norm_eps,
+        #                 with_noise_conditioning=self.cf.fe_diffusion_model,
+        #             )
+        #         )
+        #         # Optionally, add LayerNorm after i-th layer
+        #         if i in self.cf.get("fe_layer_norm_after_blocks", []):
+        #             self.fe_blocks.append(
+        #                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+        #             )
 
-        # self.fe_blocks.append(
-        #     MLP(
-        #         self.cf.ae_global_dim_embed,
-        #         self.cf.ae_global_dim_embed,
-        #         with_residual=True,
-        #         dropout_rate=self.cf.fe_dropout_rate,
-        #         norm_type=self.cf.norm_type,
-        #         dim_aux=dim_aux,
-        #         norm_eps=self.cf.mlp_norm_eps,
-        #         with_noise_conditioning=self.cf.fe_diffusion_model,
-        #     )
-        # )
+        self.fe_blocks.append(
+            MLP(
+                self.cf.ae_global_dim_embed,
+                self.cf.ae_global_dim_embed,
+                with_residual=True,
+                dropout_rate=self.cf.fe_dropout_rate,
+                norm_type=self.cf.norm_type,
+                dim_aux=dim_aux,
+                norm_eps=self.cf.mlp_norm_eps,
+                with_noise_conditioning=self.cf.fe_diffusion_model,
+            )
+        )
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.1)
