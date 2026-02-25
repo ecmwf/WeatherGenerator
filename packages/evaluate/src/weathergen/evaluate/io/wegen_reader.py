@@ -548,7 +548,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         -------
             Returns a Dataset where channels have been scaled if needed
         """
-        if stream not in ["ERA5"]:
+        if stream is None or not str(stream).startswith("ERA5"):
             return data
 
         channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
