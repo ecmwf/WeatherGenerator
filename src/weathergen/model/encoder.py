@@ -309,9 +309,15 @@ class EncoderModule(torch.nn.Module):
                 rs, 1, 1, 1
             )
 
+        tokens_global_flat = tokens_global.reshape(
+            rs * self.num_healpix_cells,
+            self.cf.ae_local_num_queries,
+            -1,
+        )
+
         # apply local assimilation engine and project onto global latent vectors
         tokens_global_unmasked, posteriors = self.assimilate_local_project_chunked(
-            tokens, tokens_global, cell_lens, model_params.q_cells_lens
+            tokens, tokens_global_flat, cell_lens, model_params.q_cells_lens
         )
 
         # apply aggregation engine on unmasked tokens
