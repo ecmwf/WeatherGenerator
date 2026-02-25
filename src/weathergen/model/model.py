@@ -614,20 +614,13 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
-    def forward(
-        self, model_params: ModelParams, batch: ModelBatch, step_callback=None
-    ) -> ModelOutput:
+    def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
         Args:
             model_params : Query and embedding parameters
             batch : Batch of data
-            step_callback : Optional callback function to be called after each forecast step.
-                           Called as step_callback(step, output) where step is the forecast step
-                           index and output is the partial ModelOutput for that step.
-                           Used for streaming output writing - allows writing after each step
-                           instead of accumulating all steps in memory.
         Returns:
             A list containing all prediction results
         """
@@ -652,10 +645,6 @@ class Model(torch.nn.Module):
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
-
-            # invoke callback for streaming output if provided
-            if step_callback is not None:
-                step_callback(step, output)
 
         return output
 

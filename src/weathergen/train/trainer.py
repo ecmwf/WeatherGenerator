@@ -563,6 +563,12 @@ class Trainer(TrainerBase):
 
                     batch.to_device(self.device)
 
+                    # Forward pass
+                    preds = self.model(
+                        self.model_params,
+                        batch.get_source_samples(),
+                    )
+
                     # denormalization function for data
                     denormalize_data_fct = (
                         (lambda x0, x1: x1)
@@ -570,62 +576,9 @@ class Trainer(TrainerBase):
                         else self.dataset_val.denormalize_target_channels
                     )
 
-                    # Prepare for streaming or standard write
-                    step_callback = None
-                    streaming_writer = None
+                    # Write output after forward completes
+                    # Single unified path: write_output handles both streaming and non-streaming
                     if bidx < num_samples_write:
-                        step_callback, streaming_writer = write_output(
-                            self.cf,
-                            mode_cfg,
-                            batch_size,
-                            mini_epoch,
-                            bidx,
-                            denormalize_data_fct,
-                            batch,
-                            None,  # model_output (will be computed below)
-                            self.target_and_aux_calculators_val,
-                        )
-
-                    # evaluate model
-                    with torch.autocast(
-                        device_type=f"cuda:{cf.local_rank}",
-                        dtype=self.mixed_precision_dtype,
-                        enabled=cf.with_mixed_precision,
-                    ):
-                        if self.ema_model is None:
-                            preds = self.model(
-                                self.model_params,
-                                batch.get_source_samples(),
-                                step_callback=step_callback,
-                            )
-                        else:
-                            preds = self.ema_model.forward_eval(
-                                self.model_params,
-                                batch.get_source_samples(),
-                                step_callback=step_callback,
-                            )
-
-                        targets_and_auxs = {}
-                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
-                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
-                            targets_and_auxs[loss_name] = target_aux.compute(
-                                self.cf.general.istep,
-                                batch.get_target_samples(target_idxs),
-                                self.model_params,
-                                self.model,
-                            )
-
-                    _ = self.loss_calculator_val.compute_loss(
-                        preds=preds,
-                        targets_and_aux=targets_and_auxs,
-                        metadata=extract_batch_metadata(batch),
-                    )
-
-                    # For streaming mode, flush remaining steps
-                    if streaming_writer is not None:
-                        streaming_writer.flush()
-                    # For non-streaming mode, now write the complete output
-                    elif bidx < num_samples_write:
                         write_output(
                             self.cf,
                             mode_cfg,
@@ -635,7 +588,7 @@ class Trainer(TrainerBase):
                             denormalize_data_fct,
                             batch,
                             preds,
-                            targets_and_auxs,
+                            self.target_and_aux_calculators_val,
                         )
 
                     pbar.update(batch_size)

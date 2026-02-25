@@ -220,14 +220,8 @@ validation_config:
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
-    # streaming output configuration for inference
-    streaming: {
-      # enable streaming mode: write output after each N forecast steps instead of all at once
-      enabled: False,
-      # number of forecast steps to process before writing to disk
-      # if null, writes after each step (num_steps=1)
-      num_steps: null,
-    }
+    # number of forecast steps to accumulate before writing to disk, default no streaming
+    fstep_chunk_size: null,
     }
 
   # run validation before training starts (mainly for model development)
