@@ -169,7 +169,8 @@ class CsvReader(Reader):
             An xarray DataArray containing the metric values with dimensions for sample,
             forecast_step, lead_time, channel, and metric. The DataArray includes attributes
             ``npoints_per_sample`` and the metric name as a coordinate.
-        If no data was found for the specified region, metric, forecast steps and channels, None is returned instead.
+            If no data was found for the specified region, metric, forecast steps, and channels,
+            None is returned instead.
         """
         metric_name = _metric_quaver_convention(metric)
         region_name = _region_quaver_convention(region)
@@ -254,7 +255,7 @@ class CsvReader(Reader):
                         dims=("sample", "forecast_step", "channel", "metric"),
                         coords={
                             "sample": samples,
-                            "lead_time": ('forecast_step', fsteps),
+                            "lead_time": ("forecast_step", fsteps),
                             "forecast_step": range(len(fsteps)),
                             "channel": channels,
                             "metric": [metric],
