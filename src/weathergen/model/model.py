@@ -247,7 +247,7 @@ class ModelParams(torch.nn.Module):
         self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
 
         # precompute for varlen attention
-        self.q_cells_lens.data.fill_(cf.ae_local_num_queries)
+        self.q_cells_lens.data.fill_(1)
         self.q_cells_lens.data[0] = 0
 
         # ensure all params have grad set to False
