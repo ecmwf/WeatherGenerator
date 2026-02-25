@@ -615,6 +615,9 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     plotting_log_emitted = False
     for region in regions:
         for metric in metrics:
+            print("##############")
+            print(metric)
+            print("##############")
             if eval_opt.get("summary_plots", True):
                 plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("ratio_plots", False):
