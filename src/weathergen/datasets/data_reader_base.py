@@ -188,7 +188,7 @@ class ReaderData:
         """
         return len(self.data)
 
-    def remove_nan_coords(self) -> "ReaderData":
+    def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
         """
         Remove all data points where coords or geoinfos contain NaN
 

@@ -415,3 +415,464 @@ class TestSampling:
         # Sample size larger than N
         sampled = monitor._sample_rows(z, sample_size=1024)
         assert sampled.shape[0] == num_samples  # No sampling occurred
+
+
+class TestConfigValidation:
+    """Test configuration validation."""
+
+    def test_invalid_compute_frequency(self):
+        """Test that non-positive compute_frequency raises error."""
+        config = {"enabled": True, "compute_frequency": 0}
+        with pytest.raises(ValueError, match="compute_frequency must be positive"):
+            CollapseMonitor(config, torch.device("cpu"))
+
+        config = {"enabled": True, "compute_frequency": -1}
+        with pytest.raises(ValueError, match="compute_frequency must be positive"):
+            CollapseMonitor(config, torch.device("cpu"))
+
+    def test_invalid_log_frequency(self):
+        """Test that non-positive log_frequency raises error."""
+        config = {"enabled": True, "log_frequency": 0}
+        with pytest.raises(ValueError, match="log_frequency must be positive"):
+            CollapseMonitor(config, torch.device("cpu"))
+
+    def test_invalid_tensor_source(self):
+        """Test that invalid tensor_source raises error."""
+        config = {
+            "enabled": True,
+            "metrics": {
+                "effective_rank": {"tensor_source": "invalid_source"},
+            },
+        }
+        with pytest.raises(ValueError, match="Invalid tensor_source"):
+            CollapseMonitor(config, torch.device("cpu"))
+
+    def test_invalid_forecast_aggregation(self):
+        """Test that invalid forecast_aggregation raises error."""
+        config = {
+            "enabled": True,
+            "metrics": {
+                "effective_rank": {"forecast_aggregation": "invalid_agg"},
+            },
+        }
+        with pytest.raises(ValueError, match="Invalid forecast_aggregation"):
+            CollapseMonitor(config, torch.device("cpu"))
+
+    def test_valid_tensor_sources(self):
+        """Test that valid tensor_source values are accepted."""
+        for source in ["student", "teacher", "both"]:
+            config = {
+                "enabled": True,
+                "metrics": {
+                    "effective_rank": {"tensor_source": source},
+                },
+            }
+            monitor = CollapseMonitor(config, torch.device("cpu"))
+            assert monitor is not None
+
+    def test_valid_forecast_aggregations(self):
+        """Test that valid forecast_aggregation values are accepted."""
+        for agg in ["all", "aggregate_only", "per_step_only"]:
+            config = {
+                "enabled": True,
+                "metrics": {
+                    "effective_rank": {"forecast_aggregation": agg},
+                },
+            }
+            monitor = CollapseMonitor(config, torch.device("cpu"))
+            assert monitor is not None
+
+
+class TestDimensionVarianceValidation:
+    """Test validation in _compute_dimension_variance."""
+
+    def test_empty_tensor(self, monitor):
+        """Test that empty tensor returns empty dict."""
+        z = torch.empty(0, 64)
+        result = monitor._compute_dimension_variance(z)
+        assert result == {}
+
+    def test_nan_tensor(self, monitor):
+        """Test that tensor with NaN returns empty dict."""
+        z = torch.randn(64, 32)
+        z[0, 0] = float("nan")
+        result = monitor._compute_dimension_variance(z)
+        assert result == {}
+
+    def test_inf_tensor(self, monitor):
+        """Test that tensor with Inf returns empty dict."""
+        z = torch.randn(64, 32)
+        z[0, 0] = float("inf")
+        result = monitor._compute_dimension_variance(z)
+        assert result == {}
+
+    def test_single_sample(self, monitor):
+        """Test that single sample returns empty dict (can't compute variance)."""
+        z = torch.randn(1, 32)
+        result = monitor._compute_dimension_variance(z)
+        assert result == {}
+
+    def test_valid_tensor(self, monitor):
+        """Test that valid tensor returns metrics."""
+        torch.manual_seed(42)
+        z = torch.randn(64, 32)
+        result = monitor._compute_dimension_variance(z)
+        assert "var_min" in result
+        assert "var_mean" in result
+        assert "var_max" in result
+
+
+class TestForecastingSequences:
+    """Test forecasting with sequences of latents."""
+
+    @pytest.fixture
+    def forecast_config(self):
+        """Config for forecasting tests."""
+        return {
+            "enabled": True,
+            "compute_frequency": 1,
+            "log_frequency": 1,
+            "metrics": {
+                "effective_rank": {
+                    "enabled": True,
+                    "tensor_source": "student",
+                    "sample_size": 0,
+                    "forecast_aggregation": "all",
+                },
+                "singular_values": {
+                    "enabled": True,
+                    "tensor_source": "student",
+                    "sample_size": 0,
+                    "forecast_aggregation": "all",
+                },
+                "dimension_variance": {
+                    "enabled": True,
+                    "tensor_source": "student",
+                    "forecast_aggregation": "all",
+                },
+                "prototype_entropy": {"enabled": False},
+                "ema_beta": {"enabled": False},
+            },
+        }
+
+    @pytest.fixture
+    def forecast_monitor(self, forecast_config):
+        """Create a monitor configured for forecasting."""
+        return CollapseMonitor(forecast_config, torch.device("cpu"))
+
+    def test_sequence_per_step_metrics(self, forecast_monitor):
+        """Test that per-step metrics are computed for sequences."""
+        torch.manual_seed(42)
+        # Create 3 time steps of latents
+        latents = [torch.randn(32, 64) for _ in range(3)]
+
+        metrics = forecast_monitor.compute_metrics(student_latent=latents)
+
+        # Check per-step effective rank metrics
+        assert "collapse.student.effective_rank.step_0" in metrics
+        assert "collapse.student.effective_rank.step_1" in metrics
+        assert "collapse.student.effective_rank.step_2" in metrics
+
+        # Check per-step variance metrics
+        assert "collapse.student.var_min.step_0" in metrics
+        assert "collapse.student.var_min.step_1" in metrics
+        assert "collapse.student.var_min.step_2" in metrics
+
+    def test_sequence_aggregate_metrics(self, forecast_monitor):
+        """Test that aggregate metrics are computed for sequences."""
+        torch.manual_seed(42)
+        latents = [torch.randn(32, 64) for _ in range(3)]
+
+        metrics = forecast_monitor.compute_metrics(student_latent=latents)
+
+        # Check aggregate effective rank metrics
+        assert "collapse.student.effective_rank.mean" in metrics
+        assert "collapse.student.effective_rank.min" in metrics
+        assert "collapse.student.effective_rank.max" in metrics
+        assert "collapse.student.effective_rank.degradation" in metrics
+
+        # Verify aggregates are consistent
+        step_values = [
+            metrics["collapse.student.effective_rank.step_0"],
+            metrics["collapse.student.effective_rank.step_1"],
+            metrics["collapse.student.effective_rank.step_2"],
+        ]
+        assert metrics["collapse.student.effective_rank.min"] == min(step_values)
+        assert metrics["collapse.student.effective_rank.max"] == max(step_values)
+        assert abs(metrics["collapse.student.effective_rank.mean"] - sum(step_values) / 3) < 1e-6
+
+    def test_degradation_metric(self, forecast_monitor):
+        """Test degradation metric (final/initial ratio)."""
+        torch.manual_seed(42)
+        # Create latents with controlled rank degradation
+        dim = 64
+        # Step 0: Full rank random matrix
+        step_0 = torch.randn(128, dim)
+        # Step 1: Lower rank (rank ~32)
+        u1 = torch.randn(128, 32)
+        v1 = torch.randn(32, dim)
+        step_1 = u1 @ v1
+        # Step 2: Even lower rank (rank ~8)
+        u2 = torch.randn(128, 8)
+        v2 = torch.randn(8, dim)
+        step_2 = u2 @ v2
+
+        latents = [step_0, step_1, step_2]
+        metrics = forecast_monitor.compute_metrics(student_latent=latents)
+
+        # Degradation should be < 1 since rank decreases
+        degradation = metrics["collapse.student.effective_rank.degradation"]
+        assert degradation < 1.0, f"Expected degradation < 1.0, got {degradation}"
+
+        # Verify degradation is step_2 / step_0
+        expected = (
+            metrics["collapse.student.effective_rank.step_2"]
+            / metrics["collapse.student.effective_rank.step_0"]
+        )
+        assert abs(degradation - expected) < 1e-6
+
+    def test_aggregate_only_mode(self):
+        """Test forecast_aggregation='aggregate_only' mode."""
+        config = {
+            "enabled": True,
+            "compute_frequency": 1,
+            "log_frequency": 1,
+            "metrics": {
+                "effective_rank": {
+                    "enabled": True,
+                    "tensor_source": "student",
+                    "forecast_aggregation": "aggregate_only",
+                },
+                "singular_values": {"enabled": False},
+                "dimension_variance": {"enabled": False},
+                "prototype_entropy": {"enabled": False},
+                "ema_beta": {"enabled": False},
+            },
+        }
+        monitor = CollapseMonitor(config, torch.device("cpu"))
+
+        torch.manual_seed(42)
+        latents = [torch.randn(32, 64) for _ in range(3)]
+        metrics = monitor.compute_metrics(student_latent=latents)
+
+        # Should NOT have per-step metrics
+        assert "collapse.student.effective_rank.step_0" not in metrics
+
+        # Should have aggregate metrics
+        assert "collapse.student.effective_rank.mean" in metrics
+        assert "collapse.student.effective_rank.min" in metrics
+
+    def test_per_step_only_mode(self):
+        """Test forecast_aggregation='per_step_only' mode."""
+        config = {
+            "enabled": True,
+            "compute_frequency": 1,
+            "log_frequency": 1,
+            "metrics": {
+                "effective_rank": {
+                    "enabled": True,
+                    "tensor_source": "student",
+                    "forecast_aggregation": "per_step_only",
+                },
+                "singular_values": {"enabled": False},
+                "dimension_variance": {"enabled": False},
+                "prototype_entropy": {"enabled": False},
+                "ema_beta": {"enabled": False},
+            },
+        }
+        monitor = CollapseMonitor(config, torch.device("cpu"))
+
+        torch.manual_seed(42)
+        latents = [torch.randn(32, 64) for _ in range(3)]
+        metrics = monitor.compute_metrics(student_latent=latents)
+
+        # Should have per-step metrics
+        assert "collapse.student.effective_rank.step_0" in metrics
+        assert "collapse.student.effective_rank.step_1" in metrics
+
+        # Should NOT have aggregate metrics
+        assert "collapse.student.effective_rank.mean" not in metrics
+        assert "collapse.student.effective_rank.degradation" not in metrics
+
+    def test_empty_sequence(self, forecast_monitor):
+        """Test that empty sequence returns no metrics."""
+        metrics = forecast_monitor.compute_metrics(student_latent=[])
+
+        # No effective rank metrics should be present
+        assert not any(key.startswith("collapse.student.effective_rank") for key in metrics)
+
+    def test_single_step_sequence(self, forecast_monitor):
+        """Test sequence with single step (no degradation possible)."""
+        torch.manual_seed(42)
+        latents = [torch.randn(32, 64)]
+
+        metrics = forecast_monitor.compute_metrics(student_latent=latents)
+
+        # Should have step_0
+        assert "collapse.student.effective_rank.step_0" in metrics
+
+        # Should have aggregates (single value)
+        assert "collapse.student.effective_rank.mean" in metrics
+
+        # Degradation should be 1.0 (same step)
+        assert metrics["collapse.student.effective_rank.degradation"] == 1.0
+
+    def test_mixed_single_and_sequence(self, forecast_monitor):
+        """Test with single tensor for student and sequence for teacher."""
+        # Need to enable teacher monitoring
+        config = {
+            "enabled": True,
+            "compute_frequency": 1,
+            "log_frequency": 1,
+            "metrics": {
+                "effective_rank": {
+                    "enabled": True,
+                    "tensor_source": "both",
+                    "forecast_aggregation": "all",
+                },
+                "singular_values": {"enabled": False},
+                "dimension_variance": {"enabled": False},
+                "prototype_entropy": {"enabled": False},
+                "ema_beta": {"enabled": False},
+            },
+        }
+        monitor = CollapseMonitor(config, torch.device("cpu"))
+
+        torch.manual_seed(42)
+        student = torch.randn(32, 64)  # Single tensor
+        teacher = [torch.randn(32, 64) for _ in range(3)]  # Sequence
+
+        metrics = monitor.compute_metrics(student_latent=student, teacher_latent=teacher)
+
+        # Student should have single metric
+        assert "collapse.student.effective_rank" in metrics
+        assert "collapse.student.effective_rank.step_0" not in metrics
+
+        # Teacher should have sequence metrics
+        assert "collapse.teacher.effective_rank.step_0" in metrics
+        assert "collapse.teacher.effective_rank.mean" in metrics
+
+    def test_3d_tensor_sequence(self, forecast_monitor):
+        """Test sequence of 3D tensors [B, N, D]."""
+        torch.manual_seed(42)
+        batch_size, num_patches, dim = 4, 32, 64
+        latents = [torch.randn(batch_size, num_patches, dim) for _ in range(3)]
+
+        metrics = forecast_monitor.compute_metrics(student_latent=latents)
+
+        # Should flatten each tensor and compute metrics
+        assert "collapse.student.effective_rank.step_0" in metrics
+        assert "collapse.student.effective_rank.mean" in metrics
+
+        # Values should be reasonable (between 1 and dim)
+        for i in range(3):
+            value = metrics[f"collapse.student.effective_rank.step_{i}"]
+            assert 1 <= value <= dim
+
+
+class TestSequenceSingularValues:
+    """Test singular value metrics for sequences."""
+
+    @pytest.fixture
+    def sv_monitor(self):
+        """Monitor configured for singular value tests."""
+        config = {
+            "enabled": True,
+            "compute_frequency": 1,
+            "log_frequency": 1,
+            "metrics": {
+                "effective_rank": {"enabled": False},
+                "singular_values": {
+                    "enabled": True,
+                    "tensor_source": "student",
+                    "sample_size": 0,
+                    "forecast_aggregation": "all",
+                },
+                "dimension_variance": {"enabled": False},
+                "prototype_entropy": {"enabled": False},
+                "ema_beta": {"enabled": False},
+            },
+        }
+        return CollapseMonitor(config, torch.device("cpu"))
+
+    def test_sv_sequence_metrics(self, sv_monitor):
+        """Test singular value metrics for sequences."""
+        torch.manual_seed(42)
+        latents = [torch.randn(64, 32) for _ in range(3)]
+
+        metrics = sv_monitor.compute_metrics(student_latent=latents)
+
+        # Per-step metrics
+        assert "collapse.student.sv_min.step_0" in metrics
+        assert "collapse.student.sv_max.step_0" in metrics
+        assert "collapse.student.sv_concentration.step_0" in metrics
+
+        # Aggregate metrics
+        assert "collapse.student.sv_min.mean" in metrics
+        assert "collapse.student.sv_max.mean" in metrics
+        assert "collapse.student.sv_concentration.mean" in metrics
+
+
+class TestSequenceVariance:
+    """Test dimension variance metrics for sequences."""
+
+    @pytest.fixture
+    def var_monitor(self):
+        """Monitor configured for variance tests."""
+        config = {
+            "enabled": True,
+            "compute_frequency": 1,
+            "log_frequency": 1,
+            "metrics": {
+                "effective_rank": {"enabled": False},
+                "singular_values": {"enabled": False},
+                "dimension_variance": {
+                    "enabled": True,
+                    "tensor_source": "student",
+                    "forecast_aggregation": "all",
+                },
+                "prototype_entropy": {"enabled": False},
+                "ema_beta": {"enabled": False},
+            },
+        }
+        return CollapseMonitor(config, torch.device("cpu"))
+
+    def test_variance_sequence_metrics(self, var_monitor):
+        """Test variance metrics for sequences."""
+        torch.manual_seed(42)
+        latents = [torch.randn(64, 32) for _ in range(3)]
+
+        metrics = var_monitor.compute_metrics(student_latent=latents)
+
+        # Per-step metrics
+        assert "collapse.student.var_min.step_0" in metrics
+        assert "collapse.student.var_mean.step_0" in metrics
+        assert "collapse.student.var_max.step_0" in metrics
+
+        # Aggregate metrics
+        assert "collapse.student.var_min.mean" in metrics
+        assert "collapse.student.var_mean.mean" in metrics
+        assert "collapse.student.var_max.mean" in metrics
+
+    def test_variance_detects_collapse_over_time(self, var_monitor):
+        """Test that variance metrics can detect collapse over forecast steps."""
+        torch.manual_seed(42)
+        dim = 32
+
+        # Step 0: Normal variance
+        step_0 = torch.randn(128, dim)
+
+        # Step 1: Some dimensions start dying
+        step_1 = torch.randn(128, dim)
+        step_1[:, :8] *= 0.1  # Reduce variance in 8 dims
+
+        # Step 2: More dimensions dead
+        step_2 = torch.randn(128, dim)
+        step_2[:, :16] *= 0.01  # Almost dead in 16 dims
+
+        latents = [step_0, step_1, step_2]
+        metrics = var_monitor.compute_metrics(student_latent=latents)
+
+        # var_min should decrease over steps (more dead dimensions)
+        assert metrics["collapse.student.var_min.step_0"] > metrics["collapse.student.var_min.step_1"]
+        assert metrics["collapse.student.var_min.step_1"] > metrics["collapse.student.var_min.step_2"]

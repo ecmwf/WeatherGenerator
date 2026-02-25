@@ -147,7 +147,7 @@ class Trainer(TrainerBase):
         self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
         cf.world_size_original = self.world_size_original
 
-        self.log_grad_norms = self.training_cfg.optimizer.get("log_grad_norms", False)
+        self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 
         # create output directory
         if is_root():
@@ -157,7 +157,7 @@ class Trainer(TrainerBase):
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
         # Initialize collapse monitor for SSL training
-        collapse_config = self.training_cfg.get("collapse_monitoring", {})
+        collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
     def get_target_aux_calculators(self, mode_cfg):
@@ -512,7 +512,13 @@ class Trainer(TrainerBase):
 
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
-                self._compute_collapse_metrics(preds, targets_and_auxs)
+                self.collapse_monitor._compute_collapse_metrics(
+                    self.cf,
+                    batch_size_total,
+                    self.target_and_aux_calculators,
+                    preds,
+                    targets_and_auxs,
+                )
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_log_freq.metrics == 0:
@@ -842,103 +848,11 @@ class Trainer(TrainerBase):
 
             self.t_start = time.time()
 
-    def _compute_collapse_metrics(self, preds, targets_and_auxs) -> None:
-        """
-        Extract latent tensors from predictions and targets, then compute collapse metrics.
-
-        This method extracts the student and teacher latent representations from the
-        SSL training outputs and passes them to the collapse monitor.
-        """
-        # Get student latents from predictions (first forecast step)
-        student_latent = None
-        teacher_latent = None
-        prototype_probs = None
-        ema_beta = None
-        loss_type = None
-
-        # Find SSL loss type and extract latents
-        for _loss_name, target_aux in targets_and_auxs.items():
-            # Check if this is an EMATeacher-based loss
-            if hasattr(target_aux, "latent") and target_aux.latent:
-                # Handle both cases:
-                # 1. latent is a list[dict] (as per TargetAuxOutput dataclass)
-                # 2. latent is a dict (as set directly by EMATeacher)
-                if isinstance(target_aux.latent, list):
-                    target_latent_dict = target_aux.latent[0] if target_aux.latent else {}
-                else:
-                    # EMATeacher sets latent directly as a dict
-                    target_latent_dict = target_aux.latent
-
-                # Determine the SSL loss type (JEPA, DINO, iBOT)
-                for ssl_type in ["JEPA", "DINO", "iBOT"]:
-                    if ssl_type in target_latent_dict:
-                        loss_type = ssl_type
-                        # Get teacher latent
-                        teacher_latent_data = target_latent_dict[ssl_type]
-                        if isinstance(teacher_latent_data, list) and len(teacher_latent_data) > 0:
-                            teacher_latent = teacher_latent_data[0]
-                        elif isinstance(teacher_latent_data, dict):
-                            # Handle LatentState or dict
-                            teacher_latent = teacher_latent_data.get("latent", teacher_latent_data)
-                        else:
-                            teacher_latent = teacher_latent_data
-                        break
-
-        # Get student latents from predictions
-        if preds.latent and len(preds.latent) > 0:
-            pred_latent_dict = preds.latent[0]
-            for ssl_type in ["JEPA", "DINO", "iBOT"]:
-                if ssl_type in pred_latent_dict:
-                    student_latent_data = pred_latent_dict[ssl_type]
-                    if isinstance(student_latent_data, list) and len(student_latent_data) > 0:
-                        student_latent = student_latent_data[0]
-                    elif isinstance(student_latent_data, dict):
-                        student_latent = student_latent_data.get("latent", student_latent_data)
-                    else:
-                        student_latent = student_latent_data
-                    loss_type = ssl_type
-                    break
-
-        # Get EMA beta from target_and_aux_calculators
-        for _calc_name, calculator in self.target_and_aux_calculators.items():
-            if isinstance(calculator, EMATeacher):
-                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-                step = batch_size_total * self.cf.general.istep
-                ema_beta = calculator.get_current_beta(step)
-                break
-
-        # Debug logging for tensor extraction
-        if student_latent is not None:
-            shape = student_latent.shape if isinstance(student_latent, torch.Tensor) else "N/A"
-            logger.debug(f"Collapse monitor - student: type={type(student_latent)}, shape={shape}")
-        else:
-            logger.debug("Collapse monitor - student_latent is None")
-
-        if teacher_latent is not None:
-            shape = teacher_latent.shape if isinstance(teacher_latent, torch.Tensor) else "N/A"
-            logger.debug(f"Collapse monitor - teacher: type={type(teacher_latent)}, shape={shape}")
-        else:
-            logger.debug("Collapse monitor - teacher_latent is None")
-
-        # Ensure tensors are properly formatted
-        if student_latent is not None and isinstance(student_latent, torch.Tensor):
-            self.collapse_monitor.compute_metrics(
-                student_latent=student_latent,
-                teacher_latent=teacher_latent if isinstance(teacher_latent, torch.Tensor) else None,
-                prototype_probs=prototype_probs,
-                ema_beta=ema_beta,
-                loss_type=loss_type,
-            )
-        else:
-            logger.debug(
-                f"Collapse monitor - skipping compute_metrics: "
-                f"student_latent is {'None' if student_latent is None else type(student_latent)}"
-            )
-
     def _log_collapse_metrics(self, stage: Stage) -> None:
         """
         Log cached collapse monitoring metrics.
         """
         metrics = self.collapse_monitor.get_cached_metrics()
         if metrics and is_root():
+            metrics["num_samples"] = self.cf.general.istep
             self.train_logger.log_metrics(stage, metrics)
