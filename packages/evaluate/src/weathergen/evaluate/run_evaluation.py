@@ -21,7 +21,7 @@ from pathlib import Path
 # Third-party
 import mlflow
 from mlflow.client import MlflowClient
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 # Local application / package
 from weathergen.common.config import _REPO_ROOT
@@ -154,6 +154,8 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
         _logger.info(f"MLFlow client set up: {mlflow_client}")
 
     cf = OmegaConf.load(config)
+    with open_dict(cf):
+        cf.evaluation.metrics = parse_metric_params(cf.evaluation.metrics)
     assert isinstance(cf, DictConfig)
     evaluate_from_config(cf, mlflow_client, log_queue)
 
@@ -276,7 +278,7 @@ def evaluate_from_config(
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
-    metrics = parse_metric_params(cfg.evaluation.metrics)
+    metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})

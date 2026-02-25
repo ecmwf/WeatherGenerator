@@ -552,23 +552,32 @@ def metric_list_to_json(
                     reader.metrics_dir
                     / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
                 )
+                metric_data_dict = metric_data.to_dict()
+
                 if save_path.exists():
                     _logger.info(f"{save_path} already present")
+
                     with save_path.open("r") as f:
                         data_dict = json.load(f)
-                        if "scores" not in data_dict:
-                            data_dict = {"scores": [data_dict]}
-                        for i, score_version in enumerate(data_dict["scores"]):
-                            if score_version["attrs"] == metric_data.attrs:
-                                _logger.warning("metric with same parameters found, replacing")
-                                data_dict["scores"][i] = metric_data.to_dict()
-                                break
-                        else:
-                            data_dict["scores"].append(metric_data.to_dict())
-                            _logger.info(f"Appending results to {save_path}")
+
+                    # Normalize structure
+                    if "scores" not in data_dict:
+                        data_dict = {"scores": [data_dict]}
+                    scores = data_dict.get("scores")
+
+                    # Try to replace existing metric with same attrs
+                    for i, existing_score in enumerate(scores):
+                        if existing_score["attrs"] == metric_data.attrs:
+                            _logger.warning("Metric with same parameters found, replacing")
+                            scores[i] = metric_data_dict
+                            break
+                    else:
+                        scores.append(metric_data_dict)
+                        _logger.info(f"Appending results to {save_path}")
+
                 else:
-                    data_dict = {"scores": [metric_data.to_dict()]}
                     _logger.info(f"Saving results to new file {save_path}")
+                    data_dict = {"scores": [metric_data_dict]}
                 with open(save_path, "w") as f:
                     json.dump(data_dict, f, indent=4)
 
