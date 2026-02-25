@@ -318,7 +318,7 @@ class LossPhysical(LossModuleBase):
                         # batch loss
                         loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
                         loss_st_corr = loss_st_corr + loss_cur_w
-                        ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
+                        ctr_loss_fcts += 1 if (loss_lfct > 0.0 and sw > 0.0) else 0
 
                     loss_timestep = loss_timestep + loss_st_corr
                     ctr_batch += 1 if ctr_loss_fcts > 0.0 else 0
@@ -338,7 +338,7 @@ class LossPhysical(LossModuleBase):
                 "Loss is 0.0, likely incorrect configuration. Check stream"
                 " support time and training configuration."
             )
-        loss = loss / ctr_streams
+        loss = loss / ctr_streams if ctr_streams > 0 else loss
 
         def _nested_dict():
             return defaultdict(dict)
