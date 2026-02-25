@@ -147,7 +147,7 @@ class CsvReader(Reader):
 
     def get_values(
         self, region: str, metric: str, forecast_steps: list[int], channels: list[str]
-    ) -> xr.DataArray:
+    ) -> xr.DataArray | None:
         """
         Retrieve metric values for the specified region, metric, forecast steps and channels.
 
@@ -165,10 +165,11 @@ class CsvReader(Reader):
 
         Returns
         -------
-        values: xr.DataArray
+        da: xr.DataArray or None
             An xarray DataArray containing the metric values with dimensions for sample,
             forecast_step, lead_time, channel, and metric. The DataArray includes attributes
             ``npoints_per_sample`` and the metric name as a coordinate.
+        If no data was found for the specified region, metric, forecast steps and channels, None is returned instead.
         """
         metric_name = _metric_quaver_convention(metric)
         region_name = _region_quaver_convention(region)
@@ -180,6 +181,14 @@ class CsvReader(Reader):
             & (self.data["channel"].isin(channels))
         ]
 
+        if data.empty:
+            _logger.warning(
+                f"No values were found for region '{region}', metric '{metric}', "
+                f"forecast steps '{forecast_steps}', and channels '{channels}'"
+            )
+            return None
+
+        # convert to DataArray
         data = data.copy()
         data["sample"] = data["date"].astype("category").cat.codes
         data["forecast_step"] = data["step"].astype("category").cat.codes
@@ -187,16 +196,6 @@ class CsvReader(Reader):
         cols = ["sample", "forecast_step", "lead_time", "channel", "metric", "value"]
         df = data[cols].set_index(["sample", "forecast_step", "channel", "metric"])
         da = df["value"].to_xarray()
-
-        if da.size == 0:
-            _logger.error(
-                f"No data has been found for region '{region}', metric '{metric}',"
-                f"forecast_steps {forecast_steps}', channels '{channels}'."
-            )
-            raise ValueError(
-                f"No data found for the specified region, metric, forecast steps and channels. "
-                f"Got {region}, {metric}, {forecast_steps}, {channels}."
-            )
 
         lead_time_map = (
             data[["forecast_step", "lead_time"]]
@@ -209,6 +208,7 @@ class CsvReader(Reader):
         )
 
         da.attrs["npoints_per_sample"] = self.npoints_per_sample
+
         da["metric"] = [metric]
 
         return da
@@ -244,8 +244,7 @@ class CsvReader(Reader):
                 data = self.get_values(
                     region=region, metric=metric, forecast_steps=fsteps, channels=channels
                 )
-
-                if data.size == 0:
+                if data is None:
                     data = xr.DataArray(
                         np.full(
                             (len(samples), len(fsteps), len(channels), 1),
@@ -255,7 +254,7 @@ class CsvReader(Reader):
                         dims=("sample", "forecast_step", "channel", "metric"),
                         coords={
                             "sample": samples,
-                            "lead_time": fsteps,
+                            "lead_time": ('forecast_step', fsteps),
                             "forecast_step": range(len(fsteps)),
                             "channel": channels,
                             "metric": [metric],
