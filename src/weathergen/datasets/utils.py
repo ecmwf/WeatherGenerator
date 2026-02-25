@@ -17,15 +17,6 @@ from weathergen.datasets.batch import BatchSamples
 
 
 ####################################################################################################
-def arc_alpha(sin_alpha, cos_alpha):
-    """Invert cosine/sine for alpha in [0,2pi] using both functions"""
-    t = torch.arccos(cos_alpha)
-    mask = sin_alpha < 0.0
-    t[mask] = (2.0 * np.pi) - t[mask]
-    return t
-
-
-####################################################################################################
 def vecs_to_rots(vecs):
     """
     Convert vectors to rotations that align with (1,0,0) ie coordinate origin in geophysical
