@@ -362,7 +362,7 @@ class DataReaderEObs(DataReaderTimestep):
         # Get the actual channel names
         all_channels = sorted(set(self.source_channels + self.target_channels))
         _logger.info(f"Available channels in dataset: {all_channels}")
-        selected_channels = all_channels if channels_idx is None else [all_channels[i] for i in channels_idx]
+        selected_channels = all_channels
         _logger.info(f"Selected channel indices: {channels_idx}")
         _logger.info(f"Selected channels for retrieval: {selected_channels}")
 
