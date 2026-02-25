@@ -178,9 +178,21 @@ def _assign_time_coord(selected_data: list[xr.DataArray]) -> tuple[xr.DataArray,
     time_dim = "lead_time"
 
     for i, data in enumerate(selected_data):
-        if data.coords["lead_time"].shape == data.coords["forecast_step"].shape:
-            selected_data[i] = data.swap_dims({"forecast_step": "lead_time"})
+        lead_time = data.coords["lead_time"]
+        forecast_step = data.coords["forecast_step"]
 
+        if (
+            lead_time.dims == forecast_step.dims
+            and lead_time.shape == forecast_step.shape
+            and lead_time.ndim == 1
+        ):
+            selected_data[i] = data.swap_dims({"forecast_step": "lead_time"})
+        else:
+            _logger.warning(
+                "lead_time coordinate is not compatible with forecast_step for all plotted data; "
+                "using forecast_step as x-axis."
+            )
+            time_dim = "forecast_step"
     return selected_data, time_dim
 
 
