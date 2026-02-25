@@ -188,6 +188,16 @@ class CsvReader(Reader):
         df = data[cols].set_index(["sample", "forecast_step", "channel", "metric"])
         da = df["value"].to_xarray()
 
+        if da.size == 0:
+            _logger.error(
+                f"No data has been found for region '{region}', metric '{metric}',"
+                f"forecast_steps {forecast_steps}', channels '{channels}'."
+            )
+            raise ValueError(
+                f"No data found for the specified region, metric, forecast steps and channels. "
+                f"Got {region}, {metric}, {forecast_steps}, {channels}."
+            )
+
         lead_time_map = (
             data[["forecast_step", "lead_time"]]
             .drop_duplicates()
