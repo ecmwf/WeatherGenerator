@@ -1,20 +1,26 @@
 train:
   plot:
-    ftfcqr0v:
+    pkp5uc1w:
       slurm_id: 0
-      description: "ftfcqr0v, old finetuning"
-    pkfuwqdh:
+      description: "ERA5 MTM, large, 128 epochs"
+    ge8vgixn:
       slurm_id: 0
-      description: "pkfuwqdh, old finetuning"
-    k8smwg67:
+      description: "ERA5 MTM, large, 128 epochs, no forecast args"
+    n713eh0x:
       slurm_id: 0
-      description: "k8smwg67, finetuning NPPATMS diagnostic"
-    spm6zeor:
+      description: "ERA5 MTM, large, 128 epochs, no forecast args, split config 0.5"
+    zm2fpwrc:
       slurm_id: 0
-      description: "spm6zeor, cont. k8smwg67, finetuning NPPATMS diagnostic"
-    ypcir9kz:
+      description: "cont., ERA5 MTM, large, 128 epochs, no forecast args, split config 0.5"
+    v7tvw1xk:
       slurm_id: 0
-      description: "ypcir9kz, finetuning NPPATMS"
-    qh893msa:
+      description: "ERA5 MTM, large, 128 epochs, no forecast args, split config 0.75"
+    cb8h0vsu:
       slurm_id: 0
-      description: "qh893msa, ypcir9kz continued, finetuning NPPATMS"
+      description: "cont., ERA5 MTM, large, 128 epochs, no forecast args, split config 0.75"
+    bs42rqtn:
+      slurm_id: 0
+      description: "ERA5 MTM, large, 128 epochs, no forecast args, split config 1.0"
+    oabsu7hm:
+      slurm_id: 0
+      description: "cont., ERA5 MTM, large, 128 epochs, no forecast args, split config 1.0"

@@ -1,0 +1,41 @@
+train:
+  plot:
+    #ge8vgixn:
+    #  slurm_id: 0
+    #  description: "0.2 rate, ERA5 MTM, large, 128 epochs, no forecast args"
+    p43hxwic:
+      slurm_id: 0
+      description: "0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args"
+    #v27qd3wt:
+    # slurm_id: 0
+    # description: "specify complement, 0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args"
+    #jb21cnrq:
+    #  slurm_id: 0
+    #  description: "0.7 rate, ERA5 MTM, large, 128 epochs, hl_mask 5, no forecast args"
+    #donmz1sj:
+    # slurm_id: 0
+    # description: "specify complement, 0.7 rate, ERA5 MTM, large, 128 epochs, hl_mask 5, no forecast args"
+    g7q59sih:
+      slurm_id: 0
+      description: "0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args, split config 0.25"
+    #wehdtg6k:
+    #  slurm_id: 0
+    #  description: "repeat with --config, 0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args, split config 0.25"
+    zaf8gvei:
+      slurm_id: 0
+      description: "0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args, split config 0.5"
+    # zm2fpwrc:
+    #   slurm_id: 0
+    #   description: "cont., 0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args, split config 0.5"
+    g2k9ysw3:
+      slurm_id: 0
+      description: "0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args, split config 0.75"
+    # cb8h0vsu:
+    #   slurm_id: 0
+    #   description: "cont., 0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args, split config 0.75"
+    ig9hf5k8:
+      slurm_id: 0
+      description: "0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args, split config 1.0"
+    #oabsu7hm:
+    #  slurm_id: 0
+    #  description: "cont., 0.7 rate, ERA5 MTM, large, 128 epochs, no forecast args, split config 1.0"

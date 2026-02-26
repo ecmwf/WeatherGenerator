@@ -174,7 +174,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        loss_fcts: { "mse": { }, },
+        loss_fcts: { "mse": { target_source_correspondence: {0 : {0 : "complement"} } }, },
         },
     }
   
