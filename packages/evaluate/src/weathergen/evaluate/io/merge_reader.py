@@ -221,9 +221,9 @@ class WeatherGenMergeReader(Reader):
         if isinstance(self.readers[0], WeatherGenZarrReader):
             # TODO: implement this properly. Not it is skipping loading scores
             for region in regions:
-                for metric in metrics:
+                for metric, parameters in metrics.items():
                     # all other cases: recompute scores
-                    missing_metrics.setdefault(region, []).append(metric)
+                    missing_metrics.setdefault(region, {}).update({metric: parameters})
         else:
             local_scores, missing_metrics = self._load_scores_json(stream, regions, metrics)
         return local_scores, missing_metrics
