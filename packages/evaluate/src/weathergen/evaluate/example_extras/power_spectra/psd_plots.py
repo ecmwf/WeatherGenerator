@@ -3,9 +3,10 @@ Adapted from Martin Willet's code for zonal power spectra for use with the Weath
 It takes 1D Fourier transforms along the longitude dimension of the data, using an
     upper and lower longitude as regional bounds.
 It produces log-log plots of the spectra and semilogx plots of the ratio of the spectra
-    to a reference (e.g., observations or reanalysis).
+    to a reference (e.g., targets or other model predictions).
 The script is designed to be flexible and can be used to plot spectra for different
     diagnostics, regions, and forecast times.
+DISCLAIMER: It is NOT suitable for bounded box regions
 """
 
 import logging
@@ -48,9 +49,9 @@ diags = {
         "std": "specific_humidity",
         "units": "kg kg-1",
         "levtype": "pressure",
-        "scale": 0.01,
+        "scale": 100*g,
         "slope": -5,
-        "yscale": 1.0,
+        "yscale": 0.1,
     },
     "t": {
         "ncvar": "t",

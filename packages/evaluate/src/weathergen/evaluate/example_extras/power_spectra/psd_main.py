@@ -16,13 +16,13 @@ Plots the power spectrum of the analysis increments
 Adapted from Martin Willet's code for power spectra
 for use with the WeatherGenerator model:
 
-uv run packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/psd_main.py
+.packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/psd_main.py
 --run-id gn3gotvh --export-dir /p/home/jusers/owens1/juwels/WeatherGen/gn3gotvh
 
 OR
 
-uv run packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/psd_main.py
---config packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/psd_config.yml
+./packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/psd_main.py
+--config ./packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/psd_config.yml
 
 Prerequisties:
 

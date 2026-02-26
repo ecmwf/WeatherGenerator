@@ -1,4 +1,4 @@
-variables: ['u'] # , 'v10', 'z'] etc.
+variables: ['q'] # , 'v10', 'z'] etc.
 regions: ['FullGlobe'] #, 'FullGlobe', 'N-Mid-Lats', 'S-Mid-Lats', 'Tropics']
 pressure_levels: [250] 
 forecast_steps : [6, 12] # choose the forecast steps (must be common to all the datasets)
@@ -6,11 +6,11 @@ output_dir: "./plots/power_spectra" #relative to dir in which script is run
 prefix: "comparison_uvpy16mo"
 # define prefix for images
 comparisons: 
-  wg_uvpy16mo:
-    netcdf_paths: ['/users/sowens/uvpy16mo/pred*']
-    # if directory all paths chosen, or use wildcard, or specify single path
+  # if directory all paths chosen, or use wildcard, or specify single path
   wg_target:
     netcdf_paths: ['/users/sowens/uvpy16mo/targ*']
+  wg_uvpy16mo:
+    netcdf_paths: ['/users/sowens/uvpy16mo/pred*']
 
 ## it will produce powerspectra and average across all the samples 
 # available then plot the fsteps as single plots
