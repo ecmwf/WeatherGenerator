@@ -40,17 +40,6 @@ class CsvReader(Reader):
             Run identifier of the model.
         private_paths : dict or None, optional
             Dictionary of private paths for the target HPC system. Defaults to None.
-
-        Raises
-        ------
-        ValueError
-            If ``metrics_dir`` is not provided in ``eval_cfg``.
-        ValueError
-            If ``stream`` is not provided in ``eval_cfg``.
-        ValueError
-            If more than one stream is specified (CsvReader only supports a single stream).
-        ValueError
-            If ``channels`` is not provided in ``eval_cfg``.
         """
 
         super().__init__(eval_cfg, run_id, private_paths)
@@ -60,21 +49,17 @@ class CsvReader(Reader):
         # for backward compatibility allow metric_dir to be specified
         # in the run config
 
-        if self.metrics_dir is None:
-            raise ValueError("metrics_dir folder must be provided in the config.")
+        assert self.metrics_dir is not None, "metrics_dir folder must be provided in the config."
 
         self.stream = list(eval_cfg.streams.keys())
 
-        if self.stream is None:
-            raise ValueError("stream must be provided in the config.")
-        if len(self.stream) != 1:
-            raise ValueError("CsvReader only supports one stream.")
+        assert self.stream is not None, "stream must be provided in the config."
+        assert len(self.stream) == 1, "CsvReader only supports one stream."
 
         self.stream = self.stream[0]
 
         self.channels = eval_cfg.streams.get(self.stream).get("channels")
-        if self.channels is None:
-            raise ValueError("channels must be provided in the config.")
+        assert self.channels is not None, "channels must be provided in the config."
 
         self.data = pd.DataFrame()
 
@@ -136,11 +121,6 @@ class CsvReader(Reader):
         -------
         list[str]
             A list of channels available in the stream.
-
-        Raises
-        ------
-        AssertionError
-            If the provided stream does not match the internal stream.
         """
         assert stream == self.stream, "streams do not match in CSVReader."
         return list(self.channels)  # Placeholder implementation
