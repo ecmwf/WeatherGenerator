@@ -10,6 +10,16 @@ import os
 import subprocess
 import sys
 import yaml
+import argparse
+
+# parse command-line options
+parser = argparse.ArgumentParser(description="Create symlinks to shared directories")
+parser.add_argument(
+    "--fix",
+    action="store_true",
+    help="automatically remove and recreate any incorrect symlinks",
+)
+args = parser.parse_args()
 
 # Change to the repo root directory (parent of scripts/)
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -67,12 +77,20 @@ for d in ["logs", "models", "output", "plots", "results"]:
             print(f"'{d}' already correctly linked to {target}, skipping.")
             continue
         else:
-            print(f"'{d}' is a symlink BUT IS NOT correctly linked to {target}, PLEASE REMOVE IT MANUALLY.")
-            continue
+            print(f"'{d}' is a symlink BUT IS NOT correctly linked to {target}.")
+            if args.fix:
+                print(f"Removing incorrect symlink '{d}' and recreating it.")
+                os.remove(d)
+                # fall through to create the correct link below
+            else:
+                print("Run this script with --fix to remove it automatically.")
+                continue
     elif os.path.exists(d):
         # It exists but is not a symlink (regular file or directory)
         print(f"'{d}' exists as a file/directory (not a symlink), PLEASE REMOVE IT MANUALLY.")
         continue
+
+    # create link if we didn't continue above
     print(f"{d} -> {target}")
     os.symlink(target, d)
 

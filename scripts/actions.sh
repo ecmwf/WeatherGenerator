@@ -128,8 +128,11 @@ case "$1" in
       # This script creates symbolic links to the shared working directories.
       # 1. Get the path of the private config of the cluster
       # 2. Read the yaml and extract the path of the shared conf
+      # A new --fix flag is supported by the Python script to remove incorrect
+      # symlinks automatically; pass it after the command name below.
       # This uses the yq command. It is a python package so uvx (bundled with uv) will donwload and create the right venv
-      uv run --no-project python scripts/check_symlinks.py
+      shift  # consume the "create-links" argument and forward remaining args
+      uv run --no-project python scripts/check_symlinks.py "$@"
     )
     ;;
   create-jupyter-kernel)
