@@ -57,10 +57,9 @@ class WeatherGenMergeReader(Reader):
         self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir"))
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
 
-        if not self.run_ids:
-            raise ValueError(
-                f"'merge_run_ids' must be non-empty in eval_cfg, but got: {self.run_ids}"
-            )
+        assert self.run_ids, (
+            f"'merge_run_ids' must be non-empty in eval_cfg, but got: {self.run_ids}"
+        )
 
         _logger.info(f"Initialising merge reader with {len(self.run_ids)} run(s): {self.run_ids}")
 
@@ -70,26 +69,20 @@ class WeatherGenMergeReader(Reader):
             _logger.debug(
                 f"Creating internal reader {i + 1}/{len(self.run_ids)} for run_id '{run_id}' ..."
             )
-            try:
-                if reader_type == "zarr":
-                    reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
-                else:
-                    reader = WeatherGenJSONReader(
-                        self.eval_cfg, run_id, self.private_paths, regions, metrics
-                    )
-                self.readers.append(reader)
-            except Exception as e:
-                _logger.error(
-                    f"Failed to instantiate reader for run_id '{run_id}' "
-                    f"with {reader_type} backend: {e}"
+            if reader_type == "zarr":
+                reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
+            else:
+                reader = WeatherGenJSONReader(
+                    self.eval_cfg, run_id, self.private_paths, regions, metrics
                 )
-                raise RuntimeError(
-                    f"Failed to create reader for run_id '{run_id}'. "
-                    f"Check configuration and data availability."
-                ) from e
+            self.readers.append(reader)
+            _logger.debug(
+                f"Instantiated reader for run_id '{run_id}' with {reader_type}"
+                f""
+            )
 
         _logger.info(
-            f"Successfully instantiated {len(self.readers)} internal readers of type {reader_type}."
+            f"Instantiated {len(self.readers)} internal readers of type {reader_type}."
         )
 
     def get_data(
@@ -319,13 +312,11 @@ class WeatherGenMergeReader(Reader):
         for reader in self.readers:
             all_ensembles.append(reader.get_ensemble(stream))
 
-        if all(e == ["0"] or e == [0] or e == {0} for e in all_ensembles):
-            return set(range(len(self.readers)))
-        else:
-            raise NotImplementedError(
-                "Merging readers with multiple ensemble members is not supported yet."
-            )
-        return
+        assert all(e == ["0"] or e == [0] or e == {0} for e in all_ensembles), (
+            "Merging readers with multiple ensemble members is not supported yet."
+        )
+        
+        return set(range(len(self.readers)))
 
     # TODO: improve this
     def is_regular(self, stream: str) -> bool:
@@ -358,12 +349,10 @@ class WeatherGenMergeReader(Reader):
         for metric in local_scores.keys():
             for region in local_scores[metric].keys():
                 for stream in local_scores[metric][region].keys():
-                    if len(local_scores[metric][region][stream].keys()) < len(self.run_ids):
-                        _logger.error(
-                            f"Not all runs have the requested precomputed scores for "
-                            f"metric: {metric}, region: {region}, stream: {stream}"
-                        )
-                        raise ValueError("Not all selected runs have precomputed scores.")
+                    assert len(local_scores[metric][region][stream].keys()) == len(self.run_ids), (
+                        f"Not all run ids are distinct or have the requested precomputed "
+                        f"scores for metric: {metric}, region: {region}, stream: {stream}"
+                    )
 
                     scores = (
                         local_scores[metric][region][stream].pop(run_id) for run_id in self.run_ids
