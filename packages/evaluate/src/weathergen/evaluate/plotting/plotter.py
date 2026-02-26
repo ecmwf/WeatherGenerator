@@ -503,7 +503,7 @@ class Plotter:
         )
 
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
-        plt.title(title)
+        plt.title(title, fontsize=9.5)
         if regionname == "global":
             ax.set_global()
         else:
@@ -630,8 +630,8 @@ class Plotter:
         if valid_time is not None:
             title += f" ({format_datetime(valid_time)})"
         elif "valid_time" in data.coords:
-            valid_time_start = data["valid_time"][0].values
-            valid_time_end = data["valid_time"][-1].values
+            valid_time_start = data["valid_time"].values.min()
+            valid_time_end = data["valid_time"].values.max()
             if valid_time_start != valid_time_end:
                 title += (
                     f" ({format_datetime(valid_time_start)} - {format_datetime(valid_time_end)})"
