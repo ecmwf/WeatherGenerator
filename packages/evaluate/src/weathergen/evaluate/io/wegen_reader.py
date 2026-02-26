@@ -157,10 +157,7 @@ class WeatherGenReader(Reader):
         return all_channels
 
     def load_scores(
-        self,
-        stream: str,
-        regions: list[str],
-        metrics: list[str],
+        self, stream: str, regions: list[str], metrics: dict[str, object]
     ) -> tuple[dict, dict]:
         """
         Load multiple pre-computed scores for a given run, stream and metric
@@ -185,10 +182,11 @@ class WeatherGenReader(Reader):
         local_scores = {}
         missing_metrics = {}
         for region in regions:
-            for metric in metrics:
-                score = self.load_single_score(stream, region, metric)
-                if score is None:
-                    missing_metrics.setdefault(region, []).append(metric)
+            for metric, parameters in metrics.items():
+                score = self.load_single_score(stream, region, metric, parameters)
+                if score is  None:
+                    # all other cases: recompute scores
+                    missing_metrics.setdefault(region, {}).update({metric: parameters})
                 else:
                     available_data = self.check_availability(stream, score, mode="evaluation")
                     if available_data.score_availability:
@@ -200,10 +198,13 @@ class WeatherGenReader(Reader):
                         local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
                             stream, {}
                         )[self.run_id] = score
+
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
 
-    def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+    def load_single_score(
+        self, stream: str, region: str, metric: str, parameters: dict | None = None
+    ) -> xr.DataArray | None:
         """
         Load a single pre-computed score for a given run, stream and metric.
 
@@ -212,6 +213,8 @@ class WeatherGenReader(Reader):
         score: xr.DataArray or None
             DataArray of the score if found, else None.
         """
+        if parameters is None:
+            parameters = {}
         score_path = (
             Path(self.metrics_dir)
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
@@ -222,8 +225,12 @@ class WeatherGenReader(Reader):
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
-                score = xr.DataArray.from_dict(data_dict)
-
+                if "scores" not in data_dict:
+                    data_dict = {"scores": [data_dict]}
+                for score_version in data_dict["scores"]:
+                    if score_version["attrs"] == parameters:
+                        score = xr.DataArray.from_dict(score_version)
+                        break
         return score
 
     def get_recomputable_metrics(self, metrics: dict)-> dict:
@@ -272,7 +279,7 @@ class WeatherGenJsonReader(WeatherGenReader):
         run_id: str,
         private_paths: dict | None = None,
         regions: list[str] | None = None,
-        metrics: list[str] | None = None,
+        metrics: dict[str, object] | None = None,
     ):
         super().__init__(eval_cfg, run_id, private_paths)
         self.common_coords: dict = self._compute_common_coords(regions, metrics)
@@ -286,8 +293,8 @@ class WeatherGenJsonReader(WeatherGenReader):
 
         for stream in streams:
             for region in regions:
-                for metric in metrics:
-                    score = self.load_single_score(stream, region, metric)
+                for metric, parameters in metrics.items():
+                    score = self.load_single_score(stream, region, metric, parameters)
                     if score is not None:
                         for name in coord_names:
                             vals = set(score[name].values)
@@ -576,7 +583,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         -------
             Returns a Dataset where channels have been scaled if needed
         """
-        if stream not in ["ERA5"]:
+        if stream is None or not str(stream).startswith("ERA5"):
             return data
 
         channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
@@ -994,9 +1001,9 @@ class WeatherGenMergeReader(Reader):
         if isinstance(self.readers[0], WeatherGenZarrReader):
             # TODO: implement this properly. Not it is skipping loading scores
             for region in regions:
-                for metric in metrics:
+                for metric, parameters in metrics.items():
                     # all other cases: recompute scores
-                    missing_metrics.setdefault(region, []).append(metric)
+                    missing_metrics.setdefault(region, {}).update({metric: parameters})
         else:  # JsonReader
             # deep merge dicts
             for reader in self.readers:

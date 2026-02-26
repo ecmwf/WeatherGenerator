@@ -131,7 +131,6 @@ def calc_scores_per_stream(
             f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
             f" and metrics {metrics}..."
         )
-
         metric_stream = xr.DataArray(
             np.full(
                 (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
@@ -141,7 +140,7 @@ def calc_scores_per_stream(
                 "sample": samples,
                 "forecast_step": fsteps,
                 "channel": channels,
-                "metric": metrics,
+                "metric": list(metrics.keys()),
                 "ens": ensemble,
             },
         )
@@ -180,9 +179,13 @@ def calc_scores_per_stream(
             valid_scores = []
             valid_metric_names = []
 
-            for metric in metrics:
+            for metric, parameters in metrics.items():
                 score = get_score(
-                    score_data, metric, agg_dims="ipoint", group_by_coord=group_by_coord
+                    score_data,
+                    metric,
+                    agg_dims="ipoint",
+                    group_by_coord=group_by_coord,
+                    parameters=parameters,
                 )
                 if score is not None:
                     valid_scores.append(score)
@@ -288,8 +291,8 @@ def calc_scores_per_stream(
         _logger.debug(f"all_metric_attrs keys: {list(all_metric_attrs.keys())}")
 
         # Build local dictionary for this region
-        for metric in metrics:
-            metric_data = metric_stream.sel({"metric": metric})
+        for metric, parameters in metrics.items():
+            metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
             # Restore metric-specific attributes from all forecast steps
             # Attributes are the same across forecast steps for a given metric
             for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
@@ -311,7 +314,7 @@ def _plot_score_maps_per_stream(
     stream: str,
     region: str,
     score_data: VerifiedData,
-    metrics: list[str],
+    metrics: dict[str, object],
     fstep: int,
 ) -> None:
     """Plot 2D score maps for all metrics and channels.
@@ -354,7 +357,7 @@ def _plot_score_maps_per_stream(
     preds = score_data.prediction
 
     plot_metrics = xr.concat(
-        [get_score(score_data, m, agg_dims="sample") for m in metrics],
+        [get_score(score_data, m, agg_dims="sample", parameters=p) for m, p in metrics.items()],
         dim="metric",
         coords="minimal",
         combine_attrs="drop_conflicts",
@@ -363,7 +366,7 @@ def _plot_score_maps_per_stream(
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=metrics,
+        metric=list(metrics.keys()),
     ).compute()
 
     if "ens" in preds.dims:
@@ -521,10 +524,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
 
 
 def metric_list_to_json(
-    reader: Reader,
-    stream: str,
-    metrics_dict: list[xr.DataArray],
-    regions: list[str],
+    reader: Reader, stream: str, metrics_dict: list[xr.DataArray], regions: list[str]
 ):
     """
     Write the evaluation results collected in a list of xarray DataArrays for the metrics
@@ -552,10 +552,34 @@ def metric_list_to_json(
                     reader.metrics_dir
                     / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
                 )
+                metric_data_dict = metric_data.to_dict()
 
-                _logger.info(f"Saving results to {save_path}")
+                if save_path.exists():
+                    _logger.info(f"{save_path} already present")
+
+                    with save_path.open("r") as f:
+                        data_dict = json.load(f)
+
+                    # Normalize structure
+                    if "scores" not in data_dict:
+                        data_dict = {"scores": [data_dict]}
+                    scores = data_dict.get("scores")
+
+                    # Try to replace existing metric with same attrs
+                    for i, existing_score in enumerate(scores):
+                        if existing_score["attrs"] == metric_data.attrs:
+                            _logger.warning("Metric with same parameters found, replacing")
+                            scores[i] = metric_data_dict
+                            break
+                    else:
+                        scores.append(metric_data_dict)
+                        _logger.info(f"Appending results to {save_path}")
+
+                else:
+                    _logger.info(f"Saving results to new file {save_path}")
+                    data_dict = {"scores": [metric_data_dict]}
                 with open(save_path, "w") as f:
-                    json.dump(metric_data.to_dict(), f, indent=4)
+                    json.dump(data_dict, f, indent=4)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "
@@ -784,3 +808,27 @@ def merge(dst: dict, src: dict) -> dict:
         else:
             dst[k] = v
     return dst
+
+
+def parse_metric_params(metrics):
+    """
+    Convert a mixed list of str and dict metrics into a dict where the metric
+    names are the keys and the values are dicts of parameters for that metric.
+    The config might read
+        metrics:
+        - fbi:
+            thresh: 280
+        - rmse
+        ...
+    In python, metrics then looks like
+        [{'fbi':{'thresh':280}},'rmse']
+    This function converts it to
+        {'fbi':{'thresh':280}, 'rmse':{}}
+    """
+    out = oc.DictConfig({})
+    for metric in metrics:
+        if isinstance(metric, str):
+            out = oc.OmegaConf.merge(out, {metric: {}})
+        else:
+            out = oc.OmegaConf.merge(out, metric)
+    return out
