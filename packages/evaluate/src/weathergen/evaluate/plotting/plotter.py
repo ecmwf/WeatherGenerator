@@ -401,7 +401,7 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                        title=self.get_map_title(var, valid_time),
+                        title=self.get_map_title(var, valid_time, da_t),
                     )
                     plot_names.append(name)
 
