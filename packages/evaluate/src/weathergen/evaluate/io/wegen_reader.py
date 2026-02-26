@@ -640,7 +640,7 @@ def _select_channels(
 
     return da_pred, da_tar
 
-def scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
+def _scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
         """
         Check scale all channels.
 
