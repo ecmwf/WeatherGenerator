@@ -53,29 +53,41 @@ def write_output(
         targets_lens += [[]]
         for stream_info in cf.streams:
             sname = stream_info["name"]
-            # predictions
-            preds = model_output.get_physical_prediction(t_idx, sname)
-            targets = target_aux_out.physical[t_idx][sname]["target"]
 
-            preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
+            # handle spoof data: do not write since it might corrupt validation (spoofing invisible
+            # there)
+            if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+                preds = model_output.get_physical_prediction(t_idx, sname)
+                preds_shape = preds[0].shape
+                # for-loop to make sure we have a consistent number of samples
+                preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in preds]
+                targets_s = [np.zeros((0, preds_shape[2])) for _ in preds]
+                t_coords_s = [np.zeros((0, 2)) for _ in preds]
+                t_times_s = [np.array([]).astype("datetime64[ns]") for _ in preds]
+
+            else:
+                preds = model_output.get_physical_prediction(t_idx, sname)
+                targets = target_aux_out.physical[t_idx][sname]["target"]
+
+                preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
+
+                # handle forcing streams or if sample is empty
+                if preds is None:
+                    # preds are empty so create copy of target and add ensemble dimension
+                    assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
+                    preds = [target.clone().unsqueeze(0) for target in targets]
+
+                for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
+                    # denormalize data if requested and map to storage format
+                    preds_s += [dn_data(sname, pred).detach().to(fp32).cpu().numpy()]
+                    targets_s += [dn_data(sname, target).detach().to(fp32).cpu().numpy()]
+
+                    # extract original target coords and times from target data
+                    target_data = target_aux_out.physical[t_idx][sname]
+                    t_coords_s += [target_data["target_coords"][i_batch].cpu().numpy()]
+                    t_times_s += [target_data["target_times"][i_batch].astype("datetime64[ns]")]
+
             targets_lens[-1] += [[]]
-
-            # handle forcing streams or if sample is empty
-            if preds is None:
-                # preds are empty so create copy of target and add ensemble dimension
-                assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
-                preds = [targets[0].clone().unsqueeze(0)]
-
-            for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
-                # denormalize data if requested and map to storage format
-                preds_s += [dn_data(sname, pred).detach().to(fp32).cpu().numpy()]
-                targets_s += [dn_data(sname, target).detach().to(fp32).cpu().numpy()]
-
-                # extract original target coords and times from target data
-                target_data = target_aux_out.physical[t_idx][sname]
-                t_coords_s += [target_data["target_coords"][i_batch].cpu().numpy()]
-                t_times_s += [target_data["target_times"][i_batch].astype("datetime64[ns]")]
-
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
 
             preds_all[-1] += [np.concatenate(preds_s, axis=1)]
@@ -90,7 +102,7 @@ def write_output(
     #               targets_coords_raw[t_idx][i_strm] = targets_coords_raw[t_idx][i_strm][idxs_inv]
     #               targets_times_raw[t_idx][i_strm] = targets_times_raw[t_idx][i_strm][idxs_inv]
 
-    if len(preds_all) == 0:
+    if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
         _logger.warning("Writing no data since predictions are empty.")
         return
 

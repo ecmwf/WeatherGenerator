@@ -116,7 +116,7 @@ def run_inference(args):
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_log_freq)
+    trainer = Trainer(cf.train_logging)
     try:
         trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
     except Exception:
@@ -154,7 +154,7 @@ def run_continue(args):
     # track history of run to ensure traceability of results
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_log_freq)
+    trainer = Trainer(cf.train_logging)
 
     try:
         trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
@@ -195,7 +195,7 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.train_log_freq)
+    trainer = Trainer(cf.train_logging)
 
     try:
         trainer.run(cf, devices)
