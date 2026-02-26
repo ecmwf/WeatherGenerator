@@ -556,8 +556,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             step_forecast_dt = base_idx + (self.time_step * timestep_idx) // self.step_timedelta
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
-
-            import pdb; pdb.set_trace()
             
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
