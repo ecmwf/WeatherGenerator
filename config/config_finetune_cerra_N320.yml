@@ -55,8 +55,8 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 16
-fe_num_heads: 16
+fe_num_blocks: 0
+fe_num_heads: 0
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
@@ -83,13 +83,15 @@ latent_noise_deterministic_latents: True
 
 
 freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
-load_chkpt: {run_id: g5bcm0ia}
+load_chkpt: {
+  run_id: wp7of15h,
+}
 
 norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_cerra/"
+streams_directory: "./config/streams/era5_025deg_cerra/"
 streams: ???
 
 zarr_store: zip
@@ -181,9 +183,9 @@ training_config:
     }
 
   forecast :
-      time_step: 06:00:00
-      offset: 1
-      num_steps: 2
+      time_step: 00:00:00
+      offset: 0
+      num_steps: 0
       policy: "fixed"
 
 
