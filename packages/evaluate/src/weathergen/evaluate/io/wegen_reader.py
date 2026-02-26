@@ -329,7 +329,7 @@ class WeatherGenJsonReader(WeatherGenReader):
     def get_data(self, *args, **kwargs):
         # TODO this should not be needed, the reader should not even be created if this is the case
         # it can still happen when a particular score was available for a different channel
-        raise ValueError(f"Missing JSON data for run {self.run_id}.")
+        assert False, f"Missing JSON data for run {self.run_id}."
 
     def get_recomputable_metrics(self, metrics):
         _logger.info(
@@ -360,10 +360,10 @@ class WeatherGenZarrReader(WeatherGenReader):
                     f"Zarr file {fname_zarr} exists but has unexpected format "
                     f"({zarr_ext}). Expected directory for 'zarr' or file for 'zip'."
                 )
-                raise FileNotFoundError(f"Zarr file {fname_zarr} has unexpected format.")
+                assert False, f"Zarr file {fname_zarr} has unexpected format."
         else:
             _logger.error(f"Zarr file {fname_zarr} does not exist.")
-            raise FileNotFoundError(f"Zarr file {fname_zarr} does not exist.")
+            assert False, f"Zarr file {fname_zarr} does not exist."
 
     def get_data(
         self,
@@ -779,7 +779,7 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     - Preserves and aligns all other coordinates and data variables.
     """
     if not ref:
-        raise ValueError("_force_consistent_grids requires at least one input DataArray.")
+        assert False, "_force_consistent_grids requires at least one input DataArray."
 
     # Determine the reference sorting using the first sample's lat/lon
     ref_lat = ref[0]["lat"].values
