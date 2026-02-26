@@ -297,12 +297,11 @@ class Reader(ABC):
         # Helper function to process range strings like '1-3' into lists [1,2,3]
         def _parse_range_list(value, name):
             if isinstance(value, str) and value != "all":
-                if not re.match(r"^\d+-\d+$", value):
-                    raise ValueError(
-                        f"String format for {name} in config must be "
-                        f"'digit-digit' or 'all'. "
-                        f"Got '{value}'."
-                    )
+                assert re.match(r"^\d+-\d+$", value), (
+                    f"String format for {name} in config must be "
+                    f"'digit-digit' or 'all'. "
+                    f"Got '{value}'."
+                )
                 start, end = map(int, value.split("-"))
                 return list(range(start, end + 1))
             return value
@@ -317,16 +316,14 @@ class Reader(ABC):
                 else val
             )
 
-        if mode not in ("plotting", "evaluation"):
-            raise ValueError(
-                f"Mode must be either 'plotting' or 'evaluation'. Got '{mode}' instead."
-            )
+        assert mode in ("plotting", "evaluation"), (
+            f"Mode must be either 'plotting' or 'evaluation'. Got '{mode}' instead."
+        )
 
         stream_cfg = self.get_stream(stream)
-        if not stream_cfg.get(mode, False):
-            raise KeyError(
-                f"Mode '{mode}' does not exist in stream config for '{stream}'. Please add it."
-            )
+        assert stream_cfg.get(mode, False), (
+            f"Mode '{mode}' does not exist in stream config for '{stream}'. Please add it."
+        )
 
         samples = stream_cfg[mode].get("sample", None)
         fsteps = stream_cfg[mode].get("forecast_step", None)
