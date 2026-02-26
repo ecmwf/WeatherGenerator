@@ -557,6 +557,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
+            import pdb; pdb.set_trace()
+            
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
@@ -565,7 +567,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
-                    stream_ds[0].mean[stream_ds[0].source_idx],
+                    stream_ds[0].mean[stream_ds[0].target_idx],
                 )
                 rdata.is_spoof = True
 
