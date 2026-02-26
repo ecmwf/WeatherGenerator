@@ -252,9 +252,9 @@ class EncoderModule(torch.nn.Module):
                 num_extra, 2, device=rope_cell_coords.device, dtype=rope_cell_coords.dtype
             )
             packed_coords = []
-            for b in range(cell_mask.shape[0]):
+            for mask_b in cell_mask.flatten(0, 1):
                 packed_coords.append(zero_coords)
-                packed_coords.append(rope_cell_coords[cell_mask[b]])
+                packed_coords.append(rope_cell_coords[mask_b])
             packed_coords = torch.cat(packed_coords, dim=0)
         else:
             packed_coords = None
