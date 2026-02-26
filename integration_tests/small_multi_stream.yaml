@@ -113,7 +113,7 @@ general:
   run_id: ???
   run_history: []
 
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250

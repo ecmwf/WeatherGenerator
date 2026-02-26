@@ -66,6 +66,10 @@ forecast_att_dense_rate: 1.0
 with_step_conditioning: True # False
 
 healpix_level: 5
+# Use 2D RoPE instead of traditional global positional encoding
+# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
+# When False: uses traditional pe_global positional encoding
+rope_2D: True
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -116,10 +120,40 @@ general:
   run_history: []
 
 # logging frequency in the training loop (in number of batches)
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
+  log_grad_norms: False
+
+  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
+  # Detects representation collapse via various metrics
+  # For forecasting, supports sequences of latents with per-step and aggregate metrics
+  collapse_monitoring:
+    enabled: true
+    compute_frequency: 100  # batches between metric computations
+    log_frequency: 100      # batches between metric logging
+    metrics:
+      effective_rank:
+        enabled: true
+        tensor_source: "both"  # "student", "teacher", or "both"
+        sample_size: 2048      # max samples for SVD (0 = no sampling)
+        # For forecasting sequences: "all" (per-step + aggregates),
+        # "aggregate_only" (mean/min/max/degradation), "per_step_only"
+        forecast_aggregation: "all"
+      singular_values:
+        enabled: true
+        tensor_source: "both"
+        sample_size: 2048
+        forecast_aggregation: "all"
+      dimension_variance:
+        enabled: true
+        tensor_source: "both"  # cheap to compute, good early indicator
+        forecast_aggregation: "all"
+      prototype_entropy:
+        enabled: true  # only applies to DINO
+      ema_beta:
+        enabled: true
 
 # parameters for data loading
 data_loading :
@@ -130,7 +164,7 @@ data_loading :
 
 # config for training
 training_config:
-  
+
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
 
@@ -161,7 +195,6 @@ training_config:
   optimizer:
     grad_clip: 1.0
     weight_decay: 0.1
-    log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.975
@@ -182,8 +215,8 @@ training_config:
         },
         },
         target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : 0.09,
-            ema_halflife_in_thousands: 1e-3,
+          { ema_ramp_up_ratio : null,
+            ema_halflife_in_thousands: 1e-1,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
