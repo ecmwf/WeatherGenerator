@@ -16,8 +16,8 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plotting.plot_utils import (
     DefaultMarkerSize,
 )
@@ -401,10 +401,7 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                        title=(
-                            f"{self.stream}, {var} : fstep = {self.fstep:03} "
-                            f"({format_datetime(valid_time)})"
-                        ),
+                        title=self.get_map_title(var, valid_time),
                     )
                     plot_names.append(name)
 
@@ -627,6 +624,22 @@ class Plotter:
 
     def get_map_output_dir(self, tag):
         return self.out_plot_basedir / self.stream / "maps" / tag
+
+    def get_map_title(self, var, valid_time, data):
+        title = f"{self.stream}, {var} : fstep = {self.fstep:03}"
+        if valid_time is not None:
+            title += f" ({format_datetime(valid_time)})"
+        elif "valid_time" in data.coords:
+            valid_time_start = data["valid_time"][0].values
+            valid_time_end = data["valid_time"][-1].values
+            if valid_time_start != valid_time_end:
+                title += (
+                    f" ({format_datetime(valid_time_start)} - {format_datetime(valid_time_end)})"
+                )
+            else:
+                title += f" ({format_datetime(valid_time_start)})"
+
+        return title
 
 
 class LinePlots:
