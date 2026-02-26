@@ -120,10 +120,11 @@ general:
   run_history: []
 
 # logging frequency in the training loop (in number of batches)
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
+  log_grad_norms: False
 
 # parameters for data loading
 data_loading :
