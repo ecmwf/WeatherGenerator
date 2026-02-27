@@ -102,7 +102,6 @@ class VerifParser(CfParser):
             result = self.reshape(result)
             da_fs.append(result)
 
-
         _logger.info(f"Retrieved {len(da_fs)} forecast steps for type {self.data_type}.")
 
         if da_fs:
@@ -128,7 +127,7 @@ class VerifParser(CfParser):
                 vars_to_merge[verif_var] = merged
 
         return vars_to_merge
- 
+
     def get_zarr_dt(self, ds: xr.Dataset) -> np.timedelta64:
         """
         Compute the time difference between forecast steps in hours from the WG output dataset.
@@ -254,8 +253,7 @@ class VerifParser(CfParser):
             if verif_var == "mslp":
                 obs_dataarray[:, i, :] = compute_mslp(obs_data, valid_time)
             if verif_var == "tp":
-                obs_dataarray[:, i, :] = compute_precip(
-                        obs_data, self.zarr_dt, valid_time)
+                obs_dataarray[:, i, :] = compute_precip(obs_data, self.zarr_dt, valid_time)
             else:
                 obs_dataarray[:, i, :] = obs_data.data_vars[obs_name].sel(time=valid_time)
 
@@ -263,7 +261,6 @@ class VerifParser(CfParser):
         obs_dataarray.name = "obs"
 
         return obs_dataarray
-    
 
     def preprocess(self, ds: xr.Dataset) -> xr.Dataset:
         """
@@ -298,9 +295,7 @@ class VerifParser(CfParser):
         else:
             return ds
 
-    def regrid(
-        self, ds: xr.Dataset, verif_var: str
-    ) -> xr.Dataset:
+    def regrid(self, ds: xr.Dataset, verif_var: str) -> xr.Dataset:
         """
         Regrid a single xarray Dataset using specific method.
         Parameters
@@ -318,9 +313,11 @@ class VerifParser(CfParser):
             _logger.info(f"{wg_var} not available in WeatherGenerator output: {e}")
             return
         # set coords
-        new_coords = {"time": np.atleast_1d(ds_var.coords["time"].values),
-                        "location": self.obs.location.values,
-                        "leadtime": ds_var.coords["leadtime"].values.astype("float32")}
+        new_coords = {
+            "time": np.atleast_1d(ds_var.coords["time"].values),
+            "location": self.obs.location.values,
+            "leadtime": ds_var.coords["leadtime"].values.astype("float32"),
+        }
 
         # set attrs
         attrs = ds_var.attrs.copy()
@@ -344,7 +341,7 @@ class VerifParser(CfParser):
         for idx in range(len(ds_var.coords["leadtime"].values)):
             regrid_values = interpolator.interpolate(ds_var.values[:, idx])
             fcstdata[idx, :] = regrid_values
-        
+
         regridded_var = xr.DataArray(
             np.array([fcstdata]),
             dims=["time", "leadtime", "location"],
@@ -624,14 +621,9 @@ class VerifParser(CfParser):
             if all(v is None for v in var_list):
                 _logger.warning(f"No data to save for variable {verif_var}. Skipping.")
                 continue
-            ds = xr.concat(var_list, 
-                            data_vars="all",
-                            dim="time")
+            ds = xr.concat(var_list, data_vars="all", dim="time")
             out_fname = self.get_output_filename(verif_var)
             _logger.info(f"Saving to {out_fname}.")
             ds.to_netcdf(out_fname)
             _logger.info(f"Saved NetCDF file to {out_fname}.")
-            _logger.info(
-                f"Saved {verif_var} data to"
-                f" {self.output_format} in {self.output_dir}."
-            )
+            _logger.info(f"Saved {verif_var} data to {self.output_format} in {self.output_dir}.")

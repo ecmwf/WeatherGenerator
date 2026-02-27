@@ -574,6 +574,7 @@ class Regridder:
 
 ## functions for verif
 
+
 def convert_coordinates(coords: np.typing.NDArray) -> np.typing.NDArray:
     """
     Convert lat-lon coordinates to cartesian coordinates in a unit box
@@ -668,7 +669,9 @@ class Verif2DInterpolator(VerifInterpolator):
 
         self.weights = self.weights / self.weights.sum(axis=1)[:, np.newaxis]
 
-    def interpolate(self, values: np.typing.NDArray, intmap: np.typing.NDArray = None) -> np.typing.NDArray:
+    def interpolate(
+        self, values: np.typing.NDArray, intmap: np.typing.NDArray = None
+    ) -> np.typing.NDArray:
         """
         Interpolate values to points
         """
@@ -704,7 +707,9 @@ class VerifLatLonInterpolator(VerifInterpolator):
         self.obs_points = obs_points
         self.triangulation = Delaunay(grid_points)
 
-    def interpolate(self, values: np.typing.NDArray, intmap: np.typing.NDArray = None) -> np.typing.NDArray:
+    def interpolate(
+        self, values: np.typing.NDArray, intmap: np.typing.NDArray = None
+    ) -> np.typing.NDArray:
         """
         Interpolate values to points
         """
@@ -738,7 +743,9 @@ class VerifNearestInterpolator(VerifInterpolator):
         tree = KDTree(grid_xyz)
         _, self.indices = tree.query(obs_xyz, k=1)
 
-    def interpolate(self, values: np.typing.NDArray, intmap: np.typing.NDArray = None) -> np.typing.NDArray:
+    def interpolate(
+        self, values: np.typing.NDArray, intmap: np.typing.NDArray = None
+    ) -> np.typing.NDArray:
         """
         Interpolate values to points
         """
