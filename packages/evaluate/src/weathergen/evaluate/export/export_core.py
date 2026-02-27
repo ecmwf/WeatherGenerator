@@ -250,6 +250,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         with Pool(processes=n_processes, maxtasksperchild=5) as pool:
             parser = CfParserFactory.get_parser(config=config, **kwargs)
 
+            processed_samples = []
+
             for s_idx, sample in enumerate(tqdm(samples)):
                 ref_time = ref_times[s_idx]
                 step_tasks = [
@@ -258,10 +260,17 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
                 results_iterator = pool.imap_unordered(get_data_worker, step_tasks, chunksize=1)
 
-                parser.process_sample(
+
+                processed = parser.process_sample(
                     results_iterator,
                     ref_time=ref_time,
                 )
+
+                processed_samples.append(processed)
+            
+            # Only save here if need to merge samples, otherwise save in process_sample
+            if processed_samples[0] is not None:
+                parser.save(processed_samples)
 
             pool.terminate()
             pool.join()

@@ -74,28 +74,28 @@ variables:
 
 coordinates:
     sfc:
-        valid_time: time
+        valid_time: valid_time
         lat: latitude
         lon: longitude
         stream: stream
         forecast_step: leadtime
-        forecast_reference_time: forecast_reference_time
+        forecast_reference_time: time
         ncells: ncells
     pl:
       #not needed
         pressure_level: pressure
-        valid_time: time
+        valid_time: valid_time
         lat: latitude
         lon: longitude
         stream: stream
         forecast_step: leadtime
-        forecast_reference_time: forecast_reference_time
+        forecast_reference_time: time
         ncells: ncells
 
 dimensions:
     valid_time:
-      verif: time
-      std: time
+      verif: valid_time
+      std: valid_time
     lat: 
       verif: latitude
       std: latitude
@@ -109,7 +109,7 @@ dimensions:
       std: pressure
       verif_unit: hPa
     forecast_reference_time: 
-      verif: forecast_reference_time
+      verif: time
       std: forecast_reference_time
     forecast_step:
       verif: leadtime

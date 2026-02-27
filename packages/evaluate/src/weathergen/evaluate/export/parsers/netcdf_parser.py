@@ -270,7 +270,7 @@ class NetcdfParser(CfParser):
         else:
             variables = self._attrs_regular_grid(ds)
 
-        dataset = xr.merge(variables.values())
+        dataset = xr.merge(variables.values(), compat="no_conflicts")
         dataset.attrs = ds.attrs
         return dataset
 
