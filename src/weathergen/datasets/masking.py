@@ -331,10 +331,15 @@ class Masker:
                 if is_stream_forcing(stream_cfg, self.stage):
                     target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
+                    # prevent target from being dropped
+                    stream_cfg_target = copy.deepcopy(stream_cfg)
+                    stream_cfg_target["randomly_drop_as_source_rate"] = 0.0
+                    # get
                     target_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
                         strategy=target_cfg.get("masking_strategy"),
                         masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
+                        stream_cfg=stream_cfg_target,
                         target_relationship_mask=("independent", None),
                     )
 
@@ -387,6 +392,7 @@ class Masker:
                         num_cells=num_cells,
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
+                        stream_cfg=stream_cfg,
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                     )
 
@@ -407,6 +413,7 @@ class Masker:
         num_cells: int,
         strategy: str,
         masking_strategy_config: dict,
+        stream_cfg: dict,
         target_relationship_mask: (str, np.typing.NDArray),
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
@@ -452,7 +459,9 @@ class Masker:
             return mask, {}
 
         # get mask
-        mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
+        mask, params = self._generate_cell_mask(
+            num_cells, strategy, masking_strategy_config, stream_cfg
+        )
 
         # handle cases where mask needs to be combined with target_mask
         # without the assert we can fail silently
@@ -470,7 +479,11 @@ class Masker:
         return (mask, params)
 
     def _generate_cell_mask(
-        self, num_cells: int, strategy: str, masking_strategy_config: dict
+        self,
+        num_cells: int,
+        strategy: str,
+        masking_strategy_config: dict,
+        stream_cfg: dict,
     ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
@@ -498,6 +511,12 @@ class Masker:
         )
 
         # generate cell mask
+
+        # if stream is not dropped then apply regular masking
+        if stream_cfg.get("randomly_drop_as_source_rate", 0.0) > 0.0:
+            if self.rng.uniform() < stream_cfg.get("randomly_drop_as_source_rate"):
+                mask = to_bool_tensor(np.zeros(num_cells, dtype=np.bool))
+                return (mask, masking_params)
 
         if strategy == "random":
             keep_rate = self._get_sampling_rate(masking_strategy_config)
