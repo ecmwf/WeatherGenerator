@@ -153,9 +153,7 @@ class Masker:
                     strategy_cfg["masking_strategy"] = section_override["masking_strategy"]
                 if "masking_strategy_config" in section_override:
                     strategy_cfg["masking_strategy_config"] = omegaconf.OmegaConf.merge(
-                        strategy_cfg.get(
-                            "masking_strategy_config", omegaconf.OmegaConf.create({})
-                        ),
+                        strategy_cfg.get("masking_strategy_config", omegaconf.OmegaConf.create({})),
                         section_override["masking_strategy_config"],
                     )
 

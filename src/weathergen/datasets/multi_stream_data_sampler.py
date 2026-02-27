@@ -12,6 +12,7 @@ import pathlib
 
 import numpy as np
 import torch
+
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
@@ -630,9 +631,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         target_cfgs = self.mode_cfg.get("target_input", {})
 
         # get/coordinate masks
-        masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(
-            mode
-        )
+        masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
 
         source_select, target_select = [], []
         if "masking" in mode:
