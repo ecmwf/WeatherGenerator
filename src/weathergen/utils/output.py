@@ -17,7 +17,6 @@ from weathergen.common.io import (
     zarrio_writer,
 )
 from weathergen.datasets.batch import ModelBatch
-from weathergen.datasets.data_reader_base import TimeWindowHandler
 from weathergen.model.model import ModelOutput
 from weathergen.train.target_and_aux_module_base import PhysicalTarget, TargetAuxOutput
 
@@ -31,12 +30,6 @@ class Writer:
     ):
         streams = {stream.name: stream for stream in streams}
         # TODO: nice: dont store all config
-        self._twh = TimeWindowHandler(
-            val_cfg.start_date,
-            val_cfg.end_date,
-            val_cfg.time_window_len,
-            val_cfg.time_window_step,
-        )
 
         _all_streams = list(streams.keys())
         _output_streams = val_cfg.get("output", None).get("streams", None)
@@ -98,6 +91,7 @@ class Writer:
             key.sample - self._sample_start, key.forecast_step - fstep_start, key.stream
         )
         data_invariants = self._get_invariants(raw_key)
+        data_invariants.source_interval = data.source_interval
 
         source, target, prediction = None, None, None
         if key.with_source:
@@ -116,9 +110,7 @@ class Writer:
 
     def _get_invariants(self, key: ItemKey) -> _DataInvariants:
         # TODO unify DTRange and TimeRange classes
-        window = self._twh.window(key.sample)
         return _DataInvariants(
-            source_interval=TimeRange(window.start, window.end),
             # val_source_channels are ListConfig[str] objects -> convert to list[str]
             source_channels=list(self._streams[key.stream].val_source_channels),
             target_channels=list(self._streams[key.stream].val_target_channels),
@@ -150,6 +142,11 @@ class _BatchOutputData:
             np.asarray(source.coords),
             np.asarray(source.geoinfos),
         )
+    
+    @property
+    def source_interval(self) -> TimeRange:
+        window = self._batch.init_time
+        return TimeRange(window.start, window.end)
 
     @property
     def samples(self):
@@ -189,10 +186,10 @@ class _BatchOutputData:
 
 @dataclasses.dataclass
 class _DataInvariants:
-    source_interval: TimeRange
     source_channels: list[str]
     target_channels: list[str]
     geoinfo_channels: list[str]
+    source_interval: TimeRange | None = None
 
 
 @dataclasses.dataclass
