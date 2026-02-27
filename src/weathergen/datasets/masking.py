@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.train.utils import Stage
+from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,70 @@ class Masker:
         Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
+
+    @staticmethod
+    def merge_masking_config(mode_cfg, override):
+        """Merge a stream's masking override into the base mode config.
+
+        Only masking strategy fields are overridden. Structural keys like
+        ``num_samples`` and ``num_steps_input`` remain unchanged.
+        """
+        if override is None:
+            return mode_cfg
+
+        effective = copy.deepcopy(mode_cfg)
+        for section_key in ("model_input", "target_input"):
+            section_override = override.get(section_key, None)
+            if section_override is None:
+                continue
+            section = effective.get(section_key, None)
+            if section is None:
+                continue
+            for strategy_cfg in section.values():
+                if "masking_strategy" in section_override:
+                    strategy_cfg["masking_strategy"] = section_override["masking_strategy"]
+                if "masking_strategy_config" in section_override:
+                    strategy_cfg["masking_strategy_config"] = omegaconf.OmegaConf.merge(
+                        strategy_cfg.get(
+                            "masking_strategy_config", omegaconf.OmegaConf.create({})
+                        ),
+                        section_override["masking_strategy_config"],
+                    )
+
+        return effective
+
+    @staticmethod
+    def build_effective_masking_cfgs(streams, mode_cfg):
+        """Build effective masking configs for all streams."""
+        cfgs = {}
+        for stream_info in streams:
+            name = stream_info["name"]
+            override = stream_info.get("masking_override", None)
+            cfgs[name] = Masker.merge_masking_config(mode_cfg, override)
+            if override is not None and is_root():
+                logger.info(f"Stream '{name}' using masking override: {override}")
+
+        return cfgs
+
+    def build_masks_for_streams(self, training_mode, num_cells, streams, stage_cfgs):
+        """Generate source and target masks for all streams."""
+        masks = {}
+        num_source_samples = 0
+        num_target_samples = 0
+        for stream_info in streams:
+            stream_name = stream_info["name"]
+            stage_cfg = stage_cfgs[stream_name]
+            masks[stream_name] = self.build_samples_for_stream(
+                training_mode,
+                num_cells,
+                stage_cfg,
+                stream_info,
+            )
+            # identical for all streams
+            num_target_samples = len(masks[stream_name][0])
+            num_source_samples = len(masks[stream_name][1])
+
+        return masks, num_source_samples, num_target_samples
 
     def _get_sampling_rate(self, cfg):
         """
