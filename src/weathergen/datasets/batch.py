@@ -11,6 +11,7 @@ import copy
 from dataclasses import dataclass
 
 import numpy as np
+from src.weathergen.datasets.data_reader_base import DTRange
 import torch
 
 from weathergen.common.config import Config
@@ -230,6 +231,7 @@ class ModelBatch:
 
 
     Attributes:
+        init_time: Initial sampling window used to costruct samples.
         source_samples: sources for model
         target_samples: targets for TargetAuxCalculator
         source2target_matching_idxs: index of corresponding target indices.
@@ -241,6 +243,7 @@ class ModelBatch:
 
     def __init__(
         self,
+        init_time: DTRange,
         streams: dict,
         num_source_samples: int,
         num_target_samples: int,
@@ -251,12 +254,14 @@ class ModelBatch:
         Initialize new ModelBatch.
 
         Args:
+            init_time: Initial sampling window used to costruct samples.
             streams: global StreamConfig.
             num_source_samples: Number of differently masked source samples for one input window.
             num_target_samples: Number of differently masked target samples for one input window.
             output_offset: forecast offset for this batch.
             output_steps: number of forecast steps for this batch.
         """
+        self.init_time: DTRange = init_time
 
         # define forecast indices
         self.output_offset: BatchSamples = output_offset

@@ -647,6 +647,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         num_output_steps = self._get_output_length(num_forecast_steps)
         batch = ModelBatch(
+            self.time_window_handler.window(idx),
             self.streams,
             num_source_samples,
             num_target_samples,
