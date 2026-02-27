@@ -5,7 +5,7 @@
 
 METOPBIASI :
   type : obs
-  stream_id : 3
+  stream_id : 1
   filenames : ['observations-ea-ofb-0001-2013-2023-metop-b-iasi-radiances-v1.zarr']
   loss_weight : 1.
   diagnostic : True
