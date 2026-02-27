@@ -7,6 +7,8 @@ Usage:
     python make_release.py --release-name atmo-foo-bar --release-version 1.2 --run-id 12345
     python make_release.py --release-name atmo-forecast --release-version 1.2rc1 \
         --run-id 12345 --dry-run
+
+Generated with Claude, manually reviewed and tested.        
 """
 
 import argparse
