@@ -57,7 +57,7 @@ packages = ["src/weathergen"]
 dev = [
  "ipykernel>=6.30.0",
  "jupytext>=1.17.2",
- "pytest~=8.3.5",
+ "pytest>=8.3",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
  "tensorboard>=2.20.0",
@@ -249,8 +249,8 @@ torch = [
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
-# branch = "feature/zarr3"
-anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", rev = "e254d878eb9154b6414955f6f56dfad2cf8fdf39"}
+# branch = "feature/any-zarr-version-in-pyproject/"
+anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", branch = "feature/any-zarr-version-in-pyproject"}
 
 [tool.pytest.ini_options]
 log_cli = true

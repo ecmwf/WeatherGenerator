@@ -26,5 +26,5 @@ impute_latent_noise_std: 0.0
 healpix_level: 4
 training_mode: "forecast"
 
-train_log:
+train_logging:
   log_interval: 1

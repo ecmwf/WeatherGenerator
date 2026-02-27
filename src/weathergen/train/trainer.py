@@ -55,10 +55,10 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
-    def __init__(self, train_log_freq: Config):
+    def __init__(self, train_logging: Config):
         TrainerBase.__init__(self)
 
-        self.train_log_freq = train_log_freq
+        self.train_logging = train_logging
 
         self.data_loader: torch.utils.data.DataLoader | None = None
         self.data_loader_validation: torch.utils.data.DataLoader | None = None
@@ -488,9 +488,9 @@ class Trainer(TrainerBase):
 
             # log gradient norms
             if self.log_grad_norms:
-                if bidx % self.train_log_freq.terminal == 0:
+                if bidx % self.train_logging.terminal == 0:
                     self.last_grad_norm = self._get_tensor_item(total_norm)
-                if bidx % self.train_log_freq.metrics == 0:
+                if bidx % self.train_logging.metrics == 0:
                     self._log_instant_grad_norms(TRAIN)
 
             # optimizer step
@@ -527,14 +527,14 @@ class Trainer(TrainerBase):
                 )
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
-            if bidx % self.train_log_freq.metrics == 0:
+            if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
 
             # save model checkpoint (with designation _latest)
-            if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
+            if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
             self.cf.general.istep += 1
@@ -763,7 +763,7 @@ class Trainer(TrainerBase):
             self.train_logger.log_metrics(stage, grad_norms)
 
     def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage):
-        print_freq = self.train_log_freq.terminal
+        print_freq = self.train_logging.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
             loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
