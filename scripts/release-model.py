@@ -33,6 +33,8 @@ WeatherGeneratorPrivate_DIR = WeatherGenerator_DIR.parent / "WeatherGenerator-pr
 # Regexes
 # ---------------------------------------------------------------------------
 
+# Specific to the atmo model.
+# This follows the naming conventions used in huggingface to simplify upload.
 RELEASE_NAME_RE = re.compile(r"^atmo(-[A-Za-z0-9]+)+$")
 # Accepts:  X.Y  with an optional rcN suffix (e.g. 1.2, 1.2rc1, 1.2rc2)
 VERSION_RE = re.compile(r"^(\d+)\.(\d+)(?:(rc)(\d+))?$")
