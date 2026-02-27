@@ -34,10 +34,8 @@ class DTRange:
     end: NPDT64
 
     def __post_init__(self):
-        if self.start >= self.end:
-            raise ValueError("start time must be before end time")
-        if self.start <= _DT_ZERO:
-            raise ValueError("start time must be after 1850-01-01T00:00")
+        assert self.start < self.end, "start time must be before end time"
+        assert self.start > _DT_ZERO, "start time must be after 1850-01-01T00:00"
 
 
 @dataclasses.dataclass
@@ -70,11 +68,11 @@ class ReaderData:
             ReaderData:
                 Has the same underlying data as `other`.
         """
-        if other is None:
-            raise TypeError("Input cannot be None.")
+        assert other is not None, "Input cannot be None."
 
-        if not isinstance(other, ReaderData):
-            raise TypeError(f"Expected input of type ReaderData. Got {type(other)}")
+        assert isinstance(other, ReaderData), (
+            f"Expected input of type ReaderData. Got {type(other)}"
+        )
 
         coords = np.asarray(other.coords)
         geoinfos = np.asarray(other.geoinfos)
@@ -104,12 +102,8 @@ class ReaderData:
             ReaderData
                 Instance with concatenated input data.
         """
-        if others is None:
-            raise TypeError("Input cannot be None.")
-
-        if not isinstance(others, list):
-            raise TypeError(f"Input must be a List. Got {type(others)}")
-
+        assert others is not None, "Input cannot be None."
+        assert isinstance(others, list), f"Input must be a List. Got {type(others)}"
         assert len(others) > 0, len(others)
 
         first = others[0]
