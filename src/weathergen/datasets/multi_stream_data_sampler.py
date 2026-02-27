@@ -581,6 +581,30 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # max(1, ...) : self.output_offset and num_forecast_steps are zero for pure masking
         return max(1, self.output_offset + num_forecast_steps)
 
+    def _get_source_target_masks(self, training_mode):
+        """
+        Generate source and target masks for all streams.
+
+        Each stream uses its own effective masking config (which may include
+        per-stream ``masking_override`` merged on top of the global config).
+        """
+        masks = {}
+        for stream_info in self.streams:
+            stream_name = stream_info["name"]
+            stage_cfg = self._effective_masking_cfgs[stream_name]
+            # Build source and target sample masks
+            masks[stream_name] = self.tokenizer.build_samples_for_stream(
+                training_mode,
+                self.num_healpix_cells,
+                stage_cfg,
+                stream_info,
+            )
+            # identical for all streams
+            num_target_samples = len(masks[stream_name][0])
+            num_source_samples = len(masks[stream_name][1])
+
+        return masks, num_source_samples, num_target_samples
+
     def _preprocess_model_batch(
         self, batch: ModelBatch, source_input_steps: int, target_input_steps: int
     ):
@@ -606,13 +630,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         target_cfgs = self.mode_cfg.get("target_input", {})
 
         # get/coordinate masks
-        masks_streams, num_source_samples, num_target_samples = (
-            self.masker.build_masks_for_streams(
-                mode,
-                self.num_healpix_cells,
-                self.streams,
-                self._effective_masking_cfgs,
-            )
+        masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(
+            mode
         )
 
         source_select, target_select = [], []

@@ -174,26 +174,6 @@ class Masker:
 
         return cfgs
 
-    def build_masks_for_streams(self, training_mode, num_cells, streams, stage_cfgs):
-        """Generate source and target masks for all streams."""
-        masks = {}
-        num_source_samples = 0
-        num_target_samples = 0
-        for stream_info in streams:
-            stream_name = stream_info["name"]
-            stage_cfg = stage_cfgs[stream_name]
-            masks[stream_name] = self.build_samples_for_stream(
-                training_mode,
-                num_cells,
-                stage_cfg,
-                stream_info,
-            )
-            # identical for all streams
-            num_target_samples = len(masks[stream_name][0])
-            num_source_samples = len(masks[stream_name][1])
-
-        return masks, num_source_samples, num_target_samples
-
     def _get_sampling_rate(self, cfg):
         """
         Get the sampling, if requested by sampling it itself
