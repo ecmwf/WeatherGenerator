@@ -88,15 +88,14 @@ class WeatherGenReader(Reader):
             config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
         else:
             _logger.info(
-                f"Loading config for run {self.run_id} from model directory: "
-                f"{self.model_base_dir}"
+                f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
             )
             config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
-        
+
         if not isinstance(config, dict | oc.DictConfig):
             _logger.warning("Model config not found. inference config will be empty.")
             config = {}
-            
+
         return config
 
     def get_climatology_filename(self, stream: str) -> str | None:
@@ -184,7 +183,7 @@ class WeatherGenReader(Reader):
         for region in regions:
             for metric, parameters in metrics.items():
                 score = self.load_single_score(stream, region, metric, parameters)
-                if score is  None:
+                if score is None:
                     # all other cases: recompute scores
                     missing_metrics.setdefault(region, {}).update({metric: parameters})
                 else:
@@ -233,7 +232,7 @@ class WeatherGenReader(Reader):
                         break
         return score
 
-    def get_recomputable_metrics(self, metrics: dict)-> dict:
+    def get_recomputable_metrics(self, metrics: dict) -> dict:
         """
         Determine which metrics can be recomputed.
 
@@ -249,7 +248,7 @@ class WeatherGenReader(Reader):
         """
         return metrics
 
-    def get_inference_stream_attr(self, stream_name: str, key: str, default=None) :
+    def get_inference_stream_attr(self, stream_name: str, key: str, default=None):
         """
         Get the value of a key for a specific stream from the a model config.
 
@@ -350,20 +349,15 @@ class WeatherGenZarrReader(WeatherGenReader):
             f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
         )
 
-        if fname_zarr.exists():
-            if (zarr_ext == "zarr" and fname_zarr.is_dir()) or (
-                zarr_ext == "zip" and fname_zarr.is_file()
-            ):
-                self.fname_zarr = fname_zarr
-            else:
-                _logger.error(
-                    f"Zarr file {fname_zarr} exists but has unexpected format "
-                    f"({zarr_ext}). Expected directory for 'zarr' or file for 'zip'."
-                )
-                assert False, f"Zarr file {fname_zarr} has unexpected format."
-        else:
-            _logger.error(f"Zarr file {fname_zarr} does not exist.")
-            assert False, f"Zarr file {fname_zarr} does not exist."
+        assert fname_zarr.exists(), f"Zarr file {fname_zarr} does not exist."
+
+        assert (zarr_ext == "zarr" and fname_zarr.is_dir()) or (
+            zarr_ext == "zip" and fname_zarr.is_file()
+        ), (
+            f"Zarr file {fname_zarr} has unexpected format. ({zarr_ext}). "
+            f"Expected directory for 'zarr' or file for 'zip'."
+        )
+        self.fname_zarr = fname_zarr
 
     def get_data(
         self,
@@ -764,7 +758,7 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     ----------
     ref: list[xr.DataArray]
         List of xarray DataArrays, each representing one sample. Must have at least one element.
-        
+
     Returns
     -------
     xr.DataArray
@@ -778,8 +772,7 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     - Enforces consistent ipoint indexing after alignment (0..N-1).
     - Preserves and aligns all other coordinates and data variables.
     """
-    if not ref:
-        assert False, "_force_consistent_grids requires at least one input DataArray."
+    assert len(ref) > 0, "_force_consistent_grids requires at least one input DataArray in 'ref'."
 
     # Determine the reference sorting using the first sample's lat/lon
     ref_lat = ref[0]["lat"].values
@@ -844,7 +837,7 @@ class WeatherGenMergeReader(Reader):
             names of the metric scores to compute
         reader_type: str
             The type of the internal reader. If zarr, WeatherGenZarrReader is used,
-            WeatherGenJSONReader otherwise. Default: zarr
+            WeatherGenJsonReader otherwise. Default: zarr
         """
         super().__init__(eval_cfg, run_id, private_paths)
         self.run_ids = eval_cfg.get("merge_run_ids", [])
@@ -859,7 +852,7 @@ class WeatherGenMergeReader(Reader):
             if reader_type == "zarr":
                 reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
             else:
-                reader = WeatherGenJSONReader(
+                reader = WeatherGenJsonReader(
                     self.eval_cfg, run_id, self.private_paths, regions, metrics
                 )
             self.readers.append(reader)
