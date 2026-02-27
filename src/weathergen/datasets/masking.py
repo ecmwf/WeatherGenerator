@@ -692,8 +692,8 @@ class Masker:
 
         hl_data = self.healpix_level_data
         hl_mask = cfg.get("hl_mask")
-        assert hl_mask is not None and hl_mask <= hl_data, (
-            "For healpix keep mask generation, cfg['hl_mask'] must be set and <= data level."
+        assert hl_mask is not None and hl_mask < hl_data, (
+            "For healpix keep mask generation, cfg['hl_mask'] must be set and < data level."
         )
         num_parent_cells = 12 * (4**hl_mask)
         level_diff = hl_data - hl_mask
