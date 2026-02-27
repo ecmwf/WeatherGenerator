@@ -73,7 +73,6 @@ class Writer:
     ) -> typing.Generator[ItemKey, None, None]:
         """Iterate over possible output items"""
         streams: list[str] = self._streams.keys()
-        len_samples = len(samples)
         samples = (self._sample_start + sample for sample in samples)
 
         # The order of iteration is important here:
@@ -84,7 +83,7 @@ class Writer:
         ):
             yield ItemKey(sample_idx, forecast_step, stream)
 
-        self._sample_start += len_samples
+        self._sample_start += len(samples)
 
     def extract(self, data: _BatchOutputData, key: ItemKey, fstep_start: int) -> OutputItem:
         raw_key = ItemKey(
@@ -128,11 +127,11 @@ class _BatchOutputData:
     def extract_source(self, key: ItemKey) -> _ExtractedData:
         # TODO check this?
         # breakpoint()
-        READER_DATA_INDEX_MYSTERY = 0
+        source_sample_idx = self._batch.target2source_matching_idxs(key.sample)
         source = (
             self._batch.source_samples.samples[key.forecast_step]
             .streams_data[key.stream]
-            .source_raw[READER_DATA_INDEX_MYSTERY]
+            .source_raw[source_sample_idx]
         )
 
         return _ExtractedData(
@@ -149,9 +148,13 @@ class _BatchOutputData:
         return TimeRange(window.start, window.end)
 
     @property
-    def samples(self):
+    def samples(self) -> list[int]:
         # TODO check: data._batch.source_samples.samples
-        return self._batch.source_samples.sample_idxs
+        sampels = list(self._batch.target_samples.sample_idxs)
+        
+        assert len(set(sampels)) == len(sampels), "samples are not unique"
+
+        return self.samples
 
     def extract_target(self, key: ItemKey) -> _ExtractedData:
         target = self._target(key)
