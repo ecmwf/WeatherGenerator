@@ -302,7 +302,6 @@ class VerifParser(CfParser):
         """
         mapped_info = self.mapping.get(verif_var, {})
         wg_var = mapped_info.get("var", None)
-
         try:
             ds_var = ds[wg_var]
         except KeyError as e:
@@ -435,7 +434,7 @@ class VerifParser(CfParser):
             xarray Dataset with CF-compliant variable attributes.
         """
         variables = self._attrs_gaussian_grid(ds)
-        dataset = xr.merge(variables.values())
+        dataset = xr.merge(variables.values(), compat="no_conflicts")
         dataset.attrs = ds.attrs
         return dataset
 
@@ -603,7 +602,7 @@ class VerifParser(CfParser):
 
     def merge(self, ds, obs_ds):
         lat, lon, alt = get_obs_coordinates(self.obs)
-        merged = xr.merge([ds, obs_ds, lat, lon, alt])
+        merged = xr.merge([ds, obs_ds, lat, lon, alt], join="outer")
         return merged
 
     def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64, verif_var: str) -> None:
