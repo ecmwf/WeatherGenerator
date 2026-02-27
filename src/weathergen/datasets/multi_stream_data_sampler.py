@@ -11,6 +11,7 @@ import logging
 import pathlib
 
 import numpy as np
+import omegaconf
 import torch
 
 from weathergen.common.config import Config
@@ -162,25 +163,48 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             msg = f"Unsupported stream type {stream_info['type']}"
                             f"for stream name '{stream_info['name']}'."
                             raise ValueError(msg)
+                ##
+                filename = stream_info.get("filenames")
+                if type(filename) is omegaconf.dictconfig.DictConfig:
+                    # Convert OmegaConf DictConfig to dict
+                    filename = dict(filename)
+                    # Prepend datapath to each dataset
+                    for entry in filename['join']:
+                        datapath=None
+                        for path in cf.data_paths:
+                            filename_tmp = pathlib.Path(path) / entry['dataset']
+                            if filename_tmp.exists():
+                                datapath=pathlib.Path(path)
+                                break
+                        if datapath is None:
+                            msg = (
+                                f"Did not find input data for {stream_info['type']} "
+                                f"stream '{stream_info['name']}'"
+                            )
+                            raise FileNotFoundError(msg)
 
-                fname = pathlib.Path(fname)
-                # dont check if file exists since zarr stores might be directories
-                if fname.exists():
-                    # check if fname is a valid path to allow for simple overwriting
-                    filename = fname
-                else:
-                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
-
-                    if not any(filename.exists() for filename in filenames):  # see above
+                        entry['dataset'] = str(datapath / entry['dataset'])
+                elif type(filename) is omegaconf.listconfig.ListConfig:
+                    if len(filename) > 1:
+                        msg = (
+                            f"Multiple filenames found for {stream_info['type']} "
+                            f"stream '{stream_info['name']}'"
+                            f"Only the first one will be used"
+                        )
+                    datapath=None
+                    for path in cf.data_paths:
+                        filename_tmp = pathlib.Path(path) / filename[0]
+                        if filename_tmp.exists():
+                            datapath=pathlib.Path(path)
+                            break
+                    if datapath is None:
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
-                            f"stream '{stream_info['name']}': {filenames}."
+                            f"stream '{stream_info['name']}'"
                         )
                         raise FileNotFoundError(msg)
+                    filename = str( datapath / filename[0])
 
-                    # The same dataset can exist on different locations in the filesystem,
-                    # so we need to choose here.
-                    filename = filenames[0]
 
                 ds_type = stream_info["type"]
                 if is_root():
@@ -565,7 +589,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
-                    stream_ds[0].mean[stream_ds[0].source_idx],
+                    stream_ds[0].mean[stream_ds[0].target_idx],
                 )
                 rdata.is_spoof = True
 
