@@ -128,7 +128,12 @@ class TrainLogger:
 
     #######################################
     @staticmethod
-    def read(run_id: str, model_path: str = None, mini_epoch: int | None = None) -> Metrics:
+    def read(
+        run_id: str,
+        model_path: str = None,
+        mini_epoch: int | None = None,
+        cols_patterns: list[str] | None = None,
+    ) -> Metrics:
         """
         Read data for run_id
         """
@@ -154,7 +159,7 @@ class TrainLogger:
         cols1, cols_train = get_loss_terms_per_stream(cf.streams, training_cfg)
         cols_train += ["dtime", "samples", "mse", "lr"]
         cols1 += [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
-        cols1_patterns = ["loss_avg"]
+        cols1_patterns = ["loss_avg"] + cols_patterns
 
         # read training log data
         try:
@@ -202,8 +207,8 @@ class TrainLogger:
         )
         cols2, cols_val = get_loss_terms_per_stream(cf.streams, validation_cfg)
         cols_val = ["dtime", "samples"]
-        cols2 = [_weathergen_timestamp, "num_samples"]
-        cols2_patterns = ["loss_avg"]
+        cols2 += [_weathergen_timestamp, "num_samples"]
+        cols2_patterns = ["loss_avg"] + cols_patterns
 
         # read validation log data
         try:
@@ -272,7 +277,8 @@ def read_metrics(
     df = read_metrics_file(metrics_path)
 
     if cols_patterns is not None:
-        cols += [col for col in df.columns if "loss_avg" in col]
+        for col_pattern in cols_patterns:
+            cols += [col for col in df.columns if col_pattern in col]
 
     if stage is not None:
         df = df.filter(pl.col("stage") == stage)
