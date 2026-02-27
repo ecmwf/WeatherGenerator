@@ -578,33 +578,31 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         return (input_data, output_data)
 
-    def _get_output_length(self, num_forecast_steps):
-        # max(1, ...) : self.output_offset and num_forecast_steps are zero for pure masking
-        return max(1, self.output_offset + num_forecast_steps)
-
     def _get_source_target_masks(self, training_mode):
         """
         Generate source and target masks for all streams.
-
-        Each stream uses its own effective masking config (which may include
-        per-stream ``masking_override`` merged on top of the global config).
         """
         masks = {}
         for stream_info in self.streams:
-            stream_name = stream_info["name"]
-            stage_cfg = self._effective_masking_cfgs[stream_name]
+            # Each stream uses its own effective masking config (which may include
+            # per-stream ``masking_override`` merged on top of the global config).
+            stage_cfg = self._effective_masking_cfgs[stream_info["name"]]
             # Build source and target sample masks
-            masks[stream_name] = self.tokenizer.build_samples_for_stream(
+            masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
                 training_mode,
                 self.num_healpix_cells,
                 stage_cfg,
                 stream_info,
             )
             # identical for all streams
-            num_target_samples = len(masks[stream_name][0])
-            num_source_samples = len(masks[stream_name][1])
+            num_target_samples = len(masks[stream_info["name"]][0])
+            num_source_samples = len(masks[stream_info["name"]][1])
 
         return masks, num_source_samples, num_target_samples
+
+    def _get_output_length(self, num_forecast_steps):
+        # max(1, ...) : self.output_offset and num_forecast_steps are zero for pure masking
+        return max(1, self.output_offset + num_forecast_steps)
 
     def _preprocess_model_batch(
         self, batch: ModelBatch, source_input_steps: int, target_input_steps: int
