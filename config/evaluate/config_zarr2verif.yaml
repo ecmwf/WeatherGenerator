@@ -1,3 +1,8 @@
+# List of variables to compare between WeatherGenerator output and MetNor observation files
+# To add more varaibles use the same formate for the variable using the `var` field to put the 
+# name of the variable in the WeatherGenerator dataset and units for each stream in `wg_uni`
+# Additionally, add the chosen variable to required channels in `verif_parser.py` L92
+
 variables:
   2t:
     var: 2t
@@ -54,7 +59,7 @@ variables:
 
 
   10si:
-    var: wind # derived channel
+    var: 10si # derived channel
     long: wind speed
     wg_unit:  {CERRA:   m/s,
                MEPS:    m/s,
