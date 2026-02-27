@@ -461,23 +461,11 @@ class ForecastingEngine(torch.nn.Module):
                         torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
                     )
 
-        # self.fe_blocks.append(
-        #     MLP(
-        #         self.cf.ae_global_dim_embed,
-        #         self.cf.ae_global_dim_embed,
-        #         with_residual=True,
-        #         dropout_rate=self.cf.fe_dropout_rate,
-        #         norm_type=self.cf.norm_type,
-        #         dim_aux=dim_aux,
-        #         norm_eps=self.cf.mlp_norm_eps,
-        #         with_noise_conditioning=self.cf.fe_diffusion_model,
-        #     )
-        # )
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
-                torch.nn.init.normal_(m.weight, mean=0, std=0.1)
+                torch.nn.init.normal_(m.weight, mean=0, std=0.001)
                 if m.bias is not None:
-                    torch.nn.init.normal_(m.bias, mean=0, std=0.1)
+                    torch.nn.init.normal_(m.bias, mean=0, std=0.001)
 
         for block in self.fe_blocks:
             block.apply(init_weights_final)

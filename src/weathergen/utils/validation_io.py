@@ -21,11 +21,16 @@ from weathergen.evaluate.plotting.plotter import Plotter
 
 _logger = logging.getLogger(__name__)
 
+# TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+i = 0
 
+
+# TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
 def _normalize_channel_name(name: str) -> str:
     return str(name).lower().replace("_", "").replace(" ", "")
 
 
+# TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
 def _resolve_channel_names(stream_info, raw_channels):
     if not raw_channels:
         return raw_channels
@@ -65,7 +70,9 @@ def write_output(
     """
     Interface for writing model output
     """
-
+    # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+    global i
+    
     # TODO: how to handle multiple physical loss terms
     outputs_physical = [
         loss_name
@@ -90,7 +97,8 @@ def write_output(
         targets_coords_all += [[]]
         targets_times_all += [[]]
         targets_lens += [[]]
-        for stream_info in cf.streams:
+        noise_levels = []  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+        for stream_idx, stream_info in enumerate(cf.streams):
             sname = stream_info["name"]
             # predictions
             preds = model_output.get_physical_prediction(t_idx, sname)
@@ -98,6 +106,18 @@ def write_output(
 
             preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
             targets_lens[-1] += [[]]
+
+            # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+            # Try to extract noise_level_rn from batch metadata if present
+            noise_level = None
+            if hasattr(batch, "target_samples"):
+                # Try to get from first sample for this stream
+                samples = batch.target_samples.get_samples()
+                if samples and hasattr(samples[0], "meta_info") and sname in samples[0].meta_info:
+                    meta = samples[0].meta_info[sname]
+                    if meta and hasattr(meta, "global_params") and meta.global_params:
+                        noise_level = meta.global_params.get("noise_level_rn", None)
+            noise_levels.append(noise_level)
 
             # handle forcing streams or if sample is empty
             if preds is None:
@@ -199,11 +219,14 @@ def write_output(
         for subset in data.items():
             zio.write_zarr(subset)
 
+    # TODO: REMOVE EVERYTHING BELOW THIS LINE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+
     # Prepare prediction data for Plotter (scatter plot expects lat/lon coords on ipoint).
     base_plot_dir = config.get_path_run(cf) / "plots" / "validation"
     base_plot_dir.mkdir(parents=True, exist_ok=True)
     plotter = Plotter({"image_format": "png", "dpi_val": 150}, base_plot_dir)
-    headline_channels = {"2t", "z500", "q850", "10u", "10v"}
+    # headline_channels = {"2t", "z500", "q850", "10u", "10v"}
+    headline_channels = {"2t"}
 
     t_idx = 0
     for stream_idx, stream_info in enumerate(cf.streams):
@@ -254,16 +277,24 @@ def write_output(
             data = da.sel(channel=varname).dropna(dim="ipoint")
             channel_dir = base_plot_dir / varname
             channel_dir.mkdir(parents=True, exist_ok=True)
-            epoch_tag = f"epoch_{mini_epoch:03d}"
+            epoch_tag = f"epoch_{mini_epoch:03d}_{i%3}"
+            # Add noise_level_rn to title if present for this stream
+            noise_level = noise_levels[stream_idx]
+            if noise_level is not None:
+                title = f"{stream_name} - {varname} (fstep {forecast_offset}) | noise_level_rn={noise_level:.4f}"
+            else:
+                title = f"{stream_name} - {varname} (fstep {forecast_offset})"
+            
             plot_name = plotter.scatter_plot(
                 data,
                 channel_dir,
                 varname=varname,
                 regionname="global",
                 tag=epoch_tag,
-                title=f"{stream_name} - {varname} (fstep {forecast_offset})",
+                title=title,
             )
             src = channel_dir / f"{plot_name}.{plotter.image_format}"
             dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
             if src != dst and src.exists():
                 src.replace(dst)
+    i += 1
