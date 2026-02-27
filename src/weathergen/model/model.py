@@ -648,6 +648,13 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
+        # Normalize tokens
+        # TODO: REMOVE THIS LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+        t_mean = tokens.mean()
+        t_std = tokens.std()
+        tokens = (tokens - t_mean) / (t_std + 1e-6)
+        tokens = torch.clamp(tokens, -5.0, 5.0)
+
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
@@ -658,6 +665,10 @@ class Model(torch.nn.Module):
                     meta_info=batch.samples[0].meta_info,
                     coords=model_params.rope_coords,
                 )
+
+            # Un-normalize tokens
+            # TODO: REMOVE THIS AS ABOVE. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+            tokens = tokens * (t_std + 1e-6) + t_mean
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)

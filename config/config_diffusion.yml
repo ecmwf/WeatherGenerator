@@ -55,7 +55,7 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 1
+fe_num_blocks: 2
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -70,9 +70,9 @@ frequency_embedding_dim: 256
 embedding_dim: 512
 sigma_min: 0.002
 sigma_max: 50000
-sigma_data: 1.7  # 0.5, but std of tokens is 1.7
+sigma_data: 0.5
 rho: 7
-p_mean: -1.2 #3.0  # -1.2
+p_mean: 0.0  # -1.2
 p_std: 1.2  # 1.2
 
 
@@ -152,7 +152,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
-  num_mini_epochs: 25
+  num_mini_epochs: 150
   samples_per_mini_epoch: 66
   shuffle: True
 
@@ -187,7 +187,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        weight: 0.0,
+        weight: 0.1,
         loss_fcts: {
           "mse": {},
         },
@@ -195,7 +195,7 @@ training_config:
     },
     "latent_diff": {
         type: LossLatentDiffusion,
-        weight: 1.0,
+        weight: 0.9,
         target_and_aux_calc: DiffusionLatentTargetEncoder,
         loss_fcts: { "mse": { }, },
         }
