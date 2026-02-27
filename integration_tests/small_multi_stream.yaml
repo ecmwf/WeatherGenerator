@@ -113,7 +113,7 @@ general:
   run_id: ???
   run_history: []
 
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
@@ -186,6 +186,7 @@ training_config:
       time_step: 06:00:00
       num_steps: 2
       policy: "fixed" 
+      offset: 1
 
 
 # validation config; full validation config is merge of training and validation config

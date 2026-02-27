@@ -31,9 +31,8 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import get_batch_size_from_config
+from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -67,7 +66,9 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> Read
             assert False, "invalid value for argument `type`"
 
         # get source (of potentially multi-step length)
-        rdata = get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords()
+        rdata = (
+            get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
+        )
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
@@ -151,39 +152,35 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 match stream_info["type"]:
                     case "obs":
                         dataset = DataReaderObs
-                        datapath = cf.data_path_obs
-                        # kwargs["end"] = end_date_padded # TODO: implement the padding
                     case "anemoi":
                         dataset = DataReaderAnemoi
-                        datapath = cf.data_path_anemoi
                     case "fesom":
                         dataset = DataReaderFesom
-                        datapath = cf.data_path_fesom
                     case type_name:
-                        reader_entry = get_extra_reader(type_name, cf)
-                        if reader_entry is not None:
-                            dataset = reader_entry.constructor
-                            datapath = reader_entry.data_path
-                        else:
+                        dataset = get_extra_reader(type_name)
+                        if dataset is None:
                             msg = f"Unsupported stream type {stream_info['type']}"
                             f"for stream name '{stream_info['name']}'."
                             raise ValueError(msg)
 
-                datapath = pathlib.Path(datapath)
                 fname = pathlib.Path(fname)
                 # dont check if file exists since zarr stores might be directories
                 if fname.exists():
                     # check if fname is a valid path to allow for simple overwriting
                     filename = fname
                 else:
-                    filename = pathlib.Path(datapath) / fname
+                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
-                    if not filename.exists():  # see above
+                    if not any(filename.exists() for filename in filenames):  # see above
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
-                            f"stream '{stream_info['name']}': {filename}."
+                            f"stream '{stream_info['name']}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
+
+                    # The same dataset can exist on different locations in the filesystem,
+                    # so we need to choose here.
+                    filename = filenames[0]
 
                 ds_type = stream_info["type"]
                 if is_root():
@@ -246,7 +243,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             else cf.data_loading.rng_seed * 97
         )
 
-        self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level))
+        self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level, stage))
 
         self.mini_epoch = 0
 
@@ -533,7 +530,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # source data: iterate overall input steps
         input_data = []
-        for idx in range(base_idx - num_steps_input_max, base_idx + 1):
+        for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
@@ -585,7 +582,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for stream_info in self.streams:
             # Build source and target sample masks
             masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
-                training_mode, self.num_healpix_cells, self.mode_cfg
+                training_mode,
+                self.num_healpix_cells,
+                self.mode_cfg,
+                stream_info,
             )
             # identical for all streams
             num_target_samples = len(masks[stream_info["name"]][0])
@@ -628,7 +628,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
             target_select += ["target_values"]
-        if "student_teacher" in mode or mode == "latent_loss" in mode:
+        if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
         # remove duplicates
@@ -691,9 +691,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # for t_idx, mask in enumerate(source_masks):
             for tidx, target_mask in enumerate(target_masks.masks):
-                # Note: for EMATeacher we the the streamdata obj
-                # to have the target mask applied to the inputs!
-                # Hence the target mask is also the source mask here!!
+                # depending on the mode, the the streamdata obj to have the target mask applied to
+                # the inputs. Hence the target mask is also the source mask here.
                 sdata = self._build_stream_data(
                     target_select,
                     tidx,
@@ -757,7 +756,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 if not batch.is_empty():
                     break
                 else:
-                    logger.warning("Skipping empty batch.")
+                    logger.warning(f"Skipping empty batch with idx={idx}.")
 
             yield batch
 

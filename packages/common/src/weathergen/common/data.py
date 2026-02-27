@@ -164,24 +164,28 @@ class ReaderData:
         """
         return len(self) == 0
 
-    def remove_nan_coords(self) -> "ReaderData":
+    def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
         """
-        Remove all data points where coords are NaN
+        Remove all data points where coords or geoinfos contain NaN
 
         Returns
         -------
-        ReaderData
+        self
         """
-        # Identify valid coordinates (where both lat/lon are not NaN)
-        idx_valid = ~np.isnan(self.coords).any(axis=1)
+        idx_valid = ~np.isnan(self.coords)
+        # filter should be if any (of the two) coords is NaN
+        idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
 
-        # Apply filtering
+        # also filter rows where any geoinfo field is NaN
+        idx_valid_geoinfos = ~np.isnan(self.geoinfos).any(axis=1)
+        idx_valid = np.logical_and(idx_valid, idx_valid_geoinfos)
+
+        # apply
         return ReaderData(
             self.coords[idx_valid],
             self.geoinfos[idx_valid],
             self.data[idx_valid],
             self.datetimes[idx_valid],
-            self.is_spoof,
         )
 
     def shuffle(self, rng, shuffle: bool, num_subset: int) -> "ReaderData":
