@@ -168,6 +168,35 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
 
+  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
+  # Detects representation collapse via various metrics
+  # For forecasting, supports sequences of latents with per-step and aggregate metrics
+  collapse_monitoring:
+    enabled: true
+    compute_frequency: 100  # batches between metric computations
+    log_frequency: 100      # batches between metric logging
+    metrics:
+      effective_rank:
+        enabled: true
+        tensor_source: "both"  # "student", "teacher", or "both"
+        sample_size: 2048      # max samples for SVD (0 = no sampling)
+        # For forecasting sequences: "all" (per-step + aggregates),
+        # "aggregate_only" (mean/min/max/degradation), "per_step_only"
+        forecast_aggregation: "all"
+      singular_values:
+        enabled: true
+        tensor_source: "both"
+        sample_size: 2048
+        forecast_aggregation: "all"
+      dimension_variance:
+        enabled: true
+        tensor_source: "both"  # cheap to compute, good early indicator
+        forecast_aggregation: "all"
+      prototype_entropy:
+        enabled: true  # only applies to DINO
+      ema_beta:
+        enabled: true
+
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
