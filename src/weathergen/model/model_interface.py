@@ -178,9 +178,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
     """
 
-    # If `run_id` is a full filesystem path to a model run directory, use it
-    # directly. This matches the behaviour of `config.load_run_config`, which
-    # accepts full-path run_id values.
+    # gets path from config and loads checkpoint. 
     path_run = get_path_model(config=cf, run_id=run_id)
     mini_epoch_id = (
         f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
