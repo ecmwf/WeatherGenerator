@@ -177,7 +177,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         run_id : model_id of the trained model
         mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
     """
-
+    # gets path from config and loads checkpoint. 
     path_run = get_path_model(cf, run_id)
     mini_epoch_id = (
         f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
