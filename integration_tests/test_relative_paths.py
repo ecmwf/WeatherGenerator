@@ -1,4 +1,4 @@
-"""Integration test to check for relative paths in the codebase."""
+"""Integration test to check for relative paths in the codebase. AI generated."""
 
 import os
 import re
