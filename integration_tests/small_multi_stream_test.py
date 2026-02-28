@@ -68,7 +68,7 @@ def test_train_multi_stream(setup, test_run_id):
     )
    
     infer_multi_stream(test_run_id)
-    # evaluate_multi_stream_results(test_run_id)
+    evaluate_multi_stream_results(test_run_id)
     assert_metrics_file_exists(test_run_id)
     assert_stream_losses_below_threshold(test_run_id, stage="train")
     assert_stream_losses_below_threshold(test_run_id, stage="val")
