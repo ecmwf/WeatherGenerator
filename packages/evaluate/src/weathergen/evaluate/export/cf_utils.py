@@ -4,8 +4,6 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-from weathergen.common.config import _get_shared_wg_path
-
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
@@ -34,13 +32,11 @@ class CfParser:
         self.fstep_hours = np.timedelta64(self.fstep_hours, "h")
         self.mapping = config.get("variables", {})
 
-        self.output_dir = _get_shared_wg_path() / "results" / config.run_id
-
     def get_output_filename(self) -> Path:
         """
         Generate output filename based on run_id and output directory.
         """
-        return self.output_dir / f"{self.run_id}.{self.file_extension}"
+        return Path(self.output_dir) / f"{self.run_id}.{self.file_extension}"
 
     def process_sample(self, fstep_iterator_results: iter, ref_time: np.datetime64):
         """

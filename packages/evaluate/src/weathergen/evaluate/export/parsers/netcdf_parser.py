@@ -9,7 +9,6 @@ from omegaconf import OmegaConf
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import Regridder, find_pl
 
-
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
@@ -104,7 +103,7 @@ class NetcdfParser(CfParser):
 
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
         out_fname = (
-            self.output_dir / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
+            Path(self.output_dir) / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
         )
         return out_fname
 

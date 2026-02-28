@@ -31,7 +31,7 @@ import pandas as pd
 import yaml
 from omegaconf import OmegaConf
 
-from weathergen.common.config import _get_shared_wg_path, load_run_config
+from weathergen.common.config import load_run_config
 
 
 def truncate_value(value, max_length=50):
@@ -152,14 +152,14 @@ def main():
         "-m1",
         "--model_directory_1",
         type=Path,
-        default=_get_shared_wg_path() / "models",
+        default=Path("models/"),
         help="Path to model directory for -r1/--run_id_1",
     )
     parser.add_argument(
         "-m2",
         "--model_directory_2",
         type=Path,
-        default=_get_shared_wg_path() / "models",
+        default=Path("models/"),
         help="Path to model directory for -r2/--run_id_2",
     )
     parser.add_argument(

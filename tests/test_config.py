@@ -9,8 +9,7 @@ import weathergen.common.config as config
 TEST_RUN_ID = "test123"
 SECRET_COMPONENT = "53CR3T"
 DUMMY_PRIVATE_CONF = {
-    "data_path_anemoi": "/path/to/anmoi/data",
-    "data_path_obs": "/path/to/observation/data",
+    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"]
     "secrets": {
         "my_big_secret": {
             "my_secret_id": f"{SECRET_COMPONENT}01234",

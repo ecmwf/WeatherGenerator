@@ -301,6 +301,26 @@ def _apply_fixes(config: Config) -> Config:
     eventually removed.
     """
     config = _check_logging(config)
+    config = _check_datasets(config)
+    return config
+
+
+def _check_datasets(config: Config) -> Config:
+    """
+    Collect dataset paths under legacy keys.
+    """
+    config = config.copy()
+    if config.get("data_paths") is None:  # TODO remove this for next version
+        legacy_keys = [
+            "data_path_anemoi",
+            "data_path_obs",
+            "data_path_eobs",
+            "data_path_fesom",
+            "data_path_icon",
+        ]
+        paths = [config.get(key) for key in legacy_keys]
+        config.data_paths = [path for path in paths if path is not None]
+
     return config
 
 
@@ -309,9 +329,9 @@ def _check_logging(config: Config) -> Config:
     Apply fixes to log frequency config.
     """
     config = config.copy()
-    if config.get("train_log_freq") is None:  # TODO remove this for next version
-        config.train_log_freq = OmegaConf.create(
-            {"checkpoint": 250, "terminal": 10, "metrics": config.train_log.log_interval}
+    if config.get("train_logging") is None:  # TODO remove this for next version
+        config.train_logging = OmegaConf.create(
+            {"checkpoint": 250, "terminal": 10, "metrics": config.train_logging.log_interval}
         )
 
     return config
@@ -526,6 +546,8 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     if "secrets" in private_cf:
         del private_cf["secrets"]
 
+    private_cf = _check_datasets(private_cf)  # TODO: remove temp backward compatibility fix
+
     assert isinstance(private_cf, DictConfig)
     return private_cf
 
@@ -625,6 +647,16 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
     return _get_shared_wg_path() / "models" / run_id
+
+
+def get_path_output(config: Config | None = None, run_id: str | None = None) -> Path:
+    """Get the current runs output path for storing output files."""
+    if config or run_id:
+        run_id = run_id if run_id else get_run_id_from_config(config)
+    else:
+        msg = f"Missing run_id and cannot infer it from config: {config}"
+        raise ValueError(msg)
+    return _get_shared_wg_path() / "output" / run_id
 
 
 def get_path_results(config: Config, mini_epoch: int) -> Path:
