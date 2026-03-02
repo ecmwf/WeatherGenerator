@@ -49,7 +49,7 @@ diags = {
         "std": "specific_humidity",
         "units": "kg kg-1",
         "levtype": "pressure",
-        "scale": 100*g,
+        "scale": 100 * g,
         "slope": -5,
         "yscale": 0.1,
     },

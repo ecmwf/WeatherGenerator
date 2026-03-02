@@ -1,4 +1,5 @@
 #!/usr/bin/env -S uv run --script
+# ruff: noqa: E501
 # /// script
 # dependencies = [
 #   "cf-units",
