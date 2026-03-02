@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --env-file ./packages/evaluate/src/weathergen/evaluate/example_extras/power_spectra/.psd_env --script # noqa: E501
+#!/usr/bin/env -S uv run --script
 # /// script
 # dependencies = [
 #   "cf-units",
@@ -31,6 +31,9 @@ e.g.
 uv run export --run-id <INFERENCE_ID> --stream ERA5 \
 --output-dir ../output_nc --format netcdf --regrid-degree 1 \
 --regrid-type regular_ll
+
+Add the following line to the bashrc:
+export LD_LIBRARY_PATH=/capstor/store/cscs/userlab/ch17/assets1/shared_libraries/udunits-2.2.28/lib:$LD_LIBRARY_PATH
 """
 
 import argparse
