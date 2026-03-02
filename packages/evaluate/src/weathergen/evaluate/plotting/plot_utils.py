@@ -11,6 +11,25 @@ from collections.abc import Iterable, Sequence
 
 import numpy as np
 import xarray as xr
+from numpy.typing import NDArray
+
+
+def _flatten_or_average(arr: NDArray) -> NDArray:
+    """Flatten array or average across non-quantile dimensions.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array, possibly multi-dimensional.
+
+    Returns
+    -------
+    np.ndarray
+        Flattened 1D array, averaged across extra dimensions if needed.
+    """
+    if arr.ndim > 1:
+        return np.mean(arr, axis=tuple(range(1, arr.ndim))).flatten()
+    return arr
 
 
 def collect_streams(runs: dict):
@@ -167,9 +186,21 @@ def _assign_time_coord(selected_data: list[xr.DataArray]) -> tuple[xr.DataArray,
     time_dim = "lead_time"
 
     for i, data in enumerate(selected_data):
-        if data.coords["lead_time"].shape == data.coords["forecast_step"].shape:
-            selected_data[i] = data.swap_dims({"forecast_step": "lead_time"})
+        lead_time = data.coords["lead_time"]
+        forecast_step = data.coords["forecast_step"]
 
+        if (
+            lead_time.dims == forecast_step.dims
+            and lead_time.shape == forecast_step.shape
+            and lead_time.ndim == 1
+        ):
+            selected_data[i] = data.swap_dims({"forecast_step": "lead_time"})
+        else:
+            _logger.warning(
+                "lead_time coordinate is not compatible with forecast_step for all plotted data; "
+                "using forecast_step as x-axis."
+            )
+            time_dim = "forecast_step"
     return selected_data, time_dim
 
 
@@ -427,6 +458,111 @@ class DefaultMarkerSize:
             List of stream names.
         """
         return list(cls._marker_size_stream.keys())
+
+
+def quantile_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+) -> None:
+    """
+    Create quantile-quantile (Q-Q) plots for extreme value analysis for all streams
+    and channels for a given metric and region.
+
+    Parameters
+    ----------
+    metric: str
+        String specifying the metric to plot (should be 'qq_analysis')
+    region: str
+        String specifying the region to plot
+    runs: dict
+        Dictionary containing the config for all runs
+    scores_dict : dict
+        The dictionary containing all computed metrics.
+    plotter:
+        Plotter object to handle the plotting part. Must have a qq_plot method.
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        for ch in channels_set:
+            selected_data, labels, run_ids = [], [], []
+            qq_full_data = []  # Store full Q-Q datasets for detailed plotting
+
+            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+                # skip if channel is missing
+                if ch not in np.atleast_1d(data.channel.values):
+                    continue
+
+                # Select channel
+                data_for_channel = data.sel(channel=ch) if "channel" in data.dims else data
+
+                # Check for NaN
+                if data_for_channel.isnull().all():
+                    continue
+
+                # For qq_analysis, extract Q-Q data from attributes
+                if metric == "qq_analysis" and "p_quantiles" in data_for_channel.attrs:
+                    attrs = data_for_channel.attrs
+                    # Convert to numpy arrays once
+                    p_quantiles_arr = np.array(attrs["p_quantiles"])
+                    gt_quantiles_arr = np.array(attrs["gt_quantiles"])
+                    qq_deviation_arr = np.array(attrs["qq_deviation"])
+                    qq_deviation_norm_arr = np.array(attrs["qq_deviation_normalized"])
+                    quantile_levels = np.array(attrs["quantile_levels"])
+                    extreme_low_mse = float(np.mean(np.array(attrs["extreme_low_mse"])))
+                    extreme_high_mse = float(np.mean(np.array(attrs["extreme_high_mse"])))
+
+                    qq_dataset = xr.Dataset(
+                        {
+                            "quantile_levels": (["quantile"], quantile_levels),
+                            "p_quantiles": (["quantile"], _flatten_or_average(p_quantiles_arr)),
+                            "gt_quantiles": (["quantile"], _flatten_or_average(gt_quantiles_arr)),
+                            "qq_deviation": (["quantile"], _flatten_or_average(qq_deviation_arr)),
+                            "qq_deviation_normalized": (
+                                ["quantile"],
+                                _flatten_or_average(qq_deviation_norm_arr),
+                            ),
+                            "extreme_low_mse": ([], extreme_low_mse),
+                            "extreme_high_mse": ([], extreme_high_mse),
+                        }
+                    )
+                    # Store extreme percentiles for plotting
+                    qq_dataset.attrs["extreme_percentiles"] = tuple(attrs["extreme_percentiles"])
+                    qq_full_data.append(qq_dataset)
+
+                selected_data.append(data_for_channel)
+                labels.append(runs[run_id].get("label", run_id))
+                run_ids.append(run_id)
+
+            if selected_data:
+                _logger.info(f"Creating Q-Q plot for {metric} - {region} - {stream} - {ch}.")
+
+                name = create_filename(
+                    prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
+                )
+
+                # Check if plotter has qq_plot method and Q-Q data is available
+                if hasattr(plotter, "qq_plot") and qq_full_data:
+                    _logger.info(f"Creating Q-Q plot with {len(qq_full_data)} dataset(s).")
+                    # Extract extreme_percentiles from dataset
+                    extreme_pct = qq_full_data[0].attrs["extreme_percentiles"]
+                    plotter.qq_plot(
+                        qq_full_data,
+                        labels,
+                        tag=name,
+                        metric=metric,
+                        extreme_percentiles=extreme_pct,
+                    )
+                else:
+                    # Skip plotting if no Q-Q data available
+                    _logger.warning(
+                        f"Q-Q data not available for {metric} - {region} - {stream} - {ch}. "
+                        f"Skipping plot generation."
+                    )
 
 
 def create_filename(

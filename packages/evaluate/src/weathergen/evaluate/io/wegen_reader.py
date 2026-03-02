@@ -28,6 +28,7 @@ from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
+from weathergen.evaluate.utils.utils import merge
 
 
 class WeatherGenReader(Reader):
@@ -151,7 +152,7 @@ class WeatherGenReader(Reader):
         return all_channels
 
     def load_scores(
-        self, stream: str, regions: list[str], metrics: list[str]
+        self, stream: str, regions: list[str], metrics: dict[str, object]
     ) -> xr.DataArray | None:
         """
         Load multiple pre-computed scores for a given run, stream and metric and epoch.
@@ -179,8 +180,8 @@ class WeatherGenReader(Reader):
         local_scores = {}
         missing_metrics = {}
         for region in regions:
-            for metric in metrics:
-                score = self.load_single_score(stream, region, metric)
+            for metric, parameters in metrics.items():
+                score = self.load_single_score(stream, region, metric, parameters)
                 if score is not None:
                     available_data = self.check_availability(stream, score, mode="evaluation")
                     if available_data.score_availability:
@@ -195,26 +196,38 @@ class WeatherGenReader(Reader):
                         continue
 
                 # all other cases: recompute scores
-                missing_metrics.setdefault(region, []).append(metric)
+                missing_metrics.setdefault(region, {}).update({metric: parameters})
                 continue
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
 
-    def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+    def load_single_score(
+        self, stream: str, region: str, metric: str, parameters: dict | None = None
+    ) -> xr.DataArray | None:
         """
         Load a single pre-computed score for a given run, stream and metric
         """
+        if parameters is None:
+            parameters = {}
         score_path = (
             Path(self.metrics_dir)
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
+<<<<<<< HEAD
         self._logger.debug(f"Looking for: {score_path}")
+=======
+        _logger.debug(f"Looking for: {score_path}")
+        score = None
+>>>>>>> origin/develop
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
-                score = xr.DataArray.from_dict(data_dict)
-        else:
-            score = None
+                if "scores" not in data_dict:
+                    data_dict = {"scores": [data_dict]}
+                for score_version in data_dict["scores"]:
+                    if score_version["attrs"] == parameters:
+                        score = xr.DataArray.from_dict(score_version)
+                        break
         return score
 
     def get_recomputable_metrics(self, metrics):
@@ -252,8 +265,12 @@ class WeatherGenJSONReader(WeatherGenReader):
         run_id: str,
         private_paths: dict | None = None,
         regions: list[str] | None = None,
+<<<<<<< HEAD
         metrics: list[str] | None = None,
         verbose=True,
+=======
+        metrics: dict[str, object] | None = None,
+>>>>>>> origin/develop
     ):
         super().__init__(eval_cfg, run_id, private_paths, verbose)
         # goes looking for the coordinates available for all streams, regions, metrics
@@ -265,8 +282,8 @@ class WeatherGenJSONReader(WeatherGenReader):
         }  # remember who had which coords, so we can warn about it later.
         for stream in streams:
             for region in regions:
-                for metric in metrics:
-                    score = self.load_single_score(stream, region, metric)
+                for metric, parameters in metrics.items():
+                    score = self.load_single_score(stream, region, metric, parameters)
                     if score is not None:
                         for name in coord_names:
                             vals = set(score[name].values)
@@ -325,8 +342,13 @@ class WeatherGenZarrReader(WeatherGenReader):
             ):
                 self.fname_zarr = fname_zarr
         else:
+<<<<<<< HEAD
             self._logger.error(f"Zarr file {self.fname_zarr} does not exist.")
             raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
+=======
+            _logger.error(f"Zarr file {fname_zarr} does not exist.")
+            raise FileNotFoundError(f"Zarr file {fname_zarr} does not exist")
+>>>>>>> origin/develop
 
     def get_data(
         self,
@@ -552,7 +574,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         -------
             Returns a Dataset where channels have been scaled if needed
         """
-        if stream not in ["ERA5"]:
+        if stream is None or not str(stream).startswith("ERA5"):
             return data
 
         channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
@@ -696,20 +718,50 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
 
 
 class WeatherGenMergeReader(Reader):
-    def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
-        """Data reader class for WeatherGenerator model outputs stored in Zarr format."""
+    def __init__(
+        self,
+        eval_cfg: dict,
+        run_id: str,
+        private_paths: dict | None = None,
+        regions: list[str] | None = None,
+        metrics: list[str] | None = None,
+        reader_type: str = "zarr",
+    ):
+        """
+        Data reader class for merging WeatherGenerator model outputs stored in Zarr or JSON format.
 
-        self.run_ids = eval_cfg.get("merge_run_ids", [])
-        self.metrics_dir = Path(eval_cfg.get("metrics_dir"))
-        self.mini_epoch = eval_cfg.get("mini_epoch", eval_cfg.get("epoch"))
-
+        Parameters
+        ----------
+        eval_cfg: dict
+           config with plotting and evaluation options for that run id
+        run_id: str
+            run id of the model
+        private_paths: dict
+            dictionary of private paths for the supported HPC
+        regions: list[str]
+            names of predefined bounding box for a region
+        metrics: list[str]
+            names of the metric scores to compute
+        reader_type: str
+            The type of the internal reader. If zarr, WeatherGenZarrReader is used,
+            WeatherGenJSONReader otherwise. Default: zarr
+        """
         super().__init__(eval_cfg, run_id, private_paths)
+        self.run_ids = eval_cfg.get("merge_run_ids", [])
+        self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir"))
+        self.mini_epoch = eval_cfg.get("mini_epoch", 0)
+
         self.readers = []
 
         self._logger.info(f"MERGE READERS: {self.run_ids} ...")
 
         for run_id in self.run_ids:
-            reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
+            if reader_type == "zarr":
+                reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
+            else:
+                reader = WeatherGenJSONReader(
+                    self.eval_cfg, run_id, self.private_paths, regions, metrics
+                )
             self.readers.append(reader)
 
     def get_data(
@@ -789,7 +841,9 @@ class WeatherGenMergeReader(Reader):
         da_preds_merge = self._concat_over_ens(da_preds_merge, fsteps_merge)
 
         return ReaderOutput(
-            target=da_tars_merge, prediction=da_preds_merge, points_per_sample=points_per_sample
+            target=da_tars_merge,
+            prediction=da_preds_merge,
+            points_per_sample=points_per_sample,
         )
 
     def _concat_over_ens(self, da_merge, fsteps_merge):
@@ -818,7 +872,9 @@ class WeatherGenMergeReader(Reader):
 
         return da_ens
 
-    def load_scores(self, stream: str, regions: str, metrics: str) -> xr.DataArray | None:
+    def load_scores(
+        self, stream: str, regions: list[str], metrics: list[str]
+    ) -> xr.DataArray | None:
         """
         Load the pre-computed scores for a given run, stream and metric and epoch.
 
@@ -839,14 +895,36 @@ class WeatherGenMergeReader(Reader):
         missing_metrics:
             dictionary of missing regions and metrics that need to be recomputed.
         """
-        # TODO: implement this properly. Not it is skipping loading scores
-
         local_scores = {}
         missing_metrics = {}
-        for region in regions:
-            for metric in metrics:
-                # all other cases: recompute scores
-                missing_metrics.setdefault(region, []).append(metric)
+
+        if isinstance(self.readers[0], WeatherGenZarrReader):
+            # TODO: implement this properly. Not it is skipping loading scores
+            for region in regions:
+                for metric, parameters in metrics.items():
+                    # all other cases: recompute scores
+                    missing_metrics.setdefault(region, {}).update({metric: parameters})
+        else:  # JsonReader
+            # deep merge dicts
+            for reader in self.readers:
+                scores, missing = reader.load_scores(stream, regions, metrics)
+                merge(local_scores, scores)
+                merge(missing_metrics, missing)
+
+            # merge runs into one with all scores concatenated
+            for metric in local_scores.keys():
+                for region in local_scores[metric].keys():
+                    for stream in local_scores[metric][region].keys():
+                        scores = (
+                            local_scores[metric][region][stream].pop(run_id)
+                            for run_id in self.run_ids
+                        )
+                        local_scores[metric][region][stream].setdefault(
+                            self.run_id,
+                            xr.concat(scores, dim="ens").assign_coords(
+                                ens=range(len(self.readers))
+                            ),
+                        )
 
         return local_scores, missing_metrics
 
@@ -934,7 +1012,7 @@ class WeatherGenMergeReader(Reader):
         for reader in self.readers:
             all_ensembles.append(reader.get_ensemble(stream))
 
-        if all(e == ["0"] or e == [0] for e in all_ensembles):
+        if all(e == ["0"] or e == [0] or e == {0} for e in all_ensembles):
             return set(range(len(self.readers)))
         else:
             raise NotImplementedError(
