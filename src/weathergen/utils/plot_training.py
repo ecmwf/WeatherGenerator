@@ -366,7 +366,7 @@ def plot_loss_per_stream(
                         for col in run_data_mode.columns:
                             col_split = col.split(".")
                             if len(col_split) < 4:
-                                if col == stream_name.lower():
+                                if stream_name in col:
                                     data_cols += [col]
                             elif (
                                 col_split[1].lower() == stream_name.lower()
