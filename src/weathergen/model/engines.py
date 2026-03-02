@@ -404,6 +404,22 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
+        downscale_factor = 8
+
+        self.fe_blocks.append(
+            MLP(
+                self.cf.ae_global_dim_embed,
+                self.cf.ae_global_dim_embed // downscale_factor,
+                with_residual=False,
+                dropout_rate=self.cf.fe_dropout_rate,
+                norm_type=self.cf.norm_type,
+                dim_aux=dim_aux,
+                norm_eps=self.cf.mlp_norm_eps,
+                with_noise_conditioning=False,
+            )
+        )
+        self.cf.ae_global_dim_embed = self.cf.ae_global_dim_embed // downscale_factor
+
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
@@ -460,6 +476,20 @@ class ForecastingEngine(torch.nn.Module):
                     self.fe_blocks.append(
                         torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
                     )
+
+        self.fe_blocks.append(
+            MLP(
+                self.cf.ae_global_dim_embed,
+                self.cf.ae_global_dim_embed * downscale_factor,
+                with_residual=False,
+                dropout_rate=self.cf.fe_dropout_rate,
+                norm_type=self.cf.norm_type,
+                dim_aux=dim_aux,
+                norm_eps=self.cf.mlp_norm_eps,
+                with_noise_conditioning=False,
+            )
+        )
+        self.cf.ae_global_dim_embed = self.cf.ae_global_dim_embed * downscale_factor
 
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
