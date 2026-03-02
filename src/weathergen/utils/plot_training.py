@@ -638,13 +638,6 @@ def plot_train(args=None):
         help="List of metrics (e.g. mse) to plot",
     )
     parser.add_argument(
-        "--all-physical-streams",
-        dest="all_physical_streams",
-        default=False,
-        action="store_true",
-        help="Plot all available physical streams",
-    )
-    parser.add_argument(
         "--per-stream-x-lim",
         dest="per_stream_x_lim",
         default=None,
@@ -714,7 +707,7 @@ def plot_train(args=None):
         clean_plot_folder(out_dir)
 
     # collect all physical streams from all run_ids if requested
-    if args.all_physical_streams:
+    if "all" in streams:
         for run_id in runs_ids:
             # Load config from given model_path if provided, otherwise use path from private config
             if model_base_dir:
@@ -729,7 +722,10 @@ def plot_train(args=None):
                 )
             for stream_info in cf.streams:
                 streams += [stream_info["name"]]
+        # ensure items are unique
         streams = list(set(streams))
+        # remove "all" key that is a special flag and not an actual stream name
+        streams.remove("all")
 
     # read logged data
 
