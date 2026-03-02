@@ -86,6 +86,7 @@ load_chkpt: {}
 
 norm_type: "LayerNorm"
 
+run_profiler: True
 #####################################
 
 streams_directory: "./config/streams/era5_1deg/"
