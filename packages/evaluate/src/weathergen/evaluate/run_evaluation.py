@@ -278,7 +278,7 @@ def evaluate_from_config(
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
-    metrics = parse_metric_params(cfg.evaluation.metrics)
+    metrics = cfg.evaluation.metrics
     regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
