@@ -93,8 +93,8 @@ variables:
     var: tp_imerg_0
     long: imerg_total_precipitation
     std: precipitation_amount
-    wg_unit: kg m-2
-    std_unit: kg m-2
+    wg_unit: m
+    std_unit: m
     level_type: sfc
   
 
