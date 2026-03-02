@@ -21,7 +21,7 @@ from pathlib import Path
 # Third-party
 import mlflow
 from mlflow.client import MlflowClient
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 # Local application / package
 from weathergen.common.config import _REPO_ROOT
@@ -154,6 +154,8 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
         _logger.info(f"MLFlow client set up: {mlflow_client}")
 
     cf = OmegaConf.load(config)
+    with open_dict(cf):
+        cf.evaluation.metrics = parse_metric_params(cf.evaluation.metrics)
     assert isinstance(cf, DictConfig)
     evaluate_from_config(cf, mlflow_client, log_queue)
 
