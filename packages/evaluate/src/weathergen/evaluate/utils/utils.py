@@ -117,10 +117,10 @@ def calc_scores_per_stream(
         channels=channels,
         ensemble=ensemble,
     )
+
     da_preds = output_data.prediction
     da_tars = output_data.target
     fsteps = sorted(list(da_preds.keys()))
-
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
     for region in regions:
@@ -129,7 +129,7 @@ def calc_scores_per_stream(
 
         _logger.info(
             f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
-            f" and metrics {metrics}..."
+            f" and metrics {list(metrics.keys())}..."
         )
         metric_stream = xr.DataArray(
             np.full(
@@ -149,7 +149,7 @@ def calc_scores_per_stream(
             metric_stream = metric_stream.assign_coords(
                 lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
             )
-        
+
         # Store metric-specific attributes that get lost during concat
         # Key: (fstep, metric) -> attrs dict
         all_metric_attrs = {}

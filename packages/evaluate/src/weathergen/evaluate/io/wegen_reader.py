@@ -438,6 +438,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                     )
                     continue
 
+                # fsteps_final.extend(valid_times_fs)
                 fsteps_final.append(valid_times_fs)
 
                 _logger.debug(
@@ -455,8 +456,8 @@ class WeatherGenZarrReader(WeatherGenReader):
                     da_preds_fs = _force_consistent_grids(da_preds_fs)
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
-                    da_tars_fs = [xr.concat(da_tars_fs, dim="ipoint")]
-                    da_preds_fs = [xr.concat(da_preds_fs, dim="ipoint")]
+                    da_tars_fs = [xr.concat(da_tars_fs, dim="ipoint", coords="minimal")]
+                    da_preds_fs = [xr.concat(da_preds_fs, dim="ipoint", coords="minimal")]
 
                 da_tars.append([da for da in da_tars_fs])
                 da_preds.append([da for da in da_preds_fs])
@@ -464,10 +465,11 @@ class WeatherGenZarrReader(WeatherGenReader):
             # Safer than a list
             da_tars_dict, da_preds_dict = {}, {}
             i = 1
+
             for _, (fstep, da_t, da_p) in enumerate(
                 zip(fsteps_final, da_tars, da_preds, strict=True)
             ):
-                if isinstance(fstep, list) and len(fstep) > 1:  # regular grid with lead times
+                if isinstance(fstep, list):  # regular grid with lead times (1 or multiple)
                     for t, p in zip(da_t, da_p, strict=True):
                         t, p = _select_channels(t, p, stream, channels, stream_cfg)
                         t = t.assign_coords(forecast_step=i)
@@ -640,31 +642,33 @@ def _select_channels(
 
     return da_pred, da_tar
 
-def _scale_z_channels(self, data: xr.DataArray, stream: str) -> xr.DataArray:
-        """
-        Check scale all channels.
 
-        Parameters
-        ----------
-        data :
-            Input dataset
-        stream :
-            Stream name.
-        Returns
-        -------
-            Returns a Dataset where channels have been scaled if needed
-        """
-        if stream is None or not str(stream).startswith("ERA5"):
-            return data
+def _scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:
+    """
+    Check scale all channels.
 
-        channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
-        factor = 9.80665
-
-        if channels_z:
-            channels = data.channel.astype(str)
-            mask = channels.str.startswith("z_")
-            data = data.where(~mask, data / factor)
+    Parameters
+    ----------
+    data :
+        Input dataset
+    stream :
+        Stream name.
+    Returns
+    -------
+        Returns a Dataset where channels have been scaled if needed
+    """
+    if stream is None or not str(stream).startswith("ERA5"):
         return data
+
+    channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
+    factor = 9.80665
+
+    if channels_z:
+        channels = data.channel.astype(str)
+        mask = channels.str.startswith("z_")
+        data = data.where(~mask, data / factor)
+    return data
+
 
 def _split_by_valid_time(arrays: list[xr.DataArray]) -> list[xr.DataArray]:
     """
@@ -759,7 +763,7 @@ def _split_by_valid_time(arrays: list[xr.DataArray]) -> list[xr.DataArray]:
 
         if per_sample:
             # Single concat operation
-            combined = xr.concat(per_sample, dim="sample")
+            combined = xr.concat(per_sample, dim="sample", coords="different", compat="equals")
             combined = combined.assign_coords(
                 ipoint=np.arange(combined.sizes["ipoint"]), forecast_step=forecast_step
             )
@@ -1002,7 +1006,9 @@ class WeatherGenMergeReader(Reader):
         da_ens = {}
         for k, fstep in enumerate(fsteps):
             da_list = [da_merge[i][k] for i in range(n_readers)]
-            da_ens[fstep] = xr.concat(da_list, dim="ens").assign_coords(ens=range(n_readers))
+            da_ens[fstep] = xr.concat(da_list, dim="ens", coords="minimal").assign_coords(
+                ens=range(n_readers)
+            )
 
         return da_ens
 
