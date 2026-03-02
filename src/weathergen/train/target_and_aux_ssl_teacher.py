@@ -151,6 +151,7 @@ class FrozenTeacher(EncoderTeacher):
 
         # Strip to encoder + create fresh heads
         prepare_encoder_teacher(teacher_model, cf.training_config, teacher_config)
+        teacher_model.to(device)
 
         # Create model params matching teacher's architecture
         teacher_model_params = ModelParams(teacher_config).create(teacher_config).to(device)
