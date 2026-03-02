@@ -419,9 +419,7 @@ def plot_loss_per_stream(
             for line in legend.get_lines():
                 line.set(alpha=1.0)
             plt.grid(True, which="both", ls="-")
-            # cap at 1.0 in case of divergence of run (through normalziation, max should be
-            # around 1.0)
-            # plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
+
             if y_lim is not None:
                 plt.ylim(y_lim)
             else:
