@@ -950,8 +950,6 @@ class WeatherGenMergeReader(Reader):
 
         da_tars_merge, da_preds_merge, fsteps_merge = [], [], []
 
-        points_per_sample = None
-
         for reader in self.readers:
             da_tars, da_preds, da_fsteps = [], [], []
             _logger.info(f"MERGE READERS: Processing run_id {reader.run_id}...")
