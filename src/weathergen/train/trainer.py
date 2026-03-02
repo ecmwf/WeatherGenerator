@@ -10,10 +10,10 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
-import os
-import sys
 import time
 from contextlib import nullcontext
+from functools import partial
+from itertools import islice
 
 import numpy as np
 import torch
@@ -158,6 +158,10 @@ class Trainer(TrainerBase):
         if is_root():
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
+
+            # create profiler trace directory
+            if cf.run_profiler:
+                config.get_path_profiler(cf).mkdir(exist_ok=True, parents=True)
 
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
@@ -370,16 +374,14 @@ class Trainer(TrainerBase):
         # run validation before training if requested
         self.validate_before_training()
 
-        # training loop
-        #run_profiler = os.getenv("RUN_PROFILER", "0") == "1"
-        run_profiler = os.getenv("RUN_PROFILER", "1") == "1"
-
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
-            if run_profiler:
-                self.profile_train(mini_epoch)
-            else:
-                self.train(mini_epoch)
+
+            self.train(mini_epoch)
+
+            if cf.run_profiler:
+                # Skip validation.
+                break
 
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
@@ -391,8 +393,9 @@ class Trainer(TrainerBase):
             )
             self.save_model(mini_epoch)
 
-        # log final model
-        self.save_model(self.training_cfg.num_mini_epochs)
+        # Log the final model only when profiling is not enabled.
+        if not cf.run_profiler:
+            self.save_model(self.training_cfg.num_mini_epochs)
 
     def validate_before_training(self):
         """
@@ -414,181 +417,6 @@ class Trainer(TrainerBase):
                     self.validate(-1, cfg, batch_size)
             else:
                 assert False, "validate_before_training must be integer or boolean."
-
-    def profile_train(self, mini_epoch):
-        """
-        Perform training for one epoch
-        """
-
-        cf = self.cf
-        self.model.train()
-
-        apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
-
-        dataset_iter = iter(self.data_loader)
-
-        self.optimizer.zero_grad()
-
-        # training loop
-        self.t_start = time.time()
-
-        # WRAP CUSTOM MODULES BEFORE PROFILING STARTS
-        wrap_module_forward_with_profiling(self.model, prefix="model")
-
-        # PyTorch Profiler setup for 3 iterations with FLOPs
-
-        # Determine profiler setup
-        if cf.local_rank == 0:
-            prof = profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                record_shapes=True,
-                profile_memory=True,
-                with_stack=True,
-                with_modules=True,
-                with_flops=True,
-                schedule=torch.profiler.schedule(wait=1, warmup=1, active=1, repeat=1),
-                on_trace_ready=trace_handler,
-                # on_trace_ready=torch.profiler.tensorboard_trace_handler('./profiler_logs/'),
-            )
-        else:
-            prof = nullcontext()
-
-        if cf.local_rank == 0:
-            # Start recording memory snapshot history
-            start_record_memory_history()
-
-        with prof:
-            for bidx, batch in enumerate(dataset_iter):
-                if cf.data_loading.get("memory_pinning", False):
-                    batch = batch.pin_memory()
-                batch.to_device(self.device)
-
-                with torch.autocast(
-                    device_type=f"cuda:{cf.local_rank}",
-                    dtype=self.mixed_precision_dtype,
-                    enabled=cf.with_mixed_precision,
-                ):
-                    preds = self.model(
-                        self.model_params,
-                        batch.get_source_samples(),
-                    )
-
-                targets_and_auxs = {}
-                for loss_name, target_aux in self.target_and_aux_calculators.items():
-                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
-                    targets_and_auxs[loss_name] = target_aux.compute(
-                        self.cf.general.istep,
-                        batch.get_target_samples(target_idxs),
-                        self.model_params,
-                        self.model,
-                    )
-
-                loss = self.loss_calculator.compute_loss(
-                    preds=preds,
-                    targets_and_aux=targets_and_auxs,
-                    metadata=extract_batch_metadata(batch),
-                )
-
-                [
-                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators.items()
-                ]
-                [
-                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators_val.items()
-                ]
-
-                self.optimizer.zero_grad()
-                self.grad_scaler.scale(loss).backward()
-
-                self.grad_scaler.unscale_(self.optimizer)
-                total_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
-                )
-
-                if self.log_grad_norms:
-                    if bidx % self.train_log_freq.terminal == 0:
-                        self.last_grad_norm = self._get_tensor_item(total_norm)
-                    if bidx % self.train_log_freq.metrics == 0:
-                        self._log_instant_grad_norms(TRAIN)
-
-                self.grad_scaler.step(self.optimizer)
-                self.grad_scaler.update()
-
-                self.lr_scheduler.step()
-
-                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-                step = batch_size_total * self.cf.general.istep
-
-                [
-                    target_aux.update_state_post_opt_step(step, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators.items()
-                ]
-                [
-                    target_aux.update_state_post_opt_step(step, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators_val.items()
-                ]
-
-                if self.validate_with_ema:
-                    self.ema_model.update(
-                        self.cf.general.istep * batch_size_total, batch_size_total
-                    )
-
-                self._log_terminal(bidx, mini_epoch, TRAIN)
-                if bidx % self.train_log_freq.metrics == 0:
-                    self._log(TRAIN)
-
-                if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
-                    self.save_model(-1)
-
-                self.cf.general.istep += 1
-
-                if hasattr(prof, "step"):
-                    prof.step()
-
-                if bidx >= 2:
-                    break
-
-            # Print only on rank 0
-            if cf.local_rank == 0 and hasattr(prof, "key_averages"):
-                print("\n" + "=" * 80)
-                print("PROFILING SUMMARY")
-                print("=" * 80)
-
-                print("\n--- Top Operations by FLOPs ---")
-                print(
-                    prof.key_averages().table(
-                        sort_by="flops", row_limit=20, top_level_events_only=False
-                    )
-                )
-
-                print("\n--- Operations Grouped by Module ---")
-                print(
-                    prof.key_averages(group_by_stack_n=5).table(
-                        sort_by="cuda_time_total", row_limit=30
-                    )
-                )
-
-                print("\n--- Memory Usage ---")
-                print(prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=20))
-
-        if cf.local_rank == 0:
-            # Create the memory snapshot file
-            export_memory_snapshot()
-
-            # Stop recording memory snapshot history
-            stop_record_memory_history()
-
-        torch.distributed.barrier()
-        print("\n" + "=" * 80)
-        print("PROFILING COMPLETE - EXITING TRAINING")
-        print("=" * 80)
-
-        """Destroy the process group."""
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-
-        sys.exit(0)  # Exit the entire program
 
     def train(self, mini_epoch):
         """
@@ -970,3 +798,186 @@ class Trainer(TrainerBase):
                 logger.info("\n")
 
             self.t_start = time.time()
+
+
+class ProfilingTrainer(Trainer):
+    def train(self, mini_epoch):
+        """
+        Profiling the training using torch profiler.
+        """
+
+        cf = self.cf
+        self.model.train()
+
+        apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
+
+        dataset_iter = iter(self.data_loader)
+
+        self.optimizer.zero_grad()
+
+        # training loop
+        self.t_start = time.time()
+
+        wrap_module_forward_with_profiling(self.model, prefix="model")
+
+        wait, warmup, active, repeat = 2, 4, 2, 1
+
+        max_profile_steps = (wait + warmup + active) * repeat
+
+        handler = partial(trace_handler, cf)
+
+        # Determine profiler setup
+        if cf.local_rank == 0:
+            prof = profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                record_shapes=True,
+                profile_memory=True,
+                with_stack=True,
+                with_modules=True,
+                with_flops=True,
+                schedule=torch.profiler.schedule(
+                    wait=wait, warmup=warmup, active=active, repeat=repeat
+                ),
+                on_trace_ready=handler,
+                # on_trace_ready=torch.profiler.tensorboard_trace_handler('./profiler_logs/'),
+                # schedule=torch.profiler.schedule(wait=2, warmup=4, active=2, repeat=1),
+            )
+        else:
+            prof = nullcontext()
+
+        if cf.local_rank == 0:
+            # Start recording memory snapshot history
+            start_record_memory_history()
+
+        with prof:
+            for bidx, batch in enumerate(islice(dataset_iter, max_profile_steps)):
+                if cf.data_loading.get("memory_pinning", False):
+                    batch = batch.pin_memory()
+                batch.to_device(self.device)
+
+                with torch.autocast(
+                    device_type=f"cuda:{cf.local_rank}",
+                    dtype=self.mixed_precision_dtype,
+                    enabled=cf.with_mixed_precision,
+                ):
+                    preds = self.model(
+                        self.model_params,
+                        batch.get_source_samples(),
+                    )
+
+                targets_and_auxs = {}
+                for loss_name, target_aux in self.target_and_aux_calculators.items():
+                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                    targets_and_auxs[loss_name] = target_aux.compute(
+                        self.cf.general.istep,
+                        batch.get_target_samples(target_idxs),
+                        self.model_params,
+                        self.model,
+                    )
+
+                loss = self.loss_calculator.compute_loss(
+                    preds=preds,
+                    targets_and_aux=targets_and_auxs,
+                    metadata=extract_batch_metadata(batch),
+                )
+
+                [
+                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators.items()
+                ]
+                [
+                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators_val.items()
+                ]
+
+                self.optimizer.zero_grad()
+                self.grad_scaler.scale(loss).backward()
+
+                self.grad_scaler.unscale_(self.optimizer)
+                total_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
+                )
+
+                if self.log_grad_norms:
+                    if bidx % self.train_log_freq.terminal == 0:
+                        self.last_grad_norm = self._get_tensor_item(total_norm)
+                    if bidx % self.train_log_freq.metrics == 0:
+                        self._log_instant_grad_norms(TRAIN)
+
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
+
+                self.lr_scheduler.step()
+
+                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+                step = batch_size_total * self.cf.general.istep
+
+                [
+                    target_aux.update_state_post_opt_step(step, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators.items()
+                ]
+                [
+                    target_aux.update_state_post_opt_step(step, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators_val.items()
+                ]
+
+                if self.validate_with_ema:
+                    self.ema_model.update(
+                        self.cf.general.istep * batch_size_total, batch_size_total
+                    )
+
+                self._log_terminal(bidx, mini_epoch, TRAIN)
+                if bidx % self.train_log_freq.metrics == 0:
+                    self._log(TRAIN)
+
+                if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
+                    self.save_model(-1)
+
+                self.cf.general.istep += 1
+
+                if hasattr(prof, "step"):
+                    prof.step()
+
+            # Print only on rank 0
+            if cf.local_rank == 0 and hasattr(prof, "key_averages"):
+                logger.info("\n" + "=" * 80)
+                logger.info("PROFILING SUMMARY")
+                logger.info("=" * 80)
+
+                logger.info("\n--- Top Operations by FLOPs ---")
+                logger.info(
+                    prof.key_averages().table(
+                        sort_by="flops", row_limit=20, top_level_events_only=False
+                    )
+                )
+
+                logger.info("\n--- Operations Grouped by Module ---")
+                logger.info(
+                    prof.key_averages(group_by_stack_n=5).table(
+                        sort_by="cuda_time_total", row_limit=30
+                    )
+                )
+
+                logger.info("\n--- Memory Usage ---")
+                logger.info(
+                    prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=20)
+                )
+
+        if cf.local_rank == 0:
+            # Create the memory snapshot file
+            export_memory_snapshot(cf)
+
+            # Stop recording memory snapshot history
+            stop_record_memory_history()
+
+        torch.distributed.barrier()
+
+        if cf.local_rank == 0:
+            logger.info("Training loop profiling is complete.")
+            logger.info(
+                "The memory snapshot, memory usage distribution, and PyTorch profiler"
+                "trace can be found in the profiler_logs folder."
+            )
+
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()

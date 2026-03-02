@@ -22,7 +22,7 @@ from pathlib import Path
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
-from weathergen.train.trainer import Trainer
+from weathergen.train.trainer import ProfilingTrainer, Trainer
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,10 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.train_log_freq)
+    if cf.run_profiler:
+        trainer = ProfilingTrainer(cf.train_log_freq)
+    else:
+        trainer = Trainer(cf.train_log_freq)
 
     try:
         trainer.run(cf, devices)
