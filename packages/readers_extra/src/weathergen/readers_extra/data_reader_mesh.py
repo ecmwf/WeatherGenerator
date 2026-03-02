@@ -3,17 +3,16 @@ import logging
 from pathlib import Path
 from typing import override
 
-import dask
 import dask.array as da
+import dask
 import fsspec
 import numpy as np
 import xarray as xr
-import torch
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    DTRange,  # <--- Added missing import
     ReaderData,
+    DTRange,
     TimeWindowHandler,
     TIndex,
 )
@@ -31,7 +30,7 @@ class DataReaderMesh(DataReaderTimestep):
     - Separate Source and Target files.
     - Persistence of State time indexing (forward fill).
     - Robust Multi-Node/Worker support (Fork-safe, Dask-safe).
-    - Dynamic Patching / Cropping with minimum point guarantees.
+    - Dynamic Patching (local) OR Global Sparse Sampling.
     """
 
     def __init__(
@@ -40,7 +39,6 @@ class DataReaderMesh(DataReaderTimestep):
         filename: Path,
         stream_info: dict,
     ) -> None:
-
         self.filename_source = Path(filename)
         # Check for separate target file
         if "target_file" in stream_info:
@@ -51,15 +49,27 @@ class DataReaderMesh(DataReaderTimestep):
         self._stream_info = stream_info
         self.roi = stream_info.get("roi", None)
         self.patch_size_deg = stream_info.get("patch_size_deg", None)
+        self.sample_points = stream_info.get("sample_points", None)
+
+        # 'patch' = contiguous geographic square
+        # 'global_sparse' = random points scattered over the whole available area
+        self.sampling_mode = stream_info.get("sampling_mode", "patch")
+
+        # --- WARNING FOR MIXED FILES + GLOBAL SAMPLING ---
+        if self.sampling_mode == "global_sparse" and self.filename_source != self.filename_target:
+            _logger.warning(
+                f"[Stream {stream_info.get('name')}] GLOBAL SPARSE SAMPLING enabled with DIFFERENT Source and Target files!"
+            )
+            _logger.warning(
+                "    -> This assumes perfect row-by-row index alignment between the two meshes."
+            )
+            _logger.warning(
+                "    -> If the meshes have different node orderings, this will produce SILENT DATA CORRUPTION."
+            )
 
         self._initialized = False
         self.ds_source = None
         self.ds_target = None
-
-        # --- PROBE METADATA (Source & Target) ---
-        self.col_map = {}
-        self.stats_means = {}
-        self.stats_vars = {}
 
         if not self.filename_source.exists():
             _logger.warning(f"Source file {self.filename_source} not found. Stream skipped.")
@@ -67,19 +77,20 @@ class DataReaderMesh(DataReaderTimestep):
             super().__init__(tw_handler, stream_info, None, None, None)
             return
 
+        # --- PROBE METADATA (Source & Target) ---
+        self.col_map = {}
+        self.stats_means = {}
+        self.stats_vars = {}
+
         # 1. Probe Source
         meta_src = self._probe_file(self.filename_source, is_source=True)
         if not meta_src:
-            self.init_empty()
-            super().__init__(tw_handler, stream_info, None, None, None)
             return
 
         # 2. Probe Target (if different)
         if self.filename_target != self.filename_source:
             meta_trg = self._probe_file(self.filename_target, is_source=False)
             if not meta_trg:
-                self.init_empty()
-                super().__init__(tw_handler, stream_info, None, None, None)
                 return
             self.col_map.update(meta_trg["col_map"])
             self.stats_means.update(meta_trg["means"])
@@ -129,15 +140,6 @@ class DataReaderMesh(DataReaderTimestep):
         self.target_channels = [self.available_channels[i] for i in self.target_idx]
 
         self._init_stats_arrays()
-
-    @override
-    def init_empty(self) -> None:
-        super().init_empty()
-        self._len_cached = 0
-
-    @override
-    def length(self) -> int:
-        return getattr(self, "_len_cached", 0)
 
     def _probe_file(self, filepath, is_source=True):
         """Helper to open a file, extract meta, and close it immediately."""
@@ -291,22 +293,40 @@ class DataReaderMesh(DataReaderTimestep):
 
         channel_indices = [self.available_channels.index(c) for c in channels]
         start_t, end_t = t_idxs[0], t_idxs[-1] + 1
-        n_steps = len(t_idxs)  # Correct step count based on found indices
+        n_steps = len(t_idxs)
 
-        # --- PATCHING LOGIC ---
-        if self.patch_size_deg:
-            local_seed = int(idx) + 12345
-            patch_rng = np.random.default_rng(local_seed)
+        # Setup RNG
+        local_seed = int(idx) + 12345
+        patch_rng = np.random.default_rng(local_seed)
 
-            # Ranges based on ROI
+        # --- STRATEGY SELECTION ---
+        if self.sampling_mode == "global_sparse":
+            # --- GLOBAL SPARSE SAMPLING ---
+            total_points = len(self.spatial_indices)
+            target_n = self.sample_points if self.sample_points else 4096
+
+            # Simple random choice from the full available set (defined by ROI in init)
+            # This is deterministic because patch_rng is seeded with idx
+            indices_local = patch_rng.choice(
+                total_points, size=min(target_n, total_points), replace=False
+            )
+
+            patch_coords_base = self.coords[indices_local]
+            final_disk_indices = self.spatial_indices[indices_local]
+
+            # Note: For scattered points, we force fancy indexing by passing rel_indices=None to _load_block
+            # to avoid reading the whole file array.
+            use_contiguous_read = False
+
+        elif self.patch_size_deg:
+            # --- PATCH SAMPLING ---
             lat_range = max(0.0, (self.roi_max_lat - self.roi_min_lat) - self.patch_size_deg)
             lon_range = max(0.0, (self.roi_max_lon - self.roi_min_lon) - self.patch_size_deg)
 
             patch_indices_local = np.array([])
             attempts = 0
-            MIN_PATCH_POINTS = 1024  # Constant minimum
+            MIN_PATCH_POINTS = 1024
 
-            # Re-draw loop: Ensure non-empty AND minimum size
             while len(patch_indices_local) < MIN_PATCH_POINTS and attempts < 100:
                 lat_0 = self.roi_min_lat + patch_rng.random() * lat_range
                 lon_0 = self.roi_min_lon + patch_rng.random() * lon_range
@@ -320,10 +340,8 @@ class DataReaderMesh(DataReaderTimestep):
                 patch_indices_local = np.where(mask)[0]
                 attempts += 1
 
-            # Deterministic Fallback if patch is still too small
             if len(patch_indices_local) < MIN_PATCH_POINTS:
-                # _logger.debug(f"Batch {idx}: Patch too small ({len(patch_indices_local)} pts). Using fallback.")
-                # Ensure we don't request more than available
+                # Fallback to random points if patch is too sparse
                 req_points = min(MIN_PATCH_POINTS, len(self.lats))
                 patch_indices_local = patch_rng.choice(
                     len(self.lats), size=req_points, replace=False
@@ -331,23 +349,35 @@ class DataReaderMesh(DataReaderTimestep):
 
             patch_coords_base = self.coords[patch_indices_local]
             final_disk_indices = self.spatial_indices[patch_indices_local]
+            use_contiguous_read = True
+
         else:
-            final_disk_indices, patch_coords_base = self.spatial_indices, self.coords
+            # --- FULL ROI / FULL GRID ---
+            final_disk_indices = self.spatial_indices
+            patch_coords_base = self.coords
+            use_contiguous_read = True
 
         # Load Data
         ds_ref = self.ds_source if is_source else self.ds_target
-        disk_start, disk_stop = np.min(final_disk_indices), np.max(final_disk_indices) + 1
-        rel_indices = final_disk_indices - disk_start
 
-        data_block = self._load_block_from_ds(
-            ds_ref,
-            channel_indices,
-            start_t,
-            end_t,
-            n_steps,
-            slice(disk_start, disk_stop),
-            rel_indices,
-        )
+        if use_contiguous_read:
+            # Optimized Contiguous Read
+            disk_start, disk_stop = np.min(final_disk_indices), np.max(final_disk_indices) + 1
+            rel_indices = final_disk_indices - disk_start
+            data_block = self._load_block_from_ds(
+                ds_ref,
+                channel_indices,
+                start_t,
+                end_t,
+                n_steps,
+                slice(disk_start, disk_stop),
+                rel_indices,
+            )
+        else:
+            # Scattered Read (Global Sparse) -> Pass raw indices, rel_indices=None
+            data_block = self._load_block_from_ds(
+                ds_ref, channel_indices, start_t, end_t, n_steps, final_disk_indices, None
+            )
 
         if data_block.size > 0:
             d_max = np.nanmax(np.abs(data_block))
@@ -355,7 +385,6 @@ class DataReaderMesh(DataReaderTimestep):
                 data_block[np.abs(data_block) > 1e10] = np.nan
 
         coords_flat = np.tile(patch_coords_base, (n_steps, 1))
-        # Ensure datetimes matches data length (n_steps)
         dt_values = self._time_values_cached[start_t:end_t]
         dt_flat = np.repeat(dt_values, patch_coords_base.shape[0])
 
@@ -365,14 +394,23 @@ class DataReaderMesh(DataReaderTimestep):
             data=data_block,
             datetimes=dt_flat,
         )
-
         return rdata
 
-    def _load_block_from_ds(self, ds, indices, start_t, end_t, n_steps, disk_slice, rel_indices):
-        if not indices:
-            return np.zeros((n_steps * len(rel_indices), 0), dtype=np.float32)
+    def _load_block_from_ds(self, ds, indices, start_t, end_t, n_steps, disk_indices, rel_indices):
+        """
+        Loads data using either contiguous slicing (fastest for patches)
+        or fancy indexing (memory efficient for sparse global).
+        """
+        # Calculate output size
+        if rel_indices is not None:
+            num_points = len(rel_indices)
+        else:
+            num_points = len(disk_indices)  # disk_indices is the list of points
 
-        output_block = np.zeros((n_steps * len(rel_indices), len(indices)), dtype=np.float32)
+        if not indices:
+            return np.zeros((n_steps * num_points, 0), dtype=np.float32)
+
+        output_block = np.zeros((n_steps * num_points, len(indices)), dtype=np.float32)
 
         with dask.config.set(scheduler="single-threaded"):
             for i, idx in enumerate(indices):
@@ -396,12 +434,31 @@ class DataReaderMesh(DataReaderTimestep):
                             sls[dims.index(d)] = val
                     sliced = sliced[tuple(sls)]
 
-                if "time" in dims:
-                    sliced = sliced[start_t:end_t, disk_slice]
-                else:
-                    sliced = da.repeat(da.expand_dims(sliced[disk_slice], 0), n_steps, axis=0)
+                # --- STRATEGY SELECTION ---
+                if rel_indices is not None:
+                    # STRATEGY A: Contiguous Read + Memory Filter (Best for Patches)
+                    if "time" in dims:
+                        sliced = sliced[start_t:end_t, disk_indices]
+                    else:
+                        sliced = da.repeat(da.expand_dims(sliced[disk_indices], 0), n_steps, axis=0)
 
-                chunk = sliced[:, rel_indices].compute().astype(np.float32)
+                    # Dask computes the slice, then we filter in RAM
+                    chunk = sliced.compute().astype(np.float32)
+                    chunk = chunk[:, rel_indices]
+                else:
+                    # STRATEGY B: Fancy Indexing (Best for Global Sparse)
+                    # disk_indices is a list of integers here
+                    if "time" in dims:
+                        # Slice time range, then select specific points
+                        # Note: dask[time_slice][:, integer_list] is standard way to do orthogonal selection
+                        sliced = sliced[start_t:end_t]
+                        sliced = sliced[:, disk_indices]
+                    else:
+                        sliced = sliced[disk_indices]
+                        sliced = da.repeat(da.expand_dims(sliced, 0), n_steps, axis=0)
+
+                    chunk = sliced.compute().astype(np.float32)
+
                 chunk[~np.isfinite(chunk)] = np.nan
                 output_block[:, i] = chunk.reshape(-1)
 
@@ -412,6 +469,15 @@ class DataReaderMesh(DataReaderTimestep):
         raise NotImplementedError(
             "DataReaderMesh._get should not be called directly. Use get_source or get_target."
         )
+
+    @override
+    def init_empty(self) -> None:
+        super().init_empty()
+        self._len_cached = 0
+
+    @override
+    def length(self) -> int:
+        return getattr(self, "_len_cached", 0)
 
     def _parse_attr(self, attrs, key):
         val = attrs.get(key, {})

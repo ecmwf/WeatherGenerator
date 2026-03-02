@@ -23,7 +23,6 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
-from weathergen.datasets.data_reader_mesh import DataReaderMesh
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
@@ -159,8 +158,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         dataset = DataReaderAnemoi
                     case "fesom":
                         dataset = DataReaderFesom
-                    case "mesh":
-                        dataset = DataReaderMesh
                     case type_name:
                         dataset = get_extra_reader(type_name)
                         if dataset is None:
@@ -660,9 +657,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # max number of input steps
             input_steps = np.array([sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()])
-            assert (
-                input_steps.min() == input_steps.max()
-            ), "Number of input steps has to be constant across configs."
+            assert input_steps.min() == input_steps.max(), (
+                "Number of input steps has to be constant across configs."
+            )
             assert input_steps.min(), "Number of input steps has to be greater than zero."
 
             # input_data and output_data is conceptually consecutive but differs
