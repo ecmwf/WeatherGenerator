@@ -149,9 +149,10 @@ class FrozenTeacher(EncoderTeacher):
         # Load only encoder weights
         load_encoder_from_checkpoint(teacher_model, cf, teacher_run_id, teacher_mini_epoch, device)
 
-        # Strip to encoder + create fresh heads
+        # Strip to encoder + create fresh heads (heads are created on CPU, so re-move to device)
         teacher_dim = teacher_config.ae_global_dim_embed
         prepare_encoder_teacher(teacher_model, cf.training_config, teacher_dim)
+        teacher_model.to(device)
 
         # Create model params matching teacher's architecture
         teacher_model_params = ModelParams(teacher_config).create(teacher_config).to(device)
