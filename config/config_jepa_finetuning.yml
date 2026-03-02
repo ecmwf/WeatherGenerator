@@ -7,51 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-embed_orientation: "channels"
-embed_unembed_mode: "block"
-embed_dropout_rate: 0.1
-
-ae_local_dim_embed: 1024
-ae_local_num_blocks: 4
-ae_local_num_heads: 16
-ae_local_dropout_rate: 0.1
-ae_local_with_qk_lnorm: True
-
-ae_local_num_queries: 1
-ae_local_queries_per_cell: False
-ae_adapter_num_heads: 16
-ae_adapter_embed: 128
-ae_adapter_with_qk_lnorm: True
-ae_adapter_with_residual: True
-ae_adapter_dropout_rate: 0.1
-
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 2
-ae_global_num_heads: 32
-ae_global_dropout_rate: 0.1
-ae_global_with_qk_lnorm: True
-# TODO: switching to < 1 triggers triton-related issues.
-# See https://github.com/ecmwf/WeatherGenerator/issues/1050
-ae_global_att_dense_rate: 1.0
-ae_global_block_factor: 64
-ae_global_mlp_hidden_factor: 2
-ae_global_trailing_layer_norm: False
-
-ae_aggregation_num_blocks: 8
-ae_aggregation_num_heads: 32
-ae_aggregation_dropout_rate: 0.1
-ae_aggregation_with_qk_lnorm: True
-ae_aggregation_att_dense_rate: 1.0
-ae_aggregation_block_factor: 64
-ae_aggregation_mlp_hidden_factor: 2
-
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
-num_class_tokens: 1
-num_register_tokens: 7
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
@@ -65,8 +25,6 @@ fe_impute_latent_noise_std: 0.0  # 1e-4
 forecast_att_dense_rate: 1.0
 with_step_conditioning: True # False
 
-healpix_level: 5
-
 # performance
 with_mixed_precision: True
 with_flash_attention: True
@@ -78,12 +36,6 @@ mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
 norm_eps: 1e-4
 
-latent_noise_kl_weight: 0.0 # 1e-5
-latent_noise_gamma: 2.0
-latent_noise_saturate_encodings: 5 
-latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True
-
 freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
 
 # type of zarr_store
@@ -91,8 +43,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-# streams_directory: "./config/streams/era5_1deg/"
-streams_directory: "./config/streams/era5_synop_finetuning/"
+streams_directory: "./config/streams/era5_iasi_finetuning/"
 streams: ???
 
 general:
@@ -139,8 +90,8 @@ training_config:
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 1979-01-01T00:00
-  end_date: 2022-12-31T00:00
+  start_date: 2012-01-01T00:00
+  end_date: 2022-08-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -172,7 +123,7 @@ training_config:
   losses : {
     "student-teacher": {
         enabled: False,
-        type: LossLatentSSLStudentTeacher,
+        type: Disabled,
         weight: 1.0,
         loss_fcts : {
           "JEPA": {
@@ -210,7 +161,7 @@ training_config:
       # masking strategy: "random", "forecast"
       enabled: False,
       masking_strategy: "random",
-      num_samples: 1,
+      num_samples: 0,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
@@ -271,7 +222,7 @@ validation_config:
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
-    streams: ["SurfaceCombined"],
+    # streams: ["SurfaceCombined"],
   }
 
   # run validation before training starts (mainly for model development)
