@@ -53,6 +53,8 @@ class DataReaderMesh(DataReaderTimestep):
         self.patch_size_deg = stream_info.get("patch_size_deg")
         self.sample_points = stream_info.get("sample_points")
 
+        self._dask_arrays = {}
+
         # 'patch' = contiguous geographic square
         # 'global_sparse' = random points scattered over the whole available area
         self.sampling_mode = stream_info.get("sampling_mode", "patch")
@@ -74,6 +76,8 @@ class DataReaderMesh(DataReaderTimestep):
         self._initialized = False
         self.ds_source = None
         self.ds_target = None
+        self.mapper_src = None
+        self.mapper_trg = None
 
         if not self.filename_source.exists():
             _logger.warning(f"Source file {self.filename_source} not found. Stream skipped.")
