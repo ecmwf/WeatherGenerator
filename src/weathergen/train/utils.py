@@ -10,16 +10,14 @@
 import copy
 import json
 import logging
-import os
-import socket
 from datetime import datetime
-from pathlib import Path
 from typing import Literal
 
 import torch
 from omegaconf import OmegaConf
 from torch.profiler import record_function
 
+import weathergen
 from weathergen.common import config
 from weathergen.common.config import Config, merge_configs
 
@@ -41,6 +39,7 @@ TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
 MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
 
 logger: logging.Logger = logging.getLogger(__name__)
+
 
 def str_to_tensor(modelid):
     return torch.tensor([ord(c) for c in modelid], dtype=torch.int32)
@@ -213,31 +212,20 @@ def start_record_memory_history() -> None:
 
 
 def stop_record_memory_history() -> None:
-    if not torch.cuda.is_available():
-        logger.info("CUDA unavailable. Not recording memory history")
-        return
-
     logger.info("Stopping snapshot record_memory_history")
     torch.cuda.memory._record_memory_history(enabled=None)
 
 
-def export_memory_snapshot() -> None:
+def export_memory_snapshot(cfg: dict | OmegaConf) -> None:
     if not torch.cuda.is_available():
         logger.info("CUDA unavailable. Not exporting memory snapshot")
         return
 
-    # Prefix for file names.
-    host_name = socket.gethostname()
+    base_path = config.get_path_profiler(cfg)
+
     timestamp = datetime.now().strftime(TIME_FORMAT_STR)
 
-    curr_dir = os.environ.get("WEATHERGEN_HOME")
-    if not curr_dir:
-        raise RuntimeError("WEATHERGEN_HOME is not set")
-
-    log_dir = Path(curr_dir) / "profiler_logs"
-    log_dir.mkdir(parents=True, exist_ok=True)  # create if missing; do nothing if exists
-
-    file_prefix = str(log_dir / f"{host_name}_{timestamp}")
+    file_prefix = base_path / f"{timestamp}_rank_{weathergen.utils.distributed.get_rank()}"
 
     try:
         logger.info(f"Saving snapshot to local file: {file_prefix}.pickle")
@@ -247,19 +235,13 @@ def export_memory_snapshot() -> None:
         return
 
 
-def trace_handler(prof: torch.profiler.profile):
+def trace_handler(cfg: dict | OmegaConf, prof: torch.profiler.profile) -> None:
     # Prefix for file names.
-    host_name = socket.gethostname()
+    base_path = config.get_path_profiler(cfg)
+
     timestamp = datetime.now().strftime(TIME_FORMAT_STR)
-    
-    curr_dir = os.environ.get("WEATHERGEN_HOME")
-    if not curr_dir:
-        raise RuntimeError("WEATHERGEN_HOME is not set")
 
-    log_dir = Path(curr_dir) / "profiler_logs"
-    log_dir.mkdir(parents=True, exist_ok=True)  # create if missing; do nothing if exists
-
-    file_prefix = str(log_dir / f"{host_name}_{timestamp}")
+    file_prefix = base_path / f"{timestamp}_rank_{weathergen.utils.distributed.get_rank()}"
 
     # Construct the trace file.
     prof.export_chrome_trace(f"{file_prefix}.json.gz")
