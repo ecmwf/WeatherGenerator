@@ -119,11 +119,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # forecast step
             self.list_num_forecast_steps = np.array(
-                (
-                    [self.forecast_cfg.get("num_steps", 0)]
-                    if isinstance(self.forecast_cfg.num_steps, int)
-                    else self.forecast_cfg.num_steps
-                ),
+                [self.forecast_cfg.get("num_steps", 0)]
+                if isinstance(self.forecast_cfg.num_steps, int)
+                else self.forecast_cfg.num_steps,
                 dtype=np.int32,
             )
 
@@ -657,9 +655,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # max number of input steps
             input_steps = np.array([sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()])
-            assert input_steps.min() == input_steps.max(), (
-                "Number of input steps has to be constant across configs."
-            )
+            assert (
+                input_steps.min() == input_steps.max()
+            ), "Number of input steps has to be constant across configs."
             assert input_steps.min(), "Number of input steps has to be greater than zero."
 
             # input_data and output_data is conceptually consecutive but differs
