@@ -304,6 +304,8 @@ def plot_loss_per_stream(
     channels: list[str],
     x_axis: str = "samples",
     x_type: str = "step",
+    x_lim: list[float] | None = None,
+    y_lim: list[float] | None = None,
     x_scale_log: bool = False,
 ):
     """
@@ -420,7 +422,16 @@ def plot_loss_per_stream(
             # cap at 1.0 in case of divergence of run (through normalziation, max should be
             # around 1.0)
             # plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
-            plt.ylim([0.95 * min_val, 1.025 * max_val])
+            if y_lim is not None:
+                import code
+
+                code.interact(local=dict(locals(), **globals()))
+                plt.ylim(y_lim)
+            else:
+                plt.ylim([0.95 * min_val, 1.025 * max_val])
+            if x_lim is not None:
+                plt.xlim(x_lim)
+
             plt.yscale("log")
             if x_scale_log:
                 plt.xscale("log")
@@ -630,6 +641,29 @@ def plot_train(args=None):
         help="List of metrics (e.g. mse) to plot",
     )
     parser.add_argument(
+        "--all-physical-streams",
+        dest="all_physical_streams",
+        default=False,
+        action="store_true",
+        help="Plot all available physical streams",
+    )
+    parser.add_argument(
+        "--per-stream-x-lim",
+        dest="per_stream_x_lim",
+        default=None,
+        type=float,
+        nargs="+",
+        help="x-lim for per-stream plots",
+    )
+    parser.add_argument(
+        "--per-stream-y-lim",
+        dest="per_stream_y_lim",
+        default=None,
+        type=float,
+        nargs="+",
+        help="x-lim for per-stream plots",
+    )
+    parser.add_argument(
         "--x_type",
         "-x",
         dest="x_type",
@@ -682,6 +716,24 @@ def plot_train(args=None):
     if args.delete == "True":
         clean_plot_folder(out_dir)
 
+    # collect all physical streams from all run_ids if requested
+    if args.all_physical_streams:
+        for run_id in runs_ids:
+            # Load config from given model_path if provided, otherwise use path from private config
+            if model_base_dir:
+                cf = config.load_run_config(
+                    run_id=run_id, mini_epoch=None, model_path=model_base_dir
+                )
+            else:
+                cf = config.load_merge_configs(
+                    private_home=None,
+                    from_run_id=run_id,
+                    mini_epoch=None,
+                )
+            for stream_info in cf.streams:
+                streams += [stream_info["name"]]
+        streams = list(set(streams))
+
     # read logged data
 
     runs_data = [
@@ -715,6 +767,8 @@ def plot_train(args=None):
         channels=args.channels,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
@@ -727,6 +781,8 @@ def plot_train(args=None):
         channels=args.channels,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
@@ -739,6 +795,8 @@ def plot_train(args=None):
         channels=args.channels,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
     )
 
