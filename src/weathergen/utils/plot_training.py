@@ -423,9 +423,6 @@ def plot_loss_per_stream(
             # around 1.0)
             # plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
             if y_lim is not None:
-                import code
-
-                code.interact(local=dict(locals(), **globals()))
                 plt.ylim(y_lim)
             else:
                 plt.ylim([0.95 * min_val, 1.025 * max_val])
