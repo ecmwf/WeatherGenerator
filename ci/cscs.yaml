@@ -6,7 +6,7 @@ stages:
 
 test_job:
   stage: test
-  extends: .container-runner-santis-gh200
+  extends: .baremetal-runner-santis-gh200
   script:
     - srun hostname
   variables:
