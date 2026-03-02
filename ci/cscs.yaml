@@ -1,0 +1,14 @@
+include:
+  - remote: 'https://gitlab.com/cscs-ci/recipes/-/raw/master/templates/v2/.ci-ext.yml'
+
+stages:
+  - test
+
+test_job:
+  stage: test
+  extends: .container-runner-santis-gh200
+  script:
+    - srun hostname
+  variables:
+    SLURM_JOB_NUM_NODES: 2
+    SLURM_NTASKS: 2
