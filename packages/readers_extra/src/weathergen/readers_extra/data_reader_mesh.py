@@ -3,16 +3,17 @@ import logging
 from pathlib import Path
 from typing import override
 
-import dask.array as da
 import dask
+import dask.array as da
 import fsspec
 import numpy as np
 import xarray as xr
+from numpy.typing import NDArray
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    ReaderData,
     DTRange,
+    ReaderData,
     TimeWindowHandler,
     TIndex,
 )
@@ -21,6 +22,7 @@ _logger = logging.getLogger(__name__)
 
 # Small epsilon to handle time boundary exclusivity
 t_epsilon = np.timedelta64(1, "ms")
+MIN_PATCH_POINTS = 1024
 
 
 class DataReaderMesh(DataReaderTimestep):
@@ -47,9 +49,9 @@ class DataReaderMesh(DataReaderTimestep):
             self.filename_target = self.filename_source
 
         self._stream_info = stream_info
-        self.roi = stream_info.get("roi", None)
-        self.patch_size_deg = stream_info.get("patch_size_deg", None)
-        self.sample_points = stream_info.get("sample_points", None)
+        self.roi = stream_info.get("roi")
+        self.patch_size_deg = stream_info.get("patch_size_deg")
+        self.sample_points = stream_info.get("sample_points")
 
         # 'patch' = contiguous geographic square
         # 'global_sparse' = random points scattered over the whole available area
@@ -58,13 +60,15 @@ class DataReaderMesh(DataReaderTimestep):
         # --- WARNING FOR MIXED FILES + GLOBAL SAMPLING ---
         if self.sampling_mode == "global_sparse" and self.filename_source != self.filename_target:
             _logger.warning(
-                f"[Stream {stream_info.get('name')}] GLOBAL SPARSE SAMPLING enabled with DIFFERENT Source and Target files!"
+                f"[Stream {stream_info.get('name')}] GLOBAL SPARSE SAMPLING"
+                "enabled with DIFFERENT Source and Target files!"
             )
             _logger.warning(
                 "    -> This assumes perfect row-by-row index alignment between the two meshes."
             )
             _logger.warning(
-                "    -> If the meshes have different node orderings, this will produce SILENT DATA CORRUPTION."
+                "    -> If the meshes have different node orderings,"
+                " this will produce SILENT DATA CORRUPTION."
             )
 
         self._initialized = False
@@ -260,7 +264,7 @@ class DataReaderMesh(DataReaderTimestep):
 
         self._initialized = True
 
-    def _get_persistent_time_idxs(self, idx: TIndex) -> tuple[np.ndarray, DTRange]:
+    def _get_persistent_time_idxs(self, idx: TIndex) -> tuple[NDArray, DTRange]:
         dtr = self.time_window_handler.window(idx)
         if dtr.end < self.data_start_time or dtr.start > self.data_end_time:
             return (np.array([], dtype=np.int64), dtr)
@@ -314,8 +318,8 @@ class DataReaderMesh(DataReaderTimestep):
             patch_coords_base = self.coords[indices_local]
             final_disk_indices = self.spatial_indices[indices_local]
 
-            # Note: For scattered points, we force fancy indexing by passing rel_indices=None to _load_block
-            # to avoid reading the whole file array.
+            # Note: For scattered points, we force fancy indexing by passing rel_indices=None
+            # to _load_block to avoid reading the whole file array.
             use_contiguous_read = False
 
         elif self.patch_size_deg:
@@ -325,7 +329,6 @@ class DataReaderMesh(DataReaderTimestep):
 
             patch_indices_local = np.array([])
             attempts = 0
-            MIN_PATCH_POINTS = 1024
 
             while len(patch_indices_local) < MIN_PATCH_POINTS and attempts < 100:
                 lat_0 = self.roi_min_lat + patch_rng.random() * lat_range
@@ -450,7 +453,6 @@ class DataReaderMesh(DataReaderTimestep):
                     # disk_indices is a list of integers here
                     if "time" in dims:
                         # Slice time range, then select specific points
-                        # Note: dask[time_slice][:, integer_list] is standard way to do orthogonal selection
                         sliced = sliced[start_t:end_t]
                         sliced = sliced[:, disk_indices]
                     else:
