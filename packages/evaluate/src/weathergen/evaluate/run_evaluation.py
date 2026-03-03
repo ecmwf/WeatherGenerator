@@ -154,8 +154,6 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
         _logger.info(f"MLFlow client set up: {mlflow_client}")
 
     cf = OmegaConf.load(config)
-    with open_dict(cf):
-        cf.evaluation.metrics = parse_metric_params(cf.evaluation.metrics)
     assert isinstance(cf, DictConfig)
     evaluate_from_config(cf, mlflow_client, log_queue)
 
@@ -274,6 +272,8 @@ def evaluate_from_config(
     cfg:
         Configuration input stored as dictionary.
     """
+    with open_dict(cfg):
+        cfg.evaluation.metrics = parse_metric_params(cfg.evaluation.metrics)
     runs = cfg.run_ids
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
