@@ -151,7 +151,7 @@ class _BatchOutputData:
             np.asarray(source.coords),
             np.asarray(source.geoinfos),
         )
-    
+
     @property
     def source_interval(self) -> TimeRange:
         window = self._batch.init_time
