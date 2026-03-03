@@ -711,10 +711,9 @@ def _fit_correlation_length(bin_centers: NDArray, bin_corr: NDArray, bin_counts:
        L_corr when the true correlation function has a steep initial drop
        followed by a slow tail (common for moisture variables).
 
-    If all three methods fail (e.g. too few valid bins), a conservative
-    default of 500 km is returned with a warning.
+    If all three methods fail (e.g. too few valid bins), a ``ValueError``
+    is raised rather than returning a potentially misleading default.
     """
-    default_l_corr = 500.0
     min_bin_count = 30
 
     valid = (~np.isnan(bin_corr)) & (bin_counts >= min_bin_count) & (bin_corr > 0.01)
@@ -722,8 +721,10 @@ def _fit_correlation_length(bin_centers: NDArray, bin_corr: NDArray, bin_counts:
     valid_corr = bin_corr[valid]
 
     if len(valid_centers) < 3:
-        logger.warning("Too few valid bins for correlation fit, using default")
-        return default_l_corr
+        raise ValueError(
+            "Too few valid distance bins for correlation length estimation "
+            f"({len(valid_centers)} valid bins). The data may be too noisy or too sparse."
+        )
 
     # --- Method 1: 1/e threshold crossing (most robust) ---
     threshold = 1.0 / np.e
@@ -755,8 +756,11 @@ def _fit_correlation_length(bin_centers: NDArray, bin_corr: NDArray, bin_counts:
     except (np.linalg.LinAlgError, ValueError):
         pass
 
-    logger.warning("Could not determine correlation length, using default")
-    return default_l_corr
+    raise ValueError(
+        "All three correlation length estimation methods failed "
+        "(1/e crossing, integrated scale, log-linear fit). "
+        "The correlation function may be too noisy or non-monotonic."
+    )
 
 
 # ---------------------------------------------------------------------------
