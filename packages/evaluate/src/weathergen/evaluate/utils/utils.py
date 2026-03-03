@@ -625,17 +625,11 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path, verbose: bool 
         "baseline": eval_opt.get("baseline", None),
     }
 
-<<<<<<< HEAD
     plotter = LinePlots(plot_cfg, summary_dir, verbose=verbose)
     sc_plotter = ScoreCards(plot_cfg, summary_dir, verbose=verbose)
     br_plotter = BarPlots(plot_cfg, summary_dir, verbose=verbose)
-=======
-    plotter = LinePlots(plot_cfg, summary_dir)
-    sc_plotter = ScoreCards(plot_cfg, summary_dir)
-    br_plotter = BarPlots(plot_cfg, summary_dir)
     quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
     plotting_log_emitted = False
->>>>>>> origin/develop
     for region in regions:
         for metric in metrics:
             if eval_opt.get("summary_plots", True):

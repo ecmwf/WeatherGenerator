@@ -213,12 +213,8 @@ class WeatherGenReader(Reader):
             Path(self.metrics_dir)
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
-<<<<<<< HEAD
         self._logger.debug(f"Looking for: {score_path}")
-=======
-        _logger.debug(f"Looking for: {score_path}")
         score = None
->>>>>>> origin/develop
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
@@ -265,12 +261,8 @@ class WeatherGenJSONReader(WeatherGenReader):
         run_id: str,
         private_paths: dict | None = None,
         regions: list[str] | None = None,
-<<<<<<< HEAD
-        metrics: list[str] | None = None,
-        verbose=True,
-=======
         metrics: dict[str, object] | None = None,
->>>>>>> origin/develop
+        verbose=True,
     ):
         super().__init__(eval_cfg, run_id, private_paths, verbose)
         # goes looking for the coordinates available for all streams, regions, metrics
@@ -342,13 +334,8 @@ class WeatherGenZarrReader(WeatherGenReader):
             ):
                 self.fname_zarr = fname_zarr
         else:
-<<<<<<< HEAD
-            self._logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
-=======
-            _logger.error(f"Zarr file {fname_zarr} does not exist.")
+            self._logger.error(f"Zarr file {fname_zarr} does not exist.")
             raise FileNotFoundError(f"Zarr file {fname_zarr} does not exist")
->>>>>>> origin/develop
 
     def get_data(
         self,
