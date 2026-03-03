@@ -152,7 +152,7 @@ class WeatherGenReader(Reader):
         return all_channels
 
     def load_scores(
-        self, stream: str, regions: list[str], metrics: list[str]
+        self, stream: str, regions: list[str], metrics: dict[str, object]
     ) -> xr.DataArray | None:
         """
         Load multiple pre-computed scores for a given run, stream and metric and epoch.
@@ -180,8 +180,8 @@ class WeatherGenReader(Reader):
         local_scores = {}
         missing_metrics = {}
         for region in regions:
-            for metric in metrics:
-                score = self.load_single_score(stream, region, metric)
+            for metric, parameters in metrics.items():
+                score = self.load_single_score(stream, region, metric, parameters)
                 if score is not None:
                     available_data = self.check_availability(stream, score, mode="evaluation")
                     if available_data.score_availability:
@@ -196,26 +196,34 @@ class WeatherGenReader(Reader):
                         continue
 
                 # all other cases: recompute scores
-                missing_metrics.setdefault(region, []).append(metric)
+                missing_metrics.setdefault(region, {}).update({metric: parameters})
                 continue
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
 
-    def load_single_score(self, stream: str, region: str, metric: str) -> xr.DataArray | None:
+    def load_single_score(
+        self, stream: str, region: str, metric: str, parameters: dict | None = None
+    ) -> xr.DataArray | None:
         """
         Load a single pre-computed score for a given run, stream and metric
         """
+        if parameters is None:
+            parameters = {}
         score_path = (
             Path(self.metrics_dir)
             / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
+        score = None
         if score_path.exists():
             with open(score_path) as f:
                 data_dict = json.load(f)
-                score = xr.DataArray.from_dict(data_dict)
-        else:
-            score = None
+                if "scores" not in data_dict:
+                    data_dict = {"scores": [data_dict]}
+                for score_version in data_dict["scores"]:
+                    if score_version["attrs"] == parameters:
+                        score = xr.DataArray.from_dict(score_version)
+                        break
         return score
 
     def get_recomputable_metrics(self, metrics):
@@ -253,7 +261,7 @@ class WeatherGenJSONReader(WeatherGenReader):
         run_id: str,
         private_paths: dict | None = None,
         regions: list[str] | None = None,
-        metrics: list[str] | None = None,
+        metrics: dict[str, object] | None = None,
     ):
         super().__init__(eval_cfg, run_id, private_paths)
         # goes looking for the coordinates available for all streams, regions, metrics
@@ -265,8 +273,8 @@ class WeatherGenJSONReader(WeatherGenReader):
         }  # remember who had which coords, so we can warn about it later.
         for stream in streams:
             for region in regions:
-                for metric in metrics:
-                    score = self.load_single_score(stream, region, metric)
+                for metric, parameters in metrics.items():
+                    score = self.load_single_score(stream, region, metric, parameters)
                     if score is not None:
                         for name in coord_names:
                             vals = set(score[name].values)
@@ -321,8 +329,8 @@ class WeatherGenZarrReader(WeatherGenReader):
             ):
                 self.fname_zarr = fname_zarr
         else:
-            _logger.error(f"Zarr file {self.fname_zarr} does not exist.")
-            raise FileNotFoundError(f"Zarr file {self.fname_zarr} does not exist")
+            _logger.error(f"Zarr file {fname_zarr} does not exist.")
+            raise FileNotFoundError(f"Zarr file {fname_zarr} does not exist")
 
     def get_data(
         self,
@@ -875,9 +883,9 @@ class WeatherGenMergeReader(Reader):
         if isinstance(self.readers[0], WeatherGenZarrReader):
             # TODO: implement this properly. Not it is skipping loading scores
             for region in regions:
-                for metric in metrics:
+                for metric, parameters in metrics.items():
                     # all other cases: recompute scores
-                    missing_metrics.setdefault(region, []).append(metric)
+                    missing_metrics.setdefault(region, {}).update({metric: parameters})
         else:  # JsonReader
             # deep merge dicts
             for reader in self.readers:
