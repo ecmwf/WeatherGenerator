@@ -442,9 +442,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     if not isinstance(plot_maps, bool):
         raise TypeError("plot_maps must be a boolean.")
 
-    plot_bias_maps = plot_settings.get("plot_bias_maps", False)
-    if not isinstance(plot_bias_maps, bool):
-        raise TypeError("plot_bias_maps must be a boolean.")
+    plot_bias = plot_settings.get("plot_bias", True)
+    if not isinstance(plot_bias, bool):
+        raise TypeError("plot_bias must be a boolean.")
 
     plot_target = plot_settings.get("plot_target", True)
     if not isinstance(plot_target, bool):
@@ -477,7 +477,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     # get common ranges across all run_ids
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
-    maps_config, bias_maps_config = common_ranges(
+    maps_config = common_ranges(
+        da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
+    )
+    bias_config = bias_ranges(
         da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
     )
 
@@ -498,9 +501,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
                         tars, plot_chs, data_selection, "targets", maps_config
                     )
 
-                if plot_bias_maps:
+                if plot_bias:
                     plotter.create_maps_per_sample(
-                        preds - tars, plot_chs, data_selection, "bias", bias_maps_config
+                        preds - tars, plot_chs, data_selection, "bias", bias_config
                     )
 
                 for ens in available_data.ensemble:
@@ -530,7 +533,7 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
         if plot_target:
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
-        if plot_bias_maps:
+        if plot_bias:
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "bias")
     return
 
@@ -665,9 +668,9 @@ def common_ranges(
     data_preds: list[dict],
     plot_chs: list[str],
     global_plotting_opts_stream: oc.dictconfig.DictConfig,
-) -> tuple[oc.dictconfig.DictConfig, oc.dictconfig.DictConfig]:
+) -> oc.dictconfig.DictConfig:
     """
-    Calculate common ranges per stream and variables, and symmetric bias ranges.
+    Calculate common ranges per stream and variables.
 
     Parameters
     ----------
@@ -684,11 +687,8 @@ def common_ranges(
     -------
     maps_config :
         the global plotting configuration with the ranges added and included for each variable.
-    bias_maps_config :
-        per-variable symmetric ranges (vmin = -abs_max, vmax = abs_max) for bias (preds - tars).
     """
     maps_config = global_plotting_opts_stream.copy()
-    bias_maps_config = global_plotting_opts_stream.copy()
     for var in plot_chs:
         if var in maps_config:
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
@@ -709,8 +709,36 @@ def common_ranges(
 
             maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
 
-        # Compute symmetric bias (preds - tars) ranges
+    return maps_config
 
+
+def bias_ranges(
+    data_tars: dict,
+    data_preds: dict,
+    plot_chs: list[str],
+    global_plotting_opts_stream: oc.dictconfig.DictConfig,
+) -> oc.dictconfig.DictConfig:
+    """
+    Calculate symmetric bias ranges (preds - tars) per variable.
+
+    Parameters
+    ----------
+    data_tars :
+        Dictionary mapping forecast steps to target xarray DataArrays.
+    data_preds :
+        Dictionary mapping forecast steps to prediction xarray DataArrays.
+    plot_chs :
+        List of variable (channel) names to compute bias ranges for.
+    global_plotting_opts_stream :
+        The global plotting configuration for the stream, used as the base config.
+
+    Returns
+    -------
+    oc.dictconfig.DictConfig
+        Per-variable symmetric ranges (vmin = -abs_max, vmax = abs_max) for bias.
+    """
+    bias_config = global_plotting_opts_stream.copy()
+    for var in plot_chs:
         bias_vals = [
             (p - t).sel(channel=var).values
             for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
@@ -718,9 +746,8 @@ def common_ranges(
         abs_max = float(
             max(abs(np.concatenate(bias_vals).max()), abs(np.concatenate(bias_vals).min()))
         )
-        bias_maps_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
-
-    return maps_config, bias_maps_config
+        bias_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
+    return bias_config
 
 
 def calc_val(x: xr.DataArray, bound: str) -> list[float]:
