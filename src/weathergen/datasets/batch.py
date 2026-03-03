@@ -11,10 +11,10 @@ import copy
 from dataclasses import dataclass
 
 import numpy as np
-from src.weathergen.datasets.data_reader_base import DTRange
 import torch
 
 from weathergen.common.config import Config
+from weathergen.datasets.data_reader_base import DTRange
 from weathergen.datasets.stream_data import StreamData
 
 
@@ -89,9 +89,7 @@ class Sample:
         """
         Check if sample is empty
         """
-        return np.all(
-            np.array([s.empty() if s is not None else True for _, s in self.streams_data.items()])
-        )
+        return all(s.empty() if s is not None else True for s in self.streams_data.values())
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
@@ -357,11 +355,11 @@ class ModelBatch:
         """
         Check if batch is empty
         """
-        source_empty = np.all(
-            np.array([s.is_empty() if s is not None else True for s in self.source_samples.samples])
+        source_empty = all(
+            s.is_empty() if s is not None else True for s in self.source_samples.samples
         )
-        target_empty = np.all(
-            np.array([s.is_empty() if s is not None else True for s in self.target_samples.samples])
+        target_empty = all(
+            s.is_empty() if s is not None else True for s in self.target_samples.samples
         )
         return source_empty or target_empty
 

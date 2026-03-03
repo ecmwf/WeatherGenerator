@@ -20,6 +20,7 @@ from weathergen.datasets.batch import ModelBatch
 from weathergen.model.model import ModelOutput
 from weathergen.train.target_and_aux_module_base import PhysicalTarget, TargetAuxOutput
 
+_LAST_INPUT_STEP_IDX = 0
 
 class Writer:
     def __init__(
@@ -31,14 +32,20 @@ class Writer:
         streams = {stream.name: stream for stream in streams}
         # TODO: nice: dont store all config
 
-        _all_streams = list(streams.keys())
-        _output_streams = val_cfg.get("output", None).get("streams", None)
-        _output_streams = val_cfg.output.streams if val_cfg.output.streams else _all_streams
+        try:  # TODO: do this in config
+            _output_streams = val_cfg.output.streams
+            if _output_streams is None:
+                raise ConfigAttributeError("")
+        except ConfigAttributeError:
+            _output_streams = list(streams.keys())
 
         self._streams = {
             name: config for name, config in streams.items() if name in _output_streams
         }
-        self._forecast_offset = val_cfg.forecast.offset
+        try:  # TODO: do this in config
+            self._forecast_offset = val_cfg.forecast.offset
+        except ConfigAttributeError:
+            self._forecast_offset = 0
         self._cf: Config = config  # used for zarr output path lookup => improve
         self._sample_start = 0
 
@@ -74,6 +81,7 @@ class Writer:
         """Iterate over possible output items"""
         streams: list[str] = self._streams.keys()
         samples = (self._sample_start + sample for sample in samples)
+        n_samples = 0
 
         # The order of iteration is important here:
         # streams is the outermost and samples the innermost loop variable
@@ -82,8 +90,9 @@ class Writer:
             streams, forecast_steps, samples
         ):
             yield ItemKey(sample_idx, forecast_step, stream)
+            n_samples += 1
 
-        self._sample_start += len(samples)
+        self._sample_start += n_samples
 
     def extract(self, data: _BatchOutputData, key: ItemKey, fstep_start: int) -> OutputItem:
         raw_key = ItemKey(
@@ -125,13 +134,13 @@ class _BatchOutputData:
     _normalizer: Callable
 
     def extract_source(self, key: ItemKey) -> _ExtractedData:
-        # TODO check this?
-        # breakpoint()
-        source_sample_idx = self._batch.target2source_matching_idxs(key.sample)
+        source_sample_idx = self._batch.target2source_matching_idxs[key.sample]
+        assert len(source_sample_idx) == 1, "Source sample expected to be unique."
+        source_sample_idx = source_sample_idx[0]
         source = (
             self._batch.source_samples.samples[key.forecast_step]
             .streams_data[key.stream]
-            .source_raw[source_sample_idx]
+            .source_raw[_LAST_INPUT_STEP_IDX]
         )
 
         return _ExtractedData(
@@ -153,8 +162,7 @@ class _BatchOutputData:
         sampels = list(self._batch.target_samples.sample_idxs)
         
         assert len(set(sampels)) == len(sampels), "samples are not unique"
-
-        return self.samples
+        return sampels
 
     def extract_target(self, key: ItemKey) -> _ExtractedData:
         target = self._target(key)
