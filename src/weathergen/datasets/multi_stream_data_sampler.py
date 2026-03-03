@@ -143,29 +143,39 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for _, stream_info in enumerate(cf.streams):
             # list of sources for current stream
             self.streams_datasets[stream_info["name"]] = []
+            
+            kwargs = {
+                "tw_handler": self.time_window_handler,
+                "stream_info": stream_info,
+            }
+            
+            dataset: type[AnyDataReader] | None = None
+            match stream_info["type"]:
+                case "obs":
+                    dataset = DataReaderObs
+                case "anemoi":
+                    dataset = DataReaderAnemoi
+                case "fesom":
+                    dataset = DataReaderFesom
+                case type_name:
+                    dataset = get_extra_reader(type_name)
+                    if dataset is None:
+                        msg = (
+                            f"Unsupported stream type {stream_info['type']}"
+                            f"for stream name '{stream_info['name']}'."
+                        )
+                        raise ValueError(msg)
 
             for fname in stream_info["filenames"]:
-                kwargs = {
-                    "tw_handler": self.time_window_handler,
-                    "stream_info": stream_info,
-                }
-                dataset: type[AnyDataReader] | None = None
-                match stream_info["type"]:
-                    case "obs":
-                        dataset = DataReaderObs
-                    case "anemoi":
-                        dataset = DataReaderAnemoi
-                    case "fesom":
-                        dataset = DataReaderFesom
-                    case type_name:
-                        dataset = get_extra_reader(type_name)
-                        if dataset is None:
-                            msg = f"Unsupported stream type {stream_info['type']}"
-                            f"for stream name '{stream_info['name']}'."
-                            raise ValueError(msg)
-                ##
                 filename = stream_info.get("filenames")
-                if type(filename) is omegaconf.dictconfig.DictConfig:
+                if type(filename) is omegaconf.dictconfig.DictConfig and "join" in filename:
+                    # join case, valid for anemoi only
+                    if stream_info["type"] != "anemoi":
+                        msg = (
+                            f"Unsupported stream type {stream_info['type']}"
+                            f"Only 'anemoi' supports the join operation."
+                        )
+                        raise ValueError(msg)
                     # Convert OmegaConf DictConfig to dict
                     filename = dict(filename)
                     # Prepend datapath to each dataset
@@ -184,7 +194,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                             raise FileNotFoundError(msg)
 
                         entry['dataset'] = str(datapath / entry['dataset'])
-                elif type(filename) is omegaconf.listconfig.ListConfig:
+                else:
+                    # normal list case
                     if len(filename) > 1:
                         msg = (
                             f"Multiple filenames found for {stream_info['type']} "
@@ -204,7 +215,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         )
                         raise FileNotFoundError(msg)
                     filename = str( datapath / filename[0])
-
 
                 ds_type = stream_info["type"]
                 if is_root():
