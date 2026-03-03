@@ -30,7 +30,7 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJSONReader,
 )
 from weathergen.evaluate.run_evaluation import evaluate_from_config
-from weathergen.run_train import inference_from_args
+from weathergen.run_train import main
 from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,9 @@ def infer_multi_stream(run_id):
     """Run inference for multi-stream model."""
     logger.info("run multi-stream inference")
     new_run_id = run_id + "_inf"  # TODO: better naming
-    inference_from_args(
+    main(
         [
+            "inference",
             "-start",
             "2021-10-10",
             "-end",
