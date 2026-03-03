@@ -20,5 +20,9 @@ def get_extra_reader(stream_type: str) -> object | None:
             from weathergen.readers_extra.data_reader_cams import DataReaderCams
 
             return DataReaderCams
+        case "mesh":
+            from weathergen.readers_extra.data_reader_mesh import DataReaderMesh
+
+            return DataReaderMesh
         case _:
             return None

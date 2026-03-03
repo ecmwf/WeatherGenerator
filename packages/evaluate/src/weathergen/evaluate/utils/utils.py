@@ -430,7 +430,8 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
         "fps": global_plotting_opts.get("fps", 2),
         "regions": global_plotting_opts.get("regions", ["global"]),
-        "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False),
+        "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
+        | plot_settings.get("plot_subtimesteps", False),
     }
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
