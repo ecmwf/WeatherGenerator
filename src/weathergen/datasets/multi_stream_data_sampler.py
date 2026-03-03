@@ -167,6 +167,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         raise ValueError(msg)
 
             for fname in stream_info["filenames"]:
+
                 filename = stream_info.get("filenames")
                 if type(filename) is omegaconf.dictconfig.DictConfig and "join" in filename:
                     # join case, valid for anemoi only
@@ -196,25 +197,24 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         entry['dataset'] = str(datapath / entry['dataset'])
                 else:
                     # normal list case
-                    if len(filename) > 1:
-                        msg = (
-                            f"Multiple filenames found for {stream_info['type']} "
-                            f"stream '{stream_info['name']}'"
-                            f"Only the first one will be used"
-                        )
-                    datapath=None
-                    for path in cf.data_paths:
-                        filename_tmp = pathlib.Path(path) / filename[0]
-                        if filename_tmp.exists():
-                            datapath=pathlib.Path(path)
-                            break
-                    if datapath is None:
-                        msg = (
-                            f"Did not find input data for {stream_info['type']} "
-                            f"stream '{stream_info['name']}'"
-                        )
-                        raise FileNotFoundError(msg)
-                    filename = str( datapath / filename[0])
+                    fname = pathlib.Path(fname)
+                    # dont check if file exists since zarr stores might be directories
+                    if fname.exists():
+                        # check if fname is a valid path to allow for simple overwriting
+                        filename = fname
+                    else:
+                        filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
+    
+                        if not any(filename.exists() for filename in filenames):  # see above
+                            msg = (
+                                f"Did not find input data for {stream_info['type']} "
+                                f"stream '{stream_info['name']}': {filenames}."
+                            )
+                            raise FileNotFoundError(msg)
+
+                        # The same dataset can exist on different locations in the filesystem,
+                        # so we need to choose here.
+                        filename = filenames[0]
 
                 ds_type = stream_info["type"]
                 if is_root():
