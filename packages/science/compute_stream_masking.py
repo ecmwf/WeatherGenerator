@@ -924,13 +924,12 @@ def analyse_dataset(
     groups : hl_mask -> list of variable names
     """
     # Load data
-    # NOTE: We intentionally use lightweight standalone loaders instead of the
-    # training DataReaders (DataReaderAnemoi / DataReaderObs).  The analysis
-    # needs random time sampling with per-variable [n_times, n_points] arrays,
-    # whereas the training readers provide sequential windows with all channels
-    # flattened into [n_times*n_points, n_channels] and apply normalisation.
-    # Reusing them would require constructing artificial TimeWindowHandler and
-    # stream_info scaffolding and then undoing the reshape and normalisation.
+    # NOTE: We use lightweight standalone loaders instead of the training
+    # DataReaders (DataReaderAnemoi / DataReaderObs).  The analysis needs
+    # per-variable [n_times, n_points] arrays, whereas the readers return
+    # all channels flattened into [n_times*n_points, n_channels] which would
+    # need to be reshaped back.  Reusing them would also require constructing
+    # a TimeWindowHandler to samples times.
     logger.info(f"Loading dataset from {dataset_path} (type={dataset_type})")
     if dataset_type == "anemoi":
         ds_info = load_anemoi(dataset_path, n_time_samples, channels, seed)
