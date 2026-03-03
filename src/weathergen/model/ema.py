@@ -48,7 +48,13 @@ class EMAModel:
         for p in self.ema_model.parameters():
             p.requires_grad = False
         maybe_sharded_sd = self.original_model.state_dict()
-        # this copies correctly tested in pdb
+        # Strip "module." prefix from DDP-wrapped student so keys match the unwrapped
+        # teacher model. The update() method already handles this mismatch (line 73),
+        # but load_state_dict needs matching keys upfront.
+        ema_keys = set(self.ema_model.state_dict().keys())
+        needs_strip = not any(k in ema_keys for k in maybe_sharded_sd)
+        if needs_strip:
+            maybe_sharded_sd = {k.removeprefix("module."): v for k, v in maybe_sharded_sd.items()}
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
         self.ema_model.eval()
 
