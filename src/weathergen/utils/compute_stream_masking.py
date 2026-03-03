@@ -405,7 +405,21 @@ def compute_spatial_autocorr(
     n_sample_pairs: int = 100_000,
     seed: int = 42,
 ) -> tuple[float, NDArray, NDArray]:
-    """Compute spatial autocorrelation and estimate correlation length.
+    """Estimate the spatial correlation length of a variable on a fixed grid.
+
+    The algorithm randomly samples pairs of grid points at different
+    distances and computes the Pearson correlation of the variable's
+    anomaly values as a function of great-circle (haversine) distance.
+    Specifically:
+
+    1. Draw ``n_sample_pairs`` random (time, point_i, point_j) triples.
+    2. Compute the haversine distance for each pair and discard pairs
+       beyond ``max_lag_km``.
+    3. Bin remaining pairs by distance into ``n_bins`` equal-width bins.
+    4. For each bin, compute the Pearson correlation:
+       ρ(d) = Cov(X_i, X_j) / Var(X),  where the variance is global.
+    5. Fit an exponential decay ρ(d) ≈ exp(-d / L_corr) to the binned
+       correlations to estimate the correlation length L_corr in km.
 
     Parameters
     ----------
@@ -465,8 +479,10 @@ def compute_spatial_autocorr(
     idx_j = idx_j[in_range]
 
     if len(distances) < 100:
-        logger.warning("Too few valid pairs for autocorrelation estimation")
-        return 500.0, np.array([]), np.array([])
+        raise ValueError(
+            "Too few valid point pairs for autocorrelation estimation "
+            f"({len(distances)} pairs). The dataset may be too small or too sparse."
+        )
 
     # Get values for all pairs
     vals_i = data[time_indices, idx_i]
@@ -481,8 +497,10 @@ def compute_spatial_autocorr(
         vals_j = vals_j[keep]
 
     if len(distances) < 100:
-        logger.warning("Too few non-NaN pairs for autocorrelation estimation")
-        return 500.0, np.array([]), np.array([])
+        raise ValueError(
+            "Too few non-NaN point pairs for autocorrelation estimation "
+            f"({len(distances)} pairs). The variable may contain too many NaNs."
+        )
 
     # Bin by distance and compute correlation per bin
     bin_edges = np.linspace(0, max_lag_km, n_bins + 1)
@@ -495,8 +513,10 @@ def compute_spatial_autocorr(
     global_var = np.nanvar(np.concatenate([vals_i, vals_j]))
 
     if global_var < 1e-12:
-        logger.warning("Near-zero variance, defaulting correlation length")
-        return 500.0, bin_centers, np.zeros(n_bins)
+        raise ValueError(
+            "Near-zero variance in sampled data — the variable is effectively constant "
+            "and its correlation length is undefined."
+        )
 
     bin_corr = np.full(n_bins, np.nan)
     bin_counts = np.zeros(n_bins, dtype=int)
@@ -527,26 +547,40 @@ def compute_spatial_autocorr_unstructured(
     n_sample_pairs: int = 100_000,
     seed: int = 42,
 ) -> tuple[float, NDArray, NDArray]:
-    """Compute spatial autocorrelation for ragged per-time observations."""
+    """Compute spatial autocorrelation for ragged (unstructured) per-time observations.
+
+    Unlike ``compute_spatial_autocorr``, this function handles datasets where
+    each time step can have a different number of observation points at
+    different locations (e.g. SYNOP, radiosonde).  The algorithm:
+
+    1. Weight-sample time steps proportionally to the number of possible
+       pairs, so denser time steps contribute more.
+    2. For each sampled time step, draw random point pairs from that
+       snapshot and compute haversine distances.
+    3. Bin all (distance, value_i, value_j) tuples into distance bins and
+       compute the Pearson correlation per bin, identical to the structured
+       version.
+    4. Fit an exponential decay to estimate the correlation length L_corr.
+    """
     rng = np.random.default_rng(seed)
     if not (len(data_list) == len(lats_list) == len(lons_list)):
         raise ValueError("Ragged data, lat, and lon lists must have the same length.")
 
     n_times = len(data_list)
     if n_times == 0:
-        logger.warning("No time samples available for autocorrelation estimation")
-        return 500.0, np.array([]), np.array([])
+        raise ValueError("No time samples available for autocorrelation estimation.")
 
     sizes = np.array([len(lats) for lats in lats_list], dtype=int)
     valid_times = np.where(sizes >= 2)[0]
     if len(valid_times) == 0:
-        logger.warning("Too few points per time for autocorrelation estimation")
-        return 500.0, np.array([]), np.array([])
+        raise ValueError(
+            "All time slices have fewer than 2 observation points — "
+            "cannot compute pairwise autocorrelation."
+        )
 
     weights = sizes[valid_times] * (sizes[valid_times] - 1)
     if weights.sum() == 0:
-        logger.warning("Too few valid pairs for autocorrelation estimation")
-        return 500.0, np.array([]), np.array([])
+        raise ValueError("Too few valid observation pairs for autocorrelation estimation.")
 
     time_samples = rng.choice(
         valid_times, size=n_sample_pairs, replace=True, p=weights / weights.sum()
@@ -580,8 +614,10 @@ def compute_spatial_autocorr_unstructured(
         vals_j_list.append(vals[idx_j])
 
     if not distances_list:
-        logger.warning("Too few valid pairs for autocorrelation estimation")
-        return 500.0, np.array([]), np.array([])
+        raise ValueError(
+            "No valid observation pairs were generated — "
+            "the dataset may be too sparse for autocorrelation estimation."
+        )
 
     distances = np.concatenate(distances_list)
     vals_i = np.concatenate(vals_i_list)
@@ -593,8 +629,10 @@ def compute_spatial_autocorr_unstructured(
     vals_j = vals_j[in_range]
 
     if len(distances) < 100:
-        logger.warning("Too few valid pairs for autocorrelation estimation")
-        return 500.0, np.array([]), np.array([])
+        raise ValueError(
+            "Too few valid point pairs for autocorrelation estimation "
+            f"({len(distances)} pairs). The observation dataset may be too sparse."
+        )
 
     nan_mask = np.isnan(vals_i) | np.isnan(vals_j)
     if nan_mask.any():
@@ -604,8 +642,10 @@ def compute_spatial_autocorr_unstructured(
         vals_j = vals_j[keep]
 
     if len(distances) < 100:
-        logger.warning("Too few non-NaN pairs for autocorrelation estimation")
-        return 500.0, np.array([]), np.array([])
+        raise ValueError(
+            "Too few non-NaN observation pairs for autocorrelation estimation "
+            f"({len(distances)} pairs). The variable may contain too many NaNs."
+        )
 
     bin_edges = np.linspace(0, max_lag_km, n_bins + 1)
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
@@ -616,8 +656,10 @@ def compute_spatial_autocorr_unstructured(
     global_var = np.nanvar(np.concatenate([vals_i, vals_j]))
 
     if global_var < 1e-12:
-        logger.warning("Near-zero variance, defaulting correlation length")
-        return 500.0, bin_centers, np.zeros(n_bins)
+        raise ValueError(
+            "Near-zero variance in sampled observation data — the variable is effectively "
+            "constant and its correlation length is undefined."
+        )
 
     bin_corr = np.full(n_bins, np.nan)
     bin_counts = np.zeros(n_bins, dtype=int)
@@ -641,14 +683,36 @@ def compute_spatial_autocorr_unstructured(
 def _fit_correlation_length(bin_centers: NDArray, bin_corr: NDArray, bin_counts: NDArray) -> float:
     """Fit correlation length from binned correlation data.
 
+    The correlation length L_corr characterises the spatial scale over which
+    a variable's anomalies are significantly correlated.  Because different
+    atmospheric variables have very different correlation structures (e.g.
+    smooth geopotential vs. noisy precipitation), no single estimator is
+    universally reliable.  We therefore try three methods in order of
+    decreasing robustness:
+
     Strategy (in priority order):
-    1. **1/e threshold crossing** – model-free, most robust for non-exponential
-       decays (e.g., precipitation, wind).
-    2. **Integrated correlation scale** – L_eff = ∫ max(ρ(r), 0) dr, robust
-       average that accounts for the full shape of the correlation function.
-    3. **Log-linear (exponential) fit** – weighted regression on log(ρ) vs. d.
-       Only used as last resort because it can overestimate L_corr when the
-       correlation function has a steep initial decline followed by a long tail.
+
+    1. **1/e threshold crossing** – the most model-free estimator.  We find
+       the distance at which the binned correlation drops below 1/e ≈ 0.37.
+       This works well for any monotonically decaying correlation function,
+       including non-exponential shapes common in precipitation and wind
+       fields.  It is preferred because it makes no parametric assumptions.
+
+    2. **Integrated correlation scale** – L_eff = ∫ max(ρ(r), 0) dr.  When
+       the correlation function never cleanly crosses the 1/e level (e.g.
+       it starts below 1/e due to noise, or has a plateau), this integral
+       measure provides a robust single-number summary.  It is less
+       sensitive to bin noise than a threshold crossing but can under-
+       estimate L_corr if the function has a long positive tail.
+
+    3. **Log-linear (exponential) fit** – weighted least-squares regression
+       of log(ρ) vs. distance, i.e. fitting ρ(d) = exp(-d/L).  This is
+       used as a last resort because the exponential model can overestimate
+       L_corr when the true correlation function has a steep initial drop
+       followed by a slow tail (common for moisture variables).
+
+    If all three methods fail (e.g. too few valid bins), a conservative
+    default of 500 km is returned with a warning.
     """
     default_l_corr = 500.0
     min_bin_count = 30
@@ -815,7 +879,7 @@ def generate_yaml_snippets(groups: dict[int, list[str]]) -> str:
         lines.append(f"      hl_mask: {hl}")
         lines.append("  target_input:")
         lines.append("    masking_strategy_config:")
-        lines.append(f"      hl_mask: {max(0, hl - 1)}")
+        lines.append(f"      hl_mask: {max(0, hl)}")
         lines.append("")
     return "\n".join(lines)
 
@@ -856,6 +920,13 @@ def analyse_dataset(
     groups : hl_mask -> list of variable names
     """
     # Load data
+    # NOTE: We intentionally use lightweight standalone loaders instead of the
+    # training DataReaders (DataReaderAnemoi / DataReaderObs).  The analysis
+    # needs random time sampling with per-variable [n_times, n_points] arrays,
+    # whereas the training readers provide sequential windows with all channels
+    # flattened into [n_times*n_points, n_channels] and apply normalisation.
+    # Reusing them would require constructing artificial TimeWindowHandler and
+    # stream_info scaffolding and then undoing the reshape and normalisation.
     logger.info(f"Loading dataset from {dataset_path} (type={dataset_type})")
     if dataset_type == "anemoi":
         ds_info = load_anemoi(dataset_path, n_time_samples, channels, seed)
@@ -958,7 +1029,12 @@ def main(argv: list[str] | None = None) -> None:
         choices=["anemoi", "fesom", "obs", "xarray", "cams", "eobs", "iconart", "iconesm"],
         help="Dataset type",
     )
-    parser.add_argument("--channels", nargs="*", default=None, help="Variables to analyse")
+    parser.add_argument(
+        "--channels",
+        nargs="*",
+        default=None,
+        help="Variables to analyse. If omitted, all variables in the dataset are analysed.",
+    )
     parser.add_argument("--n-time-samples", type=int, default=100, help="Timesteps to sample")
     parser.add_argument("--n-sample-pairs", type=int, default=100_000, help="Point pairs to sample")
     parser.add_argument(
@@ -1027,6 +1103,10 @@ def main(argv: list[str] | None = None) -> None:
     _write("=" * 50)
     _write(format_results_table(var_results))
     _write()
+    # When --correlation-multipliers is given (e.g. 1.0 1.5 2.0), we print
+    # separate grouping tables and YAML snippets for each multiplier value so
+    # the user can compare how aggressively variables are grouped.  Otherwise
+    # we use the single --correlation-multiplier value.
     multipliers = args.correlation_multipliers or [args.correlation_multiplier]
     yaml_sections: list[str] = []
 
