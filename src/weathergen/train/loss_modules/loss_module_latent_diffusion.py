@@ -95,7 +95,7 @@ class LossLatentDiffusion(LossModuleBase):
         pred_tokens_all = [pl["latent_state"].patch_tokens for pl in preds.latent if pl]
         target_tokens_all = [latent["diffusion_latent"] for latent in targets.latent if latent]
 
-        eta = torch.tensor([targets.aux_outputs["noise_level_rn"]], device=self.device)
+        eta = torch.tensor([targets.aux_outputs["noise_level_rn"]], device=self.device, dtype=torch.float32)
         fsteps = len(target_tokens_all)
 
         noise_weight = self._get_noise_weight(eta)
