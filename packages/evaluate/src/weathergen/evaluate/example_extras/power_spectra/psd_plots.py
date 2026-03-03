@@ -16,6 +16,7 @@ import iris
 import iris.cube
 import matplotlib.pyplot as plt
 import numpy as np
+from psd_calc import calcposfreq, cubepsd
 
 _logger = logging.getLogger(__name__)
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -177,77 +178,6 @@ def add_levels(weathergen_diags: dict, plevels: list) -> None:
             weathergen_diags[var_dict]["levels"] = [0]
 
 
-def psd(ht: np.typing.NDArray) -> np.typing.NDArray:
-    """
-    Returns a power spectrum density for the positive non-zero frequencies
-    Assumes ht has an even number of points
-    """
-    n = len(ht)
-    # Hf      = np.fft.fft(ht, norm='forward')
-    hf = np.fft.rfft(ht, norm="forward")
-    psd = np.abs(hf[1 : round(n / 2 + 1)]) ** 2
-    # Compensate for positive frequencies only
-    psd *= 2.0
-    return psd
-
-
-def old_cubepsd(cube: iris.cube.Cube, dimension: str = "longitude") -> np.typing.NDArray:
-    """
-    Returns a power spectrum density for a cube
-    Assumes that cube.data has an even number of points in dimension dim
-    """
-
-    npoints = len(cube.coord(dimension).points)
-    field_psd = np.zeros([round(npoints / 2)])
-
-    _logger.info("About to calc PSDs")
-
-    nloc = 0
-
-    for field_slice in cube.slices([dimension]):
-        nloc += 1
-        field_psd += psd(field_slice.data)
-
-    field_psd /= nloc
-
-    return field_psd
-
-
-def cubepsd(
-    cubes: iris.cube.CubeList | iris.cube.Cube, dimension: str = "longitude"
-) -> np.typing.NDArray:
-    """
-    Returns a power spectrum density for a cube
-    Assumes that cube.data has an even number of points in dimension dim
-    """
-
-    if isinstance(cubes, iris.cube.CubeList):
-        # being passed a cube list
-        npoints = len(cubes[0].coord(dimension).points)
-    else:
-        # Assume it is just a cube
-        npoints = len(cubes.coord(dimension).points)
-
-    field_psd = np.zeros([round(npoints / 2)])
-
-    _logger.info("About to calc PSDs")
-
-    nloc = 0
-    if isinstance(cubes, iris.cube.CubeList):
-        for cube in cubes:
-            for field_slice in cube.slices([dimension]):
-                nloc += 1
-                field_psd += psd(field_slice.data)
-    else:
-        for field_slice in cubes.slices([dimension]):
-            nloc += 1
-            field_psd += psd(field_slice.data)
-
-    field_psd /= nloc
-
-    return field_psd
-
-
 def addwvns(axes: plt.Axes) -> None:
     """
     Adds lines of equal wavenumber to plots
@@ -325,22 +255,6 @@ def addidealslope(
 
     axes.plot(slopexs, slopeys, color="black", lw=2.0, scalex=False, scaley=False)
     axes.text(xtxt, ytxt, "$k^{" + str(slope) + "}$", fontsize="xx-large", weight="bold")
-
-
-def calcposfreq(cube: iris.cube.Cube, dimension: str = "longitude") -> np.typing.NDArray:
-    """
-    Given a cube and dimension returns the positive frequencies
-    Assumes gridpoints are evenly spaced
-    """
-    npoints = len(cube.coord(dimension).points)
-
-    # Create frequencies
-    freq = np.fft.fftfreq(npoints, d=360.0 / npoints)
-
-    # Positive half
-    posfreq = np.absolute(freq[1 : round(npoints / 2 + 1)])
-
-    return posfreq
 
 
 def region_constraint(region: dict) -> tuple[iris.Constraint, iris.Constraint]:
@@ -504,7 +418,9 @@ def plot_psds(
                         testname = comp_key
                         testfiles = comparison_dict[comp_key]
                         ############## Read data ##########################
-                        _logger.info("About to read field")
+                        _logger.debug("About to read field")
+
+                        num_failed_runs = 0
 
                         try:
                             psds = []
@@ -538,7 +454,7 @@ def plot_psds(
                                     tot_constraint = tot_constraint & desired_time
                                 _logger.debug("Tot_constraint:", tot_constraint)
                                 field = field.extract(tot_constraint)
-                                _logger.info("Completed read field")
+                                _logger.debug("Completed read field")
 
                                 ############## PSD calcs ##########################
                                 # Create frequencies
@@ -548,14 +464,14 @@ def plot_psds(
                                 field_psd = scale * scale * cubepsd(field, dimension="longitude")
                                 psds.append(field_psd)
 
-                            _logger.info("Averaging PSDs over all samples for one forecast_time")
+                            _logger.debug("Averaging PSDs over all samples for one forecast_time")
                             field_psd = np.mean(psds, axis=0)
 
                             if i_test == 0:
                                 # Take a copy of the data
                                 ref_psd = np.copy(field_psd)
 
-                            _logger.info("Completed calc PSDs")
+                            _logger.debug("Completed calc PSDs")
 
                             ############## Plotting ##########################
                             plt.subplot(2, 1, 1)
@@ -563,7 +479,7 @@ def plot_psds(
 
                             if i_test == n_test - 1:
                                 # last test. Add plt stuff
-                                _logger.info(plttitle)
+                                _logger.debug(plttitle)
                                 tidy_plot(
                                     plt.gca(),
                                     plttitle + ": zonal spectra",
@@ -596,6 +512,8 @@ def plot_psds(
                             _logger.error(e)
                             _logger.error(f"Plotting power spectra failed for {testfile}")
                             failed_string += f"{testfile}"
+                            num_failed_runs += 1
                     plt.savefig(outdir / figname)
                     plt.close()
-    _logger.info(f"Runs failed: {failed_string}")
+
+    _logger.info(f"{num_failed_runs} runs failed: {failed_string}")

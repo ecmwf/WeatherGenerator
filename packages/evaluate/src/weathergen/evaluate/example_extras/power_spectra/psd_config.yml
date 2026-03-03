@@ -1,7 +1,7 @@
 variables: ['q'] # , 'v10', 'z'] etc.
-regions: ['FullGlobe'] #, 'FullGlobe', 'N-Mid-Lats', 'S-Mid-Lats', 'Tropics']
+regions: ['FullGlobe'] #, 'FullGlobe', 'ShortGlobe' 'N-Mid-Lats', 'S-Mid-Lats', 'Tropics']
 pressure_levels: [250] 
-forecast_steps : [6, 12] # choose the forecast steps (must be common to all the datasets)
+forecast_steps : [6, 12] # choose the forecast steps in hours (must be common to all the datasets)
 output_dir: "./plots/power_spectra" #relative to dir in which script is run
 prefix: "comparison_uvpy16mo"
 # define prefix for images
