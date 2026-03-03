@@ -7,10 +7,10 @@ stages:
 test_job:
   stage: test
   extends: .baremetal-runner-santis-gh200
-  script:
-    - srun hostname
-    - echo "VAR1: $VAR1"
-    - echo "VAR2: $VAR2"
+  script: |
+    srun hostname
+    echo "VAR1: $VAR1"
+    echo "VAR2: $VAR2"
   variables:
     SLURM_JOB_NUM_NODES: 2
     SLURM_NTASKS: 2
