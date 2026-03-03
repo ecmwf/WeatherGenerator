@@ -136,28 +136,49 @@ class Masker:
 
         Only masking strategy fields are overridden. Structural keys like
         ``num_samples`` and ``num_steps_input`` remain unchanged.
+
+        The override is flat per section (``model_input`` / ``target_input``),
+        not per named strategy.  If a section has multiple strategies (e.g.
+        ``"input_physical"`` and ``"input_jepa"``), the override is intentionally
+        broadcast to all of them.
+
+        Expected YAML in a stream config, e.g.:
+
+            STREAM_NAME:
+              type: ...
+              filenames: ...
+              ...
+              masking_override:
+                target_input:
+                  masking_strategy_config:
+                    hl_mask: 3
+              ...
+
+        This overrides only ``hl_mask`` within ``masking_strategy_config`` for
+        every target strategy, inheriting rate, rate_sampling, etc. from the
+        global config.  ``masking_strategy`` itself can also be replaced.
         """
         if override is None:
             return mode_cfg
 
-        effective = copy.deepcopy(mode_cfg)
+        stream_cfg_masking = copy.deepcopy(mode_cfg)
         for section_key in ("model_input", "target_input"):
-            section_override = override.get(section_key, None)
-            if section_override is None:
+            override_values = override.get(section_key, None)
+            if override_values is None:
                 continue
-            section = effective.get(section_key, None)
+            section = stream_cfg_masking.get(section_key, None)
             if section is None:
                 continue
             for strategy_cfg in section.values():
-                if "masking_strategy" in section_override:
-                    strategy_cfg["masking_strategy"] = section_override["masking_strategy"]
-                if "masking_strategy_config" in section_override:
+                if "masking_strategy" in override_values:
+                    strategy_cfg["masking_strategy"] = override_values["masking_strategy"]
+                if "masking_strategy_config" in override_values:
                     strategy_cfg["masking_strategy_config"] = omegaconf.OmegaConf.merge(
                         strategy_cfg.get("masking_strategy_config", omegaconf.OmegaConf.create({})),
-                        section_override["masking_strategy_config"],
+                        override_values["masking_strategy_config"],
                     )
 
-        return effective
+        return stream_cfg_masking
 
     @staticmethod
     def build_effective_masking_cfgs(streams, mode_cfg):
