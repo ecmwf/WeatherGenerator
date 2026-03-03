@@ -117,14 +117,23 @@ class ModelParams(torch.nn.Module):
             self.register_buffer(
                 "rope_coords",
                 torch.zeros(
-                    self.batch_size_per_gpu,
+                    1,
                     total_tokens,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+            self.register_buffer(
+                "rope_cell_coords",
+                torch.zeros(
+                    self.num_healpix_cells,
                     2,
                     dtype=self.dtype,
                 ),
             )
         else:
             self.rope_coords = None
+            self.rope_cell_coords = None
 
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
@@ -189,51 +198,40 @@ class ModelParams(torch.nn.Module):
             # Shape: (num_healpix_cells, ae_local_num_queries, 2)
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            # Per-cell coords for QueryAggregationEngine (no query expansion)
+            self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
-            coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(self.batch_size_per_gpu, 1, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0)
             offset = self.num_extra_tokens * cf.ae_local_num_queries
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
 
-            # Clear pe_global when using 2D RoPE
-            self.pe_global.data.fill_(0.0)
-        else:
-            # Original pe_global initialization
-            self.pe_global.data.fill_(0.0)
-            xs = (
-                2.0
-                * np.pi
-                * torch.arange(0, dim_embed, 2, device=self.pe_global.device)
-                / dim_embed
+        # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
+        # provides per-cell token identity which is critical for masked cells that have no
+        # content from local assimilation. Without it, masked cells are identical and the
+        # teacher representation (evaluated without dropout) collapses to low rank.
+        self.pe_global.data.fill_(0.0)
+        xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
+        self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
+            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+        )
+        self.pe_global.data[..., 0::2] += (
+            torch.sin(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
             )
-            self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
-                torch.outer(
-                    8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs
-                )
+            .unsqueeze(1)
+            .repeat((1, cf.ae_local_num_queries, 1))
+        )
+        self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
+            torch.outer(8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs)
+        )
+        self.pe_global.data[..., 1::2] += (
+            torch.cos(
+                torch.outer(torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs)
             )
-            self.pe_global.data[..., 0::2] += (
-                torch.sin(
-                    torch.outer(
-                        torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs
-                    )
-                )
-                .unsqueeze(1)
-                .repeat((1, cf.ae_local_num_queries, 1))
-            )
-            self.pe_global.data[..., 1::2] = 0.5 * torch.cos(
-                torch.outer(
-                    8 * torch.arange(cf.ae_local_num_queries, device=self.pe_global.device), xs
-                )
-            )
-            self.pe_global.data[..., 1::2] += (
-                torch.cos(
-                    torch.outer(
-                        torch.arange(self.num_healpix_cells, device=self.pe_global.device), xs
-                    )
-                )
-                .unsqueeze(1)
-                .repeat((1, cf.ae_local_num_queries, 1))
-            )
+            .unsqueeze(1)
+            .repeat((1, cf.ae_local_num_queries, 1))
+        )
 
         # healpix neighborhood structure
 
