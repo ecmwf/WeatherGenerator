@@ -345,7 +345,6 @@ class StreamData:
         boolean
             True if target is empty for stream, else False
         """
-
         return (
             torch.tensor([s.sum() if len(s) > 0 else 0 for s in self.source_tokens_lens]).sum() == 0
         )

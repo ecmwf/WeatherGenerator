@@ -51,7 +51,6 @@ from weathergen.utils.distributed import is_root
 from weathergen.utils.output import Writer
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
-from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
@@ -614,7 +613,6 @@ class Trainer(TrainerBase):
                             if mode_cfg.get("output", {}).get("normalized_samples", False)
                             else self.dataset_val.denormalize_target_channels
                         )
-
                         fstep_start = 0
                         targets = [
                             targets
@@ -628,7 +626,7 @@ class Trainer(TrainerBase):
                             raise ValueError(
                                 f"No physical outputs under key {PHYSICAL_LOSS_KEY} configured"
                             ) from e
-                        
+
                         self.output_writer.write_batch(
                             mini_epoch, batch, targets, preds, denormalize_data_fct, fstep_start
                         )

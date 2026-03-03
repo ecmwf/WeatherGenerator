@@ -15,19 +15,18 @@ import typing
 import numpy as np
 import torch
 
+from weathergen.common.io import ItemKey
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import LatentState
 
 type StreamName = str
-BufferType = np.float32
-DateTimeType = np.datetime64
 
 
 @dataclasses.dataclass
 class PhysicalTarget:
-    data: np.typing.NDArray[BufferType]
-    coords: np.typing.NDArray[BufferType]
-    datetimes: np.typing.NDArray[DateTimeType]
+    data: np.typing.NDArray[np.float32]
+    coords: np.typing.NDArray[np.float32]
+    datetimes: np.typing.NDArray[np.datetime64]
 
 
 class TargetAuxOutput:
@@ -89,9 +88,9 @@ class TargetAuxOutput:
         data = stream_targets["target"][key.sample].to(torch.float32).detach().cpu().numpy()
         data = normalizer(key.stream, data)
 
-        assert isinstance(data, np.ndarray), "Invalid data buffer type."
-        assert isinstance(coords, np.ndarray), "Invalid coords buffer type."
-        assert isinstance(times, np.ndarray), "Invalid datetimes buffer type."
+        assert isinstance(data, np.ndarray), "Invalid data buffer type."  # noqa: TID251
+        assert isinstance(coords, np.ndarray), "Invalid coords buffer type."  # noqa: TID251
+        assert isinstance(times, np.ndarray), "Invalid datetimes buffer type."  # noqa: TID251
 
         if len(coords) == 0:  # TODO can this be removed?
             coords = np.zeros((0, 2), dtype=np.float32)
@@ -100,7 +99,6 @@ class TargetAuxOutput:
         )
         assert data.shape[0] == coords.shape[0] == times.shape[0], "buffer shapes should align."
 
-        # breakpoint()
         return PhysicalTarget(data, coords, times)
 
     def get_latent_target(self, timestep_idx: int):

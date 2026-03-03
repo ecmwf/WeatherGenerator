@@ -22,6 +22,7 @@ from weathergen.train.target_and_aux_module_base import PhysicalTarget, TargetAu
 
 _LAST_INPUT_STEP_IDX = 0
 
+
 class Writer:
     def __init__(
         self,
@@ -160,7 +161,7 @@ class _BatchOutputData:
     def samples(self) -> list[int]:
         # TODO check: data._batch.source_samples.samples
         sampels = list(self._batch.target_samples.sample_idxs)
-        
+
         assert len(set(sampels)) == len(sampels), "samples are not unique"
         return sampels
 

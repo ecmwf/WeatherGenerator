@@ -5,6 +5,7 @@ Provides clean separation between:
   - Model data (StreamData objects containing tensors)
   - View metadata (spatial masks, strategies, relationships)
 """
+
 from __future__ import annotations  # allow forward references in typehints
 
 import copy
@@ -303,7 +304,6 @@ class ModelBatch:
 
         return self
 
-    # used once in MultiStreamDataSampler
     def add_source_stream(
         self,
         source_sample_idx: int,
@@ -323,7 +323,6 @@ class ModelBatch:
         assert target_sample_idx < len(self.target_samples), "invalid value for target_sample_idx"
         self.source2target_matching_idxs[source_sample_idx] = target_sample_idx
 
-    # used once in MultiStreamDataSampler
     def add_target_stream(
         self,
         target_sample_idx: int,
@@ -350,7 +349,6 @@ class ModelBatch:
             )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
 
-    # used once in MultiStreamDataSampler
     def is_empty(self):
         """
         Check if batch is empty
@@ -363,84 +361,72 @@ class ModelBatch:
         )
         return source_empty or target_empty
 
-    # unused
     def len_sources(self) -> int:
         """
         Number of source samples
         """
         return len(self.source_samples)
 
-    # unused
     def len_targets(self) -> int:
         """
         Number of target samples
         """
         return len(self.target_samples)
 
-    # unused
     def get_source_sample(self, idx: int) -> Sample:
         """
         Get a source sample
         """
         return self.source_samples.samples[idx]
 
-    # used in validation_io only
     def get_source_samples(self, subset: list | None = None) -> BatchSamples:
         """
         Get source samples
         """
         return self.source_samples.get_subset(subset)
 
-    # unused
     def get_target_sample(self, idx: int) -> Sample:
         """
         Get a target sample
         """
         return self.target_samples.samples[idx]
 
-    # unused
     def get_target_samples(self, subset: list | None = None) -> BatchSamples:
         """
         Get target samples
         """
         return self.target_samples.get_subset(subset)
 
-    # unsused
     def get_source_idx_for_target(self, target_idx: int) -> int:
         """
         Get index of source sample for a given target sample index
         """
         return int(self.target2source_matching_idxs[target_idx])
 
-    # unused
     def get_target_idx_for_source(self, source_idx: int) -> int:
         """
         Get index of target sample for a given source sample index
         """
         return int(self.source2target_matching_idxs[source_idx])
 
-    # unused
     def get_output_idxs(self) -> int:
         """
         Get valid output steps
         """
         return self.output_idxs
 
-    # unused
     def get_output_len(self) -> int:
         """
         Get length of output
         """
         return self.output_steps
 
-    # unused
     def get_device(self) -> str | torch.device:
         """
         Get device of tensors in the batch
         """
         return self.device
 
-    # unused
     def get_num_source_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
@@ -453,7 +439,6 @@ class ModelBatch:
 
         return min(lens)
 
-    # unused
     def get_num_target_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams

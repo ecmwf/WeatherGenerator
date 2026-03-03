@@ -686,7 +686,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 tidx: int = source_to_target[sidx].item()
                 sdata = self._build_stream_data(
                     source_select,
-                    tidx,  # Why use not idx here?
+                    tidx,
                     num_forecast_steps,
                     stream_info,
                     source_masks.metadata[sidx].params.get("num_steps_input", 1),

@@ -92,7 +92,7 @@ class ModelOutput:
         pred = pred.to(torch.float32).detach().cpu().numpy()
         pred = normalizer(key.stream, pred)
 
-        assert isinstance(pred, np.ndarray), "Invalid buffer type."
+        assert isinstance(pred, np.ndarray), "Invalid buffer type."  # noqa: TID251
         # TODO What to do when preds are empty,when does it occur,
         # how does it show (empty tensor or missing key?)
         assert len(pred) > 0
