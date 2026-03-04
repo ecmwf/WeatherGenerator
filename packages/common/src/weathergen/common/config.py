@@ -251,7 +251,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
                 f"Could not find model config for run_id '{run_id}' "
                 f"(mini_epoch={mini_epoch}) in '{path}'. "
                 f"Tried: '{config_path_with_epoch.name}' and '{config_path_without_epoch.name}'. "
-                f"Please provide a valid `model_path`."
+                f"Please check run_id and mini_epoch."
             )
 
     with fname.open() as f:
