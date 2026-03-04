@@ -213,6 +213,7 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
+        idxs_ord_inv = None
         if data.numel() > 0:
             # flatten per-token indices into one flat list
             idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
