@@ -20,8 +20,8 @@ from torch.distributed.fsdp import (
     fully_shard,
 )
 from torch.distributed.tensor import distribute_tensor
-
 from weathergen.common.config import Config, merge_configs
+
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -75,6 +75,7 @@ def init_model_and_shard(
             find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
+            static_graph=cf.get("ddp_static_graph", False),
         )
 
     elif with_ddp and with_fsdp:
@@ -112,7 +113,10 @@ def init_model_and_shard(
 
         for module in model.forecast_engine.fe_blocks.modules():
             if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+                # reshard_after_forward=False keeps FE parameters unsharded
+                # during the multi-step rollout loop, avoiding repeated
+                # allgather/reshard communication (up to 19x overhead).
+                fully_shard(module, reshard_after_forward=False, **fsdp_kwargs)
 
         for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):

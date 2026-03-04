@@ -18,8 +18,8 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
-
 from weathergen.common.config import Config
+
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
@@ -636,15 +636,36 @@ class Model(torch.nn.Module):
         tokens = tokens.reshape(shape).sum(axis=1)
 
         # roll-out in latent space, iterate and generate output over requested output steps
+        forecast_loss_all_step = self.cf.get("forecast_loss_all_step", True)
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+                # Determine whether we need full prediction or pushforward trick
+                needs_full_prediction = (
+                    forecast_loss_all_step
+                    or not self.training
+                    or step == max(batch.get_output_idxs())
+                )
 
-            # decoder predictions
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
-            # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output)
+                if needs_full_prediction:
+                    # Full inference: run engine → latent → decoders
+                    # NOTE: checkpoint() is incompatible with flash_attn + autocast,
+                    # so we call the forecast engine directly.
+                    tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+                    output = self.predict_latent(model_params, step, tokens, batch, output)
+                    output = self.predict_decoders(model_params, step, tokens, batch, output)
+                else:
+                    # Pushforward mode: only add empty predictions (no grad, no engine call)
+                    with torch.no_grad():
+                        tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+
+                    # Add empty predictions for all streams (vectorized / batched if possible)
+                    for stream_name in self.stream_names:
+                        output.add_physical_prediction(step, stream_name, [])
+
+                    output.add_latent_prediction(step, "latent_state", [])
+                    for name, _ in self.latent_heads.items():
+                        output.add_latent_prediction(step, name, [])
 
         return output
 
