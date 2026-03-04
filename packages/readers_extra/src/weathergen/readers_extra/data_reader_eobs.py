@@ -215,8 +215,9 @@ class DataReaderEObs(DataReaderTimestep):
         _logger.info(f"{ds_name}: grid shape: {self.n_lat} x {self.n_lon}")
 
         self.properties = {
-            "stream_id": self._stream_info.get("id", 0),
+            "stream_id": self._stream_info.get("stream_id", 0),
         }
+        _logger.info(f"{ds_name} self.properties - stream_id: {self.properties['stream_id']}")
 
         self._initialized = True
 
@@ -261,8 +262,8 @@ class DataReaderEObs(DataReaderTimestep):
 
         # Return channels and their indices in the original list
         indices = [available_vars.index(ch) for ch in selected]
-        _logger.info(f"_select_channels(): Selected channels after filtering: {selected}")
-        _logger.info(f"_select_channels(): Corresponding indices in available_vars: {indices}")
+        #_logger.info(f"_select_channels(): Selected channels after filtering: {selected}")
+        #_logger.info(f"_select_channels(): Corresponding indices in available_vars: {indices}")
         return selected, indices
 
     def _load_statistics(self, channels: list[str]) -> None:
