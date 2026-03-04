@@ -195,7 +195,7 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    if cf.run_profiler:
+    if cf.get("run_profiler", False):
         trainer = ProfilingTrainer(cf.train_log_freq)
     else:
         trainer = Trainer(cf.train_log_freq)
