@@ -341,15 +341,20 @@ class DataReaderEObs(DataReaderTimestep):
         ReaderData
             Data structure containing coords, geoinfos, data, and datetimes
         """
-        
+
+        """
         _logger.info(
             f"Requesting data for index {idx} with channel indices {channels_idx} in stream '{self._stream_info['name']}'"
         )
-        
+        """
+
         self._lazy_init()
 
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
-        
+
+        channels_idx = [0, 1, 2, 3, 4, 5, 6]  # Temporary: select all channels for now -- debug purpose
+
+        """
         _logger.info(
             f"Retrieving data for time indices {t_idxs} in stream '{self._stream_info['name']}'"
         )
@@ -362,6 +367,7 @@ class DataReaderEObs(DataReaderTimestep):
         _logger.info(
             f"Selected channels for retrieval: {[self.source_channels[i] for i in channels_idx]}"
         )
+        """
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
             _logger.info(
