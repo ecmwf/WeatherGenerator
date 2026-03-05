@@ -246,8 +246,10 @@ def calc_scores_per_stream(
                     continue
                 if coord_name == "lead_time":
                     metric_stream.coords["lead_time"].loc[{"forecast_step": int(fstep)}] = (
-                    combined_metrics.coords["lead_time"].values.astype("timedelta64[h]").astype(int)
-                )
+                        combined_metrics.coords["lead_time"]
+                        .values.astype("timedelta64[h]")
+                        .astype(int)
+                    )
                 else:
                     # Only restore coordinates whose dimensions exist in metric_stream
                     # (e.g., skip coords with 'quantile' dim if metric_stream doesn't have it)
@@ -274,14 +276,16 @@ def calc_scores_per_stream(
 
                     # Build indexers to select the right location in metric_stream
                     indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
-                    metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[coord_name]
-    
+                    metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[
+                        coord_name
+                    ]
+
             if is_regular and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
                 _plot_score_maps_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
                 )
-        
+
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
         _logger.debug(f"all_metric_attrs keys: {list(all_metric_attrs.keys())}")
 
@@ -539,7 +543,7 @@ def metric_list_to_json(
     """
     # stream_loaded_scores['rmse']['nhem']['ERA5']['jjqce6x5']
     reader.metrics_dir.mkdir(parents=True, exist_ok=True)
- 
+
     for metric, metric_stream in metrics_dict.items():
         for region in regions:
             for run_id, metric_data in metric_stream[region][stream].items():
