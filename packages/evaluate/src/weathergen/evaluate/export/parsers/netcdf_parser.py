@@ -130,7 +130,7 @@ class NetcdfParser(CfParser):
         data_vars = {}
 
         for new_var, old_vars in var_dict.items():
-            if len(old_vars) > 1:
+            if len(pl) > 0:
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
                     dims=["ipoint", "pressure_level"],
