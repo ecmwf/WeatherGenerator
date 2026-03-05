@@ -20,6 +20,7 @@ import numpy as np
 import yaml
 
 import weathergen.common.config as config
+from weathergen.evaluate.plotting.plot_utils import create_filename
 from weathergen.train.utils import TRAIN, VAL
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
@@ -235,10 +236,8 @@ def plot_lr(
     plt.ylabel("lr")
     plt.xlabel(x_axis)
     plt.tight_layout()
-    rstr = "".join([f"{r}_" for r in runs_ids])
-
     # save the plot
-    plt_fname = plot_dir / f"{rstr}lr.png"
+    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=["lr.png"])
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -284,9 +283,7 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
     plt.ylabel("loss")
     plt.xlabel("step")
     plt.tight_layout()
-    rstr = "".join([f"{r}_" for r in runs_ids])
-
-    plt_fname = plot_dir / f"{rstr}{str(stage)}_avg.png"
+    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"])
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -428,11 +425,10 @@ def plot_loss_per_stream(
             plt.ylabel("loss")
             plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
             plt.tight_layout()
-            rstr = "".join([f"{r}_" for r in runs_ids])
-
             # save the plot
-            plt_fname = plot_dir / "{}{}{}_{}.png".format(
-                rstr, "".join([f"{m}_" for m in modes]), stream_name, channel
+            plt_fname = plot_dir / create_filename(
+                middle=runs_ids.keys(),
+                suffix=list(modes) + [stream_name, f"{channel}.png"],
             )
             _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
             plt.savefig(plt_fname)
@@ -548,12 +544,14 @@ def plot_loss_per_run(
     plt.ylabel("loss")
     plt.xlabel("samples")
     plt.tight_layout()
-    sstr = "".join(
-        [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
-    )
-
     # save the plot
-    plt_fname = plot_dir / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
+    plt_fname = plot_dir / (
+        create_filename(
+            prefix=[run_id] + list(modes),
+            middle=[r.replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str],
+        )
+        + ".png"
+    )
     _logger.info(f"Saving loss plot for {run_id}-run to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -682,12 +680,18 @@ def plot_train(args=None):
     if args.delete == "True":
         clean_plot_folder(out_dir)
 
-    # read logged data
-
-    runs_data = [
-        TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
-        for run_id in runs_ids
-    ]
+    # read logged data, skipping faulty run IDs
+    valid_runs_ids = {}
+    runs_data = []
+    for run_id, run_config in runs_ids.items():
+        try:
+            runs_data.append(
+                TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
+            )
+            valid_runs_ids[run_id] = run_config
+        except Exception as e:
+            _logger.warning(f"Skipping run_id '{run_id}': {e}")
+    runs_ids = valid_runs_ids
 
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
@@ -744,24 +748,29 @@ def plot_train(args=None):
 
     # plot all cols for all run_ids
     for run_id, run_data in zip(runs_ids, runs_data, strict=False):
+        try:
+            stream_names = get_stream_names(run_id, model_path=model_base_dir)
+        except Exception as e:
+            _logger.warning(f"Skipping run_id '{run_id}' (could not get stream names): {e}")
+            continue
         plot_loss_per_run(
             ["train", "val"],
             run_id,
             runs_ids[run_id],
             run_data,
-            get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
+            stream_names,
             channels=args.channels,
             plot_dir=out_dir,
         )
-    plot_loss_per_run(
-        ["val"],
-        run_id,
-        runs_ids[run_id],
-        run_data,
-        get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
-        channels=args.channels,
-        plot_dir=out_dir,
-    )
+        plot_loss_per_run(
+            ["val"],
+            run_id,
+            runs_ids[run_id],
+            run_data,
+            stream_names,
+            channels=args.channels,
+            plot_dir=out_dir,
+        )
 
 
 if __name__ == "__main__":

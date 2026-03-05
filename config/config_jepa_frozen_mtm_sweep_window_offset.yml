@@ -123,7 +123,7 @@ train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
-  log_grad_norms: True
+  log_grad_norms: False
 
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
@@ -177,7 +177,7 @@ training_config:
   time_window_step: 06:00:00
   time_window_len: 06:00:00
 
-  window_offset_prediction : 0
+  window_offset_prediction : 1
   
   learning_rate_scheduling :
     lr_start: 5e-7

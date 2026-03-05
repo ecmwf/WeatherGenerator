@@ -1,0 +1,39 @@
+# Plot config for JEPA wiht 2drope finetuning runs (auto-generated)
+train:
+  plot:
+    9kefny85-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=2.12e-05 mask=0.78"
+    fsgs25zq-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=2.26e-05 mask=0.62"
+    6g4ra1vl-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=2.36e-06 mask=0.30"
+    mmjj3min-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=4.73e-06 mask=0.11"
+    kwfk4eow-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=1.02e-05 mask=0.32"
+    port10og-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=3.59e-05 mask=0.77"
+    2xuq8d1h-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=1.67e-06 mask=0.76"
+    vr0spk9h-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=1.54e-06 mask=0.19"
+    4prlj28a-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=3.59e-06 mask=0.49"
+    j0vb6dum-stage2:
+      slurm_id: 0
+      description: "JEPA 2d rope frozen MTM lr=1.01e-05 mask=0.22"
+    i4e3vxp5:
+      slurm_id: 0
+      description: "IASI, 31 epochs trained forecast model"
+    bf9est8a:
+      slurm_id: 0
+      description: "IASI, 128 epochs trained mtm model"
