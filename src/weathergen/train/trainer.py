@@ -29,7 +29,7 @@ from weathergen.model.model_interface import (
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
-from weathergen.train.collapse_monitor import CollapseMonitor
+# from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.trainer_base import TrainerBase
@@ -82,7 +82,7 @@ class Trainer(TrainerBase):
         self.batch_size_per_gpu = -1
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
-        self.collapse_monitor: CollapseMonitor | None = None
+        self.collapse_monitor = None
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -156,7 +156,7 @@ class Trainer(TrainerBase):
 
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
-        self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
+        # self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -521,7 +521,7 @@ class Trainer(TrainerBase):
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
             # Compute collapse monitoring metrics
-            if self.collapse_monitor.should_compute(self.cf.general.istep):
+            if self.collapse_monitor is not None and self.collapse_monitor.should_compute(self.cf.general.istep):
                 self.collapse_monitor._compute_collapse_metrics(
                     self.cf,
                     batch_size_total,
@@ -534,7 +534,7 @@ class Trainer(TrainerBase):
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log collapse metrics
-                if self.collapse_monitor.should_log(self.cf.general.istep):
+                if self.collapse_monitor is not None and self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
 
             # save model checkpoint (with designation _latest)
@@ -812,6 +812,8 @@ class Trainer(TrainerBase):
         """
         Log cached collapse monitoring metrics.
         """
+        if self.collapse_monitor is None:
+            return
         metrics = self.collapse_monitor.get_cached_metrics()
         if metrics and is_root():
             metrics["num_samples"] = self.cf.general.istep
