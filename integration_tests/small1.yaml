@@ -91,7 +91,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 ################
 
-streams_directory: "./integration_tests/streams_multi/"
+streams_directory: "./integration_tests/streams/"
 
 general:
 
