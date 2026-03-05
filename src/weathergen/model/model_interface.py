@@ -335,7 +335,10 @@ def get_target_aux_calculator(
         )
 
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
-        target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
+        frozen_epochs = target_and_aux_calc_params.get("frozen_epochs", 0)
+        target_aux = EMATeacher(
+            model, ema_model, batch_size, cf.training_config, frozen_epochs=frozen_epochs
+        )
 
         # Optional: warm start encoder from checkpoint
         teacher_run_id = target_and_aux_calc_params.get("teacher_run_id")

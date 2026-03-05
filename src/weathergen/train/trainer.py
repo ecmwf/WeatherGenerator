@@ -314,8 +314,22 @@ class Trainer(TrainerBase):
         beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
         eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
+        predictor_lr_multiplier = self.training_cfg.optimizer.get(
+            "predictor_lr_multiplier", 1.0
+        )
+        base_model = self.model.module if hasattr(self.model, "module") else self.model
+        if predictor_lr_multiplier != 1.0 and getattr(base_model, "latent_heads", None) is not None:
+            predictor_params = set(base_model.latent_heads.parameters())
+            backbone_params = [p for p in self.model.parameters() if p not in predictor_params]
+            param_groups = [
+                {"params": backbone_params, "lr_multiplier": 1.0},
+                {"params": list(predictor_params), "lr_multiplier": predictor_lr_multiplier},
+            ]
+        else:
+            param_groups = [{"params": list(self.model.parameters()), "lr_multiplier": 1.0}]
+
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
+            param_groups,
             lr=self.training_cfg.learning_rate_scheduling.lr_start,
             weight_decay=self.training_cfg.optimizer.weight_decay,
             betas=(beta1, beta2),
@@ -373,6 +387,9 @@ class Trainer(TrainerBase):
         # training loop
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
+            for target_aux in self.target_and_aux_calculators.values():
+                target_aux.on_mini_epoch_start(mini_epoch)
+
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
             self.train(mini_epoch)
 

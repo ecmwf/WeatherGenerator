@@ -209,17 +209,19 @@ class LearningRateScheduler:
                 else self.lr_max_scaled
             )
             for g in self.optimizer.param_groups:
-                g["lr"] = self.lr
+                g["lr"] = self.lr * g.get("lr_multiplier", 1.0)
         elif self.policy_decay == "constant" and phase_decay:
             cur_lr = self.lr
             self.lr = self.lr_max_scaled
             # make sure lr_max_scaled rate is used if warm-up end is not lr_max_scaled
             if cur_lr < self.lr:
                 for g in self.optimizer.param_groups:
-                    g["lr"] = self.lr
+                    g["lr"] = self.lr * g.get("lr_multiplier", 1.0)
         else:
             self.cur_scheduler.step()
             self.lr = self.cur_scheduler.get_last_lr()[0]
+            for g in self.optimizer.param_groups:
+                g["lr"] = self.lr * g.get("lr_multiplier", 1.0)
 
         # switch scheduler when learning rate regime completed
         if self.i_step == self.n_steps_warmup:

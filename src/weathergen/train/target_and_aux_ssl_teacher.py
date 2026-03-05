@@ -77,12 +77,22 @@ class EncoderTeacher(TargetAndAuxModuleBase):
 
 
 class EMATeacher(EncoderTeacher):
-    """SSL teacher using exponential moving average of student weights."""
+    """SSL teacher using exponential moving average of student weights.
 
-    def __init__(self, model, ema_model, batch_size, training_cfg, **kwargs):
+    Supports an optional frozen warm-up phase via ``frozen_epochs``: the teacher
+    weights are held fixed for the first *frozen_epochs* mini-epochs, then EMA
+    updates begin.  Combined with ``teacher_run_id`` this lets you train towards
+    a frozen pre-trained teacher first, then smoothly transition to a slow EMA.
+    """
+
+    def __init__(self, model, ema_model, batch_size, training_cfg, frozen_epochs=0, **kwargs):
         super().__init__(model, training_cfg, **kwargs)
         self.ema_model = ema_model
         self.batch_size = batch_size
+        self.frozen_epochs = frozen_epochs
+        self._ema_active = frozen_epochs <= 0
+        if frozen_epochs > 0:
+            logger.info(f"EMATeacher: teacher frozen for first {frozen_epochs} mini-epochs")
         self.reset()
 
     def _forward_teacher(self, model_params, batch):
@@ -93,13 +103,26 @@ class EMATeacher(EncoderTeacher):
         if batch_size is not None:
             self.batch_size = batch_size
 
+    def on_mini_epoch_start(self, mini_epoch: int) -> None:
+        """Activate EMA updates once the frozen warm-up phase is over."""
+        if not self._ema_active and mini_epoch >= self.frozen_epochs:
+            logger.info(
+                f"EMATeacher: activating EMA updates at mini-epoch {mini_epoch} "
+                f"(frozen_epochs={self.frozen_epochs})"
+            )
+            self._ema_active = True
+
     def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
+        if not self._ema_active:
+            return
         if self.ema_model.is_model_sharded:
             self.ema_model.ema_model.reshard()
         self.ema_model.update(istep, self.batch_size)
 
     def get_current_beta(self, cur_step: int) -> float:
         """Return the current EMA interpolation beta for monitoring."""
+        if not self._ema_active:
+            return 1.0  # frozen: teacher not moving
         return self.ema_model.get_current_beta(cur_step)
 
 

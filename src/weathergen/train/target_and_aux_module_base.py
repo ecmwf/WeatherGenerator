@@ -78,6 +78,10 @@ class TargetAndAuxModuleBase:
     def compute(self, istep, batch, *args, **kwargs) -> TargetAuxOutput:
         pass
 
+    def on_mini_epoch_start(self, mini_epoch: int) -> None:
+        """Called at the start of each mini-epoch. Override to implement epoch-based logic."""
+        pass
+
     def to_device(self, device) -> TargetAndAuxModuleBase:
         return self
 
