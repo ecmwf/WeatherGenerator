@@ -185,7 +185,7 @@ class DataReaderEObs(DataReaderTimestep):
         _logger.info(f"{ds_name}: target channels: {self.target_channels}")
         _logger.info(f"{ds_name}: grid shape: {self.n_lat} x {self.n_lon}")
 
-        self.properties = {"stream_id": self._stream_info.get("id", 0)}
+        self.properties = {"stream_id": self._stream_info.get("stream_id", 0)}
 
     # ------------------------------------------------------------------
     # Helpers
