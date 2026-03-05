@@ -217,7 +217,7 @@ class DataReaderEObs(DataReaderTimestep):
         self.properties = {
             "stream_id": self._stream_info.get("stream_id", 0),
         }
-        _logger.info(f"{ds_name} self.properties - stream_id: {self.properties['stream_id']}")
+        # _logger.info(f"{ds_name} self.properties - stream_id: {self.properties['stream_id']}")
 
         self._initialized = True
 
@@ -408,6 +408,9 @@ class DataReaderEObs(DataReaderTimestep):
                 """
                 # Load data using isel for efficient indexing
                 var_data = self.ds[ch].isel(time=t_idx).values.astype(np.float32)
+                _logger.info(
+                    f"Extracted data for {ch} at time index {t_idx} with shape {var_data.shape} in stream '{self._stream_info['name']}'"
+                )
                 """
                 _logger.info(
                     f"Extracted data shape for {ch} at time index {t_idx}: {var_data.shape}"
