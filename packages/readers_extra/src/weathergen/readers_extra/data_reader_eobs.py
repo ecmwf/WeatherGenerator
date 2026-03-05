@@ -360,7 +360,7 @@ class DataReaderEObs(DataReaderTimestep):
             f"Number of time steps in dataset: {len(self.ds.coords['time'])}, requested time steps: {len(t_idxs)}"
         )
         _logger.info(
-            f"Selected channels for retrieval: {[self.source_channels[i] for i in channels_idx
+            f"Selected channels for retrieval: {[self.source_channels[i] for i in channels_idx]}"
         )
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
