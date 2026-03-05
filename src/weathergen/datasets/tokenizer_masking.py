@@ -213,19 +213,11 @@ class TokenizerMasking(Tokenizer):
             encode_times_target,
         )
 
-        # if selection is not None and data.numel() > 0:
-        #     device_sel = selection.to(data.device)
-        #     data = data.index_select(0, device_sel)
-        #     coords = coords.index_select(0, device_sel)
-        #     if idxs_ord_inv.numel() > 0:
-        #         idxs_ord_inv = idxs_ord_inv.index_select(0, device_sel)
-
-        #     # datetimes is numpy here
-        #     np_sel = selection.cpu().numpy()
-        #     datetimes = datetimes[np_sel]
-
-        # TODO: idxs_ord_inv
         idxs_ord_inv = None
+        if data.numel() > 0:
+            # flatten per-token indices into one flat list
+            idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
+            # compute indices for inversion
+            _, idxs_ord_inv = torch.sort(idxs_flat)
 
-        # selection not passed on, we call get_target_coords first
         return (data, datetimes, coords, idxs_ord_inv)
