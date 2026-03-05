@@ -617,11 +617,17 @@ def _select_channels(
     -------
         Data arrays with selected channels and added derived channels if applicable.
     """
+    # Ensure channel is a dimension, not a scalar coordinate (can happen after squeeze)
+    if "channel" not in da_tar.dims:
+        da_tar = da_tar.expand_dims("channel")
+    if "channel" not in da_pred.dims:
+        da_pred = da_pred.expand_dims("channel")
+
     assert da_pred.channel.values.tolist() == da_tar.channel.values.tolist(), (
         "Channels in prediction and target do not match."
     )
 
-    all_channels = da_tar.channel.values
+    all_channels = da_tar.channel.values.tolist()
 
     if set(channels) != set(all_channels):
         _logger.debug(
