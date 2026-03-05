@@ -145,7 +145,7 @@ class Trainer(TrainerBase):
         self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
         cf.world_size_original = self.world_size_original
 
-        self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
+        self.log_grad_norms = False # cf.train_logging.get("log_grad_norms", False)
 
         # create output directory
         if is_root():
