@@ -239,9 +239,10 @@ class Trainer(TrainerBase):
 
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
+        logger.info("Training config: %d", self.training_cfg)
 
-        # Update collapse monitor device
-        self.collapse_monitor.device = self.device
+        # # Update collapse monitor device
+        # self.collapse_monitor.device = self.device
 
         # create data loaders
         self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
