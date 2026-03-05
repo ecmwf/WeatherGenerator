@@ -155,7 +155,7 @@ class Trainer(TrainerBase):
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
         # Initialize collapse monitor for SSL training
-        collapse_config = cf.train_logging.get("collapse_monitoring", {})
+        # collapse_config = cf.train_logging.get("collapse_monitoring", {})
         # self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
     def get_target_aux_calculators(self, mode_cfg):
