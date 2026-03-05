@@ -454,6 +454,10 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                     da_tars_fs = _force_consistent_grids(da_tars_fs)
                     da_preds_fs = _force_consistent_grids(da_preds_fs)
+
+                    # breakpoint()
+                    # da_tars_fs = [xr.concat(da_tars_fs, dim="sample", coords="different", compat="equals")]
+                    # da_preds_fs = [xr.concat(da_preds_fs, dim="sample", coords="different", compat="equals")]
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
                     da_tars_fs = [xr.concat(da_tars_fs, dim="ipoint", coords="minimal")]
