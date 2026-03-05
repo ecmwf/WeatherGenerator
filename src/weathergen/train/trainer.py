@@ -239,7 +239,7 @@ class Trainer(TrainerBase):
 
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
-        logger.info("Training config: %d", self.training_cfg)
+        logger.info("Training config: %s", self.training_cfg)
 
         # # Update collapse monitor device
         # self.collapse_monitor.device = self.device
@@ -374,7 +374,7 @@ class Trainer(TrainerBase):
 
         # training loop
 
-        logger.info("Training config: %d", self.training_cfg)
+        logger.info("Training config: %s", self.training_cfg)
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
