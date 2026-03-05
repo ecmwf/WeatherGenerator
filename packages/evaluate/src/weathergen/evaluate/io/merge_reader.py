@@ -310,7 +310,6 @@ class WeatherGenMergeReader(Reader):
         assert all(e == ["0"] or e == [0] or e == {0} for e in all_ensembles), (
             "Merging readers with multiple ensemble members is not supported yet."
         )
-
         return set(range(len(self.readers)))
 
     # TODO: improve this
