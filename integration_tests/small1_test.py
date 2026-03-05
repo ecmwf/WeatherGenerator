@@ -51,7 +51,7 @@ def test_train(setup, test_run_id):
 
     main(
         [
-            "inference",
+            "train",
             f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml",
             "--run-id",
             test_run_id,
