@@ -78,14 +78,24 @@ def write_output(
                     preds = [target.clone().unsqueeze(0) for target in targets]
 
                 for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
+                    target_data = target_aux_out.physical[t_idx][sname]
+                    t_coords = target_data["target_coords"][i_batch]
+                    t_times = target_data["target_times"][i_batch]
+
+                    idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
+                    if idxs_inv is not None:
+                        pred = pred[:, idxs_inv]
+                        target = target[idxs_inv]
+                        t_coords = t_coords[idxs_inv]
+                        t_times = t_times[idxs_inv]
+
                     # denormalize data if requested and map to storage format
                     preds_s += [dn_data(sname, pred).detach().to(fp32).cpu().numpy()]
                     targets_s += [dn_data(sname, target).detach().to(fp32).cpu().numpy()]
 
                     # extract original target coords and times from target data
-                    target_data = target_aux_out.physical[t_idx][sname]
-                    t_coords_s += [target_data["target_coords"][i_batch].cpu().numpy()]
-                    t_times_s += [target_data["target_times"][i_batch].astype("datetime64[ns]")]
+                    t_coords_s += [t_coords.cpu().numpy()]
+                    t_times_s += [t_times.astype("datetime64[ns]")]
 
             targets_lens[-1] += [[]]
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
@@ -94,13 +104,6 @@ def write_output(
             targets_all[-1] += [np.concatenate(targets_s)]
             targets_coords_all[-1] += [np.concatenate(t_coords_s)]
             targets_times_all[-1] += [np.concatenate(t_times_s)]
-
-    #         # TODO: re-enable
-    #           if len(idxs_inv) > 0:
-    #               pred = pred[:, idxs_inv]
-    #               target = target[idxs_inv]
-    #               targets_coords_raw[t_idx][i_strm] = targets_coords_raw[t_idx][i_strm][idxs_inv]
-    #               targets_times_raw[t_idx][i_strm] = targets_times_raw[t_idx][i_strm][idxs_inv]
 
     if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
         _logger.warning("Writing no data since predictions are empty.")
