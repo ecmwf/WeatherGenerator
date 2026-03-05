@@ -339,10 +339,11 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
-        forecast_offset=int | None,
+        forecast_offset:int | None,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
+        latent: list[OutputDataset] | None = None,
     ):
         """Collection of possible datasets for one output item."""
         self.key = key
@@ -355,9 +356,11 @@ class OutputItem:
         if self.key.with_source:
             self._append_dataset(self.source, "source")
 
-        if self.key.with_target(forecast_offset):
+        if forecast_offset is not None and self.key.with_target(forecast_offset):
             self._append_dataset(self.target, "target")
             self._append_dataset(self.prediction, "prediction")
+        if latent is not None:
+            self.datasets += latent
 
     def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
@@ -615,7 +618,7 @@ class OutputBatchData:
         ):
             yield self.extract(ItemKey(int(s), int(fo_s), fi_s))
 
-    def latent_items(self):
+    def latent_items(self) -> typing.Generator[OutputItem, None, None]:
         """Additionally yield latent output items if a latent stream name was provided"""
         if self.latents:
             for s, fo_s in itertools.product(self.samples, self.forecast_steps):
@@ -781,7 +784,7 @@ class OutputBatchData:
 
         return source_dataset
 
-    def _make_latent_item(self, key: ItemKey):
+    def _make_latent_item(self, key: ItemKey) -> OutputItem | None:
         """Create a lightweight output-like item for latent datasets.
 
         Returns an object with attributes `key` and `datasets` suitable for
@@ -790,22 +793,20 @@ class OutputBatchData:
         offset_key = self._offset_key(key)
 
         # ensure latents were provided
-        try:
-            latents_for_fstep = self.latents[offset_key.forecast_step]
-        except Exception:
+        if len(self.latents) <= offset_key.forecast_step:
             return None
+        latents_for_fstep = self.latents[offset_key.forecast_step]
 
-        try:
-            latents_for_sample = latents_for_fstep[offset_key.sample]
-        except Exception:
+        if len(latents_for_fstep) <= offset_key.sample:
             return None
+        latents_for_sample = latents_for_fstep[offset_key.sample]
 
         if not latents_for_sample:
             return None
 
         source_interval = self.source_intervals[offset_key.sample]
 
-        datasets = []
+        datasets: list[OutputDataset] = []
         for lname, arr in latents_for_sample.items():
             arr = np.asarray(arr)
             # determine datapoints
@@ -827,10 +828,8 @@ class OutputBatchData:
             )
             datasets.append(ds)
 
-        item = type("LatentItem", (object,), {})()
-        item.key = key
-        item.datasets = datasets
-        return item
+        # TODO: missing forecast offset
+        return OutputItem(key=key, forecast_offset=None, latent=datasets)
 
 
 def zarrio_reader(store_path: pathlib.Path) -> ZarrIO:

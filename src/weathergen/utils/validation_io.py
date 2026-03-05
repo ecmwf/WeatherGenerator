@@ -119,7 +119,8 @@ def write_output(
 
     # Allow a pseudo-stream name 'latent' to enable latent writing while
     # skipping it from the physical streams mapping.
-    output_streams = {name: stream_names.index(name) for name in output_stream_names}
+    # None means latent
+    output_streams: dict[str, int|None] = {name: stream_names.index(name) for name in output_stream_names}
     if io.LATENT_STREAM in output_stream_names:
         output_streams[io.LATENT_STREAM] = None
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
@@ -194,15 +195,16 @@ def get_latent_output(batch, model_output):
         for i_sample in range(n_samples):
             per_sample: dict = {}
             for lname, lval in latent_pred.items():
+
                 if isinstance(lval, LatentState):
-                    for field in (
-                        "z_pre_norm",
-                        "patch_tokens",
-                        "register_tokens",
-                        "class_token",
-                    ):
-                        tensor = getattr(lval, field)
-                        per_sample[f"{lname}_{field}"] = (
+                    fields = {
+                        "z_pre_norm": lval.z_pre_norm,
+                        "patch_tokens": lval.patch_tokens,
+                        "register_tokens": lval.register_tokens,
+                        "class_token": lval.class_token,
+                    }
+                    for field_name, tensor in fields.items():
+                        per_sample[f"{lname}_{field_name}"] = (
                             tensor[i_sample].detach().to(fp32).cpu().numpy()
                         )
                 else:

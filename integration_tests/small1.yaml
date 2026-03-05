@@ -198,6 +198,9 @@ validation_config:
   start_date: 2021-10-10T00:00
   end_date: 2022-10-11T00:00
 
+  output:
+    streams: ["ERA5", "latent"]
+
   validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
@@ -206,3 +209,9 @@ validation_config:
 test_config:
   output:
     num_samples: 2
+
+
+# TODO: read latent from here
+inference_config:
+  output:
+    streams: ["ERA5", "latent"]
