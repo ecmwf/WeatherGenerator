@@ -95,7 +95,7 @@ latent_noise_deterministic_latents: True
 
 
 freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
-load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}
+# load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}
 
 norm_type: "LayerNorm"
 
@@ -244,7 +244,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config
