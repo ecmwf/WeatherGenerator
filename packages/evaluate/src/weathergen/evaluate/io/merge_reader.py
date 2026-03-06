@@ -16,7 +16,7 @@ import xarray as xr
 
 # Local application / package
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
-from weathergen.evaluate.io.wegen_reader import WeatherGenJSONReader, WeatherGenZarrReader
+from weathergen.evaluate.io.wegen_reader import WeatherGenJsonReader, WeatherGenZarrReader
 from weathergen.evaluate.utils.utils import merge
 
 _logger = logging.getLogger(__name__)
@@ -45,12 +45,12 @@ class WeatherGenMergeReader(Reader):
         private_paths: dict
             dictionary of private paths for the supported HPC
         regions: list[str]
-            names of predefined bounding box for a region (only used for WeatherGenJSONReader)
+            names of predefined bounding box for a region (only used for WeatherGenJsonReader)
         metrics: list[str]
-            names of the metric scores to compute (only used for WeatherGenJSONReader)
+            names of the metric scores to compute (only used for WeatherGenJsonReader)
         reader_type: str
             The type of the internal reader. If zarr, WeatherGenZarrReader is used,
-            WeatherGenJSONReader otherwise. Default: zarr
+            WeatherGenJsonReader otherwise. Default: zarr
         """
         super().__init__(eval_cfg, run_id, private_paths)
         self.run_ids = eval_cfg.get("merge_run_ids", [])
@@ -72,18 +72,13 @@ class WeatherGenMergeReader(Reader):
             if reader_type == "zarr":
                 reader = WeatherGenZarrReader(self.eval_cfg, run_id, self.private_paths)
             else:
-                reader = WeatherGenJSONReader(
+                reader = WeatherGenJsonReader(
                     self.eval_cfg, run_id, self.private_paths, regions, metrics
                 )
             self.readers.append(reader)
-            _logger.debug(
-                f"Instantiated reader for run_id '{run_id}' with {reader_type}"
-                f""
-            )
+            _logger.debug(f"Instantiated reader for run_id '{run_id}' with {reader_type}")
 
-        _logger.info(
-            f"Instantiated {len(self.readers)} internal readers of type {reader_type}."
-        )
+        _logger.info(f"Instantiated {len(self.readers)} internal readers of type {reader_type}.")
 
     def get_data(
         self,
@@ -315,11 +310,10 @@ class WeatherGenMergeReader(Reader):
         assert all(e == ["0"] or e == [0] or e == {0} for e in all_ensembles), (
             "Merging readers with multiple ensemble members is not supported yet."
         )
-        
         return set(range(len(self.readers)))
 
     # TODO: improve this
-    def is_regular(self, stream: str) -> bool:
+    def is_gridded_data(self, stream: str) -> bool:
         """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
         Parameters
         ----------
@@ -331,7 +325,7 @@ class WeatherGenMergeReader(Reader):
             True if the stream is regularly spaced. False otherwise.
         """
         _logger.debug(f"Checking regular spacing for stream {stream}...")
-        return all(reader.is_regular(stream) for reader in self.readers)
+        return all(reader.is_gridded_data(stream) for reader in self.readers)
 
     def _load_scores_json(self, stream, regions, metrics):
         "Concatenate the scores of all JSON readers"

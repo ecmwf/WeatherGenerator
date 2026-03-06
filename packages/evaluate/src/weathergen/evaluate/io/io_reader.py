@@ -30,13 +30,10 @@ class ReaderOutput:
         Dictionary of xarray Datasets for targets, indexed by forecast step.
     prediction : dict[str, xr.Dataset]
         Dictionary of xarray Datasets for predictions, indexed by forecast step.
-    points_per_sample : xr.DataArray | None
-        xarray DataArray containing the number of points per sample, if `return_counts` is True
     """
 
     target: dict[str, xr.Dataset]
     prediction: dict[str, xr.Dataset]
-    points_per_sample: xr.DataArray | None
 
 
 @dataclass
@@ -126,7 +123,7 @@ class Reader(ABC):
         """Placeholder implementation ensemble member names getter. Override in subclass."""
         pass
 
-    def is_regular(self, stream: str) -> bool:
+    def is_gridded_data(self, stream: str) -> bool:
         """
         Placeholder implementation to check if lat/lon are regularly spaced.
         Override in subclass.
