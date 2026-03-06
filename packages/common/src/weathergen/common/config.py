@@ -312,6 +312,7 @@ def _apply_fixes(config: Config) -> Config:
     eventually removed.
     """
     config = _check_datasets(config)
+    config = _check_qk_norm_type(config)
     return config
 
 
