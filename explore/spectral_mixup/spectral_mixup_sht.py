@@ -88,7 +88,7 @@ def build_gaussian_grid(nlat: int) -> dict:
     """Build a regular Gaussian grid with *nlat* latitude rings.
 
     Returns a dict with:
-        lats_1d   – 1D latitudes  (degrees, N→S)
+        lats_1d   – 1D latitudes  (degrees, S→N for meshgrid/plotting)
         lons_1d   – 1D longitudes (degrees, 0→360 exclusive)
         LAT, LON  – 2D meshgrids  (nlat × nlon)
         lons_per_lat – [nlon]*nlat  (for SHT constructor)
@@ -98,10 +98,10 @@ def build_gaussian_grid(nlat: int) -> dict:
 
     # Gaussian co-latitudes (returned as cos(theta) in [-1, 1])
     cos_theta, _ = legendre_gauss_weights(nlat)
-    # Convert: cos_theta is on [-1,1], ascending; arccos → co-latitude (π→0)
-    theta = np.flip(np.arccos(cos_theta))           # co-lat, south→north
-    lats_deg = 90.0 - np.degrees(theta)             # geographic lat, south→north
-    lats_deg = lats_deg[::-1].copy()                 # flip to north→south
+    # cos_theta ascending [-1, 1]; arccos gives descending [π, 0]; flip → ascending [0, π]
+    theta = np.flip(np.arccos(cos_theta))           # ascending co-lat [0,π] = N→S
+    lats_deg = 90.0 - np.degrees(theta)             # geographic lat [90,-90] = N→S
+    lats_deg = lats_deg[::-1].copy()                 # flip to S→N for meshgrid
 
     lons_deg = np.linspace(0, 360, nlon, endpoint=False)
 
@@ -201,9 +201,19 @@ def regrid_to_gaussian(era5, gg: dict):
 
 
 def build_sht_pair(gg: dict, dtype=torch.float64):
-    """Create forward and inverse SHT modules for the given Gaussian grid."""
-    lmax = gg["nlat"] // 2
-    mmax = gg["nlat"] // 2
+    """Create forward and inverse SHT modules for the given Gaussian grid.
+
+    Uses full spectral resolution: lmax = mmax = nlat.  A Gaussian grid with
+    nlat latitudes and nlon = 2*nlat longitudes can exactly represent
+    harmonics up to degree nlat-1 (the SHT arrays are sized lmax = nlat so
+    that index lmax-1 = nlat-1 is included).
+
+    Note: the anemoi-core *loss* functions use nlat//2 ("quadratic"
+    truncation) to avoid aliasing in products of fields.  For a pure
+    forward-inverse round-trip that is NOT needed.
+    """
+    lmax = gg["nlat"]
+    mmax = gg["nlat"]
     forward_sht = SphericalHarmonicTransform(
         lons_per_lat=gg["lons_per_lat"], lmax=lmax, mmax=mmax
     ).to(dtype=dtype)
@@ -216,15 +226,15 @@ def build_sht_pair(gg: dict, dtype=torch.float64):
 def field_to_ring_order(field_2d: np.ndarray) -> np.ndarray:
     """Flatten a (nlat, nlon) array into ring order expected by SHT.
 
-    The SHT expects data ordered pole-to-pole with each ring contiguous.
-    Our grid is north→south, so we flip to south→north (matching the
-    Gaussian quadrature node ordering: ascending co-latitude = south→north).
+    Our 2D field has row 0 = southernmost (S→N convention from meshgrid).
+    The SHT expects ring 0 = northernmost (ascending co-latitude = N→S).
+    So we flip rows before ravelling.
     """
     return field_2d[::-1, :].ravel()
 
 
 def ring_order_to_field(flat: np.ndarray, nlat: int, nlon: int) -> np.ndarray:
-    """Reverse of field_to_ring_order: ring-ordered flat → (nlat, nlon) north→south."""
+    """Reverse of field_to_ring_order: ring-ordered (N→S) flat → (nlat, nlon) S→N."""
     return flat.reshape(nlat, nlon)[::-1, :].copy()
 
 
