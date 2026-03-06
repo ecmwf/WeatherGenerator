@@ -712,9 +712,6 @@ class Model(torch.nn.Module):
                 )
 
                 if needs_full_prediction:
-                    # Full inference: run engine → latent → decoders
-                    # NOTE: checkpoint() is incompatible with flash_attn + autocast,
-                    # so we call the forecast engine directly.
                     tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
                     output = self.predict_latent(model_params, step, tokens, batch, output)
                     output = self.predict_decoders(model_params, step, tokens, batch, output)
