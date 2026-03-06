@@ -51,14 +51,14 @@ def test_train(setup, test_run_id):
 
     main(
         [
-            "inference",
-            f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml",
+            "train",
+            f"--base-config={WEATHERGEN_HOME}/integration_tests/small1.yml",
             "--run-id",
             test_run_id,
         ]
     )
 
-    infer_with_missing(test_run_id)
+    infer(test_run_id)
     evaluate_results(test_run_id)
     assert_missing_metrics_file(test_run_id)
     assert_train_loss_below_threshold(test_run_id)
@@ -70,28 +70,7 @@ def infer(run_id):
     logger.info("run inference")
     main(
         [
-            "-start",
-            "2022-10-10",
-            "-end",
-            "2022-10-11",
-            "--samples",
-            "10",
-            "--mini-epoch",
-            "0",
-            "--from-run-id",
-            run_id,
-            "--run-id",
-            run_id,
-            "--config",
-            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
-        ]
-    )
-
-
-def infer_with_missing(run_id):
-    logger.info("run inference")
-    main(
-        [
+            "inference",
             "-start",
             "2021-10-10",
             "-end",
@@ -105,7 +84,7 @@ def infer_with_missing(run_id):
             "--run-id",
             run_id,
             "--config",
-            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
+            f"{WEATHERGEN_HOME}/integration_tests/small1.yml",
         ]
     )
 
@@ -155,7 +134,7 @@ def evaluate_results(run_id):
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
+    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id)
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -165,7 +144,7 @@ def load_metrics(run_id):
 
 def assert_missing_metrics_file(run_id):
     """Test that a missing metrics file raises FileNotFoundError."""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
+    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results"/ run_id, run_id=run_id)
     assert os.path.exists(file_path), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
@@ -208,4 +187,4 @@ def assert_val_loss_below_threshold(run_id):
     assert loss_metric is not None, f"'{loss_avg_name}' metric is missing in metrics file"
     # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 0.25, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.25"
+    assert loss_metric < 0.2, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.2"
