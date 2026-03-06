@@ -119,7 +119,7 @@ class Reader:
         """Placeholder implementation ensemble member names getter. Override in subclass."""
         return list()
 
-    def is_regular(self, stream: str) -> bool:
+    def is_gridded_data(self, stream: str) -> bool:
         """
         Placeholder implementation to check if lat/lon are regularly spaced.
         Override in subclass.

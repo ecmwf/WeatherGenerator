@@ -447,7 +447,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                     pred = pred.squeeze()
                     target = target.squeeze()
 
-                    if self.is_regular(stream):
+                    if self.is_gridded_data(stream):
                         vt_list = np.unique(target.valid_time.values).tolist()
                         valid_times_fs.append(vt_list)
                     else:
@@ -471,7 +471,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 )
 
                 # faster processing
-                if self.is_regular(stream):
+                if self.is_gridded_data(stream):
                     # Efficient concatenation for regular grid
                     da_preds_fs = _split_by_valid_time(da_preds_fs)
                     da_tars_fs = _split_by_valid_time(da_tars_fs)
@@ -496,14 +496,19 @@ class WeatherGenZarrReader(WeatherGenReader):
                 if isinstance(fstep, list):  # regular grid with lead times (1 or multiple)
                     for t, p in zip(da_t, da_p, strict=True):
                         t, p = _select_channels(t, p, stream, channels, stream_cfg)
+
+                        # But we also want to have a common forecast_step coordinate for all
+                        # substeps to be able to apply the same metrics.
                         t = t.assign_coords(forecast_step=i)
                         p = p.assign_coords(forecast_step=i)
-                        t = _add_lead_time_coord(
-                            t
-                        )  # TODO: move somewhere else into another loop maybe. but 2 loops is slow?
+
+                        # TODO: move somewhere else into another loop maybe. but 2 loops is slow?
+                        t = _add_lead_time_coord(t)
                         p = _add_lead_time_coord(p)
+
                         p = _scale_z_channels(p, stream)
                         t = _scale_z_channels(t, stream)
+
                         da_tars_dict[i] = t
                         da_preds_dict[i] = p
                         i += 1
@@ -549,8 +554,8 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     def get_forecast_substep_valid_times(self, stream: str) -> set[str]:
         """Get the set of forecast times from the Zarr file."""
-        if not self.is_regular(stream):
-            _logger.warning(f"Stream {stream} is not regular. Forecast times cannot be retrieved.")
+        if not self.is_gridded_data(stream):
+            _logger.warning(f"Stream {stream} is not gridded. Forecast times cannot be retrieved.")
             return set()
 
         with zarrio_reader(self.fname_zarr) as zio:
@@ -576,108 +581,44 @@ class WeatherGenZarrReader(WeatherGenReader):
             dummy = zio.get_data(0, stream, zio.forecast_steps[0])
         return list(dummy.prediction.as_xarray().coords["ens"].values)
 
-    def is_regular(self, stream: str) -> bool:
-        """
-        Determine if the stream’s spatial grid is regular (lat/lon evenly spaced).
-
+    def is_gridded_data(self, stream: str) -> bool:
+        """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
         Parameters
         ----------
         stream :
-            The name of the stream.
+            The name of the stream to get channels for.
 
         Returns
         -------
-        bool
-            True if lat/lon grids are consistent and regularly spaced across all samples,
-            False otherwise.
+            True if the stream is regularly spaced. False otherwise.
         """
-        _logger.debug(f"Checking regular spacing for stream '{stream}'...")
+        _logger.debug(f"Checking regular spacing for stream {stream}...")
 
-        # Early exit: if stream not found or no samples/forecast steps
-        try:
-            with zarrio_reader(self.fname_zarr) as zio:
-                if stream not in zio.streams:
-                    _logger.debug(f"Stream '{stream}' not found in Zarr. Treating as irregular.")
-                    return False
-                if not zio.samples or not zio.forecast_steps:
-                    _logger.debug("No samples or forecast steps found. Treating as irregular.")
-                    return False
+        with zarrio_reader(self.fname_zarr) as zio:
+            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
 
-                sample_idx = zio.samples[0]
-                fstep_idx = zio.forecast_steps[0]
-                dummy = zio.get_data(sample_idx, stream, fstep_idx)
-                da = dummy.prediction.as_xarray()
-
-                # Extract lat/lon; exit if missing or not 1D
-                lat = da.get("lat")
-                lon = da.get("lon")
-                if lat is None or lon is None:
-                    _logger.debug("Missing lat/lon coordinates in prediction data.")
-                    return False
-                lat = lat.squeeze()
-                lon = lon.squeeze()
-                if lat.ndim != 1 or lon.ndim != 1:
-                    _logger.debug("Lat/lon not 1D. Irregular scatter grid.")
-                    return False
-        except Exception as e:
-            _logger.debug(f"Exception during initial lat/lon check: {e}")
-            return False
-
-        # Verify regular spacing for lat and lon (monotonic, uniform step size)
-        try:
-            lat_vals = np.asarray(lat.values)
-            lon_vals = np.asarray(lon.values)
-
-            # Monotonicity check
-            if not (np.all(np.diff(lat_vals) > 0) or np.all(np.diff(lat_vals) < 0)):
-                _logger.debug("Latitude is not monotonically increasing or decreasing.")
-                return False
-            if not (np.all(np.diff(lon_vals) > 0) or np.all(np.diff(lon_vals) < 0)):
-                _logger.debug("Longitude is not monotonically increasing or decreasing.")
-                return False
-
-            # Uniform spacing check for lat (allow tolerance for floating point noise)
-            dlat = np.diff(lat_vals)
-            if not np.allclose(dlat, dlat[0], rtol=1e-5, atol=1e-8):
-                _logger.debug("Latitude spacing is non-uniform.")
-                return False
-
-            # Uniform spacing check for lon
-            dlon = np.diff(lon_vals)
-            if not np.allclose(dlon, dlon[0], rtol=1e-5, atol=1e-8):
-                _logger.debug("Longitude spacing is non-uniform.")
-                return False
-
-            # Optional: verify consistency across a second sample/forecast step
-            sample_idx2 = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
-            fstep_idx2 = (
+            sample_idx = zio.samples[1] if len(zio.samples) > 1 else zio.samples[0]
+            fstep_idx = (
                 zio.forecast_steps[1] if len(zio.forecast_steps) > 1 else zio.forecast_steps[0]
             )
-            if sample_idx2 == sample_idx and fstep_idx2 == fstep_idx:
-                # Only one unique sample/step; assume consistency
-                _logger.debug("Only one sample and one forecast step; using it for grid check.")
-            else:
-                dummy2 = zio.get_data(sample_idx2, stream, fstep_idx2)
-                da2 = dummy2.prediction.as_xarray()
-                lat2 = da2.get("lat").squeeze()
-                lon2 = da2.get("lon").squeeze()
-                if lat2 is None or lon2 is None or lat2.ndim != 1 or lon2.ndim != 1:
-                    _logger.debug("Second sample/step missing lat/lon or not 1D.")
-                    return False
+            dummy1 = zio.get_data(sample_idx, stream, fstep_idx)
 
-                if not (
-                    np.allclose(lat2.values, lat_vals, rtol=1e-5, atol=1e-8)
-                    and np.allclose(lon2.values, lon_vals, rtol=1e-5, atol=1e-8)
-                ):
-                    _logger.debug("Lat/lon grids differ between samples.")
-                    return False
+        da = dummy.prediction.as_xarray()
+        da1 = dummy1.prediction.as_xarray()
 
-            _logger.debug(f"Stream '{stream}' has a regular grid.")
-            return True
-
-        except Exception as e:
-            _logger.debug(f"Exception during regular-spacing validation: {e}")
+        if (
+            da["lat"].shape != da1["lat"].shape
+            or da["lon"].shape != da1["lon"].shape
+            or not (
+                np.allclose(sorted(da["lat"].values), sorted(da1["lat"].values))
+                and np.allclose(sorted(da["lon"].values), sorted(da1["lon"].values))
+            )
+        ):
+            _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
             return False
+
+        _logger.debug("Latitude and longitude coordinates are regularly spaced.")
+        return True
 
 
 ################### Helper functions ########################
@@ -950,36 +891,26 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
     """
     assert len(ref) > 0, "_force_consistent_grids requires at least one input DataArray in 'ref'."
 
-    # Determine the reference sorting using the first sample's lat/lon
-    ref_lat = ref[0]["lat"].values
-    ref_lon = ref[0]["lon"].values
-    sort_idx = np.lexsort((ref_lon, ref_lat))
+    # Pick first sample as reference
+    ref_lat = ref[0].lat
+    ref_lon = ref[0].lon
 
-    # Precompute aligned coordinates for efficiency
-    n_points = len(sort_idx)
-    aligned_lat = ref_lat[sort_idx]
-    aligned_lon = ref_lon[sort_idx]
-    aligned_ipoint = np.arange(n_points)
-
-    # Reorder and align each sample
-    aligned_samples = []
-    for idx, sample in enumerate(ref):
-        # Sort ipoint dimension by reference order
-        sorted_sample = sample.isel(ipoint=sort_idx)
-
-        # Reassign coordinates to enforce consistent ipoint and spatial coord values
-        aligned_sample = sorted_sample.assign_coords(
-            ipoint=aligned_ipoint,
-            lat=("ipoint", aligned_lat),
-            lon=("ipoint", aligned_lon),
+    sort_idx = np.lexsort((ref_lon.values, ref_lat.values))
+    npoints = sort_idx.size
+    aligned = []
+    samples = []
+    for i, a in enumerate(ref):
+        a_sorted = a.isel(ipoint=sort_idx)
+        samples.append(a_sorted.sample.values)
+        a_sorted = a_sorted.assign_coords(
+            ipoint=np.arange(npoints),
+            lat=("ipoint", ref_lat.values[sort_idx]),
+            lon=("ipoint", ref_lon.values[sort_idx]),
         )
 
-        # Ensure 'sample' dimension exists for concat; if missing, expand
-        if "sample" not in aligned_sample.dims:
-            aligned_sample = aligned_sample.expand_dims(sample=[idx])
+        if "sample" not in a_sorted.dims:
+            a_sorted = a_sorted.expand_dims(sample=[i])
 
-        # Explicitly update the sample coordinate
-        aligned_sample = aligned_sample.assign_coords(sample=[idx])
-        aligned_samples.append(aligned_sample)
+        aligned.append(a_sorted)
 
     return aligned  # xr.concat(aligned, dim="sample")
