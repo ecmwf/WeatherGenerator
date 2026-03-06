@@ -6,6 +6,7 @@ import astropy_healpix as hp
 import numpy as np
 import omegaconf
 import torch
+from astropy import units as u
 from numpy.typing import NDArray
 
 from weathergen.datasets.batch import SampleMetaData
@@ -43,6 +44,10 @@ class MaskData:
 
     def get_mask(self, idx: int) -> np.typing.NDArray:
         return self.masks[idx]
+
+    def get_params(self, idx: int) -> dict:
+        """Get the masking parameters for a specific mask."""
+        return self.metadata[idx].params
 
 
 def get_num_samples(config) -> np.typing.NDArray:
@@ -120,6 +125,7 @@ class Masker:
         # number of healpix cells
         self.healpix_level_data = healpix_level
         self.healpix_num_cells = 12 * (4**healpix_level)
+        self._hp_cache = {}
 
         self.stage = stage
 
@@ -340,13 +346,16 @@ class Masker:
                 if is_stream_diagnostic(stream_cfg, self.stage):
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
+                    # Get target metadata for relationships that need geometric info
+                    target_metadata = target_masks.get_params(target_idx)
+
                     source_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
+                        target_metadata=target_metadata,
                     )
-
                 corr = target_idx
                 source_masks.add_mask(
                     source_mask, mask_params, source_cfg, losses, i_source, corr, relationship
@@ -365,6 +374,7 @@ class Masker:
         strategy: str,
         masking_strategy_config: dict,
         target_relationship_mask: (str, np.typing.NDArray),
+        target_metadata: dict | None = None,
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
 
@@ -408,21 +418,184 @@ class Masker:
             mask = target_mask
             return mask, {}
 
+        # handle cone distance relationship
+        elif relationship == "cone_distance":
+            assert target_mask is not None, "relationship 'cone_distance' requires target_mask"
+            assert target_metadata is not None, "relationship 'cone_distance' requires target_metadata"
+
+            # Get cone distance parameter - supports fixed value or random selection
+            center_distance_degrees_random = masking_strategy_config.get(
+                "center_distance_degrees_random", False
+            )
+            if center_distance_degrees_random:
+                # Random selection from range with specified step (default: 0 to 90 in steps of 15)
+                min_dist = masking_strategy_config.get("center_distance_degrees_min", 0)
+                max_dist = masking_strategy_config.get("center_distance_degrees_max", 90)
+                step = masking_strategy_config.get("center_distance_degrees_step", 15)
+                possible_values = list(range(min_dist, max_dist + 1, step))
+                center_distance_degrees = float(self.rng.choice(possible_values))
+            else:
+                center_distance_degrees = masking_strategy_config.get("center_distance_degrees", None)
+                assert center_distance_degrees is not None, (
+                    "relationship 'cone_distance' requires 'center_distance_degrees' or "
+                    "'center_distance_degrees_random: true' in config"
+                )
+
+            # Get teacher center cell from explicit metadata (not instance state)
+            teacher_center_cell = target_metadata.get("center_cell", None)
+            assert teacher_center_cell is not None, (
+                "relationship 'cone_distance' requires 'center_cell' in target_metadata"
+            )
+            # Get teacher's hl_mask level from metadata
+            teacher_hl_mask = target_metadata.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+
+            # Create cone at specified distance from teacher
+            mask, student_center_cell = self._create_cone_distance_mask(
+                num_cells,
+                masking_strategy_config,
+                teacher_center_cell,
+                center_distance_degrees,
+                teacher_hl_mask,
+            )
+            params = {
+                "center_cell": student_center_cell,
+                "hl_mask": masking_strategy_config.get("hl_mask", 0),
+                "rate": masking_strategy_config.get("rate", 0.5),
+            }
+            return mask, params
+
+        # Handle contained_cone relationship (geometry-aware subset)
+        elif relationship == "contained_cone":
+            assert target_mask is not None, "relationship 'contained_cone' requires target_mask"
+            assert target_metadata is not None, "relationship 'contained_cone' requires target_metadata"
+
+            # Get teacher geometry
+            teacher_center_cell = target_metadata.get("center_cell")
+            teacher_rate = target_metadata.get("rate")
+            teacher_hl_mask = target_metadata.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+
+            assert teacher_center_cell is not None, (
+                "relationship 'contained_cone' requires 'center_cell' in target_metadata"
+            )
+            assert teacher_rate is not None, (
+                "relationship 'contained_cone' requires 'rate' in target_metadata"
+            )
+
+            mask, student_center_cell = self._create_contained_cone_mask(
+                num_cells,
+                masking_strategy_config,
+                teacher_center_cell,
+                teacher_rate,
+                teacher_hl_mask,
+            )
+            params = {
+                "center_cell": student_center_cell,
+                "hl_mask": masking_strategy_config.get("hl_mask", 0),
+                "rate": masking_strategy_config.get("rate", 0.5),
+            }
+            return mask, params
+
+        # Handle separated_cone relationship (geometry-aware disjoint)
+        elif relationship == "separated_cone":
+            assert target_mask is not None, "relationship 'separated_cone' requires target_mask"
+            assert target_metadata is not None, "relationship 'separated_cone' requires target_metadata"
+
+            # Get teacher geometry
+            teacher_center_cell = target_metadata.get("center_cell")
+            teacher_rate = target_metadata.get("rate")
+            teacher_hl_mask = target_metadata.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+
+            assert teacher_center_cell is not None, (
+                "relationship 'separated_cone' requires 'center_cell' in target_metadata"
+            )
+            assert teacher_rate is not None, (
+                "relationship 'separated_cone' requires 'rate' in target_metadata"
+            )
+
+            mask, student_center_cell = self._create_separated_cone_mask(
+                num_cells,
+                masking_strategy_config,
+                teacher_center_cell,
+                teacher_rate,
+                teacher_hl_mask,
+            )
+            params = {
+                "center_cell": student_center_cell,
+                "hl_mask": masking_strategy_config.get("hl_mask", 0),
+                "rate": masking_strategy_config.get("rate", 0.5),
+            }
+            return mask, params
+
         # get mask
         mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
 
-        # handle cases where mask needs to be combined with target_mask
-        # without the assert we can fail silently
+        # Handle subset/disjoint with strategy-aware logic
+        # For cropping_healpix with geometry info, use geometry-aware methods to maintain contiguity
         if relationship == "subset":
             assert target_mask is not None, (
-                "relationship: {relationship} incompatible with target_mask None"
+                f"relationship: {relationship} incompatible with target_mask None"
             )
-            mask = mask & target_mask
+            # Check if geometry-aware processing is available
+            if (
+                strategy == "cropping_healpix"
+                and target_metadata is not None
+                and target_metadata.get("center_cell") is not None
+                and target_metadata.get("rate") is not None
+            ):
+                # Use geometry-aware contained_cone for spatial contiguity
+                logger.debug("Using geometry-aware contained_cone for subset with cropping_healpix")
+                teacher_center_cell = target_metadata.get("center_cell")
+                teacher_rate = target_metadata.get("rate")
+                teacher_hl_mask = target_metadata.get(
+                    "hl_mask", masking_strategy_config.get("hl_mask", 0)
+                )
+
+                mask, center_cell = self._create_contained_cone_mask(
+                    num_cells,
+                    masking_strategy_config,
+                    teacher_center_cell,
+                    teacher_rate,
+                    teacher_hl_mask,
+                )
+                params["center_cell"] = center_cell
+                params["hl_mask"] = masking_strategy_config.get("hl_mask", 0)
+                params["rate"] = masking_strategy_config.get("rate", 0.5)
+            else:
+                # Standard boolean AND for non-cropping strategies
+                mask = mask & target_mask
+
         elif relationship == "disjoint":
             assert target_mask is not None, (
-                "relationship: {relationship} incompatible with target_mask None"
+                f"relationship: {relationship} incompatible with target_mask None"
             )
-            mask = mask & (~target_mask)
+            # Check if geometry-aware processing is available
+            if (
+                strategy == "cropping_healpix"
+                and target_metadata is not None
+                and target_metadata.get("center_cell") is not None
+                and target_metadata.get("rate") is not None
+            ):
+                # Use geometry-aware separated_cone for spatial contiguity
+                logger.debug("Using geometry-aware separated_cone for disjoint with cropping_healpix")
+                teacher_center_cell = target_metadata.get("center_cell")
+                teacher_rate = target_metadata.get("rate")
+                teacher_hl_mask = target_metadata.get(
+                    "hl_mask", masking_strategy_config.get("hl_mask", 0)
+                )
+
+                mask, center_cell = self._create_separated_cone_mask(
+                    num_cells,
+                    masking_strategy_config,
+                    teacher_center_cell,
+                    teacher_rate,
+                    teacher_hl_mask,
+                )
+                params["center_cell"] = center_cell
+                params["hl_mask"] = masking_strategy_config.get("hl_mask", 0)
+                params["rate"] = masking_strategy_config.get("rate", 0.5)
+            else:
+                # Standard boolean AND NOT for non-cropping strategies
+                mask = mask & (~target_mask)
 
         return (mask, params)
 
@@ -498,15 +671,43 @@ class Masker:
                 # Spatial selection method
                 method = masking_strategy_config.get("method", "geodesic_disk")
 
-                # Use standard spatial selection
-                mask = self._select_spatially_contiguous_cells(
+                # Compute anchored center cell if configured (for regional dataset focus)
+                anchor_center_cell = None
+                anchor_lat = masking_strategy_config.get("anchor_latitude")
+                anchor_lon = masking_strategy_config.get("anchor_longitude")
+
+                if anchor_lat is not None and anchor_lon is not None:
+                    anchor_lat_rad = np.radians(anchor_lat)
+                    anchor_lon_rad = np.radians(anchor_lon)
+
+                    # Apply jitter around anchor if configured
+                    jitter_deg = masking_strategy_config.get("anchor_jitter_degrees", 0.0)
+                    if jitter_deg > 0:
+                        jitter_distance = self.rng.uniform(0, np.radians(jitter_deg))
+                        jitter_azimuth = self.rng.uniform(0, 2 * np.pi)
+                        anchor_lon_rad, anchor_lat_rad = self._get_destination_latlon(
+                            anchor_lon_rad, anchor_lat_rad, jitter_distance, jitter_azimuth
+                        )
+
+                    hp_obj = self._get_hp_obj(hl_mask)
+                    anchor_center_cell = int(hp_obj.lonlat_to_healpix(
+                        anchor_lon_rad * u.rad, anchor_lat_rad * u.rad
+                    ))
+
+                # Use standard spatial selection - returns (mask, center_cell) tuple
+                mask, center_cell = self._select_spatially_contiguous_cells(
                     healpix_level=hl_mask,
                     num_cells=num_cells,
                     num_cells_to_select=num_parents_to_keep,
                     num_children_per_parent=num_children_per_parent,
-                    center_cell=None,
+                    center_cell=anchor_center_cell,
                     method=method,
                 )
+
+                # Store geometry info for downstream relationships (cone_distance, contained_cone, etc.)
+                masking_params["center_cell"] = center_cell
+                masking_params["hl_mask"] = hl_mask
+                masking_params["rate"] = keep_rate
 
         else:
             raise NotImplementedError(
@@ -525,7 +726,7 @@ class Masker:
         num_children_per_parent: int,
         center_cell: int | None = None,
         method: str = "geodesic_disk",
-    ) -> NDArray:
+    ) -> tuple[NDArray, int]:
         """
         Select spatially contiguous cells on the sphere using neighbor relationships.
 
@@ -543,11 +744,9 @@ class Masker:
                 - "geodesic_disk": Angular distance selection (circular regions)
 
         Returns:
-            Array of selected cell indices forming a spatially contiguous region
-
-        Examples:
-            # Independent crop
-            crop1 = _select_spatially_contiguous_cells(0, 9, method="geodesic_disk")
+            Tuple of (mask, center_cell):
+                - mask: Boolean array where True indicates the cell is kept
+                - center_cell: The HEALPix cell index used as the cone center
         """
 
         num_total_cells = 12 * (4**healpix_level)
@@ -555,9 +754,9 @@ class Masker:
 
         assert num_cells_to_select <= num_total_cells
 
-        # Random starting point. Note we may want overlap here
-        # for now we basically control with chosen masking rates
-        center_cell = self.rng.integers(0, num_total_cells)
+        # Random starting point if not specified
+        if center_cell is None:
+            center_cell = self.rng.integers(0, num_total_cells)
 
         if method == "disk":
             selected = self._select_disk(center_cell, num_cells_to_select, nside)
@@ -580,7 +779,7 @@ class Masker:
         mask = np.zeros(num_cells, dtype=bool)
         mask[child_indices] = True
 
-        return mask
+        return mask, int(center_cell)
 
     # separate functions for the different methods of producing spatially contiguous regions
     def _select_disk(self, center_cell: int, num_cells_to_select: int, nside: int) -> set[int]:
@@ -702,3 +901,386 @@ class Masker:
         num_parents_to_keep = int(np.round(keep_rate * num_parent_cells))
 
         return hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep
+
+    def _get_hp_obj(self, healpix_level: int) -> hp.HEALPix:
+        """
+        Get cached HEALPix object for efficient repeated queries at the same level.
+
+        Creates and caches HEALPix objects to avoid repeated initialization overhead.
+
+        Args:
+            healpix_level: HEALPix resolution level (nside = 2^level)
+
+        Returns:
+            Cached HEALPix object configured for NESTED ordering at the specified level
+
+        Note:
+            Cache is stored in self._hp_cache dictionary, initialized in __init__
+        """
+        if healpix_level not in self._hp_cache:
+            nside = 2**healpix_level
+            self._hp_cache[healpix_level] = hp.HEALPix(nside=nside, order="nested")
+        return self._hp_cache[healpix_level]
+
+    def _get_destination_latlon(
+        self, origin_lon_rad: float, origin_lat_rad: float, distance_rad: float, azimuth_rad: float
+    ) -> tuple[float, float]:
+        """
+        Calculate destination point on sphere using great circle navigation.
+
+        Given a starting point (lon, lat), a distance, and an azimuth (bearing),
+        computes the destination point using spherical trigonometry formulas.
+        This is the mathematical foundation for cone distance masking.
+
+        Args:
+            origin_lon_rad: Origin longitude in radians [-π, π]
+            origin_lat_rad: Origin latitude in radians [-π/2, π/2]
+            distance_rad: Angular distance to travel in radians [0, π]
+            azimuth_rad: Direction of travel in radians [0, 2π]
+                        (0 = north, π/2 = east, π = south, 3π/2 = west)
+
+        Returns:
+            Tuple of (destination_lon_rad, destination_lat_rad):
+                - destination_lon_rad: Destination longitude in radians, normalized to [-π, π]
+                - destination_lat_rad: Destination latitude in radians [-π/2, π/2]
+
+        Mathematical Foundation:
+            Uses the spherical law of cosines for latitude and the spherical
+            law of sines for longitude. See:
+            https://www.movable-type.co.uk/scripts/latlong.html
+        """
+        # Calculate destination latitude using spherical law of cosines
+        dest_lat_rad = np.arcsin(
+            np.sin(origin_lat_rad) * np.cos(distance_rad)
+            + np.cos(origin_lat_rad) * np.sin(distance_rad) * np.cos(azimuth_rad)
+        )
+
+        # Calculate destination longitude using spherical law of sines
+        dest_lon_rad = origin_lon_rad + np.arctan2(
+            np.sin(azimuth_rad) * np.sin(distance_rad) * np.cos(origin_lat_rad),
+            np.cos(distance_rad) - np.sin(origin_lat_rad) * np.sin(dest_lat_rad),
+        )
+
+        # Normalize longitude to [-π, π] range
+        dest_lon_normalized = float(np.arctan2(np.sin(dest_lon_rad), np.cos(dest_lon_rad)))
+
+        return dest_lon_normalized, float(dest_lat_rad)
+
+    def _create_cone_distance_mask(
+        self,
+        num_cells: int,
+        masking_strategy_config: dict,
+        teacher_center_cell: int,
+        center_distance_degrees: float,
+        teacher_hl_mask: int,
+    ) -> tuple[torch.Tensor, int]:
+        """
+        Create student cone at specified angular distance from teacher.
+
+        This creates geometrically controlled overlap where both teacher and student are
+        geodesic disks (spatially contiguous circular regions) and their overlap is determined by:
+        - The radii of the two cones (from their 'rate' configs)
+        - The angular distance between their centers
+
+        Args:
+            num_cells: Total cells at data level (12 * 4^healpix_level_data)
+            masking_strategy_config: Config for student cone, must contain:
+                - 'rate': Fraction of sphere for student cone (e.g., 0.4 = 40%)
+                - 'hl_mask': HEALPix level for cone generation
+                - 'center_azimuth_degrees' (optional): Direction from teacher (0-360°)
+                  If not specified, random direction is chosen
+            teacher_center_cell: HEALPix cell index of teacher cone center (at teacher_hl_mask level)
+            center_distance_degrees: Angular distance between centers (in degrees, 0-180)
+            teacher_hl_mask: HEALPix level of the teacher center cell (can differ from student)
+
+        Returns:
+            Tuple of (student_mask, student_center_cell):
+                - student_mask: Boolean tensor with student cone (geodesic disk)
+                - student_center_cell: HEALPix cell index of student cone center (at hl_mask level)
+
+        Mathematical Details:
+            Area fraction 'rate' maps to angular radius via spherical cap formula:
+            - Spherical cap area = 2πR²(1 - cos(θ)) where R=1 for unit sphere
+            - Total sphere area = 4πR² = 4π
+            - Area fraction = (1 - cos(θ))/2
+            - Solving for θ: radius_rad = arccos(1 - 2*rate)
+        """
+        # Configuration and Setup
+        mask_level = masking_strategy_config.get("hl_mask", 0)
+        cone_area_fraction = masking_strategy_config.get("rate", 0.5)
+        hp_mask = self._get_hp_obj(mask_level)  # Get cached HEALPix object for STUDENT
+
+        # Calculate Student Cone Center Using Spherical Geometry
+        # CRITICAL: Convert teacher center using teacher's hl_mask level, not student's
+        # This allows teacher and student to use different hl_mask levels
+        hp_teacher = self._get_hp_obj(teacher_hl_mask)  # HEALPix object at TEACHER's level
+        teacher_lon, teacher_lat = hp_teacher.healpix_to_lonlat(teacher_center_cell)
+
+        # Determine azimuth (direction from teacher to student)
+        azimuth_degrees = masking_strategy_config.get("center_azimuth_degrees")
+        if azimuth_degrees is None:
+            # Random direction if not specified
+            azimuth_degrees = self.rng.uniform(0, 360)
+        azimuth_rad = np.deg2rad(azimuth_degrees)
+        distance_rad = np.deg2rad(center_distance_degrees)
+
+        # Apply great circle navigation to find student center
+        student_lon_rad, student_lat_rad = self._get_destination_latlon(
+            teacher_lon.to_value(u.rad), teacher_lat.to_value(u.rad), distance_rad, azimuth_rad
+        )
+
+        # Tree-Based Cone Search
+        # Convert area fraction to angular radius using spherical cap formula
+        # Formula: rate = (1 - cos(θ))/2  =>  θ = arccos(1 - 2*rate)
+        cone_radius_rad = np.arccos(1 - 2 * cone_area_fraction)
+
+        # Use tree-based cone search (much faster than computing all distances)
+        selected_parent_cells = hp_mask.cone_search_lonlat(
+            student_lon_rad * u.rad, student_lat_rad * u.rad, radius=cone_radius_rad * u.rad
+        )
+
+        # Get student center cell index
+        student_center_cell = int(
+            hp_mask.lonlat_to_healpix(student_lon_rad * u.rad, student_lat_rad * u.rad)
+        )
+
+        # Efficient Mask Filling Using NESTED Ordering Properties
+        # In NESTED ordering, all children of parent P occupy contiguous indices:
+        # [P * num_children, (P+1) * num_children)
+        # This allows very fast mask filling via slice assignment
+        mask_array = np.zeros(num_cells, dtype=bool)
+        level_diff = self.healpix_level_data - mask_level
+
+        if level_diff > 0:
+            # Multiple data-level cells per mask-level parent
+            num_children_per_parent = 4**level_diff
+            for parent_idx in selected_parent_cells:
+                start_idx = parent_idx * num_children_per_parent
+                end_idx = start_idx + num_children_per_parent
+                mask_array[start_idx:end_idx] = True
+        else:
+            # Same level: direct assignment
+            mask_array[selected_parent_cells] = True
+
+        return torch.from_numpy(mask_array), student_center_cell
+
+    def _create_contained_cone_mask(
+        self,
+        num_cells: int,
+        masking_strategy_config: dict,
+        teacher_center_cell: int,
+        teacher_rate: float,
+        teacher_hl_mask: int,
+    ) -> tuple[torch.Tensor, int]:
+        """
+        Create student cone that is fully contained within teacher cone.
+
+        This ensures the student geodesic disk is a proper subset of the teacher
+        geodesic disk while maintaining spatial contiguity.
+
+        Constraint: student_radius + distance_from_teacher_center <= teacher_radius
+
+        Args:
+            num_cells: Total cells at data level
+            masking_strategy_config: Config for student cone, must contain:
+                - 'rate': Fraction of sphere for student cone
+                - 'hl_mask': HEALPix level for cone generation
+            teacher_center_cell: HEALPix cell index of teacher cone center
+            teacher_rate: Teacher's area fraction (to compute teacher radius)
+            teacher_hl_mask: HEALPix level of teacher center cell
+
+        Returns:
+            Tuple of (student_mask, student_center_cell)
+
+        Mathematical Details:
+            - Teacher radius: theta_T = arccos(1 - 2*teacher_rate)
+            - Student radius: theta_S = arccos(1 - 2*student_rate)
+            - Maximum distance: d_max = theta_T - theta_S
+            - Actual distance: sampled from [0, d_max]
+        """
+        # Get student parameters
+        mask_level = masking_strategy_config.get("hl_mask", 0)
+        student_rate = masking_strategy_config.get("rate", 0.5)
+        hp_mask = self._get_hp_obj(mask_level)
+
+        # Calculate radii using spherical cap formula
+        teacher_radius_rad = np.arccos(1 - 2 * teacher_rate)
+        student_radius_rad = np.arccos(1 - 2 * student_rate)
+
+        # Validate constraint is satisfiable
+        if student_radius_rad >= teacher_radius_rad:
+            raise ValueError(
+                f"contained_cone requires student_rate ({student_rate}) < teacher_rate ({teacher_rate}). "
+                f"Student radius ({np.degrees(student_radius_rad):.1f}deg) >= "
+                f"teacher radius ({np.degrees(teacher_radius_rad):.1f}deg)"
+            )
+
+        # Maximum distance for containment
+        max_distance_rad = teacher_radius_rad - student_radius_rad
+
+        # Sample distance (default: random within valid range)
+        distance_mode = masking_strategy_config.get("contained_distance_mode", "random")
+        if distance_mode == "random":
+            # Uniform in [0, max_distance]
+            distance_rad = self.rng.uniform(0, max_distance_rad)
+        elif distance_mode == "centered":
+            distance_rad = 0.0
+        elif distance_mode == "edge":
+            distance_rad = max_distance_rad
+        else:
+            # Fixed fraction of max
+            distance_fraction = masking_strategy_config.get("contained_distance_fraction", 0.5)
+            distance_rad = distance_fraction * max_distance_rad
+
+        # Get teacher center coordinates
+        hp_teacher = self._get_hp_obj(teacher_hl_mask)
+        teacher_lon, teacher_lat = hp_teacher.healpix_to_lonlat(teacher_center_cell)
+
+        # Random azimuth direction
+        azimuth_rad = self.rng.uniform(0, 2 * np.pi)
+
+        # Compute student center using great circle navigation
+        student_lon_rad, student_lat_rad = self._get_destination_latlon(
+            teacher_lon.to_value(u.rad),
+            teacher_lat.to_value(u.rad),
+            distance_rad,
+            azimuth_rad,
+        )
+
+        # Create student cone using tree-based search
+        selected_parent_cells = hp_mask.cone_search_lonlat(
+            student_lon_rad * u.rad,
+            student_lat_rad * u.rad,
+            radius=student_radius_rad * u.rad,
+        )
+
+        # Get student center cell index
+        student_center_cell = int(
+            hp_mask.lonlat_to_healpix(student_lon_rad * u.rad, student_lat_rad * u.rad)
+        )
+
+        # Build mask using NESTED ordering properties
+        mask_array = np.zeros(num_cells, dtype=bool)
+        level_diff = self.healpix_level_data - mask_level
+
+        if level_diff > 0:
+            num_children_per_parent = 4**level_diff
+            for parent_idx in selected_parent_cells:
+                start_idx = parent_idx * num_children_per_parent
+                end_idx = start_idx + num_children_per_parent
+                mask_array[start_idx:end_idx] = True
+        else:
+            mask_array[selected_parent_cells] = True
+
+        return torch.from_numpy(mask_array), student_center_cell
+
+    def _create_separated_cone_mask(
+        self,
+        num_cells: int,
+        masking_strategy_config: dict,
+        teacher_center_cell: int,
+        teacher_rate: float,
+        teacher_hl_mask: int,
+    ) -> tuple[torch.Tensor, int]:
+        """
+        Create student cone that is fully separated from teacher cone.
+
+        This ensures the student geodesic disk has no overlap with the teacher
+        geodesic disk while maintaining spatial contiguity.
+
+        Constraint: distance_between_centers >= student_radius + teacher_radius
+
+        Args:
+            num_cells: Total cells at data level
+            masking_strategy_config: Config for student cone, must contain:
+                - 'rate': Fraction of sphere for student cone
+                - 'hl_mask': HEALPix level for cone generation
+            teacher_center_cell: HEALPix cell index of teacher cone center
+            teacher_rate: Teacher's area fraction (to compute teacher radius)
+            teacher_hl_mask: HEALPix level of teacher center cell
+
+        Returns:
+            Tuple of (student_mask, student_center_cell)
+
+        Mathematical Details:
+            - Teacher radius: theta_T = arccos(1 - 2*teacher_rate)
+            - Student radius: theta_S = arccos(1 - 2*student_rate)
+            - Minimum distance: d_min = theta_T + theta_S
+            - Maximum distance: pi (opposite side of sphere)
+            - Actual distance: sampled from [d_min, pi]
+        """
+        # Get student parameters
+        mask_level = masking_strategy_config.get("hl_mask", 0)
+        student_rate = masking_strategy_config.get("rate", 0.5)
+        hp_mask = self._get_hp_obj(mask_level)
+
+        # Calculate radii using spherical cap formula
+        teacher_radius_rad = np.arccos(1 - 2 * teacher_rate)
+        student_radius_rad = np.arccos(1 - 2 * student_rate)
+
+        # Minimum distance for separation
+        min_distance_rad = teacher_radius_rad + student_radius_rad
+        max_distance_rad = np.pi  # Opposite side of sphere
+
+        # Validate constraint is satisfiable
+        if min_distance_rad > np.pi:
+            raise ValueError(
+                f"separated_cone requires teacher_rate + student_rate such that cones can fit. "
+                f"Combined radii ({np.degrees(min_distance_rad):.1f}deg) > 180deg"
+            )
+
+        # Sample distance (default: random within valid range)
+        distance_mode = masking_strategy_config.get("separated_distance_mode", "random")
+        if distance_mode == "random":
+            # Uniform in [min_distance, pi]
+            distance_rad = self.rng.uniform(min_distance_rad, max_distance_rad)
+        elif distance_mode == "touching":
+            distance_rad = min_distance_rad
+        elif distance_mode == "opposite":
+            distance_rad = max_distance_rad
+        else:
+            # Fixed fraction between min and max
+            distance_fraction = masking_strategy_config.get("separated_distance_fraction", 0.5)
+            distance_rad = min_distance_rad + distance_fraction * (max_distance_rad - min_distance_rad)
+
+        # Get teacher center coordinates
+        hp_teacher = self._get_hp_obj(teacher_hl_mask)
+        teacher_lon, teacher_lat = hp_teacher.healpix_to_lonlat(teacher_center_cell)
+
+        # Random azimuth direction
+        azimuth_rad = self.rng.uniform(0, 2 * np.pi)
+
+        # Compute student center using great circle navigation
+        student_lon_rad, student_lat_rad = self._get_destination_latlon(
+            teacher_lon.to_value(u.rad),
+            teacher_lat.to_value(u.rad),
+            distance_rad,
+            azimuth_rad,
+        )
+
+        # Create student cone using tree-based search
+        selected_parent_cells = hp_mask.cone_search_lonlat(
+            student_lon_rad * u.rad,
+            student_lat_rad * u.rad,
+            radius=student_radius_rad * u.rad,
+        )
+
+        # Get student center cell index
+        student_center_cell = int(
+            hp_mask.lonlat_to_healpix(student_lon_rad * u.rad, student_lat_rad * u.rad)
+        )
+
+        # Build mask using NESTED ordering properties
+        mask_array = np.zeros(num_cells, dtype=bool)
+        level_diff = self.healpix_level_data - mask_level
+
+        if level_diff > 0:
+            num_children_per_parent = 4**level_diff
+            for parent_idx in selected_parent_cells:
+                start_idx = parent_idx * num_children_per_parent
+                end_idx = start_idx + num_children_per_parent
+                mask_array[start_idx:end_idx] = True
+        else:
+            mask_array[selected_parent_cells] = True
+
+        return torch.from_numpy(mask_array), student_center_cell
