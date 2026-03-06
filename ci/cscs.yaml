@@ -13,11 +13,15 @@ test_job:
 
     PRIVATE_REPO_BRANCH="${PRIVATE_REPO_BRANCH:-main}"
 
+    cd ..
     git clone \
       --branch "$PRIVATE_REPO_BRANCH" \
       https://oauth2:${PRIVATE_REPO_TOKEN}@gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private.git
+    cd -
 
-    cd WeatherGenerator-private
+    ./scripts/actions.sh sync
+    ./scripts/actions.sh create-links
+    ./scripts/actions.sh integration-test-single
   variables:
     SLURM_JOB_NUM_NODES: 1
     WITH_UENV_VIEW: 'modules'
