@@ -83,7 +83,6 @@ class CsvReader(Reader):
         )
         self.samples = [0]
         self.forecast_steps = sorted(self.data["step"].dropna().unique().tolist())
-        self.npoints_per_sample = [0]
         self.epoch = [0]
 
     def get_samples(self) -> set[int]:
@@ -188,8 +187,6 @@ class CsvReader(Reader):
             lead_time=("forecast_step", lead_time_map.loc[da.forecast_step.values].values)
         )
 
-        da.attrs["npoints_per_sample"] = self.npoints_per_sample
-
         da["metric"] = [metric]
 
         return da
@@ -240,7 +237,6 @@ class CsvReader(Reader):
                             "channel": channels,
                             "metric": [metric],
                         },
-                        attrs={"npoints_per_sample": self.npoints_per_sample},
                     )
 
                 local_scores[metric].setdefault(region, {})[stream] = {

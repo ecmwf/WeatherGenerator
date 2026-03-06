@@ -116,11 +116,11 @@ def calc_scores_per_stream(
         samples=samples,
         channels=channels,
         ensemble=ensemble,
-        return_counts=True,
     )
+
     da_preds = output_data.prediction
     da_tars = output_data.target
-
+    fsteps = sorted(list(da_preds.keys()))
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
     for region in regions:
@@ -129,7 +129,7 @@ def calc_scores_per_stream(
 
         _logger.info(
             f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
-            f" and metrics {metrics}..."
+            f" and metrics {list(metrics.keys())}..."
         )
         metric_stream = xr.DataArray(
             np.full(
@@ -145,13 +145,21 @@ def calc_scores_per_stream(
             },
         )
 
-        lead_time_map = {}
+        if "lead_time" in da_preds[fsteps[0]].coords:
+            metric_stream = metric_stream.assign_coords(
+                lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
+            )
+
         # Store metric-specific attributes that get lost during concat
         # Key: (fstep, metric) -> attrs dict
         all_metric_attrs = {}
 
-        for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
-            if preds.ipoint.size == 0:
+        for (fstep, tars), (_, preds) in tqdm(
+            zip(da_tars.items(), da_preds.items(), strict=False),
+            total=len(da_tars),
+            desc=f"Computing scores for {reader.run_id} - stream {stream} and region {region}",
+        ):
+            if preds.sizes.get("ipoint") == 0:
                 _logger.warning(
                     f"No data for stream {stream} at fstep {fstep} in region {region}. Skipping."
                 )
@@ -216,7 +224,6 @@ def calc_scores_per_stream(
 
             combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
             combined_metrics = combined_metrics.compute()
-
             for coord in ["channel", "sample", "ens"]:
                 combined_metrics = scalar_coord_to_dim(combined_metrics, coord)
 
@@ -237,54 +244,46 @@ def calc_scores_per_stream(
                 # Skip coordinates that are already dimensions (no need to restore)
                 if coord_name in combined_metrics.dims or coord_name in metric_stream.dims:
                     continue
-
-                # Only restore coordinates whose dimensions exist in metric_stream
-                # (e.g., skip coords with 'quantile' dim if metric_stream doesn't have it)
-                coord_dims = combined_metrics.coords[coord_name].dims
-                if not all(dim in metric_stream.dims for dim in coord_dims):
-                    _logger.debug(
-                        f"Skipping coordinate '{coord_name}' with incompatible "
-                        f"dimensions {coord_dims} (metric_stream has {metric_stream.dims})"
+                if coord_name == "lead_time":
+                    metric_stream.coords["lead_time"].loc[{"forecast_step": int(fstep)}] = (
+                        combined_metrics.coords["lead_time"]
+                        .values.astype("timedelta64[h]")
+                        .astype(int)
                     )
-                    continue
+                else:
+                    # Only restore coordinates whose dimensions exist in metric_stream
+                    # (e.g., skip coords with 'quantile' dim if metric_stream doesn't have it)
+                    coord_dims = combined_metrics.coords[coord_name].dims
+                    if not all(dim in metric_stream.dims for dim in coord_dims):
+                        _logger.debug(
+                            f"Skipping coordinate '{coord_name}' with incompatible "
+                            f"dimensions {coord_dims} (metric_stream has {metric_stream.dims})"
+                        )
+                        continue
 
-                # Initialize coordinate in metric_stream if it doesn't exist yet
-                if coord_name not in metric_stream.coords:
-                    coord_shape = tuple(len(metric_stream.coords[dim]) for dim in coord_dims)
-                    metric_stream = metric_stream.assign_coords(
-                        {
-                            coord_name: xr.DataArray(
-                                np.full(coord_shape, "", dtype=object),
-                                dims=coord_dims,
-                                coords={dim: metric_stream.coords[dim] for dim in coord_dims},
-                            )
-                        }
-                    )
+                    # Initialize coordinate in metric_stream if it doesn't exist yet
+                    if coord_name not in metric_stream.coords:
+                        coord_shape = tuple(len(metric_stream.coords[dim]) for dim in coord_dims)
+                        metric_stream = metric_stream.assign_coords(
+                            {
+                                coord_name: xr.DataArray(
+                                    np.full(coord_shape, "", dtype=object),
+                                    dims=coord_dims,
+                                    coords={dim: metric_stream.coords[dim] for dim in coord_dims},
+                                )
+                            }
+                        )
 
-                # Build indexers to select the right location in metric_stream
-                indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
-                metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[coord_name]
-
-            lead_time_map[fstep] = (
-                np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
-                if "lead_time" in combined_metrics.coords
-                else None
-            )
+                    # Build indexers to select the right location in metric_stream
+                    indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
+                    metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[
+                        coord_name
+                    ]
 
             if is_regular and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
                 _plot_score_maps_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
-                )
-
-        if all(lead_time_map[f] is not None for f in lead_time_map):
-            lead_time_values = np.array(
-                [lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values]
-            ).squeeze()
-
-            if lead_time_values.shape == metric_stream.forecast_step.shape:
-                metric_stream = metric_stream.assign_coords(
-                    lead_time=("forecast_step", lead_time_values)
                 )
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
