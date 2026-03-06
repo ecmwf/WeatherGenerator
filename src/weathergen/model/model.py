@@ -606,7 +606,7 @@ class Model(torch.nn.Module):
         num_params_q_cells = (
             np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
         )
-        num_params_ae_adapater = get_num_parameters(self.encoder.ae_local_global_engine.ae_adapter)
+        num_params_ae_adapter = get_num_parameters(self.encoder.ae_local_global_engine)
 
         num_params_ae_aggregation = get_num_parameters(
             self.encoder.ae_aggregation_engine.ae_aggregation_blocks
@@ -644,7 +644,7 @@ class Model(torch.nn.Module):
             for si, np in zip(cf.streams, num_params_embed, strict=False)
         ]
         print(f" Local assimilation engine: {num_params_ae_local:,}")
-        print(f" Local-global adapter: {num_params_ae_adapater:,}")
+        print(f" Local-global adapter: {num_params_ae_adapter:,}")
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
