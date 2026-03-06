@@ -342,10 +342,9 @@ class Masker:
                 # target is specified)
                 target_idx += i_sample % target_num_samples[target_cfg_idx].item()
 
-
                 # Get target metadata for relationships that need geometric info
                 target_metadata = target_masks.get_params(target_idx)
-                
+
                 # determine if forcing dataset => mask is empty
                 if is_stream_diagnostic(stream_cfg, self.stage):
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
@@ -425,7 +424,9 @@ class Masker:
         # handle cone distance relationship
         elif relationship == "cone_distance":
             assert target_mask is not None, "relationship 'cone_distance' requires target_mask"
-            assert target_metadata is not None, "relationship 'cone_distance' requires target_metadata"
+            assert target_metadata is not None, (
+                "relationship 'cone_distance' requires target_metadata"
+            )
 
             # Get cone distance parameter - supports fixed value or random selection
             center_distance_degrees_random = masking_strategy_config.get(
@@ -439,7 +440,7 @@ class Masker:
                 possible_values = list(range(min_dist, max_dist + 1, step))
                 center_distance_degrees = float(self.rng.choice(possible_values))
             else:
-                center_distance_degrees = masking_strategy_config.get("center_distance_degrees", None)
+                center_distance_degrees = masking_strategy_config.get("center_distance_degrees")
                 assert center_distance_degrees is not None, (
                     "relationship 'cone_distance' requires 'center_distance_degrees' or "
                     "'center_distance_degrees_random: true' in config"
@@ -451,7 +452,9 @@ class Masker:
                 "relationship 'cone_distance' requires 'center_cell' in target_metadata"
             )
             # Get teacher's hl_mask level from metadata
-            teacher_hl_mask = target_metadata.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+            teacher_hl_mask = target_metadata.get(
+                "hl_mask", masking_strategy_config.get("hl_mask", 0)
+            )
 
             # Create cone at specified distance from teacher
             mask, student_center_cell = self._create_cone_distance_mask(
@@ -471,12 +474,16 @@ class Masker:
         # Handle contained_cone relationship (geometry-aware subset)
         elif relationship == "contained_cone":
             assert target_mask is not None, "relationship 'contained_cone' requires target_mask"
-            assert target_metadata is not None, "relationship 'contained_cone' requires target_metadata"
+            assert target_metadata is not None, (
+                "relationship 'contained_cone' requires target_metadata"
+            )
 
             # Get teacher geometry
             teacher_center_cell = target_metadata.get("center_cell")
             teacher_rate = target_metadata.get("rate")
-            teacher_hl_mask = target_metadata.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+            teacher_hl_mask = target_metadata.get(
+                "hl_mask", masking_strategy_config.get("hl_mask", 0)
+            )
 
             assert teacher_center_cell is not None, (
                 "relationship 'contained_cone' requires 'center_cell' in target_metadata"
@@ -502,12 +509,16 @@ class Masker:
         # Handle separated_cone relationship (geometry-aware disjoint)
         elif relationship == "separated_cone":
             assert target_mask is not None, "relationship 'separated_cone' requires target_mask"
-            assert target_metadata is not None, "relationship 'separated_cone' requires target_metadata"
+            assert target_metadata is not None, (
+                "relationship 'separated_cone' requires target_metadata"
+            )
 
             # Get teacher geometry
             teacher_center_cell = target_metadata.get("center_cell")
             teacher_rate = target_metadata.get("rate")
-            teacher_hl_mask = target_metadata.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+            teacher_hl_mask = target_metadata.get(
+                "hl_mask", masking_strategy_config.get("hl_mask", 0)
+            )
 
             assert teacher_center_cell is not None, (
                 "relationship 'separated_cone' requires 'center_cell' in target_metadata"
@@ -580,7 +591,9 @@ class Masker:
                 and target_metadata.get("rate") is not None
             ):
                 # Use geometry-aware separated_cone for spatial contiguity
-                logger.debug("Using geometry-aware separated_cone for disjoint with cropping_healpix")
+                logger.debug(
+                    "Using geometry-aware separated_cone for disjoint with cropping_healpix"
+                )
                 teacher_center_cell = target_metadata.get("center_cell")
                 teacher_rate = target_metadata.get("rate")
                 teacher_hl_mask = target_metadata.get(
@@ -694,9 +707,9 @@ class Masker:
                         )
 
                     hp_obj = self._get_hp_obj(hl_mask)
-                    anchor_center_cell = int(hp_obj.lonlat_to_healpix(
-                        anchor_lon_rad * u.rad, anchor_lat_rad * u.rad
-                    ))
+                    anchor_center_cell = int(
+                        hp_obj.lonlat_to_healpix(anchor_lon_rad * u.rad, anchor_lat_rad * u.rad)
+                    )
 
                 # Use standard spatial selection - returns (mask, center_cell) tuple
                 mask, center_cell = self._select_spatially_contiguous_cells(
@@ -708,7 +721,8 @@ class Masker:
                     method=method,
                 )
 
-                # Store geometry info for downstream relationships (cone_distance, contained_cone, etc.)
+                # Store geometry info for downstream relationships
+                # (e.g., cone_distance, contained_cone, etc.)
                 masking_params["center_cell"] = center_cell
                 masking_params["hl_mask"] = hl_mask
                 masking_params["rate"] = keep_rate
@@ -993,7 +1007,7 @@ class Masker:
                 - 'hl_mask': HEALPix level for cone generation
                 - 'center_azimuth_degrees' (optional): Direction from teacher (0-360°)
                   If not specified, random direction is chosen
-            teacher_center_cell: HEALPix cell index of teacher cone center (at teacher_hl_mask level)
+            teacher_center_cell: HEALPix cell index of teacher cone center (teacher_hl_mask level)
             center_distance_degrees: Angular distance between centers (in degrees, 0-180)
             teacher_hl_mask: HEALPix level of the teacher center cell (can differ from student)
 
@@ -1114,7 +1128,8 @@ class Masker:
         # Validate constraint is satisfiable
         if student_radius_rad >= teacher_radius_rad:
             raise ValueError(
-                f"contained_cone requires student_rate ({student_rate}) < teacher_rate ({teacher_rate}). "
+                f"contained_cone requires student_rate ({student_rate}) < "
+                f"teacher_rate ({teacher_rate}). "
                 f"Student radius ({np.degrees(student_radius_rad):.1f}deg) >= "
                 f"teacher radius ({np.degrees(teacher_radius_rad):.1f}deg)"
             )
@@ -1245,7 +1260,9 @@ class Masker:
         else:
             # Fixed fraction between min and max
             distance_fraction = masking_strategy_config.get("separated_distance_fraction", 0.5)
-            distance_rad = min_distance_rad + distance_fraction * (max_distance_rad - min_distance_rad)
+            distance_rad = min_distance_rad + distance_fraction * (
+                max_distance_rad - min_distance_rad
+            )
 
         # Get teacher center coordinates
         hp_teacher = self._get_hp_obj(teacher_hl_mask)
