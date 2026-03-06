@@ -16,18 +16,17 @@ and groups variables by similar correlation scale.  The output is a summary
 table plus YAML snippets ready to be used as ``masking_override`` blocks in
 stream config files.
 
-Example usage::
+Example usage:
 
-    python scripts/compute_stream_masking.py \\
+    uv run python packages/science/compute_spatial_autocorrelation.py \\
         --dataset /path/to/data.zarr \\
-        --type anemoi \\
-        --channels z_500 z_850 t_500 t_850 q_700 tp \\
+        --type anemoi \\ or obs, or less supported options below
+        --channels z_500 z_850 t_500 t_850 q_700 tp \\ defaults to all vars
         --n-time-samples 100 \\
         --n-sample-pairs 100000 \\
-        --correlation-multiplier 1.5 \\
-        --healpix-level 5 \\
-        --output masking_config.yml \\
-        --seed 42
+        --correlation-multiplier 0.5 \\
+        
+        then see further optional args below for controlling the output.
 """
 
 from __future__ import annotations
