@@ -29,7 +29,7 @@ class EncoderTeacher(TargetAndAuxModuleBase):
     """Base class for SSL teacher models.
 
     Handles shared logic: SSL loss extraction, target postprocessing, compute loop.
-    Subclasses must implement _forward_teacher().
+    Subclasses must implement forward_teacher().
     """
 
     def __init__(self, teacher_model, training_cfg, **kwargs):
@@ -44,12 +44,12 @@ class EncoderTeacher(TargetAndAuxModuleBase):
         # TODO: support multiple LossLatentSSLStudentTeacher loss terms
         self.postprocess_targets = get_target_postprocessing(losses_cfg[0], training_cfg, **kwargs)
 
-    def _forward_teacher(self, model_params, batch) -> Any:
-        raise NotImplementedError("Subclasses must implement _forward_teacher()")
+    def forward_teacher(self, model_params, batch) -> Any:
+        raise NotImplementedError("Subclasses must implement forward_teacher()")
 
     def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
         with torch.no_grad():
-            outputs = self._forward_teacher(model_params, batch).get_latent_prediction(0)
+            outputs = self.forward_teacher(model_params, batch).get_latent_prediction(0)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
@@ -85,7 +85,7 @@ class EMATeacher(EncoderTeacher):
         self.batch_size = batch_size
         self.reset()
 
-    def _forward_teacher(self, model_params, batch):
+    def forward_teacher(self, model_params, batch):
         return self.ema_model.forward_eval(model_params, batch)
 
     def reset(self, batch_size=None):
@@ -158,7 +158,7 @@ class FrozenTeacher(EncoderTeacher):
 
         return cls(teacher_model, cf.training_config, teacher_model_params)
 
-    def _forward_teacher(self, model_params, batch):
+    def forward_teacher(self, model_params, batch):
         params = (
             self.teacher_model_params if self.teacher_model_params is not None else model_params
         )

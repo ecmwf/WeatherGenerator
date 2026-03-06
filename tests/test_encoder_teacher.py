@@ -35,7 +35,7 @@ from weathergen.train.target_and_aux_ssl_teacher import (  # noqa: E402
     get_target_postprocessing,
 )
 from weathergen.train.teacher_utils import (  # noqa: E402
-    _create_head,
+    _create_teacher_heads,
     load_encoder_from_checkpoint,
     prepare_encoder_teacher,
 )
@@ -333,29 +333,29 @@ class TestLoadEncoderFromCheckpoint:
 class TestCreateHead:
     def test_ibot_mlp(self):
         conf = OmegaConf.create({"out_dim": 32, "num_layers": 2, "hidden_factor": 2})
-        head = _create_head("iBOT", "mlp", 64, conf)
+        head = _create_teacher_heads("iBOT", "mlp", 64, conf)
         assert isinstance(head, LatentPredictionHeadMLP)
         assert head.use_class_token is True
         assert head.use_patch_token is True
 
     def test_dino_mlp(self):
         conf = OmegaConf.create({"out_dim": 32, "num_layers": 2, "hidden_factor": 2})
-        head = _create_head("DINO", "mlp", 64, conf)
+        head = _create_teacher_heads("DINO", "mlp", 64, conf)
         assert isinstance(head, LatentPredictionHeadMLP)
         assert head.use_class_token is True
         assert head.use_patch_token is False
 
     def test_identity_head(self):
-        head = _create_head("iBOT", "identity", 64, {})
+        head = _create_teacher_heads("iBOT", "identity", 64, {})
         assert isinstance(head, LatentPredictionHeadIdentity)
 
     def test_unknown_loss_type(self):
         with pytest.raises(ValueError, match="does not support loss type"):
-            _create_head("UnknownLoss", "mlp", 64, {})
+            _create_teacher_heads("UnknownLoss", "mlp", 64, {})
 
     def test_unknown_head_type(self):
         with pytest.raises(ValueError, match="Unknown latent prediction head type"):
-            _create_head("iBOT", "nonexistent", 64, {})
+            _create_teacher_heads("iBOT", "nonexistent", 64, {})
 
     def test_transformer_requires_cf(self):
         conf = OmegaConf.create(
@@ -369,7 +369,7 @@ class TestCreateHead:
             }
         )
         with pytest.raises(ValueError, match="requires a global config"):
-            _create_head("iBOT", "transformer", 64, conf, cf=None)
+            _create_teacher_heads("iBOT", "transformer", 64, conf, cf=None)
 
 
 # ---------------------------------------------------------------------------
@@ -449,7 +449,7 @@ class TestEncoderTeacher:
         teacher.postprocess_targets = {}
 
         with pytest.raises(NotImplementedError):
-            teacher._forward_teacher(None, None)
+            teacher.forward_teacher(None, None)
 
     def test_update_state_pre_backward_is_noop(self):
         teacher = EncoderTeacher.__new__(EncoderTeacher)
@@ -579,7 +579,7 @@ class TestFrozenTeacher:
         teacher = FrozenTeacher(model, training_cfg, teacher_model_params=teacher_params)
 
         batch = MagicMock()
-        teacher._forward_teacher(MagicMock(), batch)
+        teacher.forward_teacher(MagicMock(), batch)
         model.assert_called_once_with(teacher_params, batch)
 
     def test_forward_teacher_falls_back_to_student_params(self):
@@ -592,7 +592,7 @@ class TestFrozenTeacher:
 
         student_params = MagicMock()
         batch = MagicMock()
-        teacher._forward_teacher(student_params, batch)
+        teacher.forward_teacher(student_params, batch)
         model.assert_called_once_with(student_params, batch)
 
     def test_has_required_methods(self):

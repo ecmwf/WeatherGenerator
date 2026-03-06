@@ -24,7 +24,7 @@ from weathergen.model.engines import (
 logger = logging.getLogger(__name__)
 
 
-def _create_head(name: str, head_type: str, dim_embed: int, loss_conf, cf=None) -> nn.Module:
+def _create_teacher_heads(name: str, head_type: str, dim_embed: int, loss_conf, cf=None) -> nn.Module:
     """Create a latent prediction head for a given SSL loss type.
 
     Mirrors Model._create_latent_pred_head() logic with per-loss-type token settings:
@@ -36,7 +36,7 @@ def _create_head(name: str, head_type: str, dim_embed: int, loss_conf, cf=None) 
     elif name == "DINO":
         use_class_token, use_patch_token = True, False
     else:
-        raise ValueError(f"_create_head does not support loss type {name!r}")
+        raise ValueError(f"_create_teacher_heads does not support loss type {name!r}")
 
     if head_type == "mlp":
         return LatentPredictionHeadMLP(
@@ -54,7 +54,7 @@ def _create_head(name: str, head_type: str, dim_embed: int, loss_conf, cf=None) 
         raise ValueError(f"Unknown latent prediction head type {head_type!r}")
 
 
-def prepare_encoder_teacher(model: nn.Module, training_cfg, teacher_dim_embed: int) -> None:
+def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> None:
     """Strip a model to encoder-only and create fresh SSL latent heads.
 
     Modifies model in-place:
@@ -63,6 +63,7 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, teacher_dim_embed: i
     3. Creates fresh latent_heads based on the student's SSL loss config
     """
     # Strip non-encoder components
+    teacher_dim_embed = override_cfg.ae_global_dim_embed
     model.forecast_engine = None
     model.embed_target_coords = nn.ModuleDict()
     model.target_token_engines = nn.ModuleDict()
@@ -83,7 +84,7 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, teacher_dim_embed: i
                 model.latent_heads[name] = LatentPredictionHeadIdentity()
             elif name in ("iBOT", "DINO"):
                 head_type = conf.get("head", "mlp").lower()
-                model.latent_heads[name] = _create_head(name, head_type, teacher_dim_embed, conf)
+                model.latent_heads[name] = _create_teacher_heads(name, head_type, teacher_dim_embed, conf)
             else:
                 logger.warning(f"Unknown SSL loss type {name!r} in teacher setup, skipping.")
 

@@ -323,7 +323,7 @@ def get_target_aux_calculator(
             cf, target_and_aux_calc_params.get("model_param_overrides", {})
         )
         prepare_encoder_teacher(
-            meta_ema_model, cf.training_config, cf_overridden.ae_global_dim_embed
+            meta_ema_model, cf.training_config, cf_overridden
         )
 
         ema_model = EMAModel(
