@@ -20,4 +20,6 @@ test_job:
     cd WeatherGenerator-private
   variables:
     SLURM_JOB_NUM_NODES: 1
+    WITH_UENV_VIEW: 'modules'
+    SLURM_TIMELIMIT: '00:10:00'
     UV_CACHE_DIR: /capstor/store/cscs/userlab/ch17/uv_cache_shared/
