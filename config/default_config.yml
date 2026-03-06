@@ -91,6 +91,7 @@ freeze_modules: ""
 load_chkpt: {}
 
 norm_type: "LayerNorm"
+qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 

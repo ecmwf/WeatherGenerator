@@ -31,3 +31,9 @@ train:
     dbe4l1u8-stage2:
       slurm_id: 0
       description: "JEPA new L2G engine frozen MTM lr=3.10e-05 mask=0.83"
+    i4e3vxp5:
+      slurm_id: 0
+      description: "IASI, 31 epochs trained forecast model"
+    bf9est8a:
+      slurm_id: 0
+      description: "IASI, 128 epochs trained mtm model"
