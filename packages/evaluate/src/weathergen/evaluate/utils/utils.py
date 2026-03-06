@@ -107,8 +107,8 @@ def calc_scores_per_stream(
     samples = available_data.samples
     channels = available_data.channels
     ensemble = available_data.ensemble
-    is_regular = reader.is_regular(stream)
-    group_by_coord = None if is_regular else "sample"
+    is_gridded_data = reader.is_gridded_data(stream)
+    group_by_coord = None if is_gridded_data else "sample"
 
     output_data = reader.get_data(
         stream,
@@ -280,7 +280,7 @@ def calc_scores_per_stream(
                         coord_name
                     ]
 
-            if is_regular and plot_score_maps:
+            if is_gridded_data and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
                 _plot_score_maps_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep

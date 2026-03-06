@@ -30,7 +30,7 @@ from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
-    WeatherGenJSONReader,
+    WeatherGenJsonReader,
     WeatherGenReader,
     WeatherGenZarrReader,
 )
@@ -171,7 +171,7 @@ def get_reader(
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
     elif reader_type == "json":
-        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
+        reader = WeatherGenJsonReader(run, run_id, private_paths, region, metric)
     elif reader_type == "merge":
         reader = WeatherGenMergeReader(run, run_id, private_paths)
     elif reader_type == "jsonmerge":
