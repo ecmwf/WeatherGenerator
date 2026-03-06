@@ -498,19 +498,44 @@ def main(out_dir: Path, nlat: int = 128):
     # -- Round-trip sanity checks -------------------------------------------
     LOW_FRACS = [0.05, 0.10, 0.20]
 
-    print("\n=== Round-trip check: SHT forward → inverse ===")
+    # 1) Synthetic test: create a band-limited field via iSHT, roundtrip it.
+    #    This should give machine-precision error (~1e-10 for float64).
+    print("\n=== Synthetic round-trip (band-limited field) ===")
+    torch.manual_seed(42)
+    synth_coeffs = torch.randn(1, lmax, mmax, dtype=torch.float64)
+    synth_coeffs = torch.complex(synth_coeffs, torch.randn_like(synth_coeffs))
+    synth_coeffs[:, :, 0] = synth_coeffs[:, :, 0].real  # m=0 must be real
+    # Zero below diagonal (l < m has no meaning)
+    for m in range(mmax):
+        synth_coeffs[:, :m, m] = 0.0
+    synth_field = inverse_sht(synth_coeffs)
+    synth_rt = inverse_sht(forward_sht(synth_field))
+    err_synth = torch.max(torch.abs(synth_field - synth_rt)).item()
+    print(f"  max |iSHT(SHT(synth)) - synth| = {err_synth:.2e}  (expect ~1e-10)")
+
+    # 2) ERA5 field: the truncation error measures how much spectral content
+    #    sits beyond the SHT truncation (artifacts from griddata regridding).
+    print("\n=== ERA5 truncation diagnostic ===")
     f = fields[("t1", "2t")]
     flat = field_to_ring_order(f)
     x = torch.from_numpy(flat).unsqueeze(0).to(torch.float64)
-    x_rt = inverse_sht(forward_sht(x))
-    err_rt = torch.max(torch.abs(x - x_rt)).item()
-    print(f"  max |iSHT(SHT(field)) - field| = {err_rt:.2e}")
+    x_trunc = inverse_sht(forward_sht(x))
+    err_trunc = torch.max(torch.abs(x - x_trunc)).item()
+    print(f"  max |iSHT(SHT(field)) - field| = {err_trunc:.2e}  (truncation error)")
+    # Double round-trip should be near-exact:
+    x_trunc2 = inverse_sht(forward_sht(x_trunc))
+    err_double = torch.max(torch.abs(x_trunc - x_trunc2)).item()
+    print(f"  max |double roundtrip error|    = {err_double:.2e}  (expect ~1e-10)")
 
-    print("\n=== Round-trip check: low + high = original ===")
+    # 3) Split round-trip: low + high must exactly equal the *truncated* field.
+    print("\n=== Split round-trip: low + high = iSHT(SHT(field)) ===")
+    f_trunc = ring_order_to_field(x_trunc.squeeze(0).numpy(), gg["nlat"], gg["nlon"])
     for lf in LOW_FRACS:
         lo, hi = split_freq_sht(f, forward_sht, inverse_sht, lmax, lf)
-        err = np.max(np.abs((lo + hi) - f))
-        print(f"  low_frac={lf}: max |low + high - original| = {err:.2e}")
+        err_vs_trunc = np.max(np.abs((lo + hi) - f_trunc))
+        err_vs_orig = np.max(np.abs((lo + hi) - f))
+        print(f"  low_frac={lf}: |low+high - truncated| = {err_vs_trunc:.2e}  "
+              f"|low+high - original| = {err_vs_orig:.2e}")
 
     # -- Generate plots -----------------------------------------------------
     print("\n=== Generating plots ===")
