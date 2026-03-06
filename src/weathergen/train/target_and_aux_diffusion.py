@@ -11,34 +11,16 @@ from weathergen.train.target_and_aux_module_base import (
 
 
 class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
-    def __init__(self, encoder, is_model_sharded=True):
-        # Todo: make sure this is a frozen clone or forward without gradients in compute()
-        self.encoder = encoder
+    """Computes latent diffusion targets by running the training model's frozen encoder.
 
-        self.is_model_sharded = is_model_sharded
-        # Build a name → param map once
-        self.src_params = dict(self.encoder.named_parameters())
+    No separate encoder copy is maintained. The training model's encoder is assumed to be
+    frozen (via freeze_modules config) and is used directly in compute(). This guarantees
+    that the encoder producing targets is identical to the one in the forward pass and
+    avoids illegal memory access errors from running two independent flash-attention models.
+    """
 
-        self.reset()
-
-    @torch.no_grad()
-    def reset(self):
-        """
-        This function resets the EMAModel to be the same as the Model.
-
-        It operates via the state_dict to be able to deal with sharded tensors in case
-        FSDP2 is used.
-        """
-        self.encoder.to_empty(device="cuda")
-        for p in self.encoder.parameters():
-            p.requires_grad = False
-        maybe_sharded_sd = self.encoder.state_dict()
-        mkeys, ukeys = self.encoder.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
-        self.encoder.eval()
-
-    def update_state_post_opt_step(self, istep, batch, model, **kwargs) -> None:
-        if self.is_model_sharded:
-            self.encoder.reshard()
+    def __init__(self):
+        pass
 
     def compute(
         self,
@@ -53,10 +35,12 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
             batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
         )  # TODO: adjust for multiple streams
 
-        # TODO: check if there are scenarios where the encoder needs to be set to eval
+        # The encoder is frozen (requires_grad=False via freeze_modules), so no_grad is
+        # used only to avoid unnecessary autograd bookkeeping and reduce memory usage.
+        # Unwrap DDP wrapper if present to access the encoder directly.
+        unwrapped = model.module if hasattr(model, "module") else model
         with torch.no_grad():
-            tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
-        # NOTE: must not set to train afterwards unless it was already in train
+            tokens, posteriors = unwrapped.encoder(model_params=model_params, batch=batch)
 
         output_idxs = batch.get_output_idxs()
         assert len(output_idxs) > 0
@@ -64,7 +48,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         target_aux_output = TargetAuxOutput(batch.get_output_len(), output_idxs)
 
         # TODO: currently hard-coding 0
-        target_aux_output.add_latent_target(0, "diffusion_latent", tokens)
+        target_aux_output.add_latent_target(0, "diffusion_latent", tokens.detach().clone())
 
         # TODO: write function in TargetAuxOutput class
         target_aux_output.aux_outputs = {"noise_level_rn": noise_level_rn}
