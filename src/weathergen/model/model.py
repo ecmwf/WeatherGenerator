@@ -19,7 +19,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-
 from weathergen.common.config import Config
 
 from weathergen.datasets.batch import ModelBatch
