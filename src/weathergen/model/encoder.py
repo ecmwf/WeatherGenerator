@@ -121,9 +121,14 @@ class EncoderModule(torch.nn.Module):
             self.embed_engine, batch, model_params.pe_embed, use_reentrant=False
         )
 
-        tokens_global, posteriors = checkpoint(
-            self.assimilate_local, model_params, stream_cell_tokens, batch, use_reentrant=False
-        )
+        ii = torch.arange(len(batch.tokens_lens[0, 0, 0]), device=stream_cell_tokens.device)
+        for i in torch.where(batch.tokens_lens[0, 0, 0] > 1)[0]:
+            ii[i:] += 1
+        tokens_global = stream_cell_tokens[ii].unsqueeze(0) + model_params.pe_global[:, 0]
+        posteriors = None
+        # tokens_global, posteriors = checkpoint(
+        #     self.assimilate_local, model_params, stream_cell_tokens, batch, use_reentrant=False
+        # )
 
         tokens_global = checkpoint(
             self.ae_global_engine,
