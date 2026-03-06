@@ -76,7 +76,7 @@ def init_model_and_shard(
             find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
-            static_graph=cf.get("ddp_static_graph", True)
+            # static_graph=cf.get("ddp_static_graph", True)
         )
 
     elif with_ddp and with_fsdp:
@@ -332,20 +332,8 @@ def get_target_aux_calculator(
         target_aux = PhysicalTargetAndAux(loss_cfg, model)
 
     elif target_and_aux_calc == "DiffusionLatentTargetEncoder":
-        model, _ = init_model_and_shard(
-            cf,
-            dataset,
-            cf.get("load_chkpt", {}).get("run_id", None),
-            cf.get("load_chkpt", {}).get("epoch", -1),
-            "student",
-            device,
-            with_ddp=False,
-            with_fsdp=False,
-            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
-        )
-        target_aux = DiffusionLatentTargetEncoder(
-            model, is_model_sharded=(cf.with_ddp and cf.with_fsdp)
-        )
+        # Uses the training model's frozen encoder directly — no separate model needed.
+        target_aux = DiffusionLatentTargetEncoder()
     elif target_and_aux_calc == "EMATeacher":
         # work around for problems with FSDP2
         assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"

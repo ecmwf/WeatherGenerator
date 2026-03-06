@@ -87,9 +87,9 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x.shape[0], self.num_heads, x.shape[-1] // self.num_heads]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x).reshape(s)
+        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).contiguous()
+        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).contiguous()
+        vs = self.proj_heads_v(x).reshape(s).contiguous()
 
         if self.with_2d_rope:
             if coords is None:
@@ -183,9 +183,9 @@ class MultiSelfAttentionHeadVarlenFlex(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x.shape[0], 1, self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3])
-        vs = self.proj_heads_v(x).reshape(s).permute([1, 2, 0, 3])
+        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3]).contiguous()
+        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([1, 2, 0, 3]).contiguous()
+        vs = self.proj_heads_v(x).reshape(s).permute([1, 2, 0, 3]).contiguous()
 
         outs = self.compiled_flex_attention(qs, ks, vs).transpose(1, 2).squeeze()
 
@@ -275,9 +275,9 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         # project onto heads
         s = [x.shape[0], x.shape[1], self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
-        vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
+        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3]).contiguous()
+        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3]).contiguous()
+        vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3]).contiguous()
 
         if self.with_2d_rope:
             if coords is None:
@@ -360,10 +360,10 @@ class MultiCrossAttentionHeadVarlen(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
-        qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(self.dtype)
+        qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(self.dtype).contiguous()
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
-        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x_kv).reshape(s)
+        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype).contiguous()
+        vs = self.proj_heads_v(x_kv).reshape(s).contiguous()
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
@@ -468,12 +468,12 @@ class MultiCrossAttentionHeadVarlenSlicedQ(torch.nn.Module):
         # ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], self.num_heads, self.dim_head_proj]
         qs = [
-            self.lnorm_q(head_proj(x_q_i).reshape(s)).to(self.dtype)
+            self.lnorm_q(head_proj(x_q_i).reshape(s)).to(self.dtype).contiguous()
             for head_proj, x_q_i in zip(self.proj_heads_q, x_q.transpose(1, 0), strict=False)
         ]
         s = [x_kv.shape[0], self.num_heads, self.dim_head_proj]
-        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x_kv).reshape(s)
+        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype).contiguous()
+        vs = self.proj_heads_v(x_kv).reshape(s).contiguous()
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
@@ -580,9 +580,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [*([x.shape[0], 1] if len(x.shape) == 2 else x.shape[:-1]), self.num_heads, -1]
-        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype)
-        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
-        vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
+        qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).contiguous()
+        ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).contiguous()
+        vs = self.proj_heads_v(x).reshape(s).to(self.dtype).contiguous()
 
         if self.with_2d_rope:
             if coords is None:
@@ -664,10 +664,10 @@ class MultiCrossAttentionHead(torch.nn.Module):
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
         s = [x_q.shape[0], -1, self.num_heads, self.dim_head_proj]
-        qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(self.dtype).transpose(-3, -2)
+        qs = self.lnorm_q(self.proj_heads_q(x_q).reshape(s)).to(self.dtype).transpose(-3, -2).contiguous()
         s = [x_kv.shape[0], -1, self.num_heads, self.dim_head_proj]
-        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype).transpose(-3, -2)
-        vs = self.proj_heads_v(x_kv).reshape(s).transpose(-3, -2)
+        ks = self.lnorm_k(self.proj_heads_k(x_kv).reshape(s)).to(self.dtype).transpose(-3, -2).contiguous()
+        vs = self.proj_heads_v(x_kv).reshape(s).transpose(-3, -2).contiguous()
 
         # correct ordering of tensors with seq dimension second but last is critical
         with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.FLASH_ATTENTION):
