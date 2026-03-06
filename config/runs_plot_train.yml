@@ -1,0 +1,32 @@
+train:
+  plot:
+    a54qtyk1-stage1:
+      slurm_id: 0
+      description: "lr, masking_rate: 3.91e-05, 0.90"
+    am7u9k5y-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 6.12e-05, 0.70"
+    agjjpdnv-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 5.65e-05, 0.52"
+    asdma6ny-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 6.68e-05, 0.68"
+    asm3ktz3-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 1.35e-05, 0.87"
+    abu395wx-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 1.04e-05, 0.80"
+    av26iks4-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 2.81e-05, 0.63"
+    ai0483jb-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 1.89e-05, 0.54"
+    apwh2s8j-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 6.53e-05, 0.74"
+    av1727no-stage1:
+      slurm_id: 0      
+      description: "lr, masking_rate: 1.13e-05, 0.58"
