@@ -100,7 +100,6 @@ class RegionBoundingBox:
             & (lon >= self.lon_min)
             & (lon <= self.lon_max)
         )
-
         return data.sel({data_dim: mask})
 
     @classmethod
