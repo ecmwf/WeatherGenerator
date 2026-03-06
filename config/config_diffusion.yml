@@ -117,7 +117,7 @@ general:
   # local_rank, 
   # with_ddp,
   # data_path_*, 
-  # model_path, 
+  # model_path,
   # run_path, 
   # path_shared_
   
@@ -156,7 +156,7 @@ training_config:
   num_mini_epochs: 150
   samples_per_mini_epoch: 66
   shuffle: True
-
+ 
   start_date: 2012-06-01T00:00
   end_date: 2012-06-01T18:00
 
@@ -164,8 +164,8 @@ training_config:
   time_window_len: 06:00:00
   
   learning_rate_scheduling :
-    lr_start: 1e-6 #5e-5
-    lr_max: 5e-5 #1e-4
+    lr_start: 1e-5 #5e-5
+    lr_max: 1e-4 #1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 64
@@ -207,7 +207,7 @@ training_config:
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       masking_strategy_config: {diffusion_rn: True},
-      num_samples: 3
+      num_samples: 1
       }
     }
 

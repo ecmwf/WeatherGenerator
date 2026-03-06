@@ -97,7 +97,7 @@ def write_output(
         targets_coords_all += [[]]
         targets_times_all += [[]]
         targets_lens += [[]]
-        noise_levels = []  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+        # noise_levels = []  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
         for stream_idx, stream_info in enumerate(cf.streams):
             sname = stream_info["name"]
 
@@ -279,7 +279,8 @@ def write_output(
             channel_dir.mkdir(parents=True, exist_ok=True)
             epoch_tag = f"epoch_{mini_epoch:03d}_{i%3}"
             # Add noise_level_rn to title if present for this stream
-            noise_level = noise_levels[stream_idx]
+            # noise_level = noise_levels[stream_idx]
+            noise_level = None  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
             if noise_level is not None:
                 title = f"{stream_name} - {varname} (fstep {forecast_offset}) | noise_level_rn={noise_level:.4f}"
             else:

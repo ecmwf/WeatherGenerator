@@ -19,7 +19,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         # Build a name → param map once
         self.src_params = dict(self.encoder.named_parameters())
 
-        self.reset()
+        # self.reset()
 
     @torch.no_grad()
     def reset(self):
@@ -29,7 +29,9 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         It operates via the state_dict to be able to deal with sharded tensors in case
         FSDP2 is used.
         """
+        breakpoint()
         self.encoder.to_empty(device="cuda")
+        breakpoint()
         for p in self.encoder.parameters():
             p.requires_grad = False
         maybe_sharded_sd = self.encoder.state_dict()
