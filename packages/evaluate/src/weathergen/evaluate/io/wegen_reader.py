@@ -450,8 +450,6 @@ class WeatherGenZarrReader(WeatherGenReader):
                     if self.is_gridded_data(stream):
                         vt_list = np.unique(target.valid_time.values).tolist()
                         valid_times_fs.append(vt_list)
-                    else:
-                        valid_times_fs.append(fstep)
 
                     da_tars_fs.append(target.persist())
                     da_preds_fs.append(pred.persist())
@@ -462,8 +460,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                     )
                     continue
 
-                # fsteps_final.extend(valid_times_fs)
-                fsteps_final.append(valid_times_fs)
+                fsteps_final.append(valid_times_fs if valid_times_fs else fstep)
 
                 _logger.debug(
                     f"Concatenating targets and predictions for stream {stream}, "
@@ -480,11 +477,15 @@ class WeatherGenZarrReader(WeatherGenReader):
                     da_preds_fs = _force_consistent_grids(da_preds_fs)
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
-                    da_tars_fs = [xr.concat(da_tars_fs, dim="ipoint", coords="minimal")]
-                    da_preds_fs = [xr.concat(da_preds_fs, dim="ipoint", coords="minimal")]
+                    da_tars_fs = xr.concat(
+                        da_tars_fs, dim="ipoint", coords="different", compat="equals"
+                    )
+                    da_preds_fs = xr.concat(
+                        da_preds_fs, dim="ipoint", coords="different", compat="equals"
+                    )
 
-                da_tars.append([da for da in da_tars_fs])
-                da_preds.append([da for da in da_preds_fs])
+                da_tars.append(da_tars_fs)
+                da_preds.append(da_preds_fs)
 
             # Safer than a list
             da_tars_dict, da_preds_dict = {}, {}
@@ -616,9 +617,9 @@ class WeatherGenZarrReader(WeatherGenReader):
         ):
             _logger.debug("Latitude and/or longitude coordinates are not regularly spaced.")
             return False
-
-        _logger.debug("Latitude and longitude coordinates are regularly spaced.")
-        return True
+        else:
+            _logger.debug("Latitude and longitude coordinates are regularly spaced.")
+            return True
 
 
 ################### Helper functions ########################
