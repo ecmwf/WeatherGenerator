@@ -107,7 +107,10 @@ def init_model_and_shard(
 
         for module in model.forecast_engine.fe_blocks.modules():
             if isinstance(module, modules_to_shard):
-                fully_shard(module, **fsdp_kwargs)
+                # reshard_after_forward=False keeps FE parameters unsharded
+                # during the multi-step rollout loop.
+                # Needed for pushforward trick.
+                fully_shard(module, reshard_after_forward=False, **fsdp_kwargs)
 
         for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):
