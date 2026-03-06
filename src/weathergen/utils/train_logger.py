@@ -24,10 +24,9 @@ import torch
 import weathergen.common.config as config
 
 # from weathergen.train.trainer import cfg_keys_to_filter
-from weathergen.train.utils import Stage, cfg_keys_to_filter, flatten_dict, get_active_stage_config
+from weathergen.train.utils import Stage, flatten_dict
 from weathergen.utils.distributed import ddp_average
 from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
-from weathergen.utils.utils import is_stream_forcing
 
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
@@ -155,10 +154,8 @@ class TrainLogger:
         # training
 
         # define cols for training
-        training_cfg = get_active_stage_config(cf.training_config, {}, cfg_keys_to_filter)
-        cols1, cols_train = get_loss_terms_per_stream(cf.streams, training_cfg)
-        cols_train += ["dtime", "samples", "mse", "lr"]
-        cols1 += [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
+        cols_train = ["dtime", "samples", "mse", "lr"]
+        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
         cols1_patterns = ["loss_avg"] + cols_patterns
 
         # read training log data
@@ -200,14 +197,9 @@ class TrainLogger:
 
         log_train_df = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
 
-        # validation
         # define cols for validation
-        validation_cfg = get_active_stage_config(
-            training_cfg, cf.get("validation_config", {}), cfg_keys_to_filter
-        )
-        cols2, cols_val = get_loss_terms_per_stream(cf.streams, validation_cfg)
         cols_val = ["dtime", "samples"]
-        cols2 += [_weathergen_timestamp, "num_samples"]
+        cols2 = [_weathergen_timestamp, "num_samples"]
         cols2_patterns = ["loss_avg"] + cols_patterns
 
         # read validation log data
@@ -330,22 +322,6 @@ def clean_name(s: str) -> str:
              in the same order and capitalization as they appeared in the input.
     """
     return "".join(c for c in s if c.isalnum() or c == "-" or c == "_")
-
-
-def get_loss_terms_per_stream(streams, stage_config):
-    """
-    Extract per stream loss terms
-    """
-    cols, cols_stage = [], []
-    for si in streams:
-        if is_stream_forcing(si):
-            continue
-        for _, loss_config in stage_config.get("losses", {}).items():
-            if loss_config.get("type", "LossPhysical") == "LossPhysical":
-                for lname, _ in loss_config.loss_fcts.items():
-                    cols += [_key_loss(si["name"], lname)]
-                    cols_stage += [_clean_stream_name(si["name"]) + lname]
-    return cols, cols_stage
 
 
 def _clean_stream_name(stream_name: str) -> str:
