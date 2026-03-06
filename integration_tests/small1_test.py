@@ -52,7 +52,7 @@ def test_train(setup, test_run_id):
     main(
         [
             "train",
-            f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml",
+            f"--base-config={WEATHERGEN_HOME}/integration_tests/small1.yml",
             "--run-id",
             test_run_id,
         ]
@@ -84,7 +84,7 @@ def infer(run_id):
             "--run-id",
             run_id,
             "--config",
-            f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
+            f"{WEATHERGEN_HOME}/integration_tests/small1.yml",
         ]
     )
 
@@ -166,7 +166,7 @@ def assert_train_loss_below_threshold(run_id):
     assert loss_metric is not None, f"'{loss_avg_name}' metric is missing in metrics file"
     # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
-    target = 0.5
+    target = 0.25
     assert loss_metric < target, (
         f"'{loss_avg_name}' is {loss_metric}, expected to be below {target}"
     )
@@ -187,4 +187,4 @@ def assert_val_loss_below_threshold(run_id):
     assert loss_metric is not None, f"'{loss_avg_name}' metric is missing in metrics file"
     # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 0.5, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.5"
+    assert loss_metric < 0.2, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.2"
