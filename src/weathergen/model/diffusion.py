@@ -100,7 +100,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
 
         # Compute sigma (noise level) from eta and create noise tensor
-        
+
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
 

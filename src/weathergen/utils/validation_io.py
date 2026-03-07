@@ -72,7 +72,7 @@ def write_output(
     """
     # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
     global i
-    
+
     # TODO: how to handle multiple physical loss terms
     outputs_physical = [
         loss_name
@@ -277,15 +277,17 @@ def write_output(
             data = da.sel(channel=varname).dropna(dim="ipoint")
             channel_dir = base_plot_dir / varname
             channel_dir.mkdir(parents=True, exist_ok=True)
-            epoch_tag = f"epoch_{mini_epoch:03d}_{i%3}"
+            epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}"
             # Add noise_level_rn to title if present for this stream
             # noise_level = noise_levels[stream_idx]
-            noise_level = None  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+            noise_level = (
+                None  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+            )
             if noise_level is not None:
                 title = f"{stream_name} - {varname} (fstep {forecast_offset}) | noise_level_rn={noise_level:.4f}"
             else:
                 title = f"{stream_name} - {varname} (fstep {forecast_offset})"
-            
+
             plot_name = plotter.scatter_plot(
                 data,
                 channel_dir,

@@ -4,13 +4,11 @@ import torch
 
 from weathergen.datasets.batch import ModelBatch
 from weathergen.model.model import ModelParams
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights, set_to_eval
 from weathergen.train.target_and_aux_module_base import (
     TargetAndAuxModuleBase,
     TargetAuxOutput,
 )
-
-from weathergen.model.utils import apply_fct_to_blocks, freeze_weights, set_to_eval
-
 
 
 class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
@@ -35,7 +33,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         It operates via the state_dict to be able to deal with sharded tensors in case
         FSDP2 is used.
         """
-        #TODO: This needs fixing, might need to use apply_fct_to_blocks as in init()
+        # TODO: This needs fixing, might need to use apply_fct_to_blocks as in init()
 
         self.encoder.to_empty(device="cuda")
         for p in self.encoder.parameters():
@@ -63,7 +61,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
 
         # TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():
-            self.encoder.encoder.eval() #NOTE: might be redundant
+            self.encoder.encoder.eval()  # NOTE: might be redundant
             tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
         # NOTE: must not set to train afterwards unless it was already in train
 
