@@ -58,7 +58,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
         self.cur_token = None  # TODO: re move after single sample experiments
-        self.cur_n = None  # TODO: re move after single sample experiments
 
     def forward(
         self,
@@ -101,16 +100,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
 
         # Compute sigma (noise level) from eta and create noise tensor
-
         
         sigma = (eta * self.p_std + self.p_mean).exp()
-
-        #TODO: remove wrapper after single sample experiments
-        if self.cur_n is None:
-            n = torch.zeros_like(y)
-            self.cur_n = n
-        else:
-            n = self.cur_n
+        n = torch.randn_like(y) * sigma
 
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
@@ -131,10 +123,6 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
-        
-        #TODO: remove after debugging
-        c_skip = 1.0
-        c_out = 0.0
 
         return c_skip * x + c_out * self.net(
             c_in * x, fstep=fstep, noise_emb=noise_emb

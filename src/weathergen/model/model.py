@@ -651,7 +651,7 @@ class Model(torch.nn.Module):
         t_mean = tokens.mean()
         t_std = tokens.std()
         tokens = (tokens - t_mean) / (t_std + 1e-6)
-        tokens = torch.clamp(tokens, -5.0, 5.0)
+        tokens = torch.clamp(tokens, -100.0, 100.0)
 
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
