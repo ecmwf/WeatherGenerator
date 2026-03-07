@@ -26,6 +26,7 @@ from weathergen.model.blocks import CrossAttentionBlock, OriginalPredictionBlock
 from weathergen.model.embeddings import (
     StreamEmbedLinear,
     StreamEmbedTransformer,
+    StreamEmbedTransformerVarlen,
 )
 from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
@@ -75,6 +76,17 @@ class EmbeddingEngine(torch.nn.Module):
                     self.cf.ae_local_dim_embed,
                     stream_name=stream_name,
                 )
+            elif si["embed"]["net"] == "transformer_varlen":
+                self.embeds[stream_name] = StreamEmbedTransformerVarlen(
+                    stream_name=stream_name,
+                    token_size=si["token_size"],
+                    num_channels=self.sources_size[i],
+                    dim_embed=si["embed"]["dim_embed"],
+                    dim_out=self.cf.ae_local_dim_embed,
+                    num_blocks=si["embed"]["num_blocks"],
+                    num_heads=si["embed"]["num_heads"],
+                    dropout_rate=self.cf.embed_dropout_rate,
+                )
             else:
                 raise ValueError("Unsupported embedding network type")
 
@@ -90,18 +102,20 @@ class EmbeddingEngine(torch.nn.Module):
         x_embeds = []
         for stream_name in self.stream_names:
             # collect all source tokens from all input_steps and all samples in the batch
-            sdata = []
+            sdata, sdata_lens = [], []
             for istep in range(num_steps_input):
                 for sample in batch.get_samples():
                     sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
+                    sdata_lens += [sample.streams_data[stream_name].source_tokens_cells_lens[istep]]
 
             sdata = torch.cat(sdata).to(tokens_all.dtype)
+            sdata_lens = torch.cat(sdata_lens)
             # skip empty stream
             if sdata.numel() == 0:
                 continue
 
             # embedding from physical space to per patch latent representation
-            x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
+            x_embeds += [self.embeds[stream_name](sdata, sdata_lens).flatten(0, 1)]
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 

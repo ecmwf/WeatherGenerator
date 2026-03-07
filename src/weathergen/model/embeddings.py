@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from weathergen.model.attention import MultiSelfAttentionHead
+from weathergen.model.attention import MultiSelfAttentionHead, MultiSelfAttentionHeadVarlen
 from weathergen.model.layers import MLP
 
 # from weathergen.model.mlp import MLP
@@ -202,3 +202,91 @@ class StreamEmbedLinear(torch.nn.Module):
         x = checkpoint(self.layer, x.flatten(-2, -1), use_reentrant=False).unsqueeze(0)
 
         return x
+
+
+class StreamEmbedTransformerVarlen(torch.nn.Module):
+    def __init__(
+        self,
+        stream_name,
+        token_size,
+        num_channels,
+        dim_embed,
+        dim_out,
+        num_blocks,
+        num_heads,
+        dropout_rate=0.0,
+    ):
+        """Constructor
+
+        unembed_mode : { 'full' , 'block'}
+          full : monolithic (and correspondingly large) unembedding network that maps from
+                 (num_tokens x dim_embed) to dim_out, allowing for mixing between channels/columns
+          block : per-channel/column unembedding network
+                (which is hence a block-sparse form of full)
+        """
+
+        super(StreamEmbedTransformerVarlen, self).__init__()
+
+        self.name = f"StreamEmbedder_{stream_name}"
+        self.num_channels = num_channels
+        self.dim_embed = dim_embed
+        self.dim_out = dim_out
+        self.num_blocks = num_blocks
+        self.num_heads = num_heads
+
+        self.dim_in = num_channels
+
+        self.layers = torch.nn.ModuleList()
+        for _ in range(self.num_blocks):
+            self.layers.append(
+                MultiSelfAttentionHeadVarlen(
+                    self.dim_embed,
+                    self.num_heads,
+                    dropout_rate=dropout_rate,
+                    with_qk_lnorm=True,
+                    with_flash=True,
+                )
+            )
+            self.layers.append(
+                MLP(
+                    self.dim_embed,
+                    self.dim_embed,
+                    hidden_factor=2,
+                    dropout_rate=dropout_rate,
+                    with_residual=True,
+                )
+            )
+
+        self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
+
+        # padding needed if the unembedded columns cannot be concatenated to dim_out (e.g GPSRO)
+        self.pad = self.dim_out % token_size
+        self.out_pad = torch.nn.Parameter(torch.zeros(self.pad), requires_grad=False)
+        self.unembed = torch.nn.Linear(self.dim_embed, (self.dim_out // token_size))
+        self.ln_final = torch.nn.LayerNorm(dim_out, eps=1e-6)
+
+        # TODO: factorization when sqrt is not int
+        dim1 = int(np.sqrt(dim_out))
+        assert dim1 * dim1 == dim_out
+        self.unembed1 = torch.nn.Linear(self.dim_embed, dim1)
+        self.unembed_nonlin = torch.nn.GELU()
+        self.unembed2 = torch.nn.Linear(token_size, dim1)
+
+        self.dropout_final = torch.nn.Dropout(0.1)
+
+    def forward(self, x_in, tokens_lens):
+        # embed provided input data
+        x = positional_encoding_harmonic(self.embed(x_in))
+
+        for layer in self.layers:
+            x = layer(x, tokens_lens)
+
+        out = self.unembed1(x)
+        out = self.unembed_nonlin(out)
+        out = self.unembed2(out.transpose(-2, -1))
+        out = out.flatten(-2, -1).unsqueeze(1)
+
+        # final normalize and dropout
+        out = self.dropout_final(self.ln_final(out))
+
+        return out.to(torch.float16)

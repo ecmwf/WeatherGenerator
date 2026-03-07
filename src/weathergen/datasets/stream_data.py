@@ -101,6 +101,7 @@ class StreamData:
 
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
+        self.source_tokens_cells_lens = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = [
             torch.tensor([], dtype=torch.int32) for _ in range(self.input_steps)
@@ -124,6 +125,7 @@ class StreamData:
 
         # Pin source tensors
         self.source_tokens_cells = _pin_tensor_list(self.source_tokens_cells)
+        self.source_tokens_cells_lens = _pin_tensor_list(self.source_tokens_cells_lens)
         self.source_tokens_lens = _pin_tensor_list(self.source_tokens_lens)
         self.source_idxs_embed = _pin_tensor_list(self.source_idxs_embed)
         self.source_idxs_embed_pe = _pin_tensor_list(self.source_idxs_embed_pe)
@@ -161,6 +163,9 @@ class StreamData:
                 s.to(dv, non_blocking=True) for s in self.source_tokens_cells
             ]
             self.source_tokens_lens = [s.to(dv, non_blocking=True) for s in self.source_tokens_lens]
+            self.source_tokens_cells_lens = [
+                s.to(dv, non_blocking=True) for s in self.source_tokens_cells_lens
+            ]
 
             self.source_idxs_embed = [s.to(dv, non_blocking=True) for s in self.source_idxs_embed]
             self.source_idxs_embed_pe = [
@@ -191,7 +196,8 @@ class StreamData:
 
         self.source_raw[step] = ss_raw
         self.source_tokens_lens[step] = ss_lens
-        self.source_tokens_cells[step] = torch.stack(ss_cells)
+        self.source_tokens_cells_lens[step] = torch.tensor([len(sc) for sc in ss_cells])
+        self.source_tokens_cells[step] = torch.cat(ss_cells)
 
         idx = torch.isnan(self.source_tokens_cells[step])
         self.source_tokens_cells[step][idx] = self.mask_value

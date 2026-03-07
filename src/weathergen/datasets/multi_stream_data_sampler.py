@@ -667,7 +667,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
-            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
+            input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, False)
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
             for sidx, source_mask in enumerate(source_masks.masks):
