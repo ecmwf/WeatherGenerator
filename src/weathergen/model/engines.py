@@ -79,7 +79,6 @@ class EmbeddingEngine(torch.nn.Module):
             elif si["embed"]["net"] == "transformer_varlen":
                 self.embeds[stream_name] = StreamEmbedTransformerVarlen(
                     stream_name=stream_name,
-                    token_size=si["token_size"],
                     num_channels=self.sources_size[i],
                     dim_embed=si["embed"]["dim_embed"],
                     dim_out=self.cf.ae_local_dim_embed,

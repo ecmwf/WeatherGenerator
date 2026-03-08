@@ -14,7 +14,7 @@ import torch
 
 
 ####################################################################################################
-def positional_encoding_harmonic(x):
+def positional_encoding_harmonic(x, max_len=10000):
     """space time harmonic positional encoding"""
 
     dim_embed = x.shape[-1]
@@ -25,7 +25,7 @@ def positional_encoding_harmonic(x):
     pe = torch.zeros(len_token_seq, dim_embed, device=dev, dtype=dtype)
     position = torch.arange(0, len_token_seq, device=dev, dtype=dtype).unsqueeze(1)
     div = torch.exp(
-        torch.arange(0, dim_embed, 2, device=dev, dtype=dtype) * -(math.log(10000) / dim_embed)
+        torch.arange(0, dim_embed, 2, device=dev, dtype=dtype) * -(math.log(max_len) / dim_embed)
     )
 
     pe[:, 0::2] = torch.sin(position * div[: pe[:, 0::2].shape[1]])

@@ -208,7 +208,6 @@ class StreamEmbedTransformerVarlen(torch.nn.Module):
     def __init__(
         self,
         stream_name,
-        token_size,
         num_channels,
         dim_embed,
         dim_out,
@@ -257,36 +256,52 @@ class StreamEmbedTransformerVarlen(torch.nn.Module):
                 )
             )
 
-        self.embed = torch.nn.Linear(self.dim_in, self.dim_embed)
+        self.embed = torch.nn.Linear(self.num_channels, self.dim_embed)
 
-        # padding needed if the unembedded columns cannot be concatenated to dim_out (e.g GPSRO)
-        self.pad = self.dim_out % token_size
-        self.out_pad = torch.nn.Parameter(torch.zeros(self.pad), requires_grad=False)
-        self.unembed = torch.nn.Linear(self.dim_embed, (self.dim_out // token_size))
+        self.unembed = torch.nn.Linear(self.dim_embed, self.dim_out)
         self.ln_final = torch.nn.LayerNorm(dim_out, eps=1e-6)
-
-        # TODO: factorization when sqrt is not int
-        dim1 = int(np.sqrt(dim_out))
-        assert dim1 * dim1 == dim_out
-        self.unembed1 = torch.nn.Linear(self.dim_embed, dim1)
-        self.unembed_nonlin = torch.nn.GELU()
-        self.unembed2 = torch.nn.Linear(token_size, dim1)
-
         self.dropout_final = torch.nn.Dropout(0.1)
 
+        # self.lin_layer = torch.nn.Linear( 8 * num_channels, self.dim_out)
+        self.lin_layer = torch.nn.Linear(8 * self.dim_embed, self.dim_out)
+
     def forward(self, x_in, tokens_lens):
+        # import code; code.interact(local=dict(globals(), **locals()))
+
+        peh = positional_encoding_harmonic
+        # sizes = [torch.tensor([0], device=tokens_lens.device), torch.cumsum( tokens_lens, axis=0)]
+
+        # import code; code.interact(local=dict(globals(), **locals()))
+
+        x_tokens = torch.split(x_in, list(tokens_lens))
+        x = torch.cat([peh(tok, max_len=10) for tok in x_tokens])
+        # # def f(x): return positional_encoding_harmonic(x)
+        # # compiled_f = torch.compile(f, fullgraph=True)
+        # # x = torch.nested.nested_tensor_from_jagged( x_in, torch.cat( sizes))
+        # # x = compiled_f(x)
+
         # embed provided input data
-        x = positional_encoding_harmonic(self.embed(x_in))
+        x = checkpoint(self.embed, x, use_reentrant=False)
 
         for layer in self.layers:
             x = layer(x, tokens_lens)
 
-        out = self.unembed1(x)
-        out = self.unembed_nonlin(out)
-        out = self.unembed2(out.transpose(-2, -1))
-        out = out.flatten(-2, -1).unsqueeze(1)
+        # # unembed by summing
+        # x_tokens = torch.split( x, list(tokens_lens))
+        # x = torch.stack( [x[0] for tok in x_tokens], dim=0)
+        # out = torch.stack( [tok.sum(0) for tok in x_tokens], dim=0).unsqueeze(0)
+        # x = torch.nested.nested_tensor( torch.split( x, list(tokens_lens)), layout=torch.jagged)
+        # x = torch.nested.nested_tensor_from_jagged( x_in, torch.cat( sizes))
+        # x = x.sum(1)
 
-        # final normalize and dropout
-        out = self.dropout_final(self.ln_final(out))
+        # out = checkpoint(self.unembed, x, use_reentrant=False).unsqueeze(0)
+        # # out = self.dropout_final( self.ln_final( x))
 
-        return out.to(torch.float16)
+        # import code; code.interact(local=dict(globals(), **locals()))
+
+        x = torch.split(x, list(tokens_lens))
+        pad = torch.nn.functional.pad
+        x = torch.stack([pad(tok, (0, 0, 0, 8 - tok.shape[0]), value=0) for tok in x])
+        out = checkpoint(self.lin_layer, x.flatten(-2, -1), use_reentrant=False).unsqueeze(0)
+
+        return out.to(torch.bfloat16)
