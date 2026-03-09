@@ -633,7 +633,7 @@ def plot_train(args=None):
         help="List of channels to plot",
     )
     parser.add_argument(
-        "--forecast_steps",
+        "--forecast-steps",
         dest="forecast_steps",
         default=[0, 1],
         type=int,
