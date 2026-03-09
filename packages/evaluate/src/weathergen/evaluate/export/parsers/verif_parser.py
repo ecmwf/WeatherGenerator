@@ -112,7 +112,6 @@ class VerifParser(CfParser):
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
-
             vars_to_merge = {verif_var: None for verif_var in self.mapping.keys()}
 
             for verif_var in self.mapping.keys():
@@ -313,13 +312,21 @@ class VerifParser(CfParser):
             _logger.info(f"{wg_var} not available in WeatherGenerator output: {e}")
             return
         # set coords
+        # TODO: tidy this up
         new_coords = {
-            "time": np.atleast_1d(ds_var.coords["time"].values),
-            "location": self.obs.location.values,
-            "leadtime": ds_var.coords["leadtime"].values.astype("float32"),
+            "time": (["time"], np.atleast_1d(ds_var.coords["time"].values), ds_var["time"].attrs),
+            "location": (
+                ["location"],
+                self.obs.location.values,
+                {"long_name": "Norwegian station ID"},
+            ),
+            "leadtime": (
+                ["leadtime"],
+                ds_var.coords["leadtime"].values.astype("float32"),
+                ds_var["leadtime"].attrs,
+            ),
         }
-
-        # set attrs
+        # set variable attrs
         attrs = ds_var.attrs.copy()
         with contextlib.suppress(KeyError):
             del attrs["ncells"]  #
@@ -434,7 +441,6 @@ class VerifParser(CfParser):
         """
         variables = self._attrs_gaussian_grid(ds)
         dataset = xr.merge(variables.values(), compat="no_conflicts")
-        dataset.attrs = ds.attrs
         return dataset
 
     def add_encoding(self, ds: xr.Dataset) -> xr.Dataset:
@@ -450,8 +456,8 @@ class VerifParser(CfParser):
             xarray Dataset with time encoding added.
         """
         time_encoding = {
-            "units": "hours since 1970-01-01 00:00:00",
-            "calendar": "gregorian",
+            "units": "seconds since 1970-01-01 00:00:00",
+            "calendar": "proleptic_gregorian",
         }
 
         if "time" in ds.coords:
@@ -485,7 +491,7 @@ class VerifParser(CfParser):
         ds.attrs["history"] = "Created using the verif_parser on " + np.datetime_as_string(
             np.datetime64("now"), unit="s"
         )
-        ds.attrs["Conventions"] = "verif_1.0.0"
+        ds.attrs["conventions"] = "verif_1.0.0"
 
         return ds
 
@@ -556,17 +562,16 @@ class VerifParser(CfParser):
         ds_attrs = {}
 
         for dim_name, meta in dim_cfg.items():
-            wg_name = meta.get("verif", dim_name)
-            if dim_name in ds.dims and dim_name != wg_name:
-                ds = ds.rename_dims({dim_name: wg_name})
+            verif_name = meta.get("verif", dim_name)
+            if dim_name in ds.dims and dim_name != verif_name:
+                ds = ds.rename_dims({dim_name: verif_name})
 
-            dim_attrs = {"standard_name": meta.get("std", wg_name)}
+            dim_attrs = {"standard_name": meta.get("std", verif_name)}
             if meta.get("verif_unit"):
                 dim_attrs["units"] = meta["verif_unit"]
             if meta.get("long"):
                 dim_attrs["long_name"] = meta["long"]
-            ds_attrs[wg_name] = dim_attrs
-
+            ds_attrs[verif_name] = dim_attrs
         return ds, ds_attrs
 
     def _build_coordinate_mapping(
@@ -600,7 +605,7 @@ class VerifParser(CfParser):
 
     def merge(self, ds, obs_ds):
         lat, lon, alt = get_obs_coordinates(self.obs)
-        merged = xr.merge([ds, obs_ds, lat, lon, alt])
+        merged = xr.merge([ds, obs_ds, lat, lon, alt], compat="minimal")
         return merged
 
     def save(self, list_samples: list) -> None:
@@ -621,7 +626,7 @@ class VerifParser(CfParser):
             if all(v is None for v in var_list):
                 _logger.warning(f"No data to save for variable {verif_var}. Skipping.")
                 continue
-            ds = xr.concat(var_list, data_vars="all", dim="time")
+            ds = xr.concat(var_list, data_vars="all", dim="location")
             out_fname = self.get_output_filename(verif_var)
             _logger.info(f"Saving to {out_fname}.")
             ds.to_netcdf(out_fname)
