@@ -21,6 +21,7 @@ import torch.nn as nn
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -35,8 +36,9 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
+from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import get_dtype, is_stream_forcing
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +91,7 @@ class ModelParams(torch.nn.Module):
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
+        self.batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
 
         ### POSITIONAL EMBEDDINGS ###
         len_token_seq = 1024
@@ -103,6 +106,34 @@ class ModelParams(torch.nn.Module):
             dtype=self.dtype,
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
+
+        ### ROPE COORDS ###
+        self.rope_2D = cf.get("rope_2D", False)
+        if self.rope_2D:
+            self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
+            total_tokens = (
+                self.num_healpix_cells + self.num_extra_tokens
+            ) * cf.ae_local_num_queries
+            self.register_buffer(
+                "rope_coords",
+                torch.zeros(
+                    1,
+                    total_tokens,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+            self.register_buffer(
+                "rope_cell_coords",
+                torch.zeros(
+                    self.num_healpix_cells,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+        else:
+            self.rope_coords = None
+            self.rope_cell_coords = None
 
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
@@ -161,6 +192,24 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
+
+        if self.rope_2D:
+            # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
+            # Shape: (num_healpix_cells, ae_local_num_queries, 2)
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            # Per-cell coords for QueryAggregationEngine (no query expansion)
+            self.rope_cell_coords.data.copy_(coords)
+            coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0)
+            offset = self.num_extra_tokens * cf.ae_local_num_queries
+            self.rope_coords.data.fill_(0.0)
+            self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
+
+        # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
+        # provides per-cell token identity which is critical for masked cells that have no
+        # content from local assimilation. Without it, masked cells are identical and the
+        # teacher representation (evaluated without dropout) collapses to low rank.
         self.pe_global.data.fill_(0.0)
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
         self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
@@ -347,10 +396,7 @@ class Model(torch.nn.Module):
                 stream_name = self.stream_names[i_stream]
 
                 # skip decoder if channels are empty
-                if (
-                    len(si.get("train_target_channels", [])) == 0
-                    and len(si.get("val_target_channels", [])) == 0
-                ):
+                if is_stream_forcing(si):
                     continue
 
                 # extract and setup relevant parameters
@@ -502,7 +548,12 @@ class Model(torch.nn.Module):
             self.encoder.ae_aggregation_engine.ae_aggregation_blocks
         )
 
-        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
+        num_params_latent_heads = get_num_parameters(self.latent_heads)
+        num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
+
+        num_params_fe = (
+            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
+        )
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
@@ -533,6 +584,7 @@ class Model(torch.nn.Module):
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
+        print(f" Latent prediction heads and pre-norm: {num_params_latent_heads:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
@@ -585,7 +637,7 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step)
+                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
