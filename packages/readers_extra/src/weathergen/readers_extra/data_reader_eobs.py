@@ -55,8 +55,12 @@ class DataReaderEObs(DataReaderTimestep):
         self.n_lon: int = 0
         self.n_points: int = 0
 
+        # debug
+        self.log_debug = True
+
         # Set empty defaults so the object is always in a valid state
         self.init_empty()
+        self._lazy_init()
 
     # ------------------------------------------------------------------
     # Lazy initialisation
@@ -80,7 +84,13 @@ class DataReaderEObs(DataReaderTimestep):
             return  # leave in empty state
 
         # ---- Time axis -------------------------------------------------------
-        time_coord: NDArray = ds.coords["time"].values
+
+        try:
+            time_coord: NDArray = ds.coords["time"].values
+        except KeyError:
+            _logger.warning(f"Dataset for '{self._stream_info['name']}' does not contain 'time' coordinate; switch to 'time_centered'.")
+            time_coord: NDArray = ds.coords["time_centered"].values
+
         data_start_time = np.datetime64(time_coord[0])
         data_end_time = np.datetime64(time_coord[-1])
 
@@ -112,8 +122,13 @@ class DataReaderEObs(DataReaderTimestep):
         self.period = period
 
         # ---- Spatial grid ----------------------------------------------------
-        self.latitudes = ds.coords["latitude"].values.astype(np.float32)
-        self.longitudes = ds.coords["longitude"].values.astype(np.float32)
+        try:
+            self.latitudes = ds.coords["latitude"].values.astype(np.float32)
+            self.longitudes = ds.coords["longitude"].values.astype(np.float32)
+        except KeyError:
+            _logger.warning(f"Dataset for '{self._stream_info['name']}' does not contain 'latitude'/'longitude' coordinates; switch to 'nav_lat'/'nav_lon'.")
+            self.latitudes = ds.coords["nav_lat"].values.astype(np.float32)
+            self.longitudes = ds.coords["nav_lon"].values.astype(np.float32)
 
         if np.any(self.latitudes < -90) or np.any(self.latitudes > 90):
             _logger.warning(
@@ -133,12 +148,13 @@ class DataReaderEObs(DataReaderTimestep):
         self.n_points = self.n_lat * self.n_lon
 
         # ---- Available variables (non-stat, time-varying) --------------------
+        time_variants = {"time", "time_centered"}
         available_vars: list[str] = [
             var
             for var in ds.data_vars
             if not var.endswith("_mean")
             and not var.endswith("_std")
-            and "time" in ds[var].dims
+            and any(t in ds[var].dims for t in time_variants) #"time" in ds[var].dims
         ]
 
         # ---- Channel selection -----------------------------------------------
@@ -149,6 +165,7 @@ class DataReaderEObs(DataReaderTimestep):
             available_vars, source_channels_filter, source_exclude
         )
         self.source_idx = list(self.source_idx)  # keep as list, consistent with base class
+        _logger.info(f"{self._stream_info['name']} selected source channels: {self.source_channels} (indices: {self.source_idx})")
 
         target_channels_filter = self._stream_info.get("target")
         target_exclude = self._stream_info.get("target_exclude", [])
@@ -156,6 +173,7 @@ class DataReaderEObs(DataReaderTimestep):
             available_vars, target_channels_filter, target_exclude
         )
         self.target_idx = list(self.target_idx)
+        _logger.info(f"{self._stream_info['name']} selected target channels: {self.target_channels} (indices: {self.target_idx})")
 
         self.geoinfo_channels = []
         self.geoinfo_idx = np.array([], dtype=np.int64)
@@ -258,7 +276,7 @@ class DataReaderEObs(DataReaderTimestep):
 
     @override
     def length(self) -> int:
-        self._lazy_init()
+        # self._lazy_init()
         return self.len
 
     @override
@@ -279,6 +297,7 @@ class DataReaderEObs(DataReaderTimestep):
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+            _logger.info(f"No valid time indices found for idx={idx}; returning empty data. (if self.ds is None or self.len == 0 or len(t_idxs) == 0:)")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx),
                 num_geo_fields=0,
@@ -286,30 +305,54 @@ class DataReaderEObs(DataReaderTimestep):
 
         # Map channel indices → variable names
         selected_channels = [self.available_vars[i] for i in channels_idx]
+        # selected_channels = self.available_vars
 
         data_arrays: list[NDArray] = []
         datetimes_list: list[np.datetime64] = []
 
-        time_values = self.ds.coords["time"].values
+        try:
+            time_values = self.ds.coords["time"].values
+        except KeyError:
+            _logger.warning(f"Dataset for '{self._stream_info['name']}' does not contain 'time' coordinate; switch to 'time_centered'.")
+            time_values = self.ds.coords["time_centered"].values
+
         n_time = len(time_values)
+
+        if self.log_debug:
+            _logger.info(
+                f"Available vars: {self.available_vars}, requested channels: {selected_channels}"
+                f"\n Fetching data for idx={idx} (dataset time range: {time_values[0]} to {time_values[-1]}), "
+                f"\n Selected time indices: {t_idxs} -- len={len(t_idxs)}"
+            )
 
         for t_idx in t_idxs:
             if t_idx < 0 or t_idx >= n_time:
                 continue
 
             # (n_points, n_channels)
-            timestep_data = np.stack(
-                [
-                    self.ds[ch].isel(time=int(t_idx)).values.astype(np.float32).flatten()
-                    for ch in selected_channels
-                ],
-                axis=1,
-            )
+            try:
+                timestep_data = np.stack(
+                    [
+                        self.ds[ch].isel(time=int(t_idx)).values.astype(np.float32).flatten()
+                        for ch in selected_channels
+                    ],
+                    axis=1,
+                )
+            except ValueError:
+                timestep_data = np.stack(
+                    [
+                        self.ds[ch].isel(time_centered=int(t_idx)).values.astype(np.float32).flatten()
+                        for ch in selected_channels
+                    ],
+                    axis=1,
+                )
+                
             data_arrays.append(timestep_data)
             dt = np.datetime64(time_values[t_idx])
             datetimes_list.extend([dt] * self.n_points)
 
         if not data_arrays:
+            _logger.info(f"No valid time indices found for idx={idx}; returning empty data. (if not data_arrays:)")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx),
                 num_geo_fields=0,
@@ -318,15 +361,21 @@ class DataReaderEObs(DataReaderTimestep):
         # (n_timesteps * n_points, n_channels)
         data = np.vstack(data_arrays)
 
+
+        # NOTE tmp
+        n_valid_timesteps = len(data_arrays)  # use actual count, not len(t_idxs)
+
         # Coordinate grid — broadcast lat/lon into flat point list
         lon_grid, lat_grid = np.meshgrid(self.longitudes, self.latitudes)
         coords_single = np.stack(
             [lat_grid.flatten(), lon_grid.flatten()], axis=1
         ).astype(np.float32)
-        coords = np.tile(coords_single, (len(t_idxs), 1))
+        
+        # NOTE tmp: prima era len(t_idxs) ma se ci sono t_idxs invalidi (es. fuori range del dataset) allora data_arrays sarà più corto di len(t_idxs). Meglio usare len(data_arrays) che è il numero reale di timesteps validi che abbiamo effettivamente caricato.
+        coords = np.tile(coords_single, (n_valid_timesteps, 1))
 
         geoinfos = np.zeros((len(data), 0), dtype=np.float32)
-        datetimes = np.array(datetimes_list, dtype="datetime64[ns]")
+        datetimes = np.array(datetimes_list, dtype="datetime64[s]")
 
         rd = ReaderData(
             coords=coords,
@@ -334,7 +383,38 @@ class DataReaderEObs(DataReaderTimestep):
             data=data,
             datetimes=datetimes,
         )
+        if self.log_debug:
+            _logger.info(f"Constructed ReaderData with coords shape {coords.shape}, geoinfos shape {geoinfos.shape}, data shape {data.shape}, datetimes shape {datetimes.shape}")
+            _logger.info(f"  Sample coords: {coords[:5]}, sample data: {data[:5]}, geoinfos: {geoinfos[:5]}, sample datetimes: {datetimes[:5]}")
+            _logger.info(f"  Channels in data: {selected_channels}")
+
+            _logger.info(f"  data type: {data.dtype}, coords type: {coords.dtype}, datetimes type: {datetimes.dtype}")
+
+            coords_nan = np.isnan(coords).sum()
+            coords_total = coords.size
+
+            geoinfos_nan = np.isnan(geoinfos).sum()
+            geoinfos_total = geoinfos.size
+
+            data_nan = np.isnan(data).sum()
+            data_total = data.size
+
+            datetimes_nan = np.isnan(datetimes).sum()
+            datetimes_total = datetimes.size
+
+            _logger.info(f"NaN stats:")
+            _logger.info(f"  {self._stream_info['name']} coords: {coords_nan}/{coords_total} ({coords_nan/coords_total:.4%})")
+            _logger.info(f"  {self._stream_info['name']} geoinfos: {geoinfos_nan}/{geoinfos_total} ({geoinfos_nan/geoinfos_total:.4%})")
+            _logger.info(f"  {self._stream_info['name']} data: {data_nan}/{data_total} ({data_nan/data_total:.4%})")
+            _logger.info(f"  {self._stream_info['name']} datetimes: {datetimes_nan}/{datetimes_total} ({datetimes_nan/datetimes_total:.4%})")
+            _logger.info(f"  {self._stream_info['name']} Channels in data: {selected_channels}")
+
         check_reader_data(rd, dtr)
+
+        if self.log_debug:
+            _logger.info(f"     {self._stream_info['name']} ReaderData check passed.")
+            self.log_debug = False  # only log once per worker to avoid spamming
+
         return rd
 
 
