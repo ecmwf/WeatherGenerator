@@ -463,26 +463,26 @@ class Model(torch.nn.Module):
                             tr_dim_head_proj,
                             tr_mlp_hidden_factor,
                             softcap,
-                            stream_name=stream_name,
+                            stream_config=si,
                         )
 
                     self.target_token_engines[stream_name] = tte
 
-                # ensemble prediction heads to provide probabilistic prediction
-                final_activation = si["pred_head"].get("final_activation", "Identity")
-                if is_root():
-                    logger.debug(
-                        f"{final_activation} activation of predictionhead of {si['name']} stream"
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of pred head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_stream],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
                     )
-                self.pred_heads[stream_name] = EnsPredictionHead(
-                    dims_embed[-1],
-                    self.targets_num_channels[i_stream],
-                    si["pred_head"]["num_layers"],
-                    si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
-                    final_activation=final_activation,
-                    stream_name=stream_name,
-                )
 
             # iterate again to setup shared spatial pred heads if specified in config
             for i_stream, si in enumerate(cf.streams):
@@ -495,13 +495,13 @@ class Model(torch.nn.Module):
                 pred_spatial_shared = si.get("pred_spatial_shared")
                 if pred_spatial_shared is not None:
                     if pred_spatial_shared not in self.stream_names:
-                        str = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
-                        str += " but no stream with that name found."
-                        raise ValueError(str)
+                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
+                        msg += " but no stream with that name found."
+                        raise ValueError(msg)
                     if pred_spatial_shared == stream_name:
-                        str = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
-                        str += "but cannot share with itself."
-                        raise ValueError(str)
+                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
+                        msg += "but cannot share with itself."
+                        raise ValueError(msg)
                     logger.debug(
                         f"{stream_name} shares spatial prediction head with {pred_spatial_shared}."
                     )
@@ -512,6 +512,31 @@ class Model(torch.nn.Module):
                     self.target_token_engines[stream_name] = self.target_token_engines[
                         pred_spatial_shared
                     ]
+
+                    idx_o = [
+                        i for i, so in enumerate(cf.streams) if so["name"] == pred_spatial_shared
+                    ]
+                    assert (len(idx_o)) == 1
+                    si_other = cf.streams[idx_o[0]]
+                    dims_embed = [
+                        si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
+                    ]
+
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of pred head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_stream],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
+                    )
 
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
