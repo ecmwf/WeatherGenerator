@@ -442,8 +442,12 @@ def plot_loss_per_stream(
             rstr = "".join([f"{r}_" for r in runs_ids])
 
             # save the plot
-            plt_fname = plot_dir / "{}{}{}_{}.png".format(
-                rstr, "".join([f"{m}_" for m in modes]), stream_name, channel
+            plt_fname = plot_dir / "{}{}fs_{}{}_{}.png".format(
+                rstr,
+                "".join([f"{m}_" for m in modes]),
+                "".join([f"{fs}_" for fs in forecast_steps]),
+                stream_name,
+                channel,
             )
             _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
             plt.savefig(plt_fname)
