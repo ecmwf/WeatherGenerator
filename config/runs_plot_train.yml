@@ -1,0 +1,37 @@
+train : 
+  plot : 
+    # crn7ov5y:
+    #   slurm_id: 0
+    #   description: "crn7ov5y: no noise, lat 1, phys 0, start_lr=1e-5, max_lr=1e-4"
+
+    # h3of5mec:
+    #   slurm_id: 0
+    #   description: "h3of5mec: lat 0.9, phys 0.1, start_lr=1e-5, max_lr=1e-4, fe=2 blocks"
+
+    # p0q1oz52:
+    #   slurm_id: 0
+    #   description: "p0q1oz52: lat 0.9, phys 0.1, start_lr=1e-5, max_lr=5e-5, fe=2 blocks"
+
+    # aabi87jc:
+    #   slurm_id: 0
+    #   description: "aabi87jc: lat 0.9, phys 0.1, start_lr=1e-5, max_lr=2.5e-5, fe=2 blocks"
+
+    # s9fsjudp:
+    #   slurm_id: 0
+    #   description: "s9fsjudp: lat 0.9, phys 0.1, start_lr=1e-5, max_lr=1e-5, fe=2 blocks"
+
+    # gbq1pxc9:
+    #   slurm_id: 0
+    #   description: "gbq1pxc9: lat 0.9, phys 0.1, start_lr=1e-5, max_lr=1e-4, fe=MLP"
+
+    # yyv2m7ir:
+    #   slurm_id: 0
+    #   description: "yyv2m7ir: lat 0.9, phys 0.1, start_lr=1e-5, max_lr=5e-5, fe=MLP"
+
+    # b5c60g4a:
+    #   slurm_id: 0
+    #   description: "b5c60g4a: lat 0.9, phys 0.1, start_lr=1e-5, max_lr=2.5e-5, fe=MLP"
+
+    # dkzr6lfq:
+    #   slurm_id: 0
+    #   description: "dkzr6lfq: lat 0.9, phys 0.1, start_lr=1e-6, max_lr=1e-5, fe=MLP"

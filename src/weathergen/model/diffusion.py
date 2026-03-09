@@ -100,6 +100,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
 
         # Compute sigma (noise level) from eta and create noise tensor
+
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
 
@@ -122,6 +123,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
+
         return c_skip * x + c_out * self.net(
             c_in * x, fstep=fstep, noise_emb=noise_emb
         )  # Eq. (7) in EDM paper
