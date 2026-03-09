@@ -512,7 +512,11 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     """
     Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
     """
-    env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
+    if "WEATHERGEN_PRIVATE_REPO_PATH" in os.environ:
+        env_repo_path = Path(os.environ["WEATHERGEN_PRIVATE_REPO_PATH"])
+        env_script_path = env_repo_path / "hpc" / "platform-env.py"
+    else:
+        env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
 
     if private_home is not None and private_home.is_file():
         _logger.info(f"Loading private config from {private_home}.")
