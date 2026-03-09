@@ -31,7 +31,7 @@ It does not include chained runs or total steps with finetuning included.
 """)
 
 runs = latest_runs()
-all_runs_pdf = all_runs()
+all_runs_pdf = all_runs(keep_metrics=True, keep_params=False)
 
 
 accepted_metrics = (

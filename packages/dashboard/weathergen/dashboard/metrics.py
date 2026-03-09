@@ -6,6 +6,7 @@ import logging
 
 import mlflow
 import polars as pl
+import polars.selectors as ps
 import streamlit as st
 from mlflow.client import MlflowClient
 
@@ -72,7 +73,7 @@ def latest_runs():
 
 
 @st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
-def all_runs():
+def all_runs(keep_metrics: bool, keep_params: bool) -> pl.DataFrame:
     _logger.info("Downloading all runs from MLFlow")
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
@@ -80,5 +81,20 @@ def all_runs():
             # filter_string="status='FINISHED' AND tags.completion_status = 'success'",
         )
     )
-    _logger.info("Number of all runs: %d", len(runs_pdf))
+    _logger.info("Number of all runs: %d %d", len(runs_pdf), len(runs_pdf.columns))
+    if keep_metrics:
+        _logger.info("Keeping metrics columns")
+    else:
+        _logger.info("Dropping metrics columns")
+        # Keep num_samples as it is useful for filtering and grouping.
+        runs_pdf = runs_pdf.select((~ps.starts_with("metrics.")) | ps.starts_with("metrics.num_samples"))
+    if keep_params:
+        _logger.info("Keeping params columns")
+    else:
+        _logger.info("Dropping params columns")
+        # Still keep the wgtags params, as they are useful for filtering and grouping.
+        runs_pdf = runs_pdf.select((~ps.starts_with("params.")) | ps.starts_with("params.wgtags."))
+    _logger.info("Number of all runs after filtering: %d %d", len(runs_pdf), len(runs_pdf.columns))        
+    _logger.info("Columns in all runs: %s", runs_pdf.columns)
+    _logger.info("Columns in all runs: %s", runs_pdf)
     return runs_pdf
