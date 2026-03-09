@@ -21,16 +21,16 @@ from pathlib import Path
 # Third-party
 import mlflow
 from mlflow.client import MlflowClient
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 # Local application / package
 from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
-    WeatherGenJSONReader,
-    WeatherGenMergeReader,
+    WeatherGenJsonReader,
     WeatherGenReader,
     WeatherGenZarrReader,
 )
@@ -39,6 +39,7 @@ from weathergen.evaluate.utils.utils import (
     calc_scores_per_stream,
     merge,
     metric_list_to_json,
+    parse_metric_params,
     plot_data,
     plot_summary,
     triple_nested_dict,
@@ -163,14 +164,14 @@ def get_reader(
     run_id: str,
     private_paths: dict[str, str],
     region: str | None = None,
-    metric: str | None = None,
+    metric: dict[str, object] | None = None,
 ):
     if reader_type == "zarr":
         reader = WeatherGenZarrReader(run, run_id, private_paths)
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
     elif reader_type == "json":
-        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
+        reader = WeatherGenJsonReader(run, run_id, private_paths, region, metric)
     elif reader_type == "merge":
         reader = WeatherGenMergeReader(run, run_id, private_paths)
     elif reader_type == "jsonmerge":
@@ -195,7 +196,7 @@ def _process_stream(
     private_paths: dict[str, str],
     global_plotting_opts: dict[str, object],
     regions: list[str],
-    metrics: list[str],
+    metrics: dict[str, object],
     plot_score_maps: bool,
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
     """
@@ -217,16 +218,16 @@ def _process_stream(
     regions:
         List of regions to be processed.
     metrics:
-        List of metrics to be processed.
+        Dict of metrics to be processed and their parameters.
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
     """
-
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
+        _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
         return run_id, stream, {}
 
     # Parallel plotting
@@ -237,11 +238,7 @@ def _process_stream(
     if not stream_dict.get("evaluation"):
         return run_id, stream, {}
 
-    stream_loaded_scores, recomputable_metrics = reader.load_scores(
-        stream,
-        regions,
-        metrics,
-    )
+    stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
 
     if recomputable_metrics or (plot_score_maps and type_ == "zarr"):
@@ -275,6 +272,8 @@ def evaluate_from_config(
     cfg:
         Configuration input stored as dictionary.
     """
+    with open_dict(cfg):
+        cfg.evaluation.metrics = parse_metric_params(cfg.evaluation.metrics)
     runs = cfg.run_ids
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
@@ -311,9 +310,6 @@ def evaluate_from_config(
 
         if "streams" not in run:
             run["streams"] = default_streams
-
-        regions = cfg.evaluation.regions
-        metrics = cfg.evaluation.metrics
 
         reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
