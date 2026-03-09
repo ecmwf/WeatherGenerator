@@ -24,6 +24,7 @@ class EMAModel:
         halflife_steps=float("inf"),
         rampup_ratio=0.09,
         is_model_sharded=False,
+        random_init=False,
     ):
         self.original_model = model
         self.halflife_steps = halflife_steps
@@ -31,22 +32,37 @@ class EMAModel:
         self.ema_model = empty_model
         self.is_model_sharded = is_model_sharded
         self.batch_size = 1
+        self._random_init = random_init
         # Build a name → param map once
         self.src_params = dict(self.original_model.named_parameters())
 
-        self.reset()
+        if random_init:
+            self._freeze_and_eval()
+        else:
+            self.reset()
+
+    @torch.no_grad()
+    def _freeze_and_eval(self):
+        """Freeze EMA model parameters and set to eval mode (without copying student weights)."""
+        for p in self.ema_model.parameters():
+            p.requires_grad = False
+        self.ema_model.eval()
 
     @torch.no_grad()
     def reset(self):
         """
         This function resets the EMAModel to be the same as the Model.
 
+        If random_init is active, only freezes and sets eval mode without copying
+        student weights. Otherwise copies student weights as usual.
+
         It operates via the state_dict to be able to deal with sharded tensors in case
         FSDP2 is used.
         """
+        if self._random_init:
+            self._freeze_and_eval()
+            return
         self.ema_model.to_empty(device="cuda")
-        for p in self.ema_model.parameters():
-            p.requires_grad = False
         maybe_sharded_sd = self.original_model.state_dict()
         # Strip "module." prefix from DDP-wrapped student so keys match the unwrapped
         # teacher model. The update() method already handles this mismatch (line 73),
@@ -56,7 +72,13 @@ class EMAModel:
         if needs_strip:
             maybe_sharded_sd = {k.removeprefix("module."): v for k, v in maybe_sharded_sd.items()}
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
-        self.ema_model.eval()
+        self._freeze_and_eval()
+
+    @torch.no_grad()
+    def resync_to_student(self):
+        """Force resync EMA model to current student weights, regardless of random_init flag."""
+        self._random_init = False
+        self.reset()
 
     def requires_grad_(self, flag: bool):
         for p in self.ema_model.parameters():
@@ -79,6 +101,10 @@ class EMAModel:
         if self.rampup_ratio is not None:
             halflife_steps = min(halflife_steps, cur_step / self.rampup_ratio)
         beta = 0.5 ** (self.batch_size / max(halflife_steps, 1e-6))
+
+        print("" * 50)
+        print(f"EMA update: step={cur_step}, batch_size={self.batch_size}, halflife_steps={halflife_steps:.2f}, beta={beta:.6f}")
+
         return beta
 
     @torch.no_grad()

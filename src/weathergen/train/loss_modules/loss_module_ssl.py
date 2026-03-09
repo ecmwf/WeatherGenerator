@@ -241,7 +241,12 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
     teacher_patches = teacher_patches_masked.expand((mask.shape[0], -1, -1))
     # compute loss
     loss = F.l1_loss(student_patches_masked[mask], teacher_patches[mask])
+    
+    #import pdb; pdb.set_trace()
+    
     loss = loss * masks_weight[mask]
+    
+    #import pdb; pdb.set_trace()
 
     return loss.sum()  # / student_masks.shape[0]
 

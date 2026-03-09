@@ -85,11 +85,13 @@ class EMATeacher(EncoderTeacher):
     a frozen pre-trained teacher first, then smoothly transition to a slow EMA.
     """
 
-    def __init__(self, model, ema_model, batch_size, training_cfg, frozen_epochs=0, **kwargs):
+    def __init__(self, model, ema_model, batch_size, training_cfg, frozen_epochs=0,
+                 resync_on_ema_activation=False, **kwargs):
         super().__init__(model, training_cfg, **kwargs)
         self.ema_model = ema_model
         self.batch_size = batch_size
         self.frozen_epochs = frozen_epochs
+        self.resync_on_ema_activation = resync_on_ema_activation
         self._ema_active = frozen_epochs <= 0
         if frozen_epochs > 0:
             logger.info(f"EMATeacher: teacher frozen for first {frozen_epochs} mini-epochs")
@@ -106,6 +108,12 @@ class EMATeacher(EncoderTeacher):
     def on_mini_epoch_start(self, mini_epoch: int) -> None:
         """Activate EMA updates once the frozen warm-up phase is over."""
         if not self._ema_active and mini_epoch >= self.frozen_epochs:
+            if self.resync_on_ema_activation:
+                logger.info(
+                    f"EMATeacher: resyncing teacher to student weights at mini-epoch {mini_epoch} "
+                    f"before activating EMA"
+                )
+                self.ema_model.resync_to_student()
             logger.info(
                 f"EMATeacher: activating EMA updates at mini-epoch {mini_epoch} "
                 f"(frozen_epochs={self.frozen_epochs})"

@@ -332,12 +332,17 @@ def get_target_aux_calculator(
             halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
             rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
             is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            random_init=target_and_aux_calc_params.get("random_init_teacher", False),
         )
 
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
         frozen_epochs = target_and_aux_calc_params.get("frozen_epochs", 0)
+        resync_on_ema_activation = target_and_aux_calc_params.get(
+            "resync_on_ema_activation", False
+        )
         target_aux = EMATeacher(
-            model, ema_model, batch_size, cf.training_config, frozen_epochs=frozen_epochs
+            model, ema_model, batch_size, cf.training_config, frozen_epochs=frozen_epochs,
+            resync_on_ema_activation=resync_on_ema_activation,
         )
 
         # Optional: warm start encoder from checkpoint
