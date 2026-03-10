@@ -841,7 +841,6 @@ class LinePlots:
         x_dim: str = "lead_time",
         y_dim: str = "value",
         print_summary: bool = False,
-        plot_ensemble: str | bool = False,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -893,7 +892,11 @@ class LinePlots:
 
         parts = ["compare", tag]
         name = "_".join(filter(None, parts))
-        self._plot_base(fig, name, x_dim, y_dim, print_summary)
+
+        # TODO: generalise this for other x_dims by instroducing a "units"
+        # entry in the function if needed
+        xunits = "hr" if x_dim == "lead_time" else None
+        self._plot_base(fig, name, x_dim, y_dim, print_summary, xunits=xunits)
 
     def _plot_base(
         self,
@@ -905,6 +908,8 @@ class LinePlots:
         line: float | None = None,
         vlines: bool = False,
         title: str | None = None,
+        xunits: str | None = None,
+        yunits: str | None = None,
     ) -> None:
         """
         Apply labels, title, legend, save and optionally print summary.
@@ -926,12 +931,22 @@ class LinePlots:
             If True, draw vertical lines to separate each group of variables.
         title:
             Title for the plot.
+        xunits:
+            Units for the x-axis.
+        yunits:
+            Units for the y-axis.
         Returns
         -------
             None
         """
-        plt.xlabel("".join(c if c.isalnum() else " " for c in x_dim))
-        plt.ylabel("".join(c if c.isalnum() else " " for c in y_dim))
+
+        plt.xlabel(
+            "".join(c if c.isalnum() else " " for c in x_dim) + (f" [{xunits}]" if xunits else "")
+        )
+        plt.ylabel(
+            "".join(c if c.isalnum() else " " for c in y_dim) + (f" [{yunits}]" if yunits else "")
+        )
+
         plt.title(title if title is not None else " ".join(c if c.isalnum() else " " for c in name))
         plt.legend(frameon=False)
 

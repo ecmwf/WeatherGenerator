@@ -24,13 +24,13 @@ from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 # Local application / package
-from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
+from weathergen.common.paths import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
-    WeatherGenJSONReader,
+    WeatherGenJsonReader,
     WeatherGenReader,
     WeatherGenZarrReader,
 )
@@ -171,7 +171,7 @@ def get_reader(
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
     elif reader_type == "json":
-        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
+        reader = WeatherGenJsonReader(run, run_id, private_paths, region, metric)
     elif reader_type == "merge":
         reader = WeatherGenMergeReader(run, run_id, private_paths)
     elif reader_type == "jsonmerge":
@@ -222,12 +222,12 @@ def _process_stream(
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
     """
-
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
+        _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
         return run_id, stream, {}
 
     # Parallel plotting
