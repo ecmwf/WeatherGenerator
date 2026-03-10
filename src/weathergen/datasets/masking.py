@@ -83,36 +83,13 @@ def to_bool_tensor(arr):
     return torch.from_numpy(np.asarray(arr)).to(torch.bool)
 
 
+
 class Masker:
     """Class to generate masks for token sequences and apply them.
     This class supports different masking strategies and combinations.
-
-    Attributes:
-        masking_rate (float): The base rate at which tokens are masked.
-        masking_strategy (str): The strategy used for masking (e.g., "random",
-        "healpix", "cropping_healpix").
-        current_strategy (str): The current strategy in use, relevant
-                                when using "combination" strategy.
-        "random" - random masking of tokens at the level of the data
-        "healpix" - masking at the level of HEALPix cells, where all child cells
-                    of a parent cell at a specific HEALpix level are masked
-                    if the parent is masked.
-                    The healpix level must be configured with hl_mask.
-                    e.g. masking_strategy_config = {"hl_mask": 1}
-                    with hl_mask the level for masking that we want to apply
-                    e.g. level 1 very large cells masked
-        "cropping_healpix" - spatial cropping that keeps spatially contiguous regions
-                    and masks everything else. Uses neighbor relationships or geodesic
-                    distance to ensure spatial contiguity. For DINO/JEPA/IBOT.
-                    e.g. masking_strategy_config = {"hl_mask": 0, "method": "geodesic_disk"}
-                    method: "disk" (neighbor growth), "random_walk", or "geodesic_disk" (circular)
-        masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
-        masking_strategy_config (dict): Configuration for the masking strategy, can include
-                                        additional parameters like "hl_mask", etc.
-                                        specific to the masking strategy. See above.
     """
 
-    def __init__(self, healpix_level: int, stage: Stage):
+    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
 
         self.mask_value = 0.0
@@ -123,6 +100,42 @@ class Masker:
         self.healpix_num_cells = 12 * (4**healpix_level)
 
         self.stage = stage
+
+        # If streams and mode_cfg are provided, build and store effective masking configs
+        self._effective_masking_cfgs = None
+        if streams is not None and mode_cfg is not None:
+            self._effective_masking_cfgs = self.build_effective_masking_cfgs(streams, mode_cfg)
+
+    def get_effective_masking_cfg(self, stream_name):
+        if self._effective_masking_cfgs is None:
+            raise RuntimeError("Effective masking configs not initialized in Masker.")
+        return self._effective_masking_cfgs[stream_name]
+
+    @staticmethod
+    def build_effective_masking_cfgs(streams, mode_cfg):
+        """
+        Build effective masking configs for all streams, ensuring randomly_drop_as_source_rate is included in the consolidated config.
+        """
+        cfgs = {}
+        for stream_info in streams:
+            name = stream_info["name"]
+            override = stream_info.get("masking_override", None)
+            # Merge masking config as before
+            merged_cfg = Masker.merge_masking_config(mode_cfg, override)
+            # Ensure randomly_drop_as_source_rate is included in all model_input strategies
+            drop_rate = stream_info.get("randomly_drop_as_source_rate", None)
+            if drop_rate is not None:
+                for section_key in ("model_input",):
+                    section = merged_cfg.get(section_key, None)
+                    if section is not None:
+                        for strategy_cfg in section.values():
+                            if "masking_strategy_config" not in strategy_cfg:
+                                strategy_cfg["masking_strategy_config"] = {}
+                            strategy_cfg["masking_strategy_config"]["randomly_drop_as_source_rate"] = drop_rate
+            cfgs[name] = merged_cfg
+            if override is not None and is_root():
+                logger.info(f"Applied masking_override for stream {name}")
+        return cfgs
 
     def reset_rng(self, rng) -> None:
         """
@@ -180,18 +193,6 @@ class Masker:
 
         return stream_cfg_masking
 
-    @staticmethod
-    def build_effective_masking_cfgs(streams, mode_cfg):
-        """Build effective masking configs for all streams."""
-        cfgs = {}
-        for stream_info in streams:
-            name = stream_info["name"]
-            override = stream_info.get("masking_override", None)
-            cfgs[name] = Masker.merge_masking_config(mode_cfg, override)
-            if override is not None and is_root():
-                logger.info(f"Stream '{name}' using masking override: {override}")
-
-        return cfgs
 
     def _get_sampling_rate(self, cfg):
         """
@@ -352,15 +353,13 @@ class Masker:
                 if is_stream_forcing(stream_cfg, self.stage):
                     target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
-                    # prevent target from being dropped
-                    stream_cfg_target = copy.deepcopy(stream_cfg)
-                    stream_cfg_target["randomly_drop_as_source_rate"] = 0.0
-                    # get
+                    # prevent target from being dropped: forcibly set drop rate to 0 in masking_strategy_config
+                    masking_strategy_config = copy.deepcopy(target_cfg.get("masking_strategy_config", {}))
+                    masking_strategy_config["randomly_drop_as_source_rate"] = 0.0
                     target_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
                         strategy=target_cfg.get("masking_strategy"),
-                        masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
-                        stream_cfg=stream_cfg_target,
+                        masking_strategy_config=masking_strategy_config,
                         target_relationship_mask=("independent", None),
                     )
 
@@ -413,7 +412,6 @@ class Masker:
                         num_cells=num_cells,
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
-                        stream_cfg=stream_cfg,
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                     )
 
@@ -434,7 +432,6 @@ class Masker:
         num_cells: int,
         strategy: str,
         masking_strategy_config: dict,
-        stream_cfg: dict,
         target_relationship_mask: (str, np.typing.NDArray),
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
@@ -481,7 +478,7 @@ class Masker:
 
         # get mask
         mask, params = self._generate_cell_mask(
-            num_cells, strategy, masking_strategy_config, stream_cfg
+            num_cells, strategy, masking_strategy_config
         )
 
         # handle cases where mask needs to be combined with target_mask
@@ -504,7 +501,6 @@ class Masker:
         num_cells: int,
         strategy: str,
         masking_strategy_config: dict,
-        stream_cfg: dict,
     ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
@@ -533,9 +529,13 @@ class Masker:
 
         # generate cell mask
 
-        # if stream is not dropped then apply regular masking
-        if stream_cfg.get("randomly_drop_as_source_rate", 0.0) > 0.0:
-            if self.rng.uniform() < stream_cfg.get("randomly_drop_as_source_rate"):
+        # if randomly_drop_as_source_rate is set in masking_strategy_config, apply drop
+        drop_rate = masking_strategy_config.get("randomly_drop_as_source_rate", 0.0)
+        print("drop_rate:", drop_rate, "for stream:", masking_strategy_config.get("stream_name", "unknown"))
+        if drop_rate > 0.0:
+            print(f"Random drop with rate {drop_rate} for stream: {masking_strategy_config.get('stream_name', 'unknown')}")
+            if self.rng.uniform() < drop_rate:
+                print(f"Actually applying random drop to stream: {masking_strategy_config.get('stream_name', 'unknown')}")
                 mask = to_bool_tensor(np.zeros(num_cells, dtype=np.bool))
                 return (mask, masking_params)
 

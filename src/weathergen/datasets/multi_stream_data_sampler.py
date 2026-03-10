@@ -243,12 +243,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             else cf.data_loading.rng_seed * 97
         )
 
-        self.masker = Masker(cf.healpix_level, stage)
+        # Pass streams and mode_cfg to Masker so it can build and store effective masking configs
+        self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
-
-        self._effective_masking_cfgs = self.masker.build_effective_masking_cfgs(
-            self.streams, self.mode_cfg
-        )
 
         self.mini_epoch = 0
 
@@ -584,9 +581,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
         masks = {}
         for stream_info in self.streams:
-            # Each stream uses its own effective masking config (which may include
-            # per-stream ``masking_override`` merged on top of the global config).
-            stream_cfg = self._effective_masking_cfgs[stream_info["name"]]
+            # Get effective masking config from Masker
+            stream_cfg = self.masker.get_effective_masking_cfg(stream_info["name"])
             # Build source and target sample masks
             masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
                 training_mode,
