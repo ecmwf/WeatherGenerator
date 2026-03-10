@@ -79,6 +79,13 @@ def find_pl(vars: list) -> tuple[dict[str, list[str]], list[int]]:
         else:
             var_dict.setdefault(var, []).append(var)
     pl = sorted(set(pl))
+    # Sort each variable list by pressure level so the order matches the sorted pl
+    for var_name in var_dict:
+        if len(var_dict[var_name]) > 1:
+            var_dict[var_name] = sorted(
+                var_dict[var_name],
+                key=lambda v: int(re.search(r"_(\d+)$", v).group(1)),
+            )
     return var_dict, pl
 
 
