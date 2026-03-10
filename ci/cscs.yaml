@@ -12,14 +12,12 @@ test_job:
     ml gcc/14.2.0
 
     PRIVATE_REPO_BRANCH="${PRIVATE_REPO_BRANCH:-main}"
+    WEATHERGEN_PRIVATE_REPO_PATH="$PWD/WeatherGenerator-private"
 
-    cd ..
     git clone \
       --depth 1 --single-branch \
       --branch "$PRIVATE_REPO_BRANCH" \
       https://oauth2:${PRIVATE_REPO_TOKEN}@gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private.git
-    rm -rf WeatherGenerator-private/.git/
-    cd - # The ci directory is not called WeatherGenerator
 
     ./scripts/actions.sh sync
     ./scripts/actions.sh create-links
