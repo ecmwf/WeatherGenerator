@@ -532,7 +532,7 @@ class EnsPredictionHead(torch.nn.Module):
         for pred_head in self.pred_heads:
             cpred = toks
             for block in pred_head:
-                cpred = block(cpred)
+                cpred = checkpoint(block, cpred, use_reentrant=False)
             preds.append(cpred)
         preds = torch.stack(preds, 0)
 
@@ -630,14 +630,16 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = block(tc_tokens, tcs_lens, tcs_aux)
+                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
             else:
-                tc_tokens = block(
+                tc_tokens = checkpoint(
+                    block,
                     tc_tokens,
                     tokens_stream,
                     tcs_lens,
                     tokens_lens,
                     tcs_aux,
+                    use_reentrant=False,
                 )
         return tc_tokens
 

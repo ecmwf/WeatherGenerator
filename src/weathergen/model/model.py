@@ -625,7 +625,7 @@ class Model(torch.nn.Module):
 
         output = ModelOutput(batch.get_output_len())
 
-        tokens, posteriors = self.encoder(model_params, batch)
+        tokens, posteriors, cell_mask = self.encoder(model_params, batch)
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
@@ -640,7 +640,7 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
 
             # decoder predictions
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
+            output = self.predict_decoders(model_params, step, tokens, cell_mask, batch, output)
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
 
@@ -674,6 +674,7 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         step: int,
         tokens: torch.Tensor,
+        cell_mask: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
     ) -> ModelOutput:
@@ -702,7 +703,7 @@ class Model(torch.nn.Module):
 
         # get 1-ring neighborhood for prediction
         batch_size = len(batch)
-        s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
+        s = [batch_size, tokens.shape[1], self.cf.ae_local_num_queries, tokens.shape[-1]]
         idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
         tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
         # TODO: precompute in model_params?

@@ -121,7 +121,7 @@ class EncoderModule(torch.nn.Module):
             self.embed_engine, batch, model_params.pe_embed, use_reentrant=False
         )
 
-        tokens_global, posteriors = checkpoint(
+        tokens_global, posteriors, cell_mask = checkpoint(
             self.assimilate_local, model_params, stream_cell_tokens, batch, use_reentrant=False
         )
 
@@ -132,7 +132,7 @@ class EncoderModule(torch.nn.Module):
             use_reentrant=False,
         )
 
-        return tokens_global, posteriors
+        return tokens_global, posteriors, cell_mask
 
     def interpolate_latents(self, tokens: torch.Tensor) -> (torch.Tensor, torch.Tensor):
         """ "
@@ -265,7 +265,7 @@ class EncoderModule(torch.nn.Module):
             tokens_global_unmasked, batch_lens_patched, use_reentrant=False, coords=packed_coords
         )
 
-        return tokens_global_unmasked
+        return tokens_global_unmasked, cell_mask
 
     def assimilate_local(
         self, model_params, tokens: torch.Tensor, batch: ModelBatch
@@ -306,12 +306,16 @@ class EncoderModule(torch.nn.Module):
         )
 
         # apply aggregation engine on unmasked tokens
-        tokens_global_unmasked = self.aggregation_engine_unmasked(
+        tokens_global_unmasked, cell_mask = self.aggregation_engine_unmasked(
             tokens_global_unmasked,
             tokens_global_register_class,
             batch.tokens_lens,
             rope_cell_coords=model_params.rope_cell_coords,
         )
+
+        # find neighbors for all cells
+
+        # create unique list of padding to be added, taking into account
 
         # final processing
 
@@ -347,4 +351,8 @@ class EncoderModule(torch.nn.Module):
             #  removing this line because else they get added twice? + model_params.pe_global
         ).flatten(1, 2)
 
-        return tokens_global, posteriors
+        cell_mask = None
+
+        # tokens_global = tokens_global_unmasked.unsqueeze(0)
+
+        return tokens_global, posteriors, cell_mask
