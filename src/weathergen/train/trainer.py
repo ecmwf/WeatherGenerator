@@ -555,7 +555,9 @@ class Trainer(TrainerBase):
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
+            with tqdm.tqdm(
+                total=len(self.data_loader_validation), disable=self.cf.with_ddp
+            ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
                         # pin memory for faster CPU-GPU transfer

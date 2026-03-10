@@ -19,28 +19,24 @@ case "$1" in
   lint)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
-        src/ scripts/ packages/ \
-        && \
       uv run --no-project --with "ruff==0.12.2" \
-        ruff check --target-version py312 \
-        --fix  \
-        src/ scripts/ packages/
+        ruff format --target-version py312 src/ scripts/ packages/ \
+      && \
+      uv run --no-project --with "ruff==0.12.2" \
+        ruff check --target-version py312 --fix  src/ scripts/ packages/
     )
     ;;
   lint-check)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
-        -n \
-        src/ scripts/ packages/ \
-        && \
       uv run --no-project --with "ruff==0.12.2" \
-       ruff check  --target-version py312  \
-       src/ scripts/ packages/ \
-        && \
+        ruff format --target-version py312 -n src/ scripts/ packages/ \
+      && \
+      uv run --no-project --with "ruff==0.12.2" \
+        ruff check  --target-version py312 src/ scripts/ packages/ \
+      && \
       uv run --no-project --with "pylint==4.0.3" \
-       pylint src/ packages/
+        pylint src/ packages/
     )
     ;;
   type-check)
@@ -50,7 +46,6 @@ case "$1" in
 
       # weathergen-common
       uv sync --project packages/common --no-install-workspace
-      uv pip list
       uv run --project packages/common --frozen pyrefly check packages/common
       # Fail for errors on weathergen-common:
       if [ $? -ne 0 ]; then
@@ -60,7 +55,6 @@ case "$1" in
 
       # weathergen-metrics
       uv sync --project packages/metrics --no-install-workspace
-      uv pip list
       uv run --project packages/metrics --frozen pyrefly check packages/metrics
       # Fail for errors on weathergen-metrics:
       if [ $? -ne 0 ]; then
@@ -70,13 +64,11 @@ case "$1" in
 
       # weathergen-evaluate
       uv sync --project packages/evaluate --no-install-workspace --package weathergen-evaluate 
-      uv pip list
       uv run --project packages/evaluate --frozen pyrefly check packages/evaluate
 
       # weathergen (root)
       # Install the whole workspace. It also needs the extra cpu option for the right version of pytorch.
       uv sync --all-packages --extra cpu --no-install-workspace
-      uv pip list
       uv run --all-packages pyrefly check src
       echo "Type checking completed."
     )
@@ -84,7 +76,6 @@ case "$1" in
   unit-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv sync --extra cpu 
       uv run --extra cpu pytest src/
     )
     ;;
@@ -176,9 +167,11 @@ case "$1" in
     )
     ;;
   *)
-    # Automatically extract all options from the case statement
-    options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
-    echo "Usage: $0 {$options}"
-    exit 1
+    (
+      # Automatically extract all options from the case statement
+      options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
+      echo "Usage: $0 {$options}"
+      exit 1
+    )
     ;;
 esac
