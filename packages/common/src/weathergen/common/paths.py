@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 _REPO_ROOT = Path(
     __file__
