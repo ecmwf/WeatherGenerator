@@ -447,9 +447,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                     pred = pred.squeeze()
                     target = target.squeeze()
-                    print(f"pred valid time (sample {sample})", np.unique(pred.valid_time.values), flush=True)
-                    print(f"source interval start (sample {sample})", np.unique(pred.source_interval_start.values), flush=True)
-                    print(f"source interval end (sample {sample})", np.unique(pred.source_interval_end.values), flush=True)
+
                     if is_gridded_data:
                         vt_list = np.unique(target.valid_time.values).tolist()
                         if len(vt_list) > 1:
@@ -487,16 +485,15 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                 da_tars.append(da_tars_fs)
                 da_preds.append(da_preds_fs)
-            
+
             # Safer than a list
             da_tars_dict, da_preds_dict = {}, {}
             i = 1
 
             for fstep, da_t, da_p in zip(fsteps_final, da_tars, da_preds, strict=True):
-            
                 with_substeps = isinstance(da_t, list)
                 items = zip(da_t, da_p, strict=True) if with_substeps else [(da_t, da_p)]
-                
+
                 for t, p in items:
                     t, p = _select_channels(t, p, stream, channels, stream_cfg)
 
@@ -516,7 +513,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                     else:
                         da_tars_dict[int(fstep)] = t
                         da_preds_dict[int(fstep)] = p
-            
+
         return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
 
     ######## reader utils ########
@@ -670,7 +667,7 @@ def _select_channels(
         )
 
         da_tar, da_pred, channels = dc.get_derived_channels(da_tar, da_pred)
-        
+
         # Verify that requested channels are available
         all_channels = da_tar.channel.values.tolist()
         missing_channels = set(channels) - set(all_channels)
@@ -680,7 +677,7 @@ def _select_channels(
                 f"Not found in available channels."
             )
             channels = [ch for ch in channels if ch in all_channels]
-        
+
         da_tar = da_tar.sel(channel=channels)
         da_pred = da_pred.sel(channel=channels)
 
@@ -863,7 +860,7 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     else:
         lead_time_values = vt - sis
         lead_time_per_sample = np.unique(lead_time_values[~np.isnat(lead_time_values)])
-    
+
     # Verify all samples have same lead_time for this forecast_step
     unique_lead = np.unique(lead_time_per_sample)
     if len(unique_lead) != 1:
@@ -926,5 +923,5 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
             a_sorted = a_sorted.expand_dims(sample=[i])
 
         aligned.append(a_sorted)
-        
+
     return xr.concat(aligned, dim="sample", coords="different", compat="equals")
