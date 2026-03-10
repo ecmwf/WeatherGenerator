@@ -79,8 +79,8 @@ with_fsdp: False
 ddp_find_unused_parameters: False
 attention_dtype: bf16
 mixed_precision_dtype: bf16
-mlp_norm_eps: 1e-5
-norm_eps: 1e-4
+mlp_norm_eps: 1e-8
+norm_eps: 1e-8
 
 latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
@@ -169,7 +169,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
 
-  num_mini_epochs: 32
+  num_mini_epochs: 96
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -183,7 +183,7 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 5e-7
-    lr_max: 5e-5
+    lr_max: 1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 512
