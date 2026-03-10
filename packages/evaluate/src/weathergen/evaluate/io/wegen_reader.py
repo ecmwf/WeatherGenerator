@@ -675,7 +675,7 @@ def _select_channels(
         da_tar = da_tar.sel(channel=channels)
         da_pred = da_pred.sel(channel=channels)
 
-    return da_pred, da_tar
+    return da_tar, da_pred
 
 
 def _scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:

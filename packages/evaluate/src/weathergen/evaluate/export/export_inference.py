@@ -20,7 +20,7 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
-from weathergen.common.config import _REPO_ROOT
+from weathergen.common.paths import _REPO_ROOT
 from weathergen.evaluate.export.export_core import export_model_outputs
 
 _logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def parse_args(args: list) -> argparse.Namespace:
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["ERA5"],
+        choices=["ERA5", "IMERG_ANEMOI"],
         help="Stream name to retrieve data for",
         required=True,
     )

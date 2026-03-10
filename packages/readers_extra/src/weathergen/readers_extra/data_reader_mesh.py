@@ -1,3 +1,5 @@
+# pylint: disable=bad-builtin
+
 import json
 import logging
 from pathlib import Path
