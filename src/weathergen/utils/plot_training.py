@@ -20,7 +20,7 @@ import numpy as np
 import yaml
 
 import weathergen.common.config as config
-from weathergen.train.utils import TRAIN, VAL
+from weathergen.train.utils import TRAIN
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
@@ -252,14 +252,9 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
 
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if stage == TRAIN:
-            x_vals = np.array(run_data.train["num_samples"])
-            y_vals = np.array(run_data.train["loss_avg_mean"])
-        elif stage == VAL:
-            x_vals = np.array(run_data.val["num_samples"])
-            y_vals = np.array(run_data.val["loss_avg_mean"])
-        else:
-            assert False
+        run_data_stage = run_data.train if stage == TRAIN else run_data.val
+        x_vals = np.array(run_data_stage["num_samples"])
+        y_vals = np.array(run_data_stage["loss_avg_mean"])
 
         mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
 
@@ -302,6 +297,7 @@ def plot_loss_per_stream(
     plot_dir: Path,
     errs: list[str],
     channels: list[str],
+    forecast_steps: list[int],
     x_axis: str = "samples",
     x_type: str = "step",
     x_lim: list[float] | None = None,
@@ -370,12 +366,21 @@ def plot_loss_per_stream(
                             if len(col_split) < 4:
                                 if stream_name in col:
                                     data_cols += [col]
-                            elif (
-                                col_split[1].lower() == stream_name.lower()
-                                and col_split[2].lower() == err.lower()
-                                and col_split[3] == channel
-                            ):
-                                data_cols += [col]
+                            elif len(col_split) == 4:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] == channel
+                                ):
+                                    data_cols += [col]
+                            elif len(col_split) == 5:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] == channel
+                                    and int(col_split[4]) in forecast_steps
+                                ):
+                                    data_cols += [col]
 
                         for col in data_cols:
                             x_vals = np.array(run_data_mode[x_col])
@@ -437,8 +442,12 @@ def plot_loss_per_stream(
             rstr = "".join([f"{r}_" for r in runs_ids])
 
             # save the plot
-            plt_fname = plot_dir / "{}{}{}_{}.png".format(
-                rstr, "".join([f"{m}_" for m in modes]), stream_name, channel
+            plt_fname = plot_dir / "{}{}fs_{}{}_{}.png".format(
+                rstr,
+                "".join([f"{m}_" for m in modes]),
+                "".join([f"{fs}_" for fs in forecast_steps]),
+                stream_name,
+                channel,
             )
             _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
             plt.savefig(plt_fname)
@@ -628,6 +637,14 @@ def plot_train(args=None):
         help="List of channels to plot",
     )
     parser.add_argument(
+        "--forecast-steps",
+        dest="forecast_steps",
+        default=[0, 1],
+        type=int,
+        nargs="+",
+        help="List of channels to plot",
+    )
+    parser.add_argument(
         "--metrics",
         dest="metrics",
         default=["mse"],
@@ -756,6 +773,7 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
@@ -770,6 +788,7 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
@@ -784,6 +803,7 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,

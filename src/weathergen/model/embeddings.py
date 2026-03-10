@@ -199,7 +199,6 @@ class StreamEmbedLinear(torch.nn.Module):
         self.layer = torch.nn.Linear(dim_in, dim_out)
 
     def forward(self, x):
-        # x = checkpoint( self.layer, x.flatten( -2, -1), use_reentrant=True)
-        x = self.layer(x.flatten(-2, -1))
+        x = checkpoint(self.layer, x.flatten(-2, -1), use_reentrant=False).unsqueeze(0)
 
         return x
