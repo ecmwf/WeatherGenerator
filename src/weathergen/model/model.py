@@ -513,11 +513,11 @@ class Model(torch.nn.Module):
                         pred_spatial_shared
                     ]
 
-                    idx_o = [
+                    idx_shared_s = [
                         i for i, so in enumerate(cf.streams) if so["name"] == pred_spatial_shared
                     ]
-                    assert (len(idx_o)) == 1
-                    si_other = cf.streams[idx_o[0]]
+                    assert (len(idx_shared_s)) == 1
+                    si_other = cf.streams[idx_shared_s[0]]
                     dims_embed = [
                         si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
                     ]
