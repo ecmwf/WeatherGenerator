@@ -28,9 +28,9 @@ from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
     WeatherGenJSONReader,
-    WeatherGenMergeReader,
     WeatherGenReader,
     WeatherGenZarrReader,
 )
@@ -154,8 +154,6 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
         _logger.info(f"MLFlow client set up: {mlflow_client}")
 
     cf = OmegaConf.load(config)
-    with open_dict(cf):
-        cf.evaluation.metrics = parse_metric_params(cf.evaluation.metrics)
     assert isinstance(cf, DictConfig)
     evaluate_from_config(cf, mlflow_client, log_queue)
 
@@ -274,6 +272,8 @@ def evaluate_from_config(
     cfg:
         Configuration input stored as dictionary.
     """
+    with open_dict(cfg):
+        cfg.evaluation.metrics = parse_metric_params(cfg.evaluation.metrics)
     runs = cfg.run_ids
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
