@@ -11,8 +11,8 @@ ERA5_uvw:
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   stream_id : 0
-  source : ['u_', 'v_', 'msl']
-  target: ['u_', 'v_', 'msl']
+  source : ['10u', '10v', 'u_', 'v_']
+  target: ['10u', '10v','u_', 'v_']
   loss_weight : 1.
   location_weight : cosine_latitude
   masking_rate : 0.6

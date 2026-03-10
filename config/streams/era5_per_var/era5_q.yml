@@ -37,6 +37,6 @@ ERA5_q:
     ens_size : 1
     num_layers : 1
   optimizer :
-    lr_scale : 1.0
+    lr_scale : 1.2
 
 

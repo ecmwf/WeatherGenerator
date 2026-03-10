@@ -12,8 +12,8 @@ ERA5_z:
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   stream_id : 0
-  source : ['z_']
-  target: ['z_']
+  source : ['z_', 'msl']
+  target: ['z_', 'msl']
   loss_weight : 1.
   location_weight : cosine_latitude
   masking_rate : 0.6
@@ -38,4 +38,4 @@ ERA5_z:
     ens_size : 1
     num_layers : 1
   optimizer :
-    lr_scale : 1.2
+    lr_scale : 0.5
