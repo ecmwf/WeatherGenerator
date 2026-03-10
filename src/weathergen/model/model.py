@@ -117,7 +117,7 @@ class ModelParams(torch.nn.Module):
             self.register_buffer(
                 "rope_coords",
                 torch.zeros(
-                    self.batch_size_per_gpu,
+                    1,
                     total_tokens,
                     2,
                     dtype=self.dtype,
@@ -201,7 +201,7 @@ class ModelParams(torch.nn.Module):
             # Per-cell coords for QueryAggregationEngine (no query expansion)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
-            coords_flat = coords.flatten(0, 1).unsqueeze(0).repeat(self.batch_size_per_gpu, 1, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0)
             offset = self.num_extra_tokens * cf.ae_local_num_queries
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)

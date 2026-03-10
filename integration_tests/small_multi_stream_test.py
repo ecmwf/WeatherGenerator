@@ -114,7 +114,7 @@ def evaluate_multi_stream_results(run_id):
             },
             "evaluation": {
                 "regions": ["global"],
-                "metrics": ["rmse", "l1", "mse"],
+                "metrics": ["rmse", "mae"],
                 "verbose": True,
                 "summary_plots": True,
                 "summary_dir": "./plots/",
@@ -169,7 +169,7 @@ def evaluate_multi_stream_results(run_id):
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
+    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id)
     if not file_path.is_file():
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -179,7 +179,7 @@ def load_metrics(run_id):
 
 def assert_metrics_file_exists(run_id):
     """Test that the metrics file exists and can be loaded."""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results", run_id=run_id)
+    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id)
     assert file_path.is_file(), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
