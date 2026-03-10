@@ -32,6 +32,7 @@ from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.optimizer import build_param_groups
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
@@ -314,13 +315,17 @@ class Trainer(TrainerBase):
         beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
         eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=self.training_cfg.learning_rate_scheduling.lr_start,
-            weight_decay=self.training_cfg.optimizer.weight_decay,
-            betas=(beta1, beta2),
-            eps=eps,
+        stream_optimizer_cfgs = {si["name"]: si.get("optimizer", {}) for si in cf.streams}
+        param_groups = build_param_groups(
+            self.model, stream_optimizer_cfgs, self.training_cfg.optimizer
         )
+        lr_start = self.training_cfg.learning_rate_scheduling.lr_start
+        for g in param_groups:
+            g["lr"] = lr_start * g["lr_scale"]
+            g["betas"] = (beta1, beta2)
+            g["eps"] = eps
+
+        self.optimizer = torch.optim.AdamW(param_groups)
         self.grad_scaler = torch.amp.GradScaler("cuda")
 
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"
