@@ -31,3 +31,12 @@ train:
     8m1ffmzu-stage1:
       slurm_id: 0
       description: "JEPA new L2G engine RMSNorm frozen MTM lr=6.06e-06 mask=0.83"
+    jam1nr4f-stage1:
+      slurm_id: 0
+      description: "JEPA long L2G engine RMSNorm frozen MTM lr=6.00e-05 mask=0.6"
+    g9f3kn4h-stage1:
+      slurm_id: 0
+      description: "JEPA long L2G engine RMSNorm frozen MTM lr=1.00e-04 mask=0.6"
+    kmnbh1tq-stage1:
+      slurm_id: 0
+      description: "JEPA long L2G engine RMSNorm frozen MTM new eps norm lr=1.00e-04 mask=0.6"
