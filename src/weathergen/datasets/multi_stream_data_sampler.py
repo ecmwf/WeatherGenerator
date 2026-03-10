@@ -101,11 +101,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.len_timedelta: np.timedelta64 = mode_cfg.time_window_len
         self.step_timedelta: np.timedelta64 = mode_cfg.time_window_step
+        
+        self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
+
 
         # Handle forecast_delta_hrs which might be int (hours) or string (timedelta)
         self.forecast_cfg = mode_cfg.get("forecast", {})
         if len(self.forecast_cfg) > 0:
             self.output_offset = self.forecast_cfg.get("offset", 0)
+            print(self.forecast_cfg)
             self.time_step = self.forecast_cfg.get("time_step", np.timedelta64(0, "ms"))
             self.forecast_policy = self.forecast_cfg.get("policy", None)
 
@@ -125,31 +129,35 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.time_step = np.timedelta64(0, "ms")
 
         fsm = self.list_num_forecast_steps[0]
-        forecast_len = (self.time_step * (fsm + 1)) // self.step_timedelta
-
+        forecast_len = (self.time_step * (fsm + 1)) # in milliseconds
+        print(forecast_len)
         # Handle too short time window causing duplication of samples
-        available_samples = (mode_cfg.end_date - mode_cfg.start_date) // self.time_step
-        if self.samples_per_mini_epoch >= available_samples:
-            # padding to widen time window
-            samples_diff = (
-                self.samples_per_mini_epoch - available_samples + forecast_len + 1
-            )  # extra step to be safe
-            new_end_date = mode_cfg.end_date + (samples_diff * self.time_step)
-            logger.warning(f"Using adjusted end date {new_end_date} instead of {mode_cfg.end_date}")
-            self.time_window_handler = TimeWindowHandler(
-                mode_cfg.start_date, new_end_date, self.len_timedelta, self.step_timedelta
-            )
+        available_samples = (mode_cfg.end_date - mode_cfg.start_date) // self.step_timedelta
+        print(self.samples_per_mini_epoch, available_samples)
+        if not self.repeat_data:
+            if self.samples_per_mini_epoch:
+                if self.samples_per_mini_epoch >= available_samples:
+                    # padding to widen time window
+                    samples_diff = (
+                        self.samples_per_mini_epoch - available_samples + 1
+                    )  # extra step to be safe
+                    new_end_date = mode_cfg.end_date + (samples_diff * self.step_timedelta) + forecast_len
+                    logger.warning(f"Using adjusted end date {new_end_date} instead of {mode_cfg.end_date}")
+                    print(forecast_len, self.time_step)
+                    self.time_window_handler = TimeWindowHandler(
+                        mode_cfg.start_date, new_end_date, forecast_len, self.step_timedelta
+                    )
         else:
             self.time_window_handler = TimeWindowHandler(
-                mode_cfg.start_date, mode_cfg.end_date, self.len_timedelta, self.step_timedelta
+                mode_cfg.start_date, mode_cfg.end_date, forecast_len, self.step_timedelta
             )
         if is_root():
             logger.info(self.time_window_handler)
 
         index_range = self.time_window_handler.get_index_range()
         perms_len = int(index_range.end - index_range.start)
-        perms_len = perms_len - (forecast_len + self.output_offset)
-
+        perms_len = perms_len - (fsm + self.output_offset) * (self.time_step// self.step_timedelta)
+        print(index_range, perms_len)
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
