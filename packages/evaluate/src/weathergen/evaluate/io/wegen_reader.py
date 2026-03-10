@@ -484,7 +484,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
                 da_tars.append(da_tars_fs)
                 da_preds.append(da_preds_fs)
-            
+
             # Safer than a list
             da_tars_dict, da_preds_dict = {}, {}
             i = 1
@@ -856,7 +856,7 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     else:
         lead_time_values = vt - sis
         lead_time_per_sample = np.unique(lead_time_values[~np.isnat(lead_time_values)])
-    
+
     # Verify all samples have same lead_time for this forecast_step
     unique_lead = np.unique(lead_time_per_sample)
     if len(unique_lead) != 1:
