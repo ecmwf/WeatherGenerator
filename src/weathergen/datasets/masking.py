@@ -112,7 +112,7 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, healpix_level: int, stage: Stage):
+    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
 
         self.mask_value = 0.0
@@ -123,6 +123,12 @@ class Masker:
         self.healpix_num_cells = 12 * (4**healpix_level)
 
         self.stage = stage
+
+        # Build and store per-stream effective masking configs
+        if streams is not None and mode_cfg is not None:
+            self._effective_masking_cfgs = self.build_effective_masking_cfgs(streams, mode_cfg)
+        else:
+            self._effective_masking_cfgs = {}
 
     def reset_rng(self, rng) -> None:
         """
@@ -162,6 +168,13 @@ class Masker:
             return mode_cfg
 
         stream_cfg_masking = copy.deepcopy(mode_cfg)
+
+        # Copy top-level masking keys from override
+        if "randomly_drop_as_source_rate" in override:
+            stream_cfg_masking["randomly_drop_as_source_rate"] = override[
+                "randomly_drop_as_source_rate"
+            ]
+
         for section_key in ("model_input", "target_input"):
             override_values = override.get(section_key, None)
             if override_values is None:
@@ -340,6 +353,9 @@ class Masker:
         losses = stage_cfg.losses
         corr_dict = self.parse_src_target_correspondence(losses, target_cfgs, source_cfgs)
 
+        # randomly_drop_as_source_rate from consolidated masking config
+        randomly_drop_rate = stage_cfg.get("randomly_drop_as_source_rate", 0.0)
+
         target_masks = MaskData()
 
         # iterate over all target samples
@@ -352,15 +368,11 @@ class Masker:
                 if is_stream_forcing(stream_cfg, self.stage):
                     target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
-                    # prevent target from being dropped
-                    stream_cfg_target = copy.deepcopy(stream_cfg)
-                    stream_cfg_target["randomly_drop_as_source_rate"] = 0.0
-                    # get
+                    # targets are never randomly dropped
                     target_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
                         strategy=target_cfg.get("masking_strategy"),
                         masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
-                        stream_cfg=stream_cfg_target,
                         target_relationship_mask=("independent", None),
                     )
 
@@ -405,15 +417,17 @@ class Masker:
                 # target is specified)
                 target_idx += i_sample % target_num_samples[target_cfg_idx].item()
 
-                # determine if forcing dataset => mask is empty
+                # determine if diagnostic dataset => mask is empty
                 if is_stream_diagnostic(stream_cfg, self.stage):
+                    source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                elif randomly_drop_rate > 0.0 and self.rng.uniform() < randomly_drop_rate:
+                    # randomly drop entire stream as source
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
                     source_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
-                        stream_cfg=stream_cfg,
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                     )
 
@@ -434,7 +448,6 @@ class Masker:
         num_cells: int,
         strategy: str,
         masking_strategy_config: dict,
-        stream_cfg: dict,
         target_relationship_mask: (str, np.typing.NDArray),
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
@@ -480,9 +493,7 @@ class Masker:
             return mask, {}
 
         # get mask
-        mask, params = self._generate_cell_mask(
-            num_cells, strategy, masking_strategy_config, stream_cfg
-        )
+        mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
 
         # handle cases where mask needs to be combined with target_mask
         # without the assert we can fail silently
@@ -504,7 +515,6 @@ class Masker:
         num_cells: int,
         strategy: str,
         masking_strategy_config: dict,
-        stream_cfg: dict,
     ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
@@ -532,12 +542,6 @@ class Masker:
         )
 
         # generate cell mask
-
-        # if stream is not dropped then apply regular masking
-        if stream_cfg.get("randomly_drop_as_source_rate", 0.0) > 0.0:
-            if self.rng.uniform() < stream_cfg.get("randomly_drop_as_source_rate"):
-                mask = to_bool_tensor(np.zeros(num_cells, dtype=np.bool))
-                return (mask, masking_params)
 
         if strategy == "random":
             keep_rate = self._get_sampling_rate(masking_strategy_config)
