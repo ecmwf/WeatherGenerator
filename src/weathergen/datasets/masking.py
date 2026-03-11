@@ -144,8 +144,10 @@ class Masker:
 
         The override is flat per section (``model_input`` / ``target_input``),
         not per named strategy.  If a section has multiple strategies (e.g.
-        ``"input_physical"`` and ``"input_jepa"``), the override is intentionally
-        broadcast to all of them.
+        ``"input_physical"`` and ``"input_jepa"``), masking strategy fields are
+        broadcast to all of them.  ``randomly_drop_as_source_rate`` is evaluated
+        independently per source sample, so different strategies may be
+        dropped or kept independently.
 
         Expected YAML in a stream config, e.g.:
 
