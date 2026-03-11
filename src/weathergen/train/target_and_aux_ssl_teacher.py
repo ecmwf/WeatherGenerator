@@ -58,7 +58,10 @@ class EMATeacher(TargetAndAuxModuleBase):
 
     def compute(self, bidx, batch, model_params, model) -> tuple[Any, Any]:
         with torch.no_grad():
-            outputs = self.ema_model.forward_eval(model_params, batch).get_latent_prediction(0)
+            rollout_steps = batch.get_output_len()
+            outputs = self.ema_model.forward_eval(
+                model_params, batch, rollout_steps
+            ).get_latent_prediction(0)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])

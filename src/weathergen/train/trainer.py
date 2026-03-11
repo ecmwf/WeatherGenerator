@@ -157,6 +157,11 @@ class Trainer(TrainerBase):
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
+        self.fcst_chunks_by_mode = {
+            "training": self._init_fcst_chunks(self.training_cfg),
+            "validation": self._init_fcst_chunks(self.validation_cfg),
+            "test": self._init_fcst_chunks(self.test_cfg),
+        }
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -175,6 +180,26 @@ class Trainer(TrainerBase):
             ).to_device(self.device)
 
         return target_and_aux_calculators
+
+    def _init_fcst_chunks(self, mode_cfg):
+        forecast_cfg = mode_cfg.get("forecast", {})
+        rollout_steps = forecast_cfg.get("num_steps", 0)
+        if isinstance(rollout_steps, list):
+            rollout_steps = max(rollout_steps) if len(rollout_steps) > 0 else 0
+        fcst_chunk_size = forecast_cfg.get("fstep_chunk_size", rollout_steps)
+        nchunks = (rollout_steps + fcst_chunk_size - 1) // fcst_chunk_size if rollout_steps else 0
+        remainder = rollout_steps % fcst_chunk_size if rollout_steps else 0
+        chunks = [fcst_chunk_size] * nchunks
+        if chunks:
+            chunks[-1] = remainder or fcst_chunk_size
+        return chunks
+
+    def _get_fcst_chunks(self, mode_cfg):
+        if mode_cfg is self.test_cfg:
+            return self.fcst_chunks_by_mode["test"]
+        if mode_cfg is self.training_cfg:
+            return self.fcst_chunks_by_mode["training"]
+        return self.fcst_chunks_by_mode["validation"]
 
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
@@ -571,17 +596,8 @@ class Trainer(TrainerBase):
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
-                        if self.ema_model is None:
-                            preds = self.model(
-                                self.model_params,
-                                batch.get_source_samples(),
-                            )
-                        else:
-                            preds = self.ema_model.forward_eval(
-                                self.model_params,
-                                batch.get_source_samples(),
-                            )
-
+                        chunks = self._get_fcst_chunks(mode_cfg)
+                        x = batch.get_source_samples()
                         targets_and_auxs = {}
                         for loss_name, target_aux in self.target_and_aux_calculators_val.items():
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
@@ -591,33 +607,49 @@ class Trainer(TrainerBase):
                                 self.model_params,
                                 self.model,
                             )
+                        fstep_offset = 0
+                        for chunk_size in chunks:
+                            if self.ema_model is None:
+                                x = self.model(
+                                    self.model_params,
+                                    x,
+                                    chunk_size,
+                                )
+                            else:
+                                x = self.ema_model.forward_eval(
+                                    self.model_params,
+                                    x,
+                                    chunk_size,
+                                )
+
+                            if bidx < num_samples_write:
+                                denormalize_data_fct = (
+                                    (lambda x0, x1: x1)
+                                    if mode_cfg.get("output", {}).get("normalized_samples", False)
+                                    else self.dataset_val.denormalize_target_channels
+                                )
+                                write_output(
+                                    self.cf,
+                                    mode_cfg,
+                                    batch_size,
+                                    mini_epoch,
+                                    bidx,
+                                    denormalize_data_fct,
+                                    batch,
+                                    x,
+                                    targets_and_auxs,
+                                    timestep_idxs=list(
+                                        range(fstep_offset, fstep_offset + chunk_size)
+                                    ),
+                                    fstep_offset=fstep_offset,
+                                )
+                            fstep_offset += chunk_size
 
                     _ = self.loss_calculator_val.compute_loss(
-                        preds=preds,
+                        preds=x,
                         targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
                     )
-
-                    # log output
-                    if bidx < num_samples_write:
-                        # denormalization function for data
-                        denormalize_data_fct = (
-                            (lambda x0, x1: x1)
-                            if mode_cfg.get("output", {}).get("normalized_samples", False)
-                            else self.dataset_val.denormalize_target_channels
-                        )
-                        # write output
-                        write_output(
-                            self.cf,
-                            mode_cfg,
-                            batch_size,
-                            mini_epoch,
-                            bidx,
-                            denormalize_data_fct,
-                            batch,
-                            preds,
-                            targets_and_auxs,
-                        )
 
                     pbar.update(batch_size)
 

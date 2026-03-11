@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 
 from weathergen.common.config import Config
-from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.batch import BatchSamples, ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
@@ -673,7 +673,12 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
-    def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
+    def forward(
+        self,
+        model_params: ModelParams,
+        batch: ModelBatch | BatchSamples | LatentState,
+        rollout_steps: int,
+    ) -> ModelOutput:
         """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
@@ -684,18 +689,24 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        output = ModelOutput(batch.get_output_len())
+        output = ModelOutput(rollout_steps)
 
-        tokens, posteriors = self.encoder(model_params, batch)
-        output.add_latent_prediction(0, "posteriors", posteriors)
+        if isinstance(batch, (ModelBatch, BatchSamples)):
+            tokens, posteriors = self.encoder(model_params, batch)
+            output.add_latent_prediction(0, "posteriors", posteriors)
 
-        # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
-        # collapse along input step dimension
-        tokens = tokens.reshape(shape).sum(axis=1)
+            # recover batch dimension and separate input_steps
+            shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+            # collapse along input step dimension
+            tokens = tokens.reshape(shape).sum(axis=1)
+        else:
+            if batch.z_pre_norm is None:
+                raise ValueError("LatentState.z_pre_norm must be provided to run the model.")
+            tokens = batch.z_pre_norm
+            output.add_latent_prediction(0, "posteriors", batch)
 
         # roll-out in latent space, iterate and generate output over requested output steps
-        for step in batch.get_output_idxs():
+        for step in range(rollout_steps):
             # apply forecasting engine (if present)
             if self.forecast_engine:
                 tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
