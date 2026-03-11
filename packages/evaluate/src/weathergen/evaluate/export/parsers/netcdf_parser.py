@@ -73,6 +73,8 @@ class NetcdfParser(CfParser):
                 continue
 
             result = result.as_xarray().squeeze()
+            if "channel" not in result.indexes: 
+                result = result.expand_dims("channel")
             result = result.sel(channel=self.channels)
             result = self.reshape(result)
             da_fs.append(result)
