@@ -8,12 +8,34 @@
 # nor does it submit to any jurisdiction.
 
 
+import math
+
 import torch
 
 
 class EMAModel:
     """
     Taken and modified from https://github.com/NVlabs/edm2/tree/main
+
+    Optional halflife scheduling
+    ----------------------------
+    If ``halflife_end`` is provided, the effective halflife is continuously
+    annealed from ``halflife_steps`` to ``halflife_end`` over
+    ``halflife_ramp_steps`` optimisation steps.
+
+    Two schedule types are available (``halflife_schedule_type``):
+
+    - ``"log_linear"`` (default): linear interpolation in log-halflife space
+      (i.e. geometric interpolation of the halflife value).  Natural when the
+      halflife spans orders of magnitude.
+
+    - ``"cosine_beta"``: cosine interpolation in *beta* space — this exactly
+      reproduces the momentum schedule used by I-JEPA, V-JEPA, BYOL, and DINO.
+      Those methods ramp beta from a base value toward 1.0 with the formula
+      ``beta(t) = beta_start + (beta_end - beta_start) * (1 - cos(pi*t)) / 2``.
+      We convert the configured halflife start/end to beta, apply that cosine
+      interpolation, then convert back to halflife so the rest of the code
+      (including ``rampup_ratio``) still operates on halflife.
     """
 
     @torch.no_grad()
@@ -22,12 +44,18 @@ class EMAModel:
         model,
         empty_model,
         halflife_steps=float("inf"),
+        halflife_end=None,
+        halflife_ramp_steps=None,
+        halflife_schedule_type="log_linear",
         rampup_ratio=0.09,
         is_model_sharded=False,
         random_init=False,
     ):
         self.original_model = model
         self.halflife_steps = halflife_steps
+        self.halflife_end = halflife_end
+        self.halflife_ramp_steps = halflife_ramp_steps
+        self.halflife_schedule_type = halflife_schedule_type
         self.rampup_ratio = rampup_ratio
         self.ema_model = empty_model
         self.is_model_sharded = is_model_sharded
@@ -97,13 +125,30 @@ class EMAModel:
         Returns:
             Current EMA beta value.
         """
-        halflife_steps = self.halflife_steps
+        # Scheduled halflife: interpolate from halflife_steps → halflife_end
+        if self.halflife_end is not None and self.halflife_ramp_steps is not None and self.halflife_ramp_steps > 0:
+            t = min(cur_step / self.halflife_ramp_steps, 1.0)
+            if self.halflife_schedule_type == "cosine_beta":
+                # Cosine interpolation in beta space — matches I-JEPA / BYOL / DINO.
+                # Convert start/end halflife → beta, cosine-interpolate, convert back.
+                bs = self.batch_size
+                beta_start = 0.5 ** (bs / max(self.halflife_steps, 1e-6))
+                beta_end = 0.5 ** (bs / max(self.halflife_end, 1e-6))
+                beta_t = beta_start + (beta_end - beta_start) * (1 - math.cos(math.pi * t)) / 2
+                halflife_steps = bs * math.log(0.5) / math.log(min(beta_t, 1 - 1e-15))
+            else:
+                # "log_linear": geometric interpolation of halflife (linear in log-space)
+                log_start = math.log(max(self.halflife_steps, 1e-6))
+                log_end = math.log(max(self.halflife_end, 1e-6))
+                halflife_steps = math.exp(log_start + t * (log_end - log_start))
+        else:
+            halflife_steps = self.halflife_steps
+
         if self.rampup_ratio is not None:
             halflife_steps = min(halflife_steps, cur_step / self.rampup_ratio)
         beta = 0.5 ** (self.batch_size / max(halflife_steps, 1e-6))
 
-        print("" * 50)
-        print(f"EMA update: step={cur_step}, batch_size={self.batch_size}, halflife_steps={halflife_steps:.2f}, beta={beta:.6f}")
+        # print(f"EMA update: step={cur_step}, batch_size={self.batch_size}, halflife_steps={halflife_steps:.2f}, beta={beta:.6f}")
 
         return beta
 

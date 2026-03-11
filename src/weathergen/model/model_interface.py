@@ -326,10 +326,23 @@ def get_target_aux_calculator(
             meta_ema_model, cf.training_config, cf_overridden.ae_global_dim_embed
         )
 
+        # Convert ema_halflife_ramp_epochs → steps so EMAModel stays step-based.
+        # cur_step per epoch = world_size * samples_per_mini_epoch.
+        halflife_ramp_epochs = target_and_aux_calc_params.get("ema_halflife_ramp_epochs", None)
+        if halflife_ramp_epochs is not None:
+            world_size = cf.get("world_size_original", cf.get("world_size"))
+            samples_per_epoch = cf.training_config.samples_per_mini_epoch
+            halflife_ramp_steps = halflife_ramp_epochs * world_size * samples_per_epoch
+        else:
+            halflife_ramp_steps = None
+
         ema_model = EMAModel(
             model,
             meta_ema_model,
             halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
+            halflife_end=target_and_aux_calc_params.get("ema_halflife_end", None),
+            halflife_ramp_steps=halflife_ramp_steps,
+            halflife_schedule_type=target_and_aux_calc_params.get("ema_halflife_schedule_type", "log_linear"),
             rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
             is_model_sharded=(cf.with_ddp and cf.with_fsdp),
             random_init=target_and_aux_calc_params.get("random_init_teacher", False),
