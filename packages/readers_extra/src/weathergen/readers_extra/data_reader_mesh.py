@@ -52,6 +52,7 @@ class DataReaderMesh(DataReaderTimestep):
         self.roi = stream_info.get("roi")
         self.patch_size_deg = stream_info.get("patch_size_deg")
         self.sample_points = stream_info.get("sample_points")
+        self._len_cached = 0
 
         # FIX: Separate caches to prevent identical channel names from overwriting!
         self._dask_arrays_src = {}
@@ -174,8 +175,8 @@ class DataReaderMesh(DataReaderTimestep):
                 lats = ds["lat"].values if "lat" in ds else ds["lat_c"].values
                 lons = ds["lon"].values if "lon" in ds else ds["lon_c"].values
 
-                lats = np.nan_to_num(lats, nan=0.0)
-                lons = np.nan_to_num(lons, nan=0.0)
+                lats = np.nan_to_num(lats, nan=0.0).astype(np.float32)
+                lons = np.nan_to_num(lons, nan=0.0).astype(np.float32)
                 if np.any(lats > 90.0):
                     lats = lats - 90.0
                 lats = np.clip(lats, -90.0, 90.0)
@@ -400,16 +401,17 @@ class DataReaderMesh(DataReaderTimestep):
         )
         return rdata
 
-    def _load_block_from_ds(self, 
-                            ds, 
-                            arr_cache, 
-                            indices, 
-                            start_t, 
-                            end_t, 
-                            n_steps, 
-                            disk_indices, 
-                            rel_indices
-                            ) -> np.typing.NDArray:
+    def _load_block_from_ds(
+            self, 
+            ds, 
+            arr_cache, 
+            indices, 
+            start_t, 
+            end_t, 
+            n_steps, 
+            disk_indices, 
+            rel_indices
+        ) -> np.typing.NDArray:
         if rel_indices is not None:
             num_points = len(rel_indices)
         else:
@@ -489,7 +491,7 @@ class DataReaderMesh(DataReaderTimestep):
 
     @override
     def length(self) -> int:
-        return getattr(self, "_len_cached", 0)
+        return self._len_cached
 
     def _parse_attr(self, attrs, key):
         val = attrs.get(key, {})
@@ -522,12 +524,12 @@ class DataReaderMesh(DataReaderTimestep):
     @override
     def normalize_source_channels(self, source: np.typing.NDArray) -> np.typing.NDArray:
         norm = (source - self.mean[self.source_idx]) / self.stdev[self.source_idx]
-        return np.nan_to_num(norm, nan=0.0, posinf=0.0, neginf=0.0)
+        return np.nan_to_num(norm, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
     @override
     def normalize_target_channels(self, target: np.typing.NDArray) -> np.typing.NDArray:
         norm = (target - self.mean[self.target_idx]) / self.stdev[self.target_idx]
-        return np.nan_to_num(norm, nan=np.nan, posinf=np.nan, neginf=np.nan)
+        return np.nan_to_num(norm, nan=np.nan, posinf=np.nan, neginf=np.nan).astype(np.float32)
 
     @override
     def denormalize_source_channels(self, source):
