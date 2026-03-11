@@ -2,6 +2,7 @@
 
 # TODO: this is the root weathergenerator directory, rename the variable.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
+PRIVATE_REPO_PATH="${WEATHERGEN_PRIVATE_REPO_PATH:-$SCRIPT_DIR/../WeatherGenerator-private}"
 
 case "$1" in
   sync)
@@ -63,7 +64,7 @@ case "$1" in
       fi
 
       # weathergen-evaluate
-      uv sync --project packages/evaluate --no-install-workspace --package weathergen-evaluate 
+      uv sync --project packages/evaluate --no-install-workspace --package weathergen-evaluate
       uv run --project packages/evaluate --frozen pyrefly check packages/evaluate
 
       # weathergen (root)
@@ -120,7 +121,7 @@ case "$1" in
       # 1. Get the path of the private config of the cluster
       # 2. Read the yaml and extract the path of the shared conf
       # This uses the yq command. It is a python package so uvx (bundled with uv) will donwload and create the right venv
-      export working_dir=$(cat $(../WeatherGenerator-private/hpc/platform-env.py hpc-config) | uvx yq .path_shared_working_dir)
+      export working_dir=$(cat $("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config) | uvx yq .path_shared_working_dir)
       # Remove quotes
       export working_dir=$(echo "$working_dir" | sed 's/[\"\x27]//g')
       # If the working directory does not exist, exit with an error
@@ -151,7 +152,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       uv sync --all-packages
-      uv run ipython kernel install --user --env VIRTUAL_ENV $(pwd)/.venv --name=weathergen_kernel --display-name "Python (WeatherGenerator)" 
+      uv run ipython kernel install --user --env VIRTUAL_ENV $(pwd)/.venv --name=weathergen_kernel --display-name "Python (WeatherGenerator)"
       echo "Jupyter kernel created. You can now use it in Jupyter Notebook or JupyterLab."
       echo "To use this kernel, select 'Python (WeatherGenerator)' from the kernel options in Jupyter Notebook or JupyterLab."
       echo "If you want to remove the kernel later, you can run:"
@@ -162,7 +163,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       # Run on any python or jupyter notebook files in the WeatherGenerator-private/notebooks directory
-      uv run jupytext --set-formats ipynb,py:percent --sync  ../WeatherGenerator-private/notebooks/*.ipynb ../WeatherGenerator-private/notebooks/*.py
+      uv run jupytext --set-formats ipynb,py:percent --sync  "$PRIVATE_REPO_PATH"/notebooks/*.ipynb "$PRIVATE_REPO_PATH"/notebooks/*.py
       echo "Jupytext sync completed."
     )
     ;;
