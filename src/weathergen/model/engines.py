@@ -548,7 +548,7 @@ class TargetPredictionEngineClassic(nn.Module):
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
         softcap,
-        stream_name: str,
+        stream_config: dict,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -561,7 +561,7 @@ class TargetPredictionEngineClassic(nn.Module):
         :param softcap: Softcap value for the attention layers.
         """
         super(TargetPredictionEngineClassic, self).__init__()
-        self.name = f"TargetPredictionEngine_{stream_name}"
+        self.name = f"TargetPredictionEngine_{stream_config['name']}"
 
         self.cf = cf
         self.dims_embed = dims_embed
@@ -577,7 +577,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 MultiCrossAttentionHeadVarlen(
                     dim_embed_q=self.dims_embed[i],
                     dim_embed_kv=self.cf.ae_global_dim_embed,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    num_heads=stream_config["target_readout"]["num_heads"],
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
@@ -596,7 +596,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 self.tte.append(
                     MultiSelfAttentionHeadVarlen(
                         dim_embed=self.dims_embed[i],
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=stream_config["target_readout"]["num_heads"],
                         dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
