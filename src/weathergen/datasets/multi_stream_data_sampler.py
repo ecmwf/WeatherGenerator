@@ -753,10 +753,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 batch = self._get_batch(idx, num_forecast_steps)
 
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if not batch.is_empty():
-                    break
-                else:
+                if batch.is_empty() or batch.is_nan():
                     logger.warning(f"Skipping empty batch with idx={idx}.")
+                else:
+                    break
 
             yield batch
 

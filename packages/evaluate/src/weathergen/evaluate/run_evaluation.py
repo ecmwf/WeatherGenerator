@@ -24,8 +24,8 @@ from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 # Local application / package
-from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
+from weathergen.common.paths import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
