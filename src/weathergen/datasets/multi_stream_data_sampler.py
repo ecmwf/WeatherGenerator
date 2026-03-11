@@ -95,7 +95,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
         
-        self._init_forecast_cfg(mode_cfg)
+        self._init_forecast_cfg()
         # initialise fsm, can change for future mini_epochs
         self.fsm = self.list_num_forecast_steps[0]
         self.batch_size = get_batch_size_from_config(mode_cfg)
@@ -104,21 +104,25 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.len_timedelta = mode_cfg.time_window_len
         self.step_timedelta = mode_cfg.time_window_step
         self.set_time_window()
-        self._init_stream_datasets(cf)
-        self._init_sampler_length(cf)
-
+        self._init_stream_datasets()
+        self.set_sampler_length()
+        
         self.tokenizer = TokenizerMasking(
             cf.healpix_level,
             Masker(cf.healpix_level, stage)
-        )
+        )      
+        # RNG seed setup
+        rs = cf.data_loading.rng_seed
+        nw = cf.data_loading.num_workers
+        self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
         self.rng = None
         self.perms = None
         self.perms_num_forecast_steps = None
 
         
-    def _init_forecast_cfg(self, mode_cfg):
-        forecast_cfg = mode_cfg.get("forecast", {})
+    def _init_forecast_cfg(self):
+        forecast_cfg = self.mode_cfg.get("forecast", {})
         self.forecast_cfg = forecast_cfg
 
         if len(forecast_cfg) == 0:
@@ -143,7 +147,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def set_time_window(self):
         """Compute time window and permutation base array (perms).
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
-
         forecast_win = (self.time_step * (self.fsm + 1)) # in time units
         if forecast_win > self.len_timedelta:
             logger.warning(
@@ -152,7 +155,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 )
             tw_length = forecast_win
         else:
-            tw_length - self.len_timedelta
+            tw_length = self.len_timedelta
 
         available_samples = (
             (self.mode_cfg.end_date - self.mode_cfg.start_date - forecast_win)
@@ -171,8 +174,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     + forecast_win
                 )
                 logger.warning(
-                    f"Using adjusted end date {new_end_date} instead of {self.mode_cfg.end_date} \
-                        to avoid repeating data. Use repeat_data_in_mini_epoch to avoid this behavior."
+                    f"Using adjusted end date {new_end_date} instead of {self.mode_cfg.end_date}" \
+                    " to avoid repeating data. Set repeat_data_in_mini_epoch to True to avoid this behavior."
                 )
                 end_date = new_end_date
             else:
@@ -195,18 +198,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # compute permutation range
         index_range = tw.get_index_range()
-        perms_len = int(index_range.end - index_range.start)
-        perms_len -= (self.fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
-        self.base_perms = np.arange(perms_len)
+        self.base_perms = np.arange(index_range.end - index_range.start)
         self.index_range = index_range
 
 
-    def _init_stream_datasets(self, cf):
+    def _init_stream_datasets(self):
         """Load dataset readers for all streams from config."""
         self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
 
-        for _, stream_info in enumerate(cf.streams):
+        for _, stream_info in enumerate(self.cf.streams):
             # list of sources for current stream
             self.streams_datasets[stream_info["name"]] = []
 
@@ -236,7 +237,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # check if fname is a valid path to allow for simple overwriting
                     filename = fname
                 else:
-                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
+                    filenames = [pathlib.Path(path) / fname for path in self.cf.data_paths]
 
                     if not any(filename.exists() for filename in filenames):  # see above
                         msg = (
@@ -268,13 +269,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 self.streams_datasets[stream_info["name"]] += [ds]
 
 
-    def _init_sampler_length(self, cf):
+    def set_sampler_length(self):
         """Compute static sampler length (self.len)."""
-
-        L = self.samples_per_mini_epoch
+        # if repeated data, index range will be shorter (this is now checked earlier)
+        L = min(self.samples_per_mini_epoch, int(self.index_range.end - self.index_range.start))
 
         # adjust for world size + batch size
-        len_chunk = ((L // cf.world_size) // self.batch_size) * self.batch_size
+        len_chunk = ((L // self.world_size) // self.batch_size) * self.batch_size
         self.len = min(L, len_chunk)
 
         # warning if base perms smaller than effective length
@@ -287,35 +288,31 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         logger.info(f"index_range={self.index_range}, len={self.len}, len_chunk={len_chunk}")
 
-        # RNG seed setup
-        rs = cf.data_loading.rng_seed
-        nw = cf.data_loading.num_workers
-        self.data_loader_rng_seed = rs if rs > nw else rs * 97
-
     def reset(self):
         """Reset RNG, shuffle perms, compute forecast steps."""
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
         # reset fsm for each mini epoch
-        self.reset_fsm()
-        self.set_time_window()
-        # ---- build perms for this epoch ----
-        perms = self.base_perms.copy()
+        fsm = self.reset_fsm()
+        if fsm != self.fsm:
+            self.fsm = fsm
+            # recalcualte the twindowhandler
+            self.set_time_window()
+
+        self.perms = self.base_perms.copy()
 
         # repeat if needed
-        if self.repeat_data and len(perms) < self.samples_per_mini_epoch:
-            perms = np.tile(perms, self.samples_per_mini_epoch // len(perms))
+        if self.repeat_data and len(self.perms) < self.samples_per_mini_epoch:
+            self.perms = np.tile(self.perms, self.samples_per_mini_epoch // len(self.perms))
             filler = self.rng.choice(
-                perms,
-                size=self.samples_per_mini_epoch - len(perms),
+                self.perms,
+                size=self.samples_per_mini_epoch - len(self.perms),
                 replace=False,
             )
-            perms = np.concatenate([perms, filler])
+            self.perms = np.concatenate([self.perms, filler])
 
         # shuffle
         if self.shuffle:
-            perms = self.rng.permutation(perms)
-
-        self.perms = perms
+            self.perms = self.rng.permutation(self.perms)
 
         # ---- forecast policy for each batch ----
         len_dt = len(self) // self.batch_size
@@ -324,12 +321,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             fs = np.zeros(len_dt, dtype=np.int64)
 
         elif self.forecast_policy in ("fixed", "sequential"):
-            fs = self.fsm * np.ones(len_dt, dtype=np.int64)
+            fs = fsm * np.ones(len_dt, dtype=np.int64)
 
         elif self.forecast_policy in ("random", "sequential_random"):
             fs = self.rng.integers(
                 low=self.list_num_forecast_steps.min(),
-                high=self.fsm + 1,
+                high=fsm + 1,
                 size=len_dt,
                 dtype=np.int64,
             )
@@ -345,12 +342,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # fixed number of forecast steps for this run
         if self.forecast_policy != "random":
             idx = min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
-            self.fsm = self.list_num_forecast_steps[idx]
+            fsm = self.list_num_forecast_steps[idx]
         else:
-            self.fsm = self.list_num_forecast_steps.max()
+            fsm = self.list_num_forecast_steps.max()
 
-        if self.fsm > 0:
-            logger.info(f"forecast_steps : {self.fsm}")
+        if fsm > 0:
+            logger.info(f"forecast_steps : {fsm}")
+        return fsm
 
     def advance(self):
         """
@@ -794,10 +792,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 batch = self._get_batch(idx, num_forecast_steps)
 
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if not batch.is_empty():
-                    break
-                else:
+                if batch.is_empty() or batch.is_nan():
                     logger.warning(f"Skipping empty batch with idx={idx}.")
+                else:
+                    break
 
             yield batch
 
