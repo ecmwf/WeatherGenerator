@@ -80,6 +80,14 @@ class Sample:
             np.array([s.empty() if s is not None else True for _, s in self.streams_data.items()])
         )
 
+    def is_nan(self) -> bool:
+        """
+        Check if sample is all NaN
+        """
+        return np.all(
+            np.array([s.nan() if s is not None else True for _, s in self.streams_data.items()])
+        )
+
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
         """
         Add data for stream @stream_name to sample
@@ -319,6 +327,18 @@ class ModelBatch:
             np.array([s.is_empty() if s is not None else True for s in self.target_samples.samples])
         )
         return source_empty or target_empty
+
+    def is_nan(self):
+        """
+        Check if batch is empty
+        """
+        source_nan = np.all(
+            np.array([s.is_nan() if s is not None else True for s in self.source_samples.samples])
+        )
+        target_nan = np.all(
+            np.array([s.is_nan() if s is not None else True for s in self.target_samples.samples])
+        )
+        return source_nan or target_nan
 
     def len_sources(self) -> int:
         """
