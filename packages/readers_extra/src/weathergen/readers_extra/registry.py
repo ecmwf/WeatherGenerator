@@ -8,10 +8,10 @@ def get_extra_reader(stream_type: str) -> object | None:
             from weathergen.readers_extra.data_reader_iconart import DataReaderIconArt
 
             return DataReaderIconArt
-        case "eobs":
-            from weathergen.readers_extra.data_reader_eobs import DataReaderEObs
+        case "grep":
+            from weathergen.readers_extra.data_reader_grep import DataReaderGREP
 
-            return DataReaderEObs
+            return DataReaderGREP
         case "iconesm":
             from weathergen.readers_extra.data_reader_icon_esm import DataReaderIconEsm
 
