@@ -141,7 +141,7 @@ class FrozenTeacher(EncoderTeacher):
         teacher_mini_epoch = params.get("teacher_mini_epoch", -1)
 
         # Load teacher's config, create model with teacher's architecture
-        teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, cf.model_path)
+        teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, model_path=None)
         teacher_config = merge_configs(teacher_config, {"with_ddp": False, "with_fsdp": False})
 
         teacher_model = get_model(teacher_config, "student", dataset, {})
