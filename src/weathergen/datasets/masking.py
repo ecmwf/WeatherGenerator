@@ -136,8 +136,7 @@ class Masker:
         """
         self.rng = rng
 
-    @staticmethod
-    def merge_masking_config(mode_cfg, override):
+    def merge_masking_config(self, mode_cfg, override):
         """Merge a stream's masking override into the base mode config.
 
         Only masking strategy fields are overridden. Structural keys like
@@ -193,14 +192,13 @@ class Masker:
 
         return stream_cfg_masking
 
-    @staticmethod
-    def build_effective_masking_cfgs(streams, mode_cfg):
+    def build_effective_masking_cfgs(self, streams, mode_cfg):
         """Build effective masking configs for all streams."""
         cfgs = {}
         for stream_info in streams:
             name = stream_info["name"]
             override = stream_info.get("masking_override", None)
-            cfgs[name] = Masker.merge_masking_config(mode_cfg, override)
+            cfgs[name] = self.merge_masking_config(mode_cfg, override)
             if override is not None and is_root():
                 logger.info(f"Stream '{name}' using masking override: {override}")
 
@@ -334,27 +332,28 @@ class Masker:
         self,
         training_mode: str,
         num_cells: int,
-        stage_cfg: dict,
-        stream_cfg: dict,
+        stream_info: dict,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
         SampleMetaData is currently just a dict with the masking params used.
         """
 
+        stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
+
         # target and source configs
-        target_cfgs = stage_cfg.get("target_input", [])
-        source_cfgs = stage_cfg.get("model_input", [])
+        target_cfgs = stream_masking_cfg.get("target_input", [])
+        source_cfgs = stream_masking_cfg.get("model_input", [])
 
         # target and source are assumed identical when target is not specified
         if len(target_cfgs) == 0:
             target_cfgs = copy.deepcopy(source_cfgs)
 
-        losses = stage_cfg.losses
+        losses = stream_masking_cfg.losses
         corr_dict = self.parse_src_target_correspondence(losses, target_cfgs, source_cfgs)
 
         # randomly_drop_as_source_rate from consolidated masking config
-        randomly_drop_rate = stage_cfg.get("randomly_drop_as_source_rate", 0.0)
+        randomly_drop_rate = stream_masking_cfg.get("randomly_drop_as_source_rate", 0.0)
 
         target_masks = MaskData()
 
@@ -365,7 +364,7 @@ class Masker:
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
                 # determine if forcing dataset => mask is empty
-                if is_stream_forcing(stream_cfg, self.stage):
+                if is_stream_forcing(stream_info, self.stage):
                     target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
                     # targets are never randomly dropped
@@ -417,11 +416,11 @@ class Masker:
                 # target is specified)
                 target_idx += i_sample % target_num_samples[target_cfg_idx].item()
 
-                # determine if diagnostic dataset => mask is empty
-                if is_stream_diagnostic(stream_cfg, self.stage):
-                    source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
-                elif randomly_drop_rate > 0.0 and self.rng.uniform() < randomly_drop_rate:
-                    # randomly drop entire stream as source
+                # determine if diagnostic dataset or randomly dropped => mask is empty
+                is_stream_dropped = (
+                    randomly_drop_rate > 0.0 and self.rng.uniform() < randomly_drop_rate
+                )
+                if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
                     source_mask, mask_params = self._get_mask(

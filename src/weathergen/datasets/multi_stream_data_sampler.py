@@ -580,14 +580,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """
         masks = {}
         for stream_info in self.streams:
-            # Each stream uses its own effective masking config (which may include
-            # per-stream ``masking_override`` merged on top of the global config).
-            stream_cfg = self.masker._effective_masking_cfgs[stream_info["name"]]
             # Build source and target sample masks
             masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
                 training_mode,
                 self.num_healpix_cells,
-                stream_cfg,
                 stream_info,
             )
             # identical for all streams
