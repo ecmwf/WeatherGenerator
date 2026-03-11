@@ -10,6 +10,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
+import subprocess
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -47,7 +48,26 @@ class QuaverParser(CfParser):
         if not hasattr(self, "channels"):
             raise ValueError("Channels must be provided for Quaver format.")
         if not hasattr(self, "expver"):
-            raise ValueError("Expver must be provided for Quaver format.")
+            _logger.info("Trying to load PIFS environment to get a new expver.")
+            result = subprocess.run(
+                "module load pifsenv",
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                raise ValueError(f"Failed to load pifsenv module."
+                "Automatic generation of expver works only on ATOS."
+                "Please manually provide an expver for other environments through --expver."
+            )
+            else:
+                _logger.info("pifsenv module loaded successfully. Generating new expver...")
+
+            result = subprocess.run(
+                ["getNewId", "--class", "rd"], capture_output=True, text=True, check=True
+            )
+            self.expver = result.stdout.strip()
+            _logger.info(f"Generated new expver: {self.expver}")    
 
         super().__init__(config, **kwargs)
 
