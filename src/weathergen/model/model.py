@@ -93,6 +93,11 @@ class ModelParams(torch.nn.Module):
         self.dtype = get_dtype(cf.attention_dtype)
         self.batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
 
+        # Precompute healpix cell centers (lon, lat) in degrees for downstream use.
+        ipix = np.arange(self.num_healpix_cells)
+        lon, lat = hp.healpix_to_lonlat(ipix, 2**self.healpix_level, order="nested")
+        self.healpix_coords = (lon.to_value("deg"), lat.to_value("deg"))
+
         ### POSITIONAL EMBEDDINGS ###
         len_token_seq = 1024
         self.pe_embed = torch.nn.Parameter(
