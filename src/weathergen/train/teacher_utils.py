@@ -24,7 +24,9 @@ from weathergen.model.engines import (
 logger = logging.getLogger(__name__)
 
 
-def _create_teacher_heads(name: str, head_type: str, dim_embed: int, loss_conf, cf=None) -> nn.Module:
+def _create_teacher_heads(
+    name: str, head_type: str, dim_embed: int, loss_conf, cf=None
+) -> nn.Module:
     """Create a latent prediction head for a given SSL loss type.
 
     Mirrors Model._create_latent_pred_head() logic with per-loss-type token settings:
@@ -84,7 +86,9 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
                 model.latent_heads[name] = LatentPredictionHeadIdentity()
             elif name in ("iBOT", "DINO"):
                 head_type = conf.get("head", "mlp").lower()
-                model.latent_heads[name] = _create_teacher_heads(name, head_type, teacher_dim_embed, conf)
+                model.latent_heads[name] = _create_teacher_heads(
+                    name, head_type, teacher_dim_embed, conf
+                )
             else:
                 logger.warning(f"Unknown SSL loss type {name!r} in teacher setup, skipping.")
 
