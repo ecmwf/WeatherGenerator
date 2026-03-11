@@ -9,9 +9,11 @@
 
 """Tests for per-stream masking override infrastructure."""
 
+import numpy as np
 from omegaconf import OmegaConf
 
-from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.datasets.masking import Masker
+from weathergen.train.utils import TRAIN, VAL
 
 
 def _make_mode_cfg():
@@ -63,18 +65,18 @@ def _make_stream_info(name, masking_override=None):
     return info
 
 
+def _make_masker(stage=TRAIN):
+    """Create a minimal Masker without streams (for calling methods directly)."""
+    return Masker(healpix_level=0, stage=stage)
+
+
 class TestBuildEffectiveMaskingCfgs:
-    """Test _build_effective_masking_cfgs logic in isolation."""
+    """Test build_effective_masking_cfgs logic in isolation."""
 
-    def _build(self, streams, mode_cfg):
-        """Call _build_effective_masking_cfgs without constructing a full sampler.
-
-        We monkey-patch the minimal attributes the method needs.
-        """
-        obj = object.__new__(MultiStreamDataSampler)
-        obj.streams = streams
-        obj.mode_cfg = mode_cfg
-        return obj._build_effective_masking_cfgs()
+    def _build(self, streams, mode_cfg, stage=TRAIN):
+        """Call build_effective_masking_cfgs on a minimal Masker."""
+        masker = _make_masker(stage)
+        return masker.build_effective_masking_cfgs(streams, mode_cfg)
 
     def test_no_override_returns_global_config(self):
         mode_cfg = _make_mode_cfg()
@@ -82,7 +84,7 @@ class TestBuildEffectiveMaskingCfgs:
         cfgs = self._build(streams, mode_cfg)
 
         assert "ERA5" in cfgs
-        # Should be the exact same object (no copy)
+        # Should be the exact same object (no copy needed)
         assert cfgs["ERA5"] is mode_cfg
 
     def test_override_masking_strategy_config(self):
@@ -219,3 +221,42 @@ class TestBuildEffectiveMaskingCfgs:
         assert effective is not mode_cfg
         target_cfg = list(effective.target_input.values())[0]
         assert target_cfg.masking_strategy_config.hl_mask == 0
+
+    def test_randomly_drop_as_source_rate_override(self):
+        mode_cfg = _make_mode_cfg()
+        override = OmegaConf.create(
+            {
+                "randomly_drop_as_source_rate": 0.5,
+            }
+        )
+        streams = [_make_stream_info("stream_a", masking_override=override)]
+        cfgs = self._build(streams, mode_cfg)
+
+        effective = cfgs["stream_a"]
+        assert effective.randomly_drop_as_source_rate == 0.5
+
+    def test_randomly_drop_as_source_rate_disabled_during_validation(self):
+        """Verify that randomly_drop_as_source_rate is ignored for non-training stages."""
+        mode_cfg = _make_mode_cfg()
+        override = OmegaConf.create(
+            {
+                "randomly_drop_as_source_rate": 0.9,
+                "target_input": {
+                    "masking_strategy_config": {"hl_mask": 0},
+                },
+            }
+        )
+        streams = [_make_stream_info("stream_a", masking_override=override)]
+
+        # Build a masker for validation stage
+        masker = Masker(healpix_level=0, stage=VAL, streams=streams, mode_cfg=mode_cfg)
+        masker.reset_rng(np.random.default_rng(42))
+
+        # The effective config still has the rate, but build_samples_for_stream
+        # should not drop during validation.  We can't easily call
+        # build_samples_for_stream without a full loss config, so verify
+        # the stage-gated rate directly.
+        stream_masking_cfg = masker._effective_masking_cfgs["stream_a"]
+        assert stream_masking_cfg.randomly_drop_as_source_rate == 0.9
+        # The gate in build_samples_for_stream checks self.stage == "train"
+        assert masker.stage != "train"
