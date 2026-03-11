@@ -31,9 +31,8 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import get_batch_size_from_config
+from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.train_logger import TRAIN, Stage
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -67,7 +66,9 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
             assert False, "invalid value for argument `type`"
 
         # get source (of potentially multi-step length)
-        rdata = get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords()
+        rdata = (
+            get_reader_data(idx).shuffle(rng, shuffle, num_subset).remove_nan_coords_and_geoinfos()
+        )
         rdata.data = normalize_channels(rdata.data)
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
@@ -142,26 +143,26 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             # list of sources for current stream
             self.streams_datasets[stream_info["name"]] = []
 
-            for fname in stream_info["filenames"]:
-                kwargs = {
-                    "tw_handler": self.time_window_handler,
-                    "stream_info": stream_info,
-                }
-                dataset: type[AnyDataReader] | None = None
-                match stream_info["type"]:
-                    case "obs":
-                        dataset = DataReaderObs
-                    case "anemoi":
-                        dataset = DataReaderAnemoi
-                    case "fesom":
-                        dataset = DataReaderFesom
-                    case type_name:
-                        dataset = get_extra_reader(type_name)
-                        if dataset is None:
-                            msg = f"Unsupported stream type {stream_info['type']}"
-                            f"for stream name '{stream_info['name']}'."
-                            raise ValueError(msg)
+            kwargs = {
+                "tw_handler": self.time_window_handler,
+                "stream_info": stream_info,
+            }
+            dataset: type[AnyDataReader] | None = None
+            match stream_info["type"]:
+                case "obs":
+                    dataset = DataReaderObs
+                case "anemoi":
+                    dataset = DataReaderAnemoi
+                case "fesom":
+                    dataset = DataReaderFesom
+                case type_name:
+                    dataset = get_extra_reader(type_name)
+                    if dataset is None:
+                        msg = f"Unsupported stream type {stream_info['type']}"
+                        f"for stream name '{stream_info['name']}'."
+                        raise ValueError(msg)
 
+            for fname in stream_info["filenames"]:
                 fname = pathlib.Path(fname)
                 # dont check if file exists since zarr stores might be directories
                 if fname.exists():
@@ -529,12 +530,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # source data: iterate overall input steps
         input_data = []
-        for idx in range(base_idx - num_steps_input_max, base_idx + 1):
+        for idx in range(base_idx - num_steps_input_max + 1, base_idx + 1):
             # TODO: check that we are not out of bounds when we go back in time
 
             rdata = collect_datasources(stream_ds, idx, "source", self.rng)
 
-            if rdata.is_empty() and self._stage == TRAIN:
+            if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(idx)
@@ -556,7 +557,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
-            if rdata.is_empty() and self._stage == TRAIN:
+            if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
                 time_win = self.time_window_handler.window(timestep_idx)
@@ -564,7 +565,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
-                    stream_ds[0].mean[stream_ds[0].source_idx],
+                    stream_ds[0].mean[stream_ds[0].target_idx],
                 )
                 rdata.is_spoof = True
 
@@ -752,10 +753,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 batch = self._get_batch(idx, num_forecast_steps)
 
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if not batch.is_empty():
-                    break
-                else:
+                if batch.is_empty() or batch.is_nan():
                     logger.warning(f"Skipping empty batch with idx={idx}.")
+                else:
+                    break
 
             yield batch
 
