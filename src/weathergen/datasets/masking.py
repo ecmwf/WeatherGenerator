@@ -145,9 +145,10 @@ class Masker:
         The override is flat per section (``model_input`` / ``target_input``),
         not per named strategy.  If a section has multiple strategies (e.g.
         ``"input_physical"`` and ``"input_jepa"``), masking strategy fields are
-        broadcast to all of them.  ``randomly_drop_as_source_rate`` is evaluated
-        independently per source sample, so different strategies may be
-        dropped or kept independently.
+        broadcast to all of them.  ``randomly_drop_as_source_rate`` is a
+        per-stream rate; the drop decision is made once per call to
+        ``build_samples_for_stream`` and applies to all source strategies
+        uniformly (training only).
 
         Expected YAML in a stream config, e.g.:
 
@@ -354,8 +355,12 @@ class Masker:
         losses = stream_masking_cfg.losses
         corr_dict = self.parse_src_target_correspondence(losses, target_cfgs, source_cfgs)
 
-        # randomly_drop_as_source_rate from consolidated masking config
-        randomly_drop_rate = stream_masking_cfg.get("randomly_drop_as_source_rate", 0.0)
+        # randomly_drop_as_source_rate from consolidated masking config (training only)
+        randomly_drop_rate = (
+            stream_masking_cfg.get("randomly_drop_as_source_rate", 0.0)
+            if self.stage == "train"
+            else 0.0
+        )
 
         target_masks = MaskData()
 
@@ -394,6 +399,7 @@ class Masker:
         source_masks = MaskData()
         source_target_mapping = []
         target_num_samples = get_num_samples(target_cfgs)
+        is_stream_dropped = randomly_drop_rate > 0.0 and self.rng.uniform() < randomly_drop_rate
         i_source = 0
         for i_src_cfg, (_, source_cfg) in enumerate(source_cfgs.items()):
             # skip items that do not appear in loss
@@ -419,9 +425,6 @@ class Masker:
                 target_idx += i_sample % target_num_samples[target_cfg_idx].item()
 
                 # determine if diagnostic dataset or randomly dropped => mask is empty
-                is_stream_dropped = (
-                    randomly_drop_rate > 0.0 and self.rng.uniform() < randomly_drop_rate
-                )
                 if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
