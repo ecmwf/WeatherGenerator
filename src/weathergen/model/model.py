@@ -53,15 +53,28 @@ class ModelOutput:
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
+    noised_physical: list[dict[StreamName, torch.Tensor]]
 
     def __init__(self, len_output: int) -> None:
         self.physical = [{} for _ in range(len_output)]
         self.latent = [{} for _ in range(len_output)]
+        self.noised_physical = [{} for _ in range(len_output)]
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
     ) -> None:
         self.physical[fstep][stream_name] = pred
+
+    def add_noised_physical_prediction(
+        self, fstep: int, stream_name: StreamName, pred: torch.Tensor
+    ) -> None:
+        self.noised_physical[fstep][stream_name] = pred
+
+    def get_noised_physical_prediction(self, fstep: int, stream_name: StreamName | None = None):
+        pred = self.noised_physical[fstep]
+        if stream_name is not None:
+            pred = pred.get(stream_name, None)
+        return pred
 
     def add_latent_prediction(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
         self.latent[fstep][latent_name] = pred
@@ -670,6 +683,22 @@ class Model(torch.nn.Module):
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
+
+            # decode noised tokens for visualization (diffusion models only, eval mode)
+            if (
+                not self.training
+                and isinstance(self.forecast_engine, DiffusionForecastEngine)
+                and self.forecast_engine._noised_tokens is not None
+            ):
+                output = self.predict_decoders(
+                    model_params,
+                    step,
+                    self.forecast_engine._noised_tokens,
+                    batch,
+                    output,
+                    noised=True,
+                )
+
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
 
@@ -705,6 +734,7 @@ class Model(torch.nn.Module):
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
+        noised: bool = False,
     ) -> ModelOutput:
         """
         Compute decoder-based predictions
@@ -806,6 +836,9 @@ class Model(torch.nn.Module):
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
             # breakpoint()
-            output.add_physical_prediction(step, stream_name, pred)
+            if noised:
+                output.add_noised_physical_prediction(step, stream_name, pred)
+            else:
+                output.add_physical_prediction(step, stream_name, pred)
 
         return output

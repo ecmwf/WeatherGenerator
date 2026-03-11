@@ -58,6 +58,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
         self.cur_token = None  # TODO: re move after single sample experiments
+        self._noised_tokens: torch.Tensor | None = None
 
     def forward(
         self,
@@ -103,6 +104,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
+
+        self._noised_tokens = y + n
 
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 

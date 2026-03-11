@@ -72,7 +72,7 @@ sigma_min: 0.002
 sigma_max: 50000
 sigma_data: 0.5
 rho: 7
-p_mean: -1.2
+p_mean: 1.2
 p_std: 1.2
 
 
@@ -207,7 +207,7 @@ training_config:
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       masking_strategy_config: {diffusion_rn: True},
-      num_samples: 3
+      num_samples: 1
       }
     }
 

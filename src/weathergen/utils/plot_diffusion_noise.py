@@ -134,9 +134,7 @@ def plot_noise_vs_tokens(
         label="log10(|tokens|)",
     )
     ax.hist(np.log10(sigma), bins=200, density=True, alpha=0.4, color="coral", label=label_noise)
-    ax.axvline(
-        np.log10(sigma_data), color="k", ls="--", lw=1.5, label=f"sigma_data={sigma_data}"
-    )
+    ax.axvline(np.log10(sigma_data), color="k", ls="--", lw=1.5, label=f"sigma_data={sigma_data}")
     ax.set_xlabel("log10 scale")
     ax.set_ylabel("Density")
     ax.set_title("log10(|tokens|) vs log10(sigma)")

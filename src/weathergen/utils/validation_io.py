@@ -85,6 +85,7 @@ def write_output(
     # collect all target / prediction-related information
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
+    noised_preds_all = []  # decoded noised tokens (diffusion models only)
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
@@ -96,6 +97,7 @@ def write_output(
         targets_all += [[]]
         targets_coords_all += [[]]
         targets_times_all += [[]]
+        noised_preds_all += [[]]
         targets_lens += [[]]
         # noise_levels = []  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
         for stream_idx, stream_info in enumerate(cf.streams):
@@ -151,6 +153,19 @@ def write_output(
             targets_all[-1] += [np.concatenate(targets_s)]
             targets_coords_all[-1] += [np.concatenate(t_coords_s)]
             targets_times_all[-1] += [np.concatenate(t_times_s)]
+
+            # collect decoded noised tokens (diffusion models only)
+            noised_preds = model_output.get_noised_physical_prediction(t_idx, sname)
+            if noised_preds is not None:
+                noised_s = []
+                for i_batch, npred in enumerate(noised_preds):
+                    idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
+                    if idxs_inv is not None:
+                        npred = npred[:, idxs_inv]
+                    noised_s += [dn_data(sname, npred).detach().to(fp32).cpu().numpy()]
+                noised_preds_all[-1] += [np.concatenate(noised_s, axis=1)]
+            else:
+                noised_preds_all[-1] += [np.array([])]
 
     if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
         _logger.warning("Writing no data since predictions are empty.")
@@ -303,4 +318,70 @@ def write_output(
             dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
             if src != dst and src.exists():
                 src.replace(dst)
+
+    # Plot decoded noised tokens (diffusion models only)
+    has_noised = any(
+        noised_preds_all[t_idx][s_idx].size > 0
+        for s_idx in range(len(cf.streams))
+        if noised_preds_all[t_idx][s_idx].ndim >= 2
+    )
+    if has_noised:
+        for stream_idx, stream_info in enumerate(cf.streams):
+            stream_name = stream_info["name"]
+            noised_stream = noised_preds_all[t_idx][stream_idx]
+            coords_stream = targets_coords_all[t_idx][stream_idx]
+
+            if noised_stream.size == 0 or coords_stream.size == 0:
+                continue
+
+            if noised_stream.ndim == 3:
+                noised_stream = noised_stream[0]
+            elif noised_stream.ndim != 2:
+                continue
+
+            lat = coords_stream[:, 0]
+            lon = coords_stream[:, 1]
+            channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
+
+            da_noised = xr.DataArray(
+                noised_stream,
+                dims=("ipoint", "channel"),
+                coords={
+                    "ipoint": np.arange(noised_stream.shape[0]),
+                    "channel": channels,
+                    "lat": ("ipoint", lat),
+                    "lon": ("ipoint", lon),
+                },
+            )
+
+            plotter.stream = stream_name
+            plotter.run_id = config.get_run_id_from_config(cf)
+            plotter.fstep = forecast_offset
+
+            selected_channels = [
+                ch for ch in channels if _normalize_channel_name(ch) in headline_channels
+            ]
+            if not selected_channels:
+                continue
+
+            for varname in selected_channels:
+                data = da_noised.sel(channel=varname).dropna(dim="ipoint")
+                channel_dir = base_plot_dir / varname / "noised"
+                channel_dir.mkdir(parents=True, exist_ok=True)
+                epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_noised"
+                title = f"{stream_name} - {varname} (fstep {forecast_offset}) [noised input]"
+
+                plot_name = plotter.scatter_plot(
+                    data,
+                    channel_dir,
+                    varname=varname,
+                    regionname="global",
+                    tag=epoch_tag,
+                    title=title,
+                )
+                src = channel_dir / f"{plot_name}.{plotter.image_format}"
+                dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
+                if src != dst and src.exists():
+                    src.replace(dst)
+
     i += 1
