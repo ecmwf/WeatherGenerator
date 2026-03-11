@@ -133,10 +133,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         }
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
-        
-        # debug
-        self.log_debug = True
-
 
     @override
     def init_empty(self) -> None:
@@ -177,13 +173,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         # End is inclusive
         didx_end = t_idxs[-1] + 1
 
-
-        if self.log_debug:
-            _logger.info(
-                f"Available vars: {list(channels_idx)}, geoinfo: {list(self.geoinfo_idx)}"
-                f"\n Selected time indices: {t_idxs} -- len={len(t_idxs)}"
-            )
-
         # extract number of time steps and collapse ensemble dimension
         # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
         # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
@@ -218,15 +207,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
         datetimes = np.repeat(self.ds.dates[didx_start:didx_end], len(data) // len(t_idxs))
-
-        if self.log_debug:
-            _logger.info(f"Constructed ReaderData with coords shape {coords.shape}, geoinfos shape {geoinfos.shape}, data shape {data.shape}, datetimes shape {datetimes.shape}")
-            _logger.info(f"  Sample coords: {coords[:5]}, sample data: {data[:5]}, geoinfos: {geoinfos[:5]}, sample datetimes: {datetimes[:5]}")
-            _logger.info(f"  Channels in data: {list(channels_idx)}")
-
-            _logger.info(f"  data type: {data.dtype}, coords type: {coords.dtype}, datetimes type: {datetimes.dtype}")
-            
-            self.log_debug = False  # only log once per worker to avoid spamming
 
         rd = ReaderData(
             coords=coords,
