@@ -95,10 +95,10 @@ class DataReaderGREP(DataReaderTimestep):
 
         # ---- Time axis -------------------------------------------------------
 
+        # TODO remove try/except
         try:
             time_coord: NDArray = ds.coords["time"].values
         except KeyError:
-            # _logger.warning(f"Dataset for '{self._stream_info['name']}' does not contain 'time' coordinate; switch to 'time_centered'.")
             time_coord: NDArray = ds.coords["time_centered"].values
 
         data_start_time = np.datetime64(time_coord[0])
@@ -141,7 +141,8 @@ class DataReaderGREP(DataReaderTimestep):
 
             if np.any(self.longitudes < -180) or np.any(self.longitudes > 180):
                 _logger.warning(
-                    f"Longitude values outside [-180, 180] in '{self._stream_info['name']}'; converting from [0, 360]."
+                    f"Longitude values outside [-180, 180] in '{self._stream_info['name']}'; "
+                    "converting from [0, 360]."
                 )
                 self.longitudes = ((self.longitudes + 180.0) % 360.0 - 180.0).astype(np.float32)
 
@@ -197,7 +198,8 @@ class DataReaderGREP(DataReaderTimestep):
         )
         self.source_idx = list(self.source_idx)  # keep as list, consistent with base class
         _logger.info(
-            f"{self._stream_info['name']} selected source channels: {self.source_channels} (indices: {self.source_idx})"
+            f"{self._stream_info['name']} selected source channels: "
+            f"{self.source_channels} (indices: {self.source_idx})"
         )
 
         target_channels_filter = self._stream_info.get("target")
@@ -207,7 +209,8 @@ class DataReaderGREP(DataReaderTimestep):
         )
         self.target_idx = list(self.target_idx)
         _logger.info(
-            f"{self._stream_info['name']} selected target channels: {self.target_channels} (indices: {self.target_idx})"
+            f"{self._stream_info['name']} selected target channels: "
+            f"{self.target_channels} (indices: {self.target_idx})"
         )
 
         self.geoinfo_channels = []
@@ -329,7 +332,8 @@ class DataReaderGREP(DataReaderTimestep):
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
             _logger.info(
-                f"No valid time indices found for idx={idx}; returning empty data. (if self.ds is None or self.len == 0 or len(t_idxs) == 0:)"
+                f"No valid time indices found for idx={idx}; returning empty data. "
+                "(if self.ds is None or self.len == 0 or len(t_idxs) == 0:)"
             )
             return ReaderData.empty(
                 num_data_fields=len(channels_idx),
@@ -343,14 +347,12 @@ class DataReaderGREP(DataReaderTimestep):
         data_arrays: list[NDArray] = []
         datetimes_list: list[np.datetime64] = []
 
+        # TODO remove try/except
         try:
             # EOBS uses 'time'
             time_values = self.ds.coords["time"].values
         except KeyError:
             # C-GLORS uses 'time_centered'
-            _logger.warning(
-                f"Dataset for '{self._stream_info['name']}' does not contain 'time' coordinate; switch to 'time_centered'."
-            )
             time_values = self.ds.coords["time_centered"].values
 
         n_time = len(time_values)
@@ -358,7 +360,8 @@ class DataReaderGREP(DataReaderTimestep):
         if self.log_debug:
             _logger.info(
                 f"Available vars: {self.available_vars}, requested channels: {selected_channels}"
-                f"\n Fetching data for idx={idx} (dataset time range: {time_values[0]} to {time_values[-1]}), "
+                f"\n Fetching data for idx={idx} (dataset time range: "
+                f"{time_values[0]} to {time_values[-1]}), "
                 f"\n Selected time indices: {t_idxs} -- len={len(t_idxs)}"
             )
 
@@ -392,9 +395,7 @@ class DataReaderGREP(DataReaderTimestep):
             datetimes_list.extend([dt] * self.n_points)
 
         if not data_arrays:
-            _logger.info(
-                f"No valid time indices found for idx={idx}; returning empty data. (if not data_arrays:)"
-            )
+            _logger.info(f"No valid time indices found for idx={idx}; returning empty data.")
             return ReaderData.empty(
                 num_data_fields=len(channels_idx),
                 num_geo_fields=0,
@@ -421,9 +422,10 @@ class DataReaderGREP(DataReaderTimestep):
                 np.float32
             )
 
-        # NOTE tmp: prima era len(t_idxs) ma se ci sono t_idxs invalidi (es. fuori range del dataset)
-        # allora data_arrays sarà più corto di len(t_idxs). Meglio usare len(data_arrays) che è il
-        # numero reale di timesteps validi che abbiamo effettivamente caricato.
+        # NOTE tmp: prima era len(t_idxs) ma se ci sono t_idxs invalidi
+        # (es. fuori range del dataset) allora data_arrays sarà più corto di len(t_idxs).
+        # Meglio usare n_valid_timesteps che è il numero reale di timesteps validi
+        # che abbiamo effettivamente caricato.
         coords = np.tile(coords_single, (n_valid_timesteps, 1))
 
         geoinfos = np.zeros((len(data), 0), dtype=np.float32)
@@ -437,14 +439,18 @@ class DataReaderGREP(DataReaderTimestep):
         )
         if self.log_debug:
             _logger.info(
-                f"Constructed ReaderData with coords shape {coords.shape}, geoinfos shape {geoinfos.shape}, data shape {data.shape}, datetimes shape {datetimes.shape}"
+                f"Constructed ReaderData with coords shape {coords.shape}, "
+                f"geoinfos shape {geoinfos.shape}, data shape {data.shape}, "
+                f"datetimes shape {datetimes.shape}"
             )
             _logger.info(
-                f"  Sample coords: {coords[:5]}, sample data: {data[:5]}, geoinfos: {geoinfos[:5]}, sample datetimes: {datetimes[:5]}"
+                f"  Sample coords: {coords[:5]}, sample data: {data[:5]}, "
+                f"geoinfos: {geoinfos[:5]}, sample datetimes: {datetimes[:5]}"
             )
             _logger.info(f"  Channels in data: {selected_channels}")
             _logger.info(
-                f"  data type: {data.dtype}, coords type: {coords.dtype}, datetimes type: {datetimes.dtype}"
+                f"  data type: {data.dtype}, coords type: {coords.dtype}, "
+                f"datetimes type: {datetimes.dtype}"
             )
             self.log_debug = False  # only log once per worker to avoid spamming
 
