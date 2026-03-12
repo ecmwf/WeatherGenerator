@@ -322,7 +322,7 @@ class VerifParser(CfParser):
             ),
             "leadtime": (
                 ["leadtime"],
-                ds_var.coords["leadtime"].values.astype("float32"),
+                np.atleast_1d(ds_var.coords["leadtime"].values.astype("float32")),
                 ds_var["leadtime"].attrs,
             ),
         }
@@ -345,7 +345,9 @@ class VerifParser(CfParser):
         method_factory = InterpolatorFactory(self.method)
         interpolator = method_factory.get_interpolator(self.zarr_coords, self.obs_coords)
 
-        for idx in range(len(ds_var.coords["leadtime"].values)):
+        num_leadtimes = np.atleast_1d(ds_var.coords["leadtime"].values).shape[0]
+
+        for idx in range(num_leadtimes):
             regrid_values = interpolator.interpolate(ds_var.values[:, idx])
             fcstdata[idx, :] = regrid_values
 
