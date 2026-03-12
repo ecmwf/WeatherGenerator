@@ -37,3 +37,12 @@ train:
     bf9est8a:
       slurm_id: 0
       description: "IASI, 128 epochs trained mtm model"
+    jam1nr4f-stage2:
+      slurm_id: 0
+      description: "JEPA long L2G engine RMSNorm frozen MTM lr=6.00e-05 mask=0.6"
+    g9f3kn4h-stage2:
+      slurm_id: 0
+      description: "JEPA long L2G engine RMSNorm frozen MTM lr=1.00e-04 mask=0.6"
+    kmnbh1tq-stage2:
+      slurm_id: 0
+      description: "JEPA long L2G engine RMSNorm frozen MTM new eps norm lr=1.00e-04 mask=0.6"
