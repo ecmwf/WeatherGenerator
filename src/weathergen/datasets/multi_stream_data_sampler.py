@@ -148,7 +148,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """Compute time window and permutation base array (perms).
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        forecast_win = (self.time_step * (self.fsm + 1)) # in time units
+        forecast_win = (self.time_step * (self.fsm + self.output_offset)) # in time units
         #tw_length = max(forecast_win, self.len_timedelta) 
         ## trying to ensure time window is large enough to accomodate forecast steps
         ## why does this break the code???
@@ -168,7 +168,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 new_end_date = (
                     self.mode_cfg.end_date
                     + samples_diff * self.step_timedelta
-                    + forecast_win
                 )
                 logger.warning(
                     f"Using adjusted end date {new_end_date} instead of {self.mode_cfg.end_date} \
@@ -276,7 +275,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         perms_len = perms_len - (forecast_len + self.output_offset)
 
         # length of dataset; check the repeat data flag and adjust len accordingly
-
+        ## TO BE REMOVED AFTER TESTING
+        
         self.len = int(self.index_range.end - self.index_range.start)
         if not self.repeat_data:
             if self.samples_per_mini_epoch:
