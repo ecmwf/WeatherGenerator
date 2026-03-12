@@ -55,9 +55,14 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         *args,
         **kwargs,
     ) -> tuple[Any, Any]:
-        noise_level_rn = (
-            batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
-        )  # TODO: adjust for multiple streams
+        # During validation (model in eval mode), fix noise level to 0.0
+        # so that sigma = exp(p_mean), consistent with DiffusionForecastEngine
+        if model.training:
+            noise_level_rn = (
+                batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
+            )  # TODO: adjust for multiple streams
+        else:
+            noise_level_rn = 0.0
 
         # TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():
