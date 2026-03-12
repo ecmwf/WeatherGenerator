@@ -193,7 +193,14 @@ class Trainer(TrainerBase):
             stage=VAL,
         )
         self.dataset_val = self.dataset
-
+        # # amend self.test_cfg to update with time window handlerd
+        self.test_cfg["start_date"] = str(np.datetime_as_string(self.dataset_val.time_window_handler.t_start))
+        self.test_cfg["end_date"] = str(np.datetime_as_string(self.dataset_val.time_window_handler.t_end))
+        config._sanitize_start_end_time_keys(self.test_cfg)
+        # in the future we might have to update these keys as well
+        # self.test_cfg.time_window_len = str(self.dataset_val.time_window_handler.t_window_len)
+        # self.test_cfg.time_window_step = str(self.dataset_val.time_window_handler.t_window_step)
+        # config._sanitize_delta_time_keys(self.test_cfg)
         # make sure number of loaders does not exceed requested samples
         loader_num_workers = min(self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers)
         loader_params = {
