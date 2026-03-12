@@ -97,9 +97,6 @@ class StreamData:
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
         ]
         self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
-        self.target_tokens_lens = [
-            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
-        ]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
 
         # source tokens per cell
@@ -122,7 +119,6 @@ class StreamData:
         self.target_coords = _pin_tensor_list(self.target_coords)
         self.target_coords_lens = _pin_tensor_list(self.target_coords_lens)
         self.target_tokens = _pin_tensor_list(self.target_tokens)
-        self.target_tokens_lens = _pin_tensor_list(self.target_tokens_lens)
         self.idxs_inv = _pin_tensor_list(self.idxs_inv)
         self.target_coords_raw = _pin_tensor_list(self.target_coords_raw)
 
@@ -354,6 +350,44 @@ class StreamData:
             torch.tensor([s.sum() if len(s) > 0 else 0 for s in self.source_tokens_lens]).sum() == 0
         )
 
+    def target_nan(self) -> bool:
+        """
+        Check if target for stream is all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if target is empty for stream, else False
+        """
+
+        return torch.isnan(torch.cat(self.target_tokens)).all()
+
+    def source_nan(self) -> bool:
+        """
+        Check if source for stream is all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if source is all NaN for stream, else False
+        """
+
+        return torch.tensor(
+            [
+                torch.isnan(s.coords).all() or torch.isnan(s.data).all()
+                for s in self.source_raw
+                if s is not None
+            ]
+        ).all()
+
     def empty(self):
         """
         Test if stream (source and target) are empty
@@ -369,6 +403,22 @@ class StreamData:
         """
 
         return self.source_empty() and self.target_empty()
+
+    def nan(self) -> bool:
+        """
+        Check if stream (source and target) are all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if stream is all NaN
+        """
+
+        return self.source_nan() and self.target_nan()
 
     def is_spoof(self) -> bool:
         """

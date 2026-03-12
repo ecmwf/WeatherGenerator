@@ -26,10 +26,8 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
 from weathergen.common.io import StoreType
+from weathergen.common.paths import _REPO_ROOT, get_wg_private_path
 
-_REPO_ROOT = Path(
-    __file__
-).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
 _DATETIME_TYPE_NAME = "datetime"  # Names for custom resolvers used in Omegaconf
@@ -234,12 +232,25 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path) / run_id
 
-        fname = path / _get_model_config_file_read_name(run_id, mini_epoch)
-        assert fname.exists(), (
-            "The fallback path to the model does not exist. Please provide a `model_path`.",
-            fname,
-        )
-        _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
+        config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
+        config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
+
+        if config_path_with_epoch.exists():
+            fname = config_path_with_epoch
+            _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
+        elif config_path_without_epoch.exists():
+            fname = config_path_without_epoch
+            _logger.info(
+                f"Config for mini_epoch {mini_epoch} not found. "
+                f"Falling back to config without mini_epoch: {fname}"
+            )
+        else:
+            raise FileNotFoundError(
+                f"Could not find model config for run_id '{run_id}' "
+                f"(mini_epoch={mini_epoch}) in '{path}'. "
+                f"Tried: '{config_path_with_epoch.name}' and '{config_path_without_epoch.name}'. "
+                f"Please check run_id and mini_epoch."
+            )
 
     with fname.open() as f:
         json_str = f.read()
@@ -301,6 +312,26 @@ def _apply_fixes(config: Config) -> Config:
     eventually removed.
     """
     config = _check_logging(config)
+    config = _check_datasets(config)
+    return config
+
+
+def _check_datasets(config: Config) -> Config:
+    """
+    Collect dataset paths under legacy keys.
+    """
+    config = config.copy()
+    if config.get("data_paths") is None:  # TODO remove this for next version
+        legacy_keys = [
+            "data_path_anemoi",
+            "data_path_obs",
+            "data_path_eobs",
+            "data_path_fesom",
+            "data_path_icon",
+        ]
+        paths = [config.get(key) for key in legacy_keys]
+        config.data_paths = [path for path in paths if path is not None]
+
     return config
 
 
@@ -309,9 +340,9 @@ def _check_logging(config: Config) -> Config:
     Apply fixes to log frequency config.
     """
     config = config.copy()
-    if config.get("train_log_freq") is None:  # TODO remove this for next version
-        config.train_log_freq = OmegaConf.create(
-            {"checkpoint": 250, "terminal": 10, "metrics": config.train_log.log_interval}
+    if config.get("train_logging") is None:  # TODO remove this for next version
+        config.train_logging = OmegaConf.create(
+            {"checkpoint": 250, "terminal": 10, "metrics": config.train_logging.log_interval}
         )
 
     return config
@@ -479,7 +510,7 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     """
     Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
     """
-    env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
+    env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
 
     if private_home is not None and private_home.is_file():
         _logger.info(f"Loading private config from {private_home}.")
@@ -525,6 +556,8 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
+
+    private_cf = _check_datasets(private_cf)  # TODO: remove temp backward compatibility fix
 
     assert isinstance(private_cf, DictConfig)
     return private_cf

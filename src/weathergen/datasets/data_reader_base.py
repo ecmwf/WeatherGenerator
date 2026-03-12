@@ -188,9 +188,9 @@ class ReaderData:
         """
         return len(self.data)
 
-    def remove_nan_coords(self) -> "ReaderData":
+    def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
         """
-        Remove all data points where coords are NaN
+        Remove all data points where coords or geoinfos contain NaN
 
         Returns
         -------
@@ -199,6 +199,10 @@ class ReaderData:
         idx_valid = ~np.isnan(self.coords)
         # filter should be if any (of the two) coords is NaN
         idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
+
+        # also filter rows where any geoinfo field is NaN
+        idx_valid_geoinfos = ~np.isnan(self.geoinfos).any(axis=1)
+        idx_valid = np.logical_and(idx_valid, idx_valid_geoinfos)
 
         # apply
         return ReaderData(
@@ -610,7 +614,9 @@ class DataReaderBase(metaclass=ABCMeta):
 
         assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
         for i, _ in enumerate(self.geoinfo_idx):
-            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / self.stdev_geoinfo[i]
+            # for constant fields, just center the data (resulting in 0s after subtracting mean)
+            stdev = 1.0 if np.isclose(self.stdev_geoinfo[i], 0) else self.stdev_geoinfo[i]
+            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / stdev
 
         return geoinfos
 

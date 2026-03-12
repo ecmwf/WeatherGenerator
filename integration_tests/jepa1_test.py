@@ -12,12 +12,11 @@ import logging
 import os
 import shutil
 from pathlib import Path
-import omegaconf
-import pytest
-import numpy as np
 
-from weathergen.evaluate.run_evaluation import evaluate_from_config
-from weathergen.run_train import inference_from_args, train_with_args
+import numpy as np
+import pytest
+
+from weathergen.run_train import main
 from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
@@ -48,14 +47,14 @@ def setup(test_run_id):
 @pytest.mark.parametrize("test_run_id", ["test_jepa1_" + commit_hash])
 def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id} {WEATHERGEN_HOME}")
-
-    train_with_args(
-        [ f"--config={WEATHERGEN_HOME}/integration_tests/jepa1.yaml" ]
-        + [
+    
+    main(
+        [
+            "train",
+            f"--config={WEATHERGEN_HOME}/integration_tests/jepa1.yaml",
             "--run-id",
             test_run_id,
-        ],
-        f"{WEATHERGEN_HOME}/config/streams/streams_test/",
+        ]
     )
 
     assert_missing_metrics_file(test_run_id)
@@ -85,12 +84,26 @@ def assert_missing_metrics_file(run_id):
 def assert_nans_in_metrics_file(run_id):
     """Test that there are no NaNs in the metrics file."""
     metrics = load_metrics(run_id)
-    loss_values_train = np.array([entry.get('LossLatentSSLStudentTeacher.loss_avg') for entry in metrics if entry.get("stage") == 'train'])
-    loss_values_val = np.array([entry.get('LossLatentSSLStudentTeacher.loss_avg') for entry in metrics if entry.get("stage") == 'val'])
+    loss_values_train = np.array(
+        [
+            entry.get('LossLatentSSLStudentTeacher.loss_avg')
+            for entry in metrics if entry.get("stage") == 'train'
+        ]
+    )
+    loss_values_val = np.array(
+        [
+            entry.get('LossLatentSSLStudentTeacher.loss_avg')
+            for entry in metrics if entry.get("stage") == 'val'
+        ]
+    )
     
     #remove nans if applicable
-    loss_values_train = np.array([float(value) if value != 'nan' else np.nan for value in loss_values_train])
-    loss_values_val = np.array([float(value) if value != 'nan' else np.nan for value in loss_values_val])
+    loss_values_train = np.array(
+        [float(value) if value != 'nan' else np.nan for value in loss_values_train]
+    )
+    loss_values_val = np.array(
+        [float(value) if value != 'nan' else np.nan for value in loss_values_val]
+    )
     
     assert not np.isnan(loss_values_train).any(), (
         "NaN values found in training loss metrics!"
