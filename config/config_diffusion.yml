@@ -149,14 +149,12 @@ data_loading :
 
 # config for training
 training_config:
-
-  gradient_accumulation_steps: 1 #batches
   
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
   num_mini_epochs: 150
-  samples_per_mini_epoch: 72
+  samples_per_mini_epoch: 66
   shuffle: True
  
   start_date: 2012-06-01T00:00

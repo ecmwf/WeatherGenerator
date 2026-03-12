@@ -179,7 +179,7 @@ class LearningRateScheduler:
 
         # explicitly track steps to be able to switch between optimizers
         self.i_step = 0
-        self.lr = self.cur_scheduler.get_last_lr()[0]
+        self.lr = self.cur_scheduler.get_last_lr()
 
         # advance manually to step_contd (last_mini_epoch parameter for schedulers is not working
         # and this is also more brittle with the different phases)
