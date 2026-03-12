@@ -342,7 +342,8 @@ def _check_logging(config: Config) -> Config:
     config = config.copy()
     if config.get("train_logging") is None:  # TODO remove this for next version
         config.train_logging = OmegaConf.create(
-            {"checkpoint": 250, "terminal": 10, "metrics": config.train_logging.log_interval}
+#            {"checkpoint": 250, "terminal": 10, "metrics": config.train_logging.log_interval}
+            {"checkpoint": 250, "terminal": 10, "metrics": config.train_log_freq.metrics}
         )
 
     return config
