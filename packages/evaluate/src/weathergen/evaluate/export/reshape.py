@@ -75,10 +75,10 @@ def find_pl(vars: list) -> tuple[dict[str, list[str]], list[int]]:
             var_name = match.group(1)
             pressure_level = int(match.group(2))
             pl.append(pressure_level)
-            var_dict.setdefault(var_name, []).append(var)
+            var_dict.setdefault(var_name, []).append(pressure_level)
         else:
-            var_dict.setdefault(var, []).append(var)
-    pl = sorted(set(pl))
+            var_dict.setdefault(var, []).append(None)
+
     return var_dict, pl
 
 
