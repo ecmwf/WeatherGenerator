@@ -260,10 +260,6 @@ def write_output(
         preds_stream = preds_all[t_idx][stream_idx]
         coords_stream = targets_coords_all[t_idx][stream_idx]
 
-        # Release references in the list so GC can reclaim memory as we go
-        preds_all[t_idx][stream_idx] = None
-        targets_coords_all[t_idx][stream_idx] = None
-
         if preds_stream.size == 0 or coords_stream.size == 0:
             _logger.warning(f"No prediction data to plot for stream {stream_name}.")
             continue
@@ -374,49 +370,77 @@ def write_output(
             elif noised_stream.ndim != 2:
                 continue
 
+            channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
+            selected_channels = [
+                ch for ch in channels if _normalize_channel_name(ch) in headline_channels
+            ]
+            if not selected_channels:
+                del noised_stream, coords_stream
+                continue
+
+            ch_to_col = {ch: idx for idx, ch in enumerate(channels)}
+
             lat = coords_stream[:, 0]
             lon = coords_stream[:, 1]
-            channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
-
-            da_noised = xr.DataArray(
-                noised_stream,
-                dims=("ipoint", "channel"),
-                coords={
-                    "ipoint": np.arange(noised_stream.shape[0]),
-                    "channel": channels,
-                    "lat": ("ipoint", lat),
-                    "lon": ("ipoint", lon),
-                },
-            )
 
             plotter.stream = stream_name
             plotter.run_id = config.get_run_id_from_config(cf)
             plotter.fstep = forecast_offset
 
-            selected_channels = [
-                ch for ch in channels if _normalize_channel_name(ch) in headline_channels
-            ]
-            if not selected_channels:
-                continue
+            num_samples = len(preds)
+            len_per_sample = noised_stream.shape[0] // num_samples
 
-            for varname in selected_channels:
-                data = da_noised.sel(channel=varname).dropna(dim="ipoint")
-                channel_dir = base_plot_dir / varname / "noised"
-                channel_dir.mkdir(parents=True, exist_ok=True)
-                epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_noised"
-                title = f"{stream_name} - {varname} (fstep {forecast_offset}) [noised input]"
+            for sample in range(num_samples):
+                s_start = sample * len_per_sample
+                s_end = (sample + 1) * len_per_sample
 
-                plot_name = plotter.scatter_plot(
-                    data,
-                    channel_dir,
-                    varname=varname,
-                    regionname="global",
-                    tag=epoch_tag,
-                    title=title,
-                )
-                src = channel_dir / f"{plot_name}.{plotter.image_format}"
-                dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
-                if src != dst and src.exists():
-                    src.replace(dst)
+                for varname in selected_channels:
+                    col = ch_to_col[varname]
+                    vals = noised_stream[s_start:s_end, col]
+                    sample_lat = lat[s_start:s_end]
+                    sample_lon = lon[s_start:s_end]
+
+                    # Drop NaN points
+                    valid = ~np.isnan(vals)
+                    vals = vals[valid]
+                    sample_lat = sample_lat[valid]
+                    sample_lon = sample_lon[valid]
+
+                    sample_da = xr.DataArray(
+                        vals,
+                        dims=("ipoint",),
+                        coords={
+                            "ipoint": np.arange(len(vals)),
+                            "lat": ("ipoint", sample_lat),
+                            "lon": ("ipoint", sample_lon),
+                        },
+                    )
+
+                    channel_dir = base_plot_dir / varname / "noised"
+                    channel_dir.mkdir(parents=True, exist_ok=True)
+                    epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}_noised"
+
+                    noise_level = noise_levels[stream_idx]
+                    if noise_level is not None:
+                        title = f"{stream_name} - {varname} (fstep {forecast_offset}) [noised] | sample {sample + 1} | noise_level={exp(noise_level[sample] * cf.p_std + cf.p_mean):.4f}"
+                    else:
+                        title = f"{stream_name} - {varname} (fstep {forecast_offset}) [noised] | sample {sample + 1}"
+
+                    plot_name = plotter.scatter_plot(
+                        sample_da,
+                        channel_dir,
+                        varname=varname,
+                        regionname="global",
+                        tag=epoch_tag,
+                        title=title,
+                    )
+                    src = channel_dir / f"{plot_name}.{plotter.image_format}"
+                    dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
+                    if src != dst and src.exists():
+                        src.replace(dst)
+
+                    del sample_da, vals, sample_lat, sample_lon, valid
+
+            del noised_stream, coords_stream
 
     i += 1
