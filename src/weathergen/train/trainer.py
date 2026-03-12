@@ -194,8 +194,12 @@ class Trainer(TrainerBase):
         )
         self.dataset_val = self.dataset
         # # amend self.test_cfg to update with time window handlerd
-        self.test_cfg["start_date"] = str(np.datetime_as_string(self.dataset_val.time_window_handler.t_start))
-        self.test_cfg["end_date"] = str(np.datetime_as_string(self.dataset_val.time_window_handler.t_end))
+        self.test_cfg["start_date"] = str(
+            np.datetime_as_string(self.dataset_val.time_window_handler.t_start)
+        )
+        self.test_cfg["end_date"] = str(
+            np.datetime_as_string(self.dataset_val.time_window_handler.t_end)
+        )
         config._sanitize_start_end_time_keys(self.test_cfg)
         # in the future we might have to update these keys as well
         # self.test_cfg.time_window_len = str(self.dataset_val.time_window_handler.t_window_len)
