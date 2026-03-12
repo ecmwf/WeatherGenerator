@@ -213,6 +213,7 @@ def export_from_args(args: list) -> None:
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
 
     kwargs = vars(args).copy()
+
     _logger.info(kwargs)
 
     # Ensure output directory exists
