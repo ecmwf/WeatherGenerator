@@ -419,202 +419,45 @@ class Masker:
                 "relationship: {relationship} incompatible with target_mask None"
             )
             mask = target_mask
-            return mask, {}
+            params = {}
 
-        # handle cone distance relationship
         elif relationship == "cone_distance":
-            assert target_mask is not None, "relationship 'cone_distance' requires target_mask"
-            assert target_metadata is not None, (
-                "relationship 'cone_distance' requires target_metadata"
-            )
-
-            # Get cone distance parameter - supports fixed value or random selection
-            center_distance_degrees_random = masking_strategy_config.get(
-                "center_distance_degrees_random", False
-            )
-            if center_distance_degrees_random:
-                # Random selection from range with specified step (default: 0 to 90 in steps of 15)
-                min_dist = masking_strategy_config.get("center_distance_degrees_min", 0)
-                max_dist = masking_strategy_config.get("center_distance_degrees_max", 90)
-                step = masking_strategy_config.get("center_distance_degrees_step", 15)
-                possible_values = list(range(min_dist, max_dist + 1, step))
-                center_distance_degrees = float(self.rng.choice(possible_values))
-            else:
-                center_distance_degrees = masking_strategy_config.get("center_distance_degrees")
-                assert center_distance_degrees is not None, (
-                    "relationship 'cone_distance' requires 'center_distance_degrees' or "
-                    "'center_distance_degrees_random: true' in config"
-                )
-
-            # Get teacher center cell from explicit metadata (not instance state)
-            teacher_center_cell = target_metadata.get("center_cell", None)
-            assert teacher_center_cell is not None, (
-                "relationship 'cone_distance' requires 'center_cell' in target_metadata"
-            )
-            # Get teacher's hl_mask level from metadata
-            teacher_hl_mask = target_metadata.get(
-                "hl_mask", masking_strategy_config.get("hl_mask", 0)
-            )
-
-            # Create cone at specified distance from teacher
-            mask, student_center_cell = self._create_cone_distance_mask(
+            mask, params = self._get_cone_distance_relationship_mask(
                 num_cells,
                 masking_strategy_config,
-                teacher_center_cell,
-                center_distance_degrees,
-                teacher_hl_mask,
+                target_mask,
+                target_metadata,
             )
-            params = {
-                "center_cell": student_center_cell,
-                "hl_mask": masking_strategy_config.get("hl_mask", 0),
-                "rate": masking_strategy_config.get("rate", 0.5),
-            }
-            return mask, params
-
-        # Handle contained_cone relationship (geometry-aware subset)
         elif relationship == "contained_cone":
-            assert target_mask is not None, "relationship 'contained_cone' requires target_mask"
-            assert target_metadata is not None, (
-                "relationship 'contained_cone' requires target_metadata"
-            )
-
-            # Get teacher geometry
-            teacher_center_cell = target_metadata.get("center_cell")
-            teacher_rate = target_metadata.get("rate")
-            teacher_hl_mask = target_metadata.get(
-                "hl_mask", masking_strategy_config.get("hl_mask", 0)
-            )
-
-            assert teacher_center_cell is not None, (
-                "relationship 'contained_cone' requires 'center_cell' in target_metadata"
-            )
-            assert teacher_rate is not None, (
-                "relationship 'contained_cone' requires 'rate' in target_metadata"
-            )
-
-            mask, student_center_cell = self._create_contained_cone_mask(
+            mask, params = self._get_contained_cone_relationship_mask(
                 num_cells,
                 masking_strategy_config,
-                teacher_center_cell,
-                teacher_rate,
-                teacher_hl_mask,
+                target_mask,
+                target_metadata,
             )
-            params = {
-                "center_cell": student_center_cell,
-                "hl_mask": masking_strategy_config.get("hl_mask", 0),
-                "rate": masking_strategy_config.get("rate", 0.5),
-            }
-            return mask, params
-
-        # Handle separated_cone relationship (geometry-aware disjoint)
         elif relationship == "separated_cone":
-            assert target_mask is not None, "relationship 'separated_cone' requires target_mask"
-            assert target_metadata is not None, (
-                "relationship 'separated_cone' requires target_metadata"
-            )
-
-            # Get teacher geometry
-            teacher_center_cell = target_metadata.get("center_cell")
-            teacher_rate = target_metadata.get("rate")
-            teacher_hl_mask = target_metadata.get(
-                "hl_mask", masking_strategy_config.get("hl_mask", 0)
-            )
-
-            assert teacher_center_cell is not None, (
-                "relationship 'separated_cone' requires 'center_cell' in target_metadata"
-            )
-            assert teacher_rate is not None, (
-                "relationship 'separated_cone' requires 'rate' in target_metadata"
-            )
-
-            mask, student_center_cell = self._create_separated_cone_mask(
+            mask, params = self._get_separated_cone_relationship_mask(
                 num_cells,
                 masking_strategy_config,
-                teacher_center_cell,
-                teacher_rate,
-                teacher_hl_mask,
+                target_mask,
+                target_metadata,
             )
-            params = {
-                "center_cell": student_center_cell,
-                "hl_mask": masking_strategy_config.get("hl_mask", 0),
-                "rate": masking_strategy_config.get("rate", 0.5),
-            }
-            return mask, params
+        else:
+            # get mask
+            mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
 
-        # get mask
-        mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
-
-        # Handle subset/disjoint with strategy-aware logic
-        # For cropping_healpix with geometry info, use geometry-aware methods to maintain contiguity
-        if relationship == "subset":
-            assert target_mask is not None, (
-                f"relationship: {relationship} incompatible with target_mask None"
+            mask, params = self._apply_subset_or_disjoint_relationship(
+                num_cells,
+                strategy,
+                relationship,
+                masking_strategy_config,
+                target_mask,
+                target_metadata,
+                mask,
+                params,
             )
-            # Check if geometry-aware processing is available
-            if (
-                strategy == "cropping_healpix"
-                and target_metadata is not None
-                and target_metadata.get("center_cell") is not None
-                and target_metadata.get("rate") is not None
-            ):
-                # Use geometry-aware contained_cone for spatial contiguity
-                logger.debug("Using geometry-aware contained_cone for subset with cropping_healpix")
-                teacher_center_cell = target_metadata.get("center_cell")
-                teacher_rate = target_metadata.get("rate")
-                teacher_hl_mask = target_metadata.get(
-                    "hl_mask", masking_strategy_config.get("hl_mask", 0)
-                )
 
-                mask, center_cell = self._create_contained_cone_mask(
-                    num_cells,
-                    masking_strategy_config,
-                    teacher_center_cell,
-                    teacher_rate,
-                    teacher_hl_mask,
-                )
-                params["center_cell"] = center_cell
-                params["hl_mask"] = masking_strategy_config.get("hl_mask", 0)
-                params["rate"] = masking_strategy_config.get("rate", 0.5)
-            else:
-                # Standard boolean AND for non-cropping strategies
-                mask = mask & target_mask
-
-        elif relationship == "disjoint":
-            assert target_mask is not None, (
-                f"relationship: {relationship} incompatible with target_mask None"
-            )
-            # Check if geometry-aware processing is available
-            if (
-                strategy == "cropping_healpix"
-                and target_metadata is not None
-                and target_metadata.get("center_cell") is not None
-                and target_metadata.get("rate") is not None
-            ):
-                # Use geometry-aware separated_cone for spatial contiguity
-                logger.debug(
-                    "Using geometry-aware separated_cone for disjoint with cropping_healpix"
-                )
-                teacher_center_cell = target_metadata.get("center_cell")
-                teacher_rate = target_metadata.get("rate")
-                teacher_hl_mask = target_metadata.get(
-                    "hl_mask", masking_strategy_config.get("hl_mask", 0)
-                )
-
-                mask, center_cell = self._create_separated_cone_mask(
-                    num_cells,
-                    masking_strategy_config,
-                    teacher_center_cell,
-                    teacher_rate,
-                    teacher_hl_mask,
-                )
-                params["center_cell"] = center_cell
-                params["hl_mask"] = masking_strategy_config.get("hl_mask", 0)
-                params["rate"] = masking_strategy_config.get("rate", 0.5)
-            else:
-                # Standard boolean AND NOT for non-cropping strategies
-                mask = mask & (~target_mask)
-
-        return (mask, params)
+        return mask, params
 
     def _generate_cell_mask(
         self, num_cells: int, strategy: str, masking_strategy_config: dict
@@ -735,6 +578,252 @@ class Masker:
         mask = to_bool_tensor(mask)
 
         return (mask, masking_params)
+
+    def _get_cone_relationship_params(
+        self, masking_strategy_config: dict, center_cell: int
+    ) -> dict:
+        """Get standard metadata returned by cone-based relationships."""
+        return {
+            "center_cell": center_cell,
+            "hl_mask": masking_strategy_config.get("hl_mask", 0),
+            "rate": masking_strategy_config.get("rate", 0.5),
+        }
+
+    def _get_teacher_cone_metadata(
+        self,
+        relationship: str,
+        masking_strategy_config: dict,
+        target_metadata: dict,
+        require_rate: bool = False,
+    ) -> tuple[int, float | None, int]:
+        """Get teacher cone geometry from explicit metadata."""
+        teacher_center_cell = target_metadata.get("center_cell")
+        teacher_rate = target_metadata.get("rate")
+        teacher_hl_mask = target_metadata.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+
+        assert teacher_center_cell is not None, (
+            f"relationship '{relationship}' requires 'center_cell' in target_metadata"
+        )
+        if require_rate:
+            assert teacher_rate is not None, (
+                f"relationship '{relationship}' requires 'rate' in target_metadata"
+            )
+
+        return teacher_center_cell, teacher_rate, teacher_hl_mask
+
+    def _get_center_distance_degrees(self, masking_strategy_config: dict) -> float:
+        """Get cone distance from config."""
+        # Get cone distance parameter - supports fixed value or random selection
+        center_distance_degrees_random = masking_strategy_config.get(
+            "center_distance_degrees_random", False
+        )
+        if center_distance_degrees_random:
+            # Random selection from range with specified step (default: 0 to 90 in steps of 15)
+            min_dist = masking_strategy_config.get("center_distance_degrees_min", 0)
+            max_dist = masking_strategy_config.get("center_distance_degrees_max", 90)
+            step = masking_strategy_config.get("center_distance_degrees_step", 15)
+            possible_values = list(range(min_dist, max_dist + 1, step))
+            return float(self.rng.choice(possible_values))
+
+        center_distance_degrees = masking_strategy_config.get("center_distance_degrees")
+        assert center_distance_degrees is not None, (
+            "relationship 'cone_distance' requires 'center_distance_degrees' or "
+            "'center_distance_degrees_random: true' in config"
+        )
+
+        return center_distance_degrees
+
+    def _get_cone_distance_relationship_mask(
+        self,
+        num_cells: int,
+        masking_strategy_config: dict,
+        target_mask: np.typing.NDArray | None,
+        target_metadata: dict | None,
+    ) -> tuple[torch.Tensor, dict]:
+        """Handle the cone_distance relationship."""
+        assert target_mask is not None, "relationship 'cone_distance' requires target_mask"
+        assert target_metadata is not None, "relationship 'cone_distance' requires target_metadata"
+
+        # Get cone distance parameter
+        center_distance_degrees = self._get_center_distance_degrees(masking_strategy_config)
+
+        # Get teacher center cell from explicit metadata (not instance state)
+        teacher_center_cell, _, teacher_hl_mask = self._get_teacher_cone_metadata(
+            "cone_distance",
+            masking_strategy_config,
+            target_metadata,
+        )
+
+        # Create cone at specified distance from teacher
+        mask, student_center_cell = self._create_cone_distance_mask(
+            num_cells,
+            masking_strategy_config,
+            teacher_center_cell,
+            center_distance_degrees,
+            teacher_hl_mask,
+        )
+        params = self._get_cone_relationship_params(
+            masking_strategy_config,
+            student_center_cell,
+        )
+        return mask, params
+
+    def _get_contained_cone_relationship_mask(
+        self,
+        num_cells: int,
+        masking_strategy_config: dict,
+        target_mask: np.typing.NDArray | None,
+        target_metadata: dict | None,
+    ) -> tuple[torch.Tensor, dict]:
+        """Handle the contained_cone relationship."""
+        assert target_mask is not None, "relationship 'contained_cone' requires target_mask"
+        assert target_metadata is not None, "relationship 'contained_cone' requires target_metadata"
+
+        # Get teacher geometry
+        teacher_center_cell, teacher_rate, teacher_hl_mask = self._get_teacher_cone_metadata(
+            "contained_cone",
+            masking_strategy_config,
+            target_metadata,
+            require_rate=True,
+        )
+
+        mask, student_center_cell = self._create_contained_cone_mask(
+            num_cells,
+            masking_strategy_config,
+            teacher_center_cell,
+            teacher_rate,
+            teacher_hl_mask,
+        )
+        params = self._get_cone_relationship_params(
+            masking_strategy_config,
+            student_center_cell,
+        )
+        return mask, params
+
+    def _get_separated_cone_relationship_mask(
+        self,
+        num_cells: int,
+        masking_strategy_config: dict,
+        target_mask: np.typing.NDArray | None,
+        target_metadata: dict | None,
+    ) -> tuple[torch.Tensor, dict]:
+        """Handle the separated_cone relationship."""
+        assert target_mask is not None, "relationship 'separated_cone' requires target_mask"
+        assert target_metadata is not None, "relationship 'separated_cone' requires target_metadata"
+
+        # Get teacher geometry
+        teacher_center_cell, teacher_rate, teacher_hl_mask = self._get_teacher_cone_metadata(
+            "separated_cone",
+            masking_strategy_config,
+            target_metadata,
+            require_rate=True,
+        )
+
+        mask, student_center_cell = self._create_separated_cone_mask(
+            num_cells,
+            masking_strategy_config,
+            teacher_center_cell,
+            teacher_rate,
+            teacher_hl_mask,
+        )
+        params = self._get_cone_relationship_params(
+            masking_strategy_config,
+            student_center_cell,
+        )
+        return mask, params
+
+    def _has_geometry_aware_target_metadata(
+        self, strategy: str, target_metadata: dict | None
+    ) -> bool:
+        """Check whether geometry-aware subset/disjoint handling is available."""
+        return (
+            strategy == "cropping_healpix"
+            and target_metadata is not None
+            and target_metadata.get("center_cell") is not None
+            and target_metadata.get("rate") is not None
+        )
+
+    def _apply_subset_or_disjoint_relationship(
+        self,
+        num_cells: int,
+        strategy: str,
+        relationship: str,
+        masking_strategy_config: dict,
+        target_mask: np.typing.NDArray | None,
+        target_metadata: dict | None,
+        mask: np.typing.NDArray,
+        params: dict,
+    ) -> tuple[np.typing.NDArray, dict]:
+        """Apply subset/disjoint logic after mask generation."""
+        if relationship not in {"subset", "disjoint"}:
+            return mask, params
+
+        if relationship == "subset":
+            assert target_mask is not None, (
+                f"relationship: {relationship} incompatible with target_mask None"
+            )
+
+            # Check if geometry-aware processing is available
+            if self._has_geometry_aware_target_metadata(strategy, target_metadata):
+                # Use geometry-aware contained_cone for spatial contiguity
+                logger.debug("Using geometry-aware contained_cone for subset with cropping_healpix")
+                teacher_center_cell, teacher_rate, teacher_hl_mask = (
+                    self._get_teacher_cone_metadata(
+                        relationship,
+                        masking_strategy_config,
+                        target_metadata,
+                        require_rate=True,
+                    )
+                )
+
+                mask, center_cell = self._create_contained_cone_mask(
+                    num_cells,
+                    masking_strategy_config,
+                    teacher_center_cell,
+                    teacher_rate,
+                    teacher_hl_mask,
+                )
+                params.update(
+                    self._get_cone_relationship_params(masking_strategy_config, center_cell)
+                )
+            else:
+                # Standard boolean AND for non-cropping strategies
+                mask = mask & target_mask
+        else:
+            assert target_mask is not None, (
+                f"relationship: {relationship} incompatible with target_mask None"
+            )
+
+            # Check if geometry-aware processing is available
+            if self._has_geometry_aware_target_metadata(strategy, target_metadata):
+                # Use geometry-aware separated_cone for spatial contiguity
+                logger.debug(
+                    "Using geometry-aware separated_cone for disjoint with cropping_healpix"
+                )
+                teacher_center_cell, teacher_rate, teacher_hl_mask = (
+                    self._get_teacher_cone_metadata(
+                        relationship,
+                        masking_strategy_config,
+                        target_metadata,
+                        require_rate=True,
+                    )
+                )
+
+                mask, center_cell = self._create_separated_cone_mask(
+                    num_cells,
+                    masking_strategy_config,
+                    teacher_center_cell,
+                    teacher_rate,
+                    teacher_hl_mask,
+                )
+                params.update(
+                    self._get_cone_relationship_params(masking_strategy_config, center_cell)
+                )
+            else:
+                # Standard boolean AND NOT for non-cropping strategies
+                mask = mask & (~target_mask)
+
+        return mask, params
 
     def _select_spatially_contiguous_cells(
         self,
@@ -944,17 +1033,18 @@ class Masker:
         self, origin_lon_rad: float, origin_lat_rad: float, distance_rad: float, azimuth_rad: float
     ) -> tuple[float, float]:
         """
-        Calculate destination point on sphere using great circle navigation.
+        Compute the destination lon/lat on a sphere from an origin, angular distance,
+        and initial azimuth.
 
-        Given a starting point (lon, lat), a distance, and an azimuth (bearing),
-        computes the destination point using spherical trigonometry formulas.
+        Given a starting point (lon, lat), an angular distance, and an initial bearing,
+        return the point reached by traveling along the corresponding great-circle path.
         This is the mathematical foundation for cone distance masking.
 
         Args:
             origin_lon_rad: Origin longitude in radians [-π, π]
             origin_lat_rad: Origin latitude in radians [-π/2, π/2]
             distance_rad: Angular distance to travel in radians [0, π]
-            azimuth_rad: Direction of travel in radians [0, 2π]
+            azimuth_rad: Initial direction of travel in radians [0, 2π]
                         (0 = north, π/2 = east, π = south, 3π/2 = west)
 
         Returns:
