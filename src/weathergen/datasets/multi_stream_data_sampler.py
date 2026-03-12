@@ -675,7 +675,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 tidx = source_to_target[sidx].item()
                 sdata = self._build_stream_data(
                     source_select,
-                    tidx,
+                    idx,
                     num_forecast_steps,
                     stream_info,
                     source_masks.metadata[sidx].params.get("num_steps_input", 1),
@@ -695,7 +695,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # the inputs. Hence the target mask is also the source mask here.
                 sdata = self._build_stream_data(
                     target_select,
-                    tidx,
+                    idx,
                     num_forecast_steps,
                     stream_info,
                     target_masks.metadata[tidx].params.get("num_steps_input", 1),
@@ -753,10 +753,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 batch = self._get_batch(idx, num_forecast_steps)
 
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if not batch.is_empty():
-                    break
-                else:
+                if batch.is_empty() or batch.is_nan():
                     logger.warning(f"Skipping empty batch with idx={idx}.")
+                else:
+                    break
 
             yield batch
 

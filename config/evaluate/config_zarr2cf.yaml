@@ -89,6 +89,13 @@ variables:
     wg_unit: Pa
     std_unit: Pa
     level_type: sfc
+  tp_imerg:
+    var: tp_imerg_0
+    long: imerg_total_precipitation
+    std: precipitation_amount
+    wg_unit: m
+    std_unit: m
+    level_type: sfc
   
 
 coordinates:

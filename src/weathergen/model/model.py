@@ -399,83 +399,144 @@ class Model(torch.nn.Module):
                 if is_stream_forcing(si):
                     continue
 
-                # extract and setup relevant parameters
-                etc = si["embed_target_coords"]
-                tr = si["target_readout"]
-                num_layers = tr["num_layers"]
-                tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
-                tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
-                softcap = tr["softcap"] if "softcap" in tr else 0.0
-
-                dims_embed = [si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)]
-
-                if is_root():
-                    logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
-
-                dim_coord_in = self.targets_coords_size[i_stream]
-
-                # embedding network for coordinates
-                if etc["net"] == "linear":
-                    self.embed_target_coords[stream_name] = NamedLinear(
-                        f"embed_target_coords_{stream_name}",
-                        in_features=dim_coord_in,
-                        out_features=dims_embed[0],
-                        bias=False,
+                # skip for the moment to ensure target embedding and tte exist (ordering of
+                # cf.streams is random)
+                if si.get("pred_spatial_shared") is None:
+                    # extract and setup relevant parameters
+                    etc = si["embed_target_coords"]
+                    tr = si["target_readout"]
+                    num_layers = tr["num_layers"]
+                    tr_mlp_hidden_factor = (
+                        tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
                     )
-                elif etc["net"] == "mlp":
-                    self.embed_target_coords[stream_name] = MLP(
-                        dim_coord_in,
-                        dims_embed[0],
-                        hidden_factor=8,
-                        with_residual=False,
-                        dropout_rate=dropout_rate,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        stream_name=f"embed_target_coords_{stream_name}",
-                    )
-                else:
-                    assert False
+                    tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
+                    softcap = tr["softcap"] if "softcap" in tr else 0.0
 
-                if cf.decoder_type == "Linear":
-                    tte = BilinearDecoder(
-                        stream_name,
-                        dims_embed[0],
-                        cf.ae_global_dim_embed,
+                    dims_embed = [
+                        si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
+                    ]
+
+                    if is_root():
+                        logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
+
+                    dim_coord_in = self.targets_coords_size[i_stream]
+
+                    # embedding network for coordinates
+                    if etc["net"] == "linear":
+                        self.embed_target_coords[stream_name] = NamedLinear(
+                            f"embed_target_coords_{stream_name}",
+                            in_features=dim_coord_in,
+                            out_features=dims_embed[0],
+                            bias=False,
+                        )
+                    elif etc["net"] == "mlp":
+                        self.embed_target_coords[stream_name] = MLP(
+                            dim_coord_in,
+                            dims_embed[0],
+                            hidden_factor=8,
+                            with_residual=False,
+                            dropout_rate=dropout_rate,
+                            norm_eps=self.cf.mlp_norm_eps,
+                            stream_name=f"embed_target_coords_{stream_name}",
+                        )
+                    else:
+                        assert False
+
+                    if cf.decoder_type == "Linear":
+                        tte = BilinearDecoder(
+                            stream_name,
+                            dims_embed[0],
+                            cf.ae_global_dim_embed,
+                            self.targets_num_channels[i_stream],
+                        )
+                    else:
+                        # target prediction engines
+                        tte_version = (
+                            TargetPredictionEngine
+                            if cf.decoder_type != "PerceiverIOCoordConditioning"
+                            else TargetPredictionEngineClassic
+                        )
+                        tte = tte_version(
+                            cf,
+                            dims_embed,
+                            dim_coord_in,
+                            tr_dim_head_proj,
+                            tr_mlp_hidden_factor,
+                            softcap,
+                            stream_config=si,
+                        )
+
+                    self.target_token_engines[stream_name] = tte
+
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of pred head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
                         self.targets_num_channels[i_stream],
-                    )
-                else:
-                    # target prediction engines
-                    tte_version = (
-                        TargetPredictionEngine
-                        if cf.decoder_type != "PerceiverIOCoordConditioning"
-                        else TargetPredictionEngineClassic
-                    )
-                    tte = tte_version(
-                        cf,
-                        dims_embed,
-                        dim_coord_in,
-                        tr_dim_head_proj,
-                        tr_mlp_hidden_factor,
-                        softcap,
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
                         stream_name=stream_name,
                     )
 
-                self.target_token_engines[stream_name] = tte
+            # iterate again to setup shared spatial pred heads if specified in config
+            for i_stream, si in enumerate(cf.streams):
+                stream_name = self.stream_names[i_stream]
 
-                # ensemble prediction heads to provide probabilistic prediction
-                final_activation = si["pred_head"].get("final_activation", "Identity")
-                if is_root():
+                # skip decoder if channels are empty
+                if is_stream_forcing(si):
+                    continue
+
+                pred_spatial_shared = si.get("pred_spatial_shared")
+                if pred_spatial_shared is not None:
+                    if pred_spatial_shared not in self.stream_names:
+                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
+                        msg += " but no stream with that name found."
+                        raise ValueError(msg)
+                    if pred_spatial_shared == stream_name:
+                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
+                        msg += "but cannot share with itself."
+                        raise ValueError(msg)
                     logger.debug(
-                        f"{final_activation} activation of predictionhead of {si['name']} stream"
+                        f"{stream_name} shares spatial prediction head with {pred_spatial_shared}."
                     )
-                self.pred_heads[stream_name] = EnsPredictionHead(
-                    dims_embed[-1],
-                    self.targets_num_channels[i_stream],
-                    si["pred_head"]["num_layers"],
-                    si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
-                    final_activation=final_activation,
-                    stream_name=stream_name,
-                )
+
+                    self.embed_target_coords[stream_name] = self.embed_target_coords[
+                        pred_spatial_shared
+                    ]
+                    self.target_token_engines[stream_name] = self.target_token_engines[
+                        pred_spatial_shared
+                    ]
+
+                    idx_shared_s = [
+                        i for i, so in enumerate(cf.streams) if so["name"] == pred_spatial_shared
+                    ]
+                    assert (len(idx_shared_s)) == 1
+                    si_other = cf.streams[idx_shared_s[0]]
+                    dims_embed = [
+                        si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
+                    ]
+
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of pred head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_stream],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
+                    )
 
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
