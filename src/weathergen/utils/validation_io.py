@@ -227,6 +227,9 @@ def write_output(
         for subset in data.items():
             zio.write_zarr(subset)
 
+    # Free arrays no longer needed after zarr writing
+    del targets_all, targets_times_all, targets_lens, sources, data
+
     # TODO: REMOVE EVERYTHING BELOW THIS LINE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
 
     # Prepare prediction data for Plotter (scatter plot expects lat/lon coords on ipoint).
@@ -242,6 +245,10 @@ def write_output(
         preds_stream = preds_all[t_idx][stream_idx]
         coords_stream = targets_coords_all[t_idx][stream_idx]
 
+        # Release references in the list so GC can reclaim memory as we go
+        preds_all[t_idx][stream_idx] = None
+        targets_coords_all[t_idx][stream_idx] = None
+
         if preds_stream.size == 0 or coords_stream.size == 0:
             _logger.warning(f"No prediction data to plot for stream {stream_name}.")
             continue
@@ -255,40 +262,55 @@ def write_output(
             )
             continue
 
-        lat = coords_stream[:, 0]
-        lon = coords_stream[:, 1]
         channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
-
-        da = xr.DataArray(
-            preds_stream,
-            dims=("ipoint", "channel"),
-            coords={
-                "ipoint": np.arange(preds_stream.shape[0]),
-                "channel": channels,
-                "lat": ("ipoint", lat),
-                "lon": ("ipoint", lon),
-            },
-        )
-
-        plotter.stream = stream_name
-        plotter.run_id = config.get_run_id_from_config(cf)
-        plotter.fstep = forecast_offset
-
         selected_channels = [
             ch for ch in channels if _normalize_channel_name(ch) in headline_channels
         ]
         if not selected_channels:
             _logger.warning(f"No headline channels available for plotting stream {stream_name}.")
+            del preds_stream, coords_stream
             continue
 
+        # Build a channel index map so we can slice numpy arrays directly
+        # instead of constructing a full xarray DataArray for all channels.
+        ch_to_col = {ch: idx for idx, ch in enumerate(channels)}
+
+        lat = coords_stream[:, 0]
+        lon = coords_stream[:, 1]
+
+        plotter.stream = stream_name
+        plotter.run_id = config.get_run_id_from_config(cf)
+        plotter.fstep = forecast_offset
+
         num_samples = len(preds)
-        len_per_sample = len(da) // num_samples
+        len_per_sample = preds_stream.shape[0] // num_samples
 
         for sample in range(num_samples):
-            sample_da = da.isel(ipoint=slice(sample * len_per_sample, (sample + 1) * len_per_sample))
-            
+            s_start = sample * len_per_sample
+            s_end = (sample + 1) * len_per_sample
+
             for varname in selected_channels:
-                sample_da = sample_da.sel(channel=varname).dropna(dim="ipoint")
+                col = ch_to_col[varname]
+                vals = preds_stream[s_start:s_end, col]
+                sample_lat = lat[s_start:s_end]
+                sample_lon = lon[s_start:s_end]
+
+                # Drop NaN points
+                valid = ~np.isnan(vals)
+                vals = vals[valid]
+                sample_lat = sample_lat[valid]
+                sample_lon = sample_lon[valid]
+
+                sample_da = xr.DataArray(
+                    vals,
+                    dims=("ipoint",),
+                    coords={
+                        "ipoint": np.arange(len(vals)),
+                        "lat": ("ipoint", sample_lat),
+                        "lon": ("ipoint", sample_lon),
+                    },
+                )
+
                 channel_dir = base_plot_dir / varname
                 channel_dir.mkdir(parents=True, exist_ok=True)
                 epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}"
@@ -312,4 +334,8 @@ def write_output(
                 dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
                 if src != dst and src.exists():
                     src.replace(dst)
+
+                del sample_da, vals, sample_lat, sample_lon, valid
+
+        del preds_stream, coords_stream
     i += 1
