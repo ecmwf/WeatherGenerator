@@ -675,7 +675,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 tidx = source_to_target[sidx].item()
                 sdata = self._build_stream_data(
                     source_select,
-                    tidx,
+                    idx,
                     num_forecast_steps,
                     stream_info,
                     source_masks.metadata[sidx].params.get("num_steps_input", 1),
@@ -695,7 +695,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 # the inputs. Hence the target mask is also the source mask here.
                 sdata = self._build_stream_data(
                     target_select,
-                    tidx,
+                    idx,
                     num_forecast_steps,
                     stream_info,
                     target_masks.metadata[tidx].params.get("num_steps_input", 1),
