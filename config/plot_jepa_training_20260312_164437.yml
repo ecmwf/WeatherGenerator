@@ -1,0 +1,33 @@
+# Plot config for iBOT pretraining runs (auto-generated)
+train:
+  plot:
+    5rad4kps-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=7.59e-05 mask=0.48"
+    ogqqiiyd-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=2.51e-05 mask=0.53"
+    k3jnznqt-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=8.76e-05 mask=0.29"
+    pk4svtgz-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=9.92e-05 mask=0.89"
+    wvmltxku-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=5.75e-05 mask=0.61"
+    eoyt1wwg-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=2.15e-05 mask=0.56"
+    64vewgn1-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=1.98e-05 mask=0.30"
+    2rw8ocg4-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=1.57e-05 mask=0.45"
+    giggp0ob-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=1.58e-05 mask=0.45"
+    bf5zsu3h-stage1:
+      slurm_id: 0
+      description: "JEPA new L2G engine RMSNorm frozen MTM lr=7.39e-05 mask=0.46"

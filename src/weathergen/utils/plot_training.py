@@ -182,6 +182,7 @@ def plot_lr(
     runs_active: list[bool],
     plot_dir: Path,
     x_axis: str = "samples",
+    legend_outside: bool = False,
 ):
     """
     Plot learning rate curves of training runs.
@@ -229,7 +230,10 @@ def plot_lr(
         )
         return
 
-    plt.legend(legend_str)
+    if legend_outside:
+        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small")
+    else:
+        plt.legend(legend_str)
     plt.grid(True, which="both", ls="-")
     plt.yscale("log")
     plt.title("learning rate")
@@ -244,11 +248,19 @@ def plot_lr(
     # save the plot
     plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=["lr.png"])
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
-    plt.savefig(plt_fname)
+    plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
 
 
-def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN, x_scale_log=False):
+def plot_loss_avg(
+    plot_dir: Path,
+    runs_ids,
+    runs_data,
+    runs_active,
+    stage=TRAIN,
+    x_scale_log=False,
+    legend_outside: bool = False,
+):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
@@ -272,7 +284,10 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
             ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
         ]
 
-    plt.legend(legend_str)
+    if legend_outside:
+        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small")
+    else:
+        plt.legend(legend_str)
     plt.grid(True, which="both", ls="-")
     plt.yscale("log")
     # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
@@ -285,7 +300,7 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
     plt.tight_layout()
     plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"])
     _logger.info(f"Saving avg plot to '{plt_fname}'")
-    plt.savefig(plt_fname)
+    plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
 
 
@@ -305,6 +320,7 @@ def plot_loss_per_stream(
     x_lim: list[float] | None = None,
     y_lim: list[float] | None = None,
     x_scale_log: bool = False,
+    legend_outside: bool = False,
 ):
     """
     Plot each stream in stream_names (using matching to data columns) for all run_ids
@@ -481,6 +497,7 @@ def plot_loss_per_run(
     errs: list[str] | None = None,
     x_axis: str = "samples",
     x_scale_log: bool = False,
+    legend_outside: bool = False,
 ):
     """
     Plot all stream_names (using matching to data columns) for given run_id
@@ -568,7 +585,12 @@ def plot_loss_per_run(
         return
 
     plt.title(run_id + " : " + run_desc[1])
-    legend = plt.legend(legend_str, loc="lower left")
+    if legend_outside:
+        legend = plt.legend(
+            legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small"
+        )
+    else:
+        legend = plt.legend(legend_str, loc="lower left")
     for line in legend.get_lines():
         line.set(alpha=1.0)
     plt.yscale("log")
@@ -592,7 +614,7 @@ def plot_loss_per_run(
     plt_fname = plot_dir / fname
 
     _logger.info(f"Saving loss plot for {run_id}-run to '{plt_fname}'")
-    plt.savefig(plt_fname)
+    plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
 
 
@@ -700,6 +722,13 @@ def plot_train(args=None):
         help="Type of x-axis used in plots. Options: 'step' or 'reltime'",
     )
 
+    parser.add_argument(
+        "--legend-outside",
+        default=False,
+        action="store_true",
+        help="Place legend outside the plot (to the right) with reduced font size",
+    )
+
     run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
         "-fd",
@@ -780,11 +809,14 @@ def plot_train(args=None):
 
     x_scale_log = False
 
+    legend_outside = args.legend_outside
+
     # plot learning rate
-    plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)
+    plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir, legend_outside=legend_outside)
 
     # plot average loss
-    plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=TRAIN)
+    plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=TRAIN,
+                  legend_outside=legend_outside)
 
     # compare different runs
     plot_loss_per_stream(
@@ -801,6 +833,7 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
+        legend_outside=legend_outside,
     )
     plot_loss_per_stream(
         ["val"],
@@ -816,6 +849,7 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
+        legend_outside=legend_outside,
     )
     plot_loss_per_stream(
         ["train"],
@@ -831,6 +865,7 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
+        legend_outside=legend_outside,
     )
 
     # plot all cols for all run_ids
@@ -848,6 +883,7 @@ def plot_train(args=None):
             stream_names,
             channels=args.channels,
             plot_dir=out_dir,
+            legend_outside=legend_outside,
         )
         plot_loss_per_run(
             ["val"],
@@ -857,6 +893,7 @@ def plot_train(args=None):
             stream_names,
             channels=args.channels,
             plot_dir=out_dir,
+            legend_outside=legend_outside,
         )
 
 
