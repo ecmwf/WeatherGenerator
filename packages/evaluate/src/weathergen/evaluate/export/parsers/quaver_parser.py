@@ -10,7 +10,6 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-import subprocess
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
