@@ -100,7 +100,8 @@ class LossLatentDiffusion(LossModuleBase):
         )
         fsteps = len(target_tokens_all)
 
-        noise_weight = self._get_noise_weight(eta)
+        # During validation, use unweighted loss (no noise-level scaling)
+        noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta)
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)

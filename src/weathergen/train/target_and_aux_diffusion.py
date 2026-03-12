@@ -20,6 +20,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         apply_fct_to_blocks(self.encoder, ".*", set_to_eval)
 
         self.is_model_sharded = is_model_sharded
+        self._fixed_noise_level: float | None = None
         # Build a name → param map once
         self.src_params = dict(self.encoder.named_parameters())
 
@@ -55,14 +56,14 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         *args,
         **kwargs,
     ) -> tuple[Any, Any]:
-        # During validation (model in eval mode), fix noise level to 0.0
-        # so that sigma = exp(p_mean), consistent with DiffusionForecastEngine
+        # During validation (model in eval mode), use fixed noise level
+        # so that sigma = exp(eta * p_std + p_mean) is deterministic
         if model.training:
             noise_level_rn = (
                 batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
             )  # TODO: adjust for multiple streams
         else:
-            noise_level_rn = 0.0
+            noise_level_rn = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0
 
         # TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():

@@ -59,6 +59,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.p_std = self.cf.p_std
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
+        self._fixed_noise_level: float | None = None
 
     def forward(
         self,
@@ -102,8 +103,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.training:
             eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
         else:
-            # During validation, fix sigma to exp(p_mean) by setting eta to the mean of N(0,1)
-            eta = torch.zeros(1, device=tokens.device)
+            # During validation, use fixed noise level (default: 0.0 = mean of noise distribution)
+            noise_level = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0
+            eta = torch.tensor([noise_level], device=tokens.device)
 
         # Compute sigma (noise level) from eta and create noise tensor
         sigma = (eta * self.p_std + self.p_mean).exp()
