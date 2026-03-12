@@ -209,7 +209,7 @@ training_config:
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       masking_strategy_config: {diffusion_rn: True},
-      num_samples: 3
+      num_samples: 1
       }
     }
 

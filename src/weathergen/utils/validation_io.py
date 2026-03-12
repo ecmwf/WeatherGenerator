@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from math import exp
 
 import numpy as np
 import torch
@@ -318,7 +319,7 @@ def write_output(
                 noise_level = noise_levels[stream_idx]
                 
                 if noise_level is not None:
-                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1} | noise_level_rn={noise_level[sample]:.4f}"
+                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1} | noise_level={exp(noise_level[sample] * cf.p_std + cf.p_mean):.4f}"
                 else:
                     title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1}"
 
