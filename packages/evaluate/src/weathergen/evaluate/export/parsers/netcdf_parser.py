@@ -134,14 +134,12 @@ class NetcdfParser(CfParser):
         for new_var, pls in var_dict.items():
             if pls[0] is not None:
                 old_vars = [f"{new_var}_{p}" for p in pls]
-                print(old_vars)
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
                     dims=["ipoint", "pressure_level"],
                     coords={"pressure_level": pls},
                 )
             else:
-                print(new_var)
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=new_var).values,
                     dims=["ipoint"],
