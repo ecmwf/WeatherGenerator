@@ -97,12 +97,13 @@ def write_output(
         targets_coords_all += [[]]
         targets_times_all += [[]]
         targets_lens += [[]]
-        # noise_levels = []  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
+        noise_levels = []  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
         for stream_idx, stream_info in enumerate(cf.streams):
             sname = stream_info["name"]
 
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
+
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 preds = model_output.get_physical_prediction(t_idx, sname)
                 preds_shape = preds[0].shape
@@ -115,6 +116,8 @@ def write_output(
             else:
                 preds = model_output.get_physical_prediction(t_idx, sname)
                 targets = target_aux_out.physical[t_idx][sname]["target"]
+                
+                noise_levels.append([target_aux_out.physical[t_idx][sname]['target_metda_data'][i][sname].params['noise_level_rn'] for i in range(len(targets))])
 
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
 
@@ -143,6 +146,7 @@ def write_output(
                     # extract original target coords and times from target data
                     t_coords_s += [t_coords.cpu().numpy()]
                     t_times_s += [t_times.astype("datetime64[ns]")]
+                    
 
             targets_lens[-1] += [[]]
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
@@ -151,6 +155,7 @@ def write_output(
             targets_all[-1] += [np.concatenate(targets_s)]
             targets_coords_all[-1] += [np.concatenate(t_coords_s)]
             targets_times_all[-1] += [np.concatenate(t_times_s)]
+
 
     if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
         _logger.warning("Writing no data since predictions are empty.")
@@ -276,31 +281,35 @@ def write_output(
             _logger.warning(f"No headline channels available for plotting stream {stream_name}.")
             continue
 
-        for varname in selected_channels:
-            data = da.sel(channel=varname).dropna(dim="ipoint")
-            channel_dir = base_plot_dir / varname
-            channel_dir.mkdir(parents=True, exist_ok=True)
-            epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}"
-            # Add noise_level_rn to title if present for this stream
-            # noise_level = noise_levels[stream_idx]
-            noise_level = (
-                None  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-            )
-            if noise_level is not None:
-                title = f"{stream_name} - {varname} (fstep {forecast_offset}) | noise_level_rn={noise_level:.4f}"
-            else:
-                title = f"{stream_name} - {varname} (fstep {forecast_offset})"
+        num_samples = len(preds)
+        len_per_sample = len(da) // num_samples
 
-            plot_name = plotter.scatter_plot(
-                data,
-                channel_dir,
-                varname=varname,
-                regionname="global",
-                tag=epoch_tag,
-                title=title,
-            )
-            src = channel_dir / f"{plot_name}.{plotter.image_format}"
-            dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
-            if src != dst and src.exists():
-                src.replace(dst)
+        for sample in range(num_samples):
+            sample_da = da.isel(ipoint=slice(sample * len_per_sample, (sample + 1) * len_per_sample))
+            
+            for varname in selected_channels:
+                sample_da = sample_da.sel(channel=varname).dropna(dim="ipoint")
+                channel_dir = base_plot_dir / varname
+                channel_dir.mkdir(parents=True, exist_ok=True)
+                epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}"
+                # Add noise_level_rn to title if present for this stream
+                noise_level = noise_levels[stream_idx]
+                
+                if noise_level is not None:
+                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1} | noise_level_rn={noise_level[sample]:.4f}"
+                else:
+                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1}"
+
+                plot_name = plotter.scatter_plot(
+                    sample_da,
+                    channel_dir,
+                    varname=varname,
+                    regionname="global",
+                    tag=epoch_tag,
+                    title=title,
+                )
+                src = channel_dir / f"{plot_name}.{plotter.image_format}"
+                dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
+                if src != dst and src.exists():
+                    src.replace(dst)
     i += 1
