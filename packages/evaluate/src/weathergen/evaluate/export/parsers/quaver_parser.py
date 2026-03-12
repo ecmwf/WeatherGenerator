@@ -38,37 +38,18 @@ class QuaverParser(CfParser):
         """
         Initialize Quaver parser with configuration and additional parameters.
         """
+
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-        if not hasattr(self, "quaver_template_folder"):
+        if not hasattr(self, "quaver_template_folder") or self.quaver_template_folder is None:
             raise ValueError("Template folder must be provided for Quaver format.")
-        if not hasattr(self, "quaver_template_grid_type"):
+        if not hasattr(self, "quaver_template_grid_type") or self.quaver_template_grid_type is None:
             raise ValueError("Template grid type must be provided for Quaver format.")
-        if not hasattr(self, "channels"):
+        if not hasattr(self, "channels") or self.channels is None:
             raise ValueError("Channels must be provided for Quaver format.")
-        if not hasattr(self, "expver"):
-            _logger.info("Trying to load PIFS environment to get a new expver.")
-            result = subprocess.run(
-                "module load pifsenv",
-                shell=True,
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                raise ValueError(f"Failed to load pifsenv module."
-                "Automatic generation of expver works only on ATOS."
-                "Please manually provide an expver for other environments through --expver."
-            )
-            else:
-                _logger.info("pifsenv module loaded successfully. Generating new expver...")
-
-            result = subprocess.run(
-                ["getNewId", "--class", "rd"], capture_output=True, text=True, check=True
-            )
-            self.expver = result.stdout.strip()
-            _logger.info(f"Generated new expver: {self.expver}")    
-
+        if not hasattr(self, "expver") or self.expver is None:
+            raise ValueError("Expver must be provided for Quaver format.")
         super().__init__(config, **kwargs)
 
         self.template_cache = []

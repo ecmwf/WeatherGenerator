@@ -17,6 +17,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+import subprocess
 
 from omegaconf import OmegaConf
 
@@ -195,6 +196,28 @@ def export() -> None:
     # By default, arguments from the command line are read.
     export_from_args(sys.argv[1:])
 
+def generate_new_expver() -> str:
+    """
+    Generate a new expver string for the quaver parser.
+    Returns
+    -------
+        str: newly generated string.
+    """
+    _logger.info("Generating new expver using getNewId command...")
+    result = subprocess.run(
+        ["getNewId", "--class", "rd"], capture_output=True, text=True, check=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to get new expver: {result.stderr}."
+        "if you are on ATOS, please run `ml pifsenv` and rerun the command, or use the --expver flag."
+        "NOTE: the expver can be generated with `getNewId --class rd` command on ATOS, and it does NOT work on other environments."
+        "if you have an expver that you want to use, you can also pass it with the --expver flag."
+        )
+
+    expver = result.stdout.strip()
+
+    _logger.info(f"Generated new expver: {expver}")  
+    return expver
 
 def export_from_args(args: list) -> None:
     # Get run_id zarr data as lists of xarray DataArrays
@@ -213,6 +236,9 @@ def export_from_args(args: list) -> None:
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
 
     kwargs = vars(args).copy()
+    
+    if kwargs.get("expver") == "NEW":
+        kwargs["expver"] = generate_new_expver()
 
     _logger.info(kwargs)
 
