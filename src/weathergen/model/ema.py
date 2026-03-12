@@ -8,9 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 import math
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 class EMAModel:
@@ -23,11 +26,16 @@ class EMAModel:
     annealed from ``halflife_steps`` to ``halflife_end`` over
     ``halflife_ramp_steps`` optimisation steps.
 
-    Two schedule types are available (``halflife_schedule_type``):
+    Three schedule types are available (``halflife_schedule_type``):
 
     - ``"log_linear"`` (default): linear interpolation in log-halflife space
       (i.e. geometric interpolation of the halflife value).  Natural when the
       halflife spans orders of magnitude.
+
+    - ``"linear"``: linear interpolation in halflife space.  The halflife grows
+      by constant absolute increments, so beta increases quickly early on (when
+      the halflife is small relative to the increment) and levels off later.
+      This front-loads the teacher stabilisation compared to log_linear.
 
     - ``"cosine_beta"``: cosine interpolation in *beta* space — this exactly
       reproduces the momentum schedule used by I-JEPA, V-JEPA, BYOL, and DINO.
@@ -68,6 +76,17 @@ class EMAModel:
             self._freeze_and_eval()
         else:
             self.reset()
+
+        logger.info(
+            "EMAModel initialised: halflife_start=%.1f, halflife_end=%s, "
+            "halflife_ramp_steps=%s, schedule_type=%s, rampup_ratio=%s, random_init=%s",
+            halflife_steps,
+            halflife_end,
+            halflife_ramp_steps,
+            halflife_schedule_type,
+            rampup_ratio,
+            random_init,
+        )
 
     @torch.no_grad()
     def _freeze_and_eval(self):
@@ -136,6 +155,11 @@ class EMAModel:
                 beta_end = 0.5 ** (bs / max(self.halflife_end, 1e-6))
                 beta_t = beta_start + (beta_end - beta_start) * (1 - math.cos(math.pi * t)) / 2
                 halflife_steps = bs * math.log(0.5) / math.log(min(beta_t, 1 - 1e-15))
+            elif self.halflife_schedule_type == "linear":
+                # Linear interpolation in halflife space.
+                # Halflife grows by constant absolute increments, so beta increases
+                # quickly early (when halflife is small) and slows down later.
+                halflife_steps = self.halflife_steps + t * (self.halflife_end - self.halflife_steps)
             else:
                 # "log_linear": geometric interpolation of halflife (linear in log-space)
                 log_start = math.log(max(self.halflife_steps, 1e-6))
@@ -148,8 +172,6 @@ class EMAModel:
             halflife_steps = min(halflife_steps, cur_step / self.rampup_ratio)
         beta = 0.5 ** (self.batch_size / max(halflife_steps, 1e-6))
 
-        # print(f"EMA update: step={cur_step}, batch_size={self.batch_size}, halflife_steps={halflife_steps:.2f}, beta={beta:.6f}")
-
         return beta
 
     @torch.no_grad()
@@ -160,6 +182,17 @@ class EMAModel:
         # determine correct interpolation params
         self.batch_size = batch_size
         beta = self.get_current_beta(cur_step)
+
+        if self.halflife_ramp_steps and self.halflife_ramp_steps > 0:
+            t = min(cur_step / self.halflife_ramp_steps, 1.0)
+        else:
+            t = None
+        if cur_step == batch_size or (cur_step > 0 and cur_step % (batch_size * 1000) == 0):
+            logger.info(
+                "EMA update: cur_step=%d, batch_size=%d, beta=%.10f, schedule_t=%s",
+                cur_step, batch_size, beta,
+                f"{t:.4f}" if t is not None else "N/A",
+            )
 
         for name, p_ema in self.ema_model.named_parameters():
             p_src = self.src_params.get(name, None)
