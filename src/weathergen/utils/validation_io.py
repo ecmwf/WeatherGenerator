@@ -90,8 +90,8 @@ def write_output(
                         t_times = t_times[idxs_inv]
 
                     # denormalize data if requested and map to storage format
-                    preds_s += [dn_data(sname, pred).detach().to(fp32).cpu().numpy()]
-                    targets_s += [dn_data(sname, target).detach().to(fp32).cpu().numpy()]
+                    preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+                    targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
 
                     # extract original target coords and times from target data
                     t_coords_s += [t_coords.cpu().numpy()]
