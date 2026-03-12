@@ -661,10 +661,10 @@ class Model(torch.nn.Module):
 
         # Normalize tokens
         # TODO: REMOVE THIS LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-        # t_mean = tokens.mean()
-        # t_std = tokens.std()
-        # tokens = (tokens - t_mean) / (t_std + 1e-6)
-        # tokens = torch.clamp(tokens, -100.0, 100.0)
+        t_mean = tokens.mean()
+        t_std = tokens.std()
+        tokens = (tokens - t_mean) / (t_std + 1e-6) * cf.p_mean
+        tokens = torch.clamp(tokens, -100.0, 100.0)
 
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
@@ -679,7 +679,7 @@ class Model(torch.nn.Module):
 
             # Un-normalize tokens
             # TODO: REMOVE THIS AS ABOVE. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-            # tokens = tokens * (t_std + 1e-6) + t_mean
+            tokens = tokens * (t_std + 1e-6) / cf.p_mean + t_mean
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
