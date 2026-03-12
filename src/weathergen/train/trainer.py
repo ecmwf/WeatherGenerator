@@ -8,7 +8,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-import contextlib
 import copy
 import logging
 import time
@@ -423,22 +422,6 @@ class Trainer(TrainerBase):
 
         dataset_iter = iter(self.data_loader)
 
-        # gradient accumulation: accumulate gradients over multiple micro-batches
-        # before performing an optimizer step, to increase effective batch size
-        accum_steps = self.training_cfg.get("gradient_accumulation_steps", 1)
-
-        # For DDP: skip gradient synchronization on non-final micro-batches
-        # to avoid redundant all-reduce communication. On the final micro-batch
-        # of each accumulation window, let DDP sync normally.
-        ddp_model = self.model
-        maybe_no_sync = (
-            ddp_model.no_sync
-            if hasattr(ddp_model, "no_sync") and accum_steps > 1
-            else contextlib.nullcontext
-        )
-
-        batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-
         self.optimizer.zero_grad()
 
         # training loop
@@ -493,51 +476,45 @@ class Trainer(TrainerBase):
                 for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
 
-            # backward pass — scale loss for gradient accumulation so that
-            # accumulated gradients average correctly over micro-batches
-            is_accum_step = (bidx + 1) % accum_steps == 0 or (bidx + 1) == len(self.data_loader)
+            # backward pass
+            self.optimizer.zero_grad()
+            self.grad_scaler.scale(loss).backward()
 
-            # With DDP, suppress gradient sync on non-final micro-batches
-            sync_context = contextlib.nullcontext if is_accum_step else maybe_no_sync
-            with sync_context():
-                self.grad_scaler.scale(loss / accum_steps).backward()
+            # gradient clipping
+            self.grad_scaler.unscale_(self.optimizer)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
+            )
 
-            if is_accum_step:
-                # gradient clipping
-                self.grad_scaler.unscale_(self.optimizer)
-                total_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
-                )
+            # log gradient norms
+            if self.log_grad_norms:
+                if bidx % self.train_logging.terminal == 0:
+                    self.last_grad_norm = self._get_tensor_item(total_norm)
+                if bidx % self.train_logging.metrics == 0:
+                    self._log_instant_grad_norms(TRAIN)
 
-                # log gradient norms
-                if self.log_grad_norms:
-                    if bidx % self.train_logging.terminal == 0:
-                        self.last_grad_norm = self._get_tensor_item(total_norm)
-                    if bidx % self.train_logging.metrics == 0:
-                        self._log_instant_grad_norms(TRAIN)
+            # optimizer step
+            self.grad_scaler.step(self.optimizer)
+            self.grad_scaler.update()
 
-                # optimizer step
-                self.grad_scaler.step(self.optimizer)
-                self.grad_scaler.update()
-                self.optimizer.zero_grad()
+            # update learning rate
+            self.lr_scheduler.step()
 
-                # update learning rate
-                self.lr_scheduler.step()
+            batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+            step = batch_size_total * self.cf.general.istep
 
-                step = batch_size_total * self.cf.general.istep
+            [
+                target_aux.update_state_post_opt_step(step, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators.items()
+            ]
+            [
+                target_aux.update_state_post_opt_step(step, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators_val.items()
+            ]
 
-                [
-                    target_aux.update_state_post_opt_step(step, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators.items()
-                ]
-                [
-                    target_aux.update_state_post_opt_step(step, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators_val.items()
-                ]
-
-                # EMA update
-                if self.validate_with_ema:
-                    self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
+            # EMA update
+            if self.validate_with_ema:
+                self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
@@ -560,9 +537,7 @@ class Trainer(TrainerBase):
             if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
-            # istep counts optimizer steps, not micro-batches
-            if is_accum_step:
-                self.cf.general.istep += 1
+            self.cf.general.istep += 1
 
         self.dataset.advance()
 
