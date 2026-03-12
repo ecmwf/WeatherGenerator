@@ -24,7 +24,7 @@ _logger = logging.getLogger(__name__)
 
 # Small epsilon to handle time boundary exclusivity
 t_epsilon = np.timedelta64(1, "ms")
-MIN_PATCH_POINTS = 1024
+MIN_PATCH_POINTS = 512
 
 
 class DataReaderMesh(DataReaderTimestep):
@@ -54,7 +54,6 @@ class DataReaderMesh(DataReaderTimestep):
         self.sample_points = stream_info.get("sample_points")
         self._len_cached = 0
 
-        # FIX: Separate caches to prevent identical channel names from overwriting!
         self._dask_arrays_src = {}
         self._dask_arrays_trg = {}
 
@@ -242,13 +241,11 @@ class DataReaderMesh(DataReaderTimestep):
         else:
             self.ds_target = self.ds_source
 
-        # FIX: Populate Source Cache
         for ch in self.source_channels:
             var = self.col_map[ch]["var"]
             if var in self.ds_source:
                 self._dask_arrays_src[ch] = self.ds_source[var].data
 
-        # FIX: Populate Target Cache Separately
         for ch in self.target_channels:
             var = self.col_map[ch]["var"]
             if var in self.ds_target:
@@ -435,23 +432,23 @@ class DataReaderMesh(DataReaderTimestep):
                 info = self.col_map[ch_name]
                 base_arr = arr_cache[ch_name]
                 dims = ds[info["var"]].dims
-
+                # 1. Apply Vertical Level Selection
                 sliced = base_arr
                 if info["sel"]:
                     sls = [slice(None)] * sliced.ndim
                     for d, val in info["sel"].items():
-                        if d in dims: 
+                        if d in dims:
                             sls[dims.index(d)] = val
                     sliced = sliced[tuple(sls)]
-                
-                # Apply disk_indices indexing lazily
-                if "time" in dims:
-                    sliced = sliced[start_t:end_t, disk_indices]
-                else:
-                    sliced = sliced[disk_indices]
-                    # We repeat later if necessary
 
+                # 2. Slice Time (keeps memory small before we flatten)
+                if "time" in dims:
+                    sliced = sliced[start_t:end_t]
+
+                # 3. Compute the block into memory
                 chunk = sliced.compute().astype(np.float32)
+
+                # 4. FLATTEN THE SPATIAL DIMENSIONS FIRST (Crucial for 2D Grids)
                 if chunk.ndim > 1:
                     if "time" in dims:
                         # (time, lat, lon) -> (time, nodes)
@@ -460,20 +457,34 @@ class DataReaderMesh(DataReaderTimestep):
                         # (lat, lon) -> (nodes)
                         chunk = chunk.reshape(-1)
 
+                # 5. NOW apply the spatial indices (which are 1D flat indices)
                 if rel_indices is not None:
                     if "time" in dims:
-                        chunk = chunk[:, rel_indices]
+                        # Contiguous read: Apply raw disk bounds, then rel_indices
+                        chunk = chunk[:, disk_indices]
+                        
+                        # Safety check: if chunk is completely empty, fill with NaNs
+                        if chunk.shape[1] == 0:
+                            assert False, "Empty chunk after disk indexing with time dimension"
+
+                        else:
+                            chunk = chunk[:, rel_indices]
                     else:
-                        chunk = chunk[rel_indices]
+                        chunk = chunk[disk_indices]
+                        if chunk.size == 0:
+                            assert False, "Empty chunk after disk indexing with rel_indices"
+                        else:
+                            chunk = chunk[rel_indices]
                         chunk = np.repeat(np.expand_dims(chunk, 0), n_steps, axis=0)
                 else:
+                    # Fancy Indexing (Sparse Global)
                     if "time" in dims:
                         chunk = chunk[:, disk_indices]
                     else:
                         chunk = chunk[disk_indices]
                         chunk = np.repeat(np.expand_dims(chunk, 0), n_steps, axis=0)
 
-                # Suppress missing/land values
+                # 6. Apply Land Masks
                 chunk[(chunk == 0.0) | (chunk <= -9000.0)] = np.nan
                 chunk[~np.isfinite(chunk)] = np.nan
                 output_block[:, i] = chunk.reshape(-1)
