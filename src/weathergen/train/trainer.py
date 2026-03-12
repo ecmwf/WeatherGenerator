@@ -45,7 +45,6 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.plot_diffusion_noise import plot_noise_vs_tokens
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -554,10 +553,6 @@ class Trainer(TrainerBase):
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
-        # Collect encoded tokens for diffusion noise diagnostic plot
-        is_diffusion = cf.get("fe_diffusion_model", False)
-        collected_tokens = []
-
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
@@ -603,14 +598,6 @@ class Trainer(TrainerBase):
                         metadata=extract_batch_metadata(batch),
                     )
 
-                    # Collect encoded tokens (z_pre_norm) for diffusion diagnostics
-                    if is_diffusion and preds.latent and preds.latent[0]:
-                        latent_state = preds.latent[0].get("latent_state")
-                        if latent_state is not None and latent_state.z_pre_norm is not None:
-                            collected_tokens.append(
-                                latent_state.z_pre_norm.detach().float().cpu().numpy().flatten()
-                            )
-
                     # log output
                     if bidx < num_samples_write:
                         # denormalization function for data
@@ -640,43 +627,8 @@ class Trainer(TrainerBase):
                 self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)
 
-        # Plot diffusion noise vs encoded token distribution (root rank only)
-        if is_diffusion and collected_tokens and is_root():
-            self._plot_diffusion_noise_vs_tokens(mini_epoch, collected_tokens)
-
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
-
-    def _plot_diffusion_noise_vs_tokens(
-        self, mini_epoch: int, collected_tokens: list[np.ndarray]
-    ) -> None:
-        """Generate diffusion noise vs encoded token distribution diagnostic plot.
-
-        Called at the end of validation when fe_diffusion_model is True.
-
-        Args:
-            mini_epoch: Current mini epoch (used in filename).
-            collected_tokens: List of flattened token arrays from validation batches.
-        """
-        token_values = np.concatenate(collected_tokens)
-        p_mean = self.cf.get("p_mean", -1.2)
-        p_std = self.cf.get("p_std", 1.2)
-        sigma_data = self.cf.get("sigma_data", 0.5)
-
-        output_dir = config.get_path_run(self.cf)
-        output_path = output_dir / f"diffusion_noise_vs_tokens_epoch{mini_epoch:05d}.png"
-
-        logger.info(
-            f"Plotting diffusion noise vs tokens: p_mean={p_mean}, p_std={p_std}, "
-            f"token_mean={token_values.mean():.4f}, token_std={token_values.std():.4f}"
-        )
-        plot_noise_vs_tokens(
-            p_mean=p_mean,
-            p_std=p_std,
-            token_values=token_values,
-            sigma_data=sigma_data,
-            output_path=output_path,
-        )
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
