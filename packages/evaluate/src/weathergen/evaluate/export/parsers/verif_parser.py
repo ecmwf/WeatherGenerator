@@ -69,7 +69,8 @@ class VerifParser(CfParser):
         self.obs_coords = np.column_stack((lat.values, lon.values))
         self.zarr_coords = None
 
-        self.channels: list("foo") | None = None
+        required_channels = ["10u", "10v", "sp", "2t", "msl"]
+        self.channels = list(set(self.channels) & set(required_channels))
         self.zarr_dt: np.timedelta64 | None = None
 
     def process_sample(
@@ -94,8 +95,6 @@ class VerifParser(CfParser):
             )
             return
 
-        required_channels = ["10u", "10v", "sp", "2t", "msl"]
-        self.channels = list(set(self.channels) & set(required_channels))
         da_fs = []
         for result in fstep_iterator_results:
             if result is None:
