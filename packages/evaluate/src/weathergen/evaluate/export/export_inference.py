@@ -34,6 +34,25 @@ if not _logger.handlers:
     _logger.addHandler(handler)
 
 
+def parse_range(value: str) -> list[int]:
+        """Parse fsteps argument, supporting both individual values and range tuples like (0,360,2)."""
+        value = value.strip()
+        if value.startswith("(") and value.endswith(")"):
+            parts = [int(x.strip()) for x in value[1:-1].split(",")]
+            if len(parts) not in (2, 3):
+                raise argparse.ArgumentTypeError(
+                    f"Range tuple must have 2 or 3 elements, got: {value}"
+                )
+            return list(range(*parts))
+        return [int(value)]
+
+def flatten_lists(kwargs: object) -> object:
+    """Flatten a list of lists into a single list."""
+    for key, value in kwargs.items():
+        if isinstance(value, list) and all(isinstance(i, list) for i in value):
+            kwargs[key] = [item for sublist in value for item in sublist]
+    return kwargs
+
 def parse_args(args: list) -> argparse.Namespace:
     """
     Parse command line arguments.
@@ -91,19 +110,19 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--fsteps",
-        type=int,
+        type=parse_range,
         nargs="+",
         default=None,
-        help="List of forecast steps to retrieve (e.g. 1 2 3). "
+        help="List of forecast steps to retrieve (e.g. 1 2 3) or a range tuple like (0,360,2). "
         "If not provided, retrieves all available forecast steps.",
     )
 
     parser.add_argument(
         "--samples",
-        type=int,
+        type=parse_range,
         nargs="+",
         default=None,
-        help="List of samples to process (e.g. 0 1 2). If not provided, processes all samples.",
+        help="List of samples to process (e.g. 0 1 2) or a range tuple like (0,10,2). If not provided, processes all samples.",
     )
 
     parser.add_argument(
@@ -242,6 +261,7 @@ def export_from_args(args: list) -> None:
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
 
     kwargs = vars(args).copy()
+    kwargs = flatten_lists(kwargs)  # Flatten list of lists
 
     if kwargs.get("expver") == "NEW":
         kwargs["expver"] = generate_new_expver()
@@ -254,8 +274,8 @@ def export_from_args(args: list) -> None:
 
     for dtype in args.type:
         _logger.info(
-            f"Starting processing {dtype} for run ID {args.run_id}. "
-            f"Detected {args.samples} samples and {args.fsteps} forecast steps."
+            f"Starting processing {dtype} for run ID {kwargs['run_id']}. "
+            f"Detected {kwargs['samples']} samples and {kwargs['fsteps']} forecast steps."
         )
 
         export_model_outputs(dtype, config, **kwargs)
