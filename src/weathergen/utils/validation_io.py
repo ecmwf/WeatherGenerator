@@ -9,6 +9,7 @@
 
 import logging
 from math import exp
+import re
 
 import numpy as np
 import torch
@@ -66,10 +67,21 @@ def _resolve_channel_names(stream_info, raw_channels):
 
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
+    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out, 
+    noise_level=None,
+    write_zarr=True,
 ):
     """
     Interface for writing model output
+
+    Parameters
+    ----------
+    noise_level : float | None
+        Fixed diffusion noise level (eta) used for this validation pass.
+        When not None the value is embedded in plot filenames and titles.
+    write_zarr : bool
+        Whether to write zarr output. Default True. Set to False to only
+        generate plots without writing zarr data.
     """
     # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
     global i
@@ -100,7 +112,6 @@ def write_output(
         targets_times_all += [[]]
         noised_preds_all += [[]]
         targets_lens += [[]]
-        noise_levels = []  # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
         for stream_idx, stream_info in enumerate(cf.streams):
             sname = stream_info["name"]
 
@@ -120,8 +131,6 @@ def write_output(
                 preds = model_output.get_physical_prediction(t_idx, sname)
                 targets = target_aux_out.physical[t_idx][sname]["target"]
                 
-                noise_levels.append([target_aux_out.physical[t_idx][sname]['target_metda_data'][i][sname].params['noise_level_rn'] for i in range(len(targets))])
-
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
 
                 # handle forcing streams or if sample is empty
@@ -238,9 +247,11 @@ def write_output(
         sample_start,
         forecast_offset,
     )
-    with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
-        for subset in data.items():
-            zio.write_zarr(subset)
+    if write_zarr:
+        with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
+            for subset in data.items():
+                zio.write_zarr(subset)
+
 
     # Free arrays no longer needed after zarr writing
     del targets_all, targets_times_all, targets_lens, sources, data
@@ -326,10 +337,15 @@ def write_output(
                 channel_dir.mkdir(parents=True, exist_ok=True)
                 epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}"
                 # Add noise_level_rn to title if present for this stream
-                noise_level = noise_levels[stream_idx]
+                if noise_level is not None:
+                    eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.0e}'))
+                else:
+                    eta_str = None
+                eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
+                epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}{eta_tag}"
                 
                 if noise_level is not None:
-                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1} | noise_level={exp(noise_level[sample] * cf.p_std + cf.p_mean):.4f}"
+                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1} | noise_level={eta_str}"
                 else:
                     title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1}"
 
@@ -420,11 +436,17 @@ def write_output(
                     channel_dir.mkdir(parents=True, exist_ok=True)
                     epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}_noised"
 
-                    noise_level = noise_levels[stream_idx]
                     if noise_level is not None:
-                        title = f"{stream_name} - {varname} (fstep {forecast_offset}) [noised] | sample {sample + 1} | noise_level={exp(noise_level[sample] * cf.p_std + cf.p_mean):.4f}"
+                        eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.0e}'))
                     else:
-                        title = f"{stream_name} - {varname} (fstep {forecast_offset}) [noised] | sample {sample + 1}"
+                        eta_str = None
+                    eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
+                    epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}{eta_tag}"
+                    
+                    if noise_level is not None:
+                        title = f"{stream_name} - {varname} (fstep {forecast_offset}) | noised sample {sample + 1} | noise_level={eta_str}"
+                    else:
+                        title = f"{stream_name} - {varname} (fstep {forecast_offset}) | noised sample {sample + 1}"
 
                     plot_name = plotter.scatter_plot(
                         sample_da,
