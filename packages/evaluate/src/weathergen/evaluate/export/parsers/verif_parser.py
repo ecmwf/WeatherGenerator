@@ -69,6 +69,9 @@ class VerifParser(CfParser):
         self.obs_coords = np.column_stack((lat.values, lon.values))
         self.zarr_coords = None
 
+        self.channels: list(str()) | None = None
+        self.zarr_dt: np.timedelta64 | None = None
+
     def process_sample(
         self,
         fstep_iterator_results: iter,
