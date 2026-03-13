@@ -20,7 +20,7 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
-from weathergen.common.config import _REPO_ROOT
+from weathergen.common.paths import _REPO_ROOT
 from weathergen.evaluate.export.export_core import export_model_outputs
 
 _logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def parse_args(args: list) -> argparse.Namespace:
         "--format",
         dest="output_format",
         type=str,
-        choices=["netcdf", "grib", "quaver"],
+        choices=["netcdf", "verif", "quaver"],
         help="Output file format (currently only netcdf supported)",
         required=True,
     )
@@ -83,9 +83,8 @@ def parse_args(args: list) -> argparse.Namespace:
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["ERA5"],
+        choices=["ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
         help="Stream name to retrieve data for",
-        required=True,
     )
 
     parser.add_argument(
@@ -182,6 +181,24 @@ def parse_args(args: list) -> argparse.Namespace:
         help="Type of grid to regrid to (only used if --regrid-degree is specified)",
     )
 
+    parser.add_argument("-b", "--obs", help="observation file for creating verif files")
+
+    parser.add_argument(
+        "-m",
+        "--method",
+        default="2d",
+        choices=["2d", "lat_lon", "nearest"],
+        help="Interpolation method used for verif. Default: 2d_interpolation",
+    )
+
+    parser.add_argument(
+        "--verif-template",
+        default="verif/%S/%V/verif_%S_%V_%M_%D.nc",
+        help="Template for the output nc filenames, default will be to create output/verif/%S/%V \
+              repertories where %S, %V, %M, %D are replaced by the "
+        "streams, variable, method and date",
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
@@ -205,9 +222,11 @@ def export_from_args(args: list) -> None:
         args : List of command line arguments.
     """
     args = parse_args(sys.argv[1:])
-
     # Load configuration
-    config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
+    if args.output_format == "verif":
+        config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2verif.yaml")
+    else:
+        config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")
     config = OmegaConf.load(config_file)
     # check config loaded correctly
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"

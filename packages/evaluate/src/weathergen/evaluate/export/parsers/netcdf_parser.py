@@ -1,3 +1,5 @@
+# pylint: disable=bad-builtin
+
 import logging
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,8 @@ class NetcdfParser(CfParser):
                 continue
 
             result = result.as_xarray().squeeze()
+            if "channel" not in result.indexes: 
+                result = result.expand_dims("channel")
             result = result.sel(channel=self.channels)
             result = self.reshape(result)
             da_fs.append(result)
@@ -270,7 +274,7 @@ class NetcdfParser(CfParser):
         else:
             variables = self._attrs_regular_grid(ds)
 
-        dataset = xr.merge(variables.values())
+        dataset = xr.merge(variables.values(), compat="no_conflicts")
         dataset.attrs = ds.attrs
         return dataset
 
