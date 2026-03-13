@@ -32,6 +32,7 @@ from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
+from weathergen.train.target_and_aux_diffusion import DiffusionLatentTargetEncoder
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
@@ -109,7 +110,15 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
-        for module in model.forecast_engine.fe_blocks.modules():
+        if cf.fe_diffusion_model:
+            model_fe_blocks = model.forecast_engine.net.fe_blocks
+        else:
+            model_fe_blocks = model.forecast_engine.fe_blocks
+        for module in model_fe_blocks.modules():
+            if isinstance(module, modules_to_shard):
+                fully_shard(module, **fsdp_kwargs)
+
+        for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
@@ -299,7 +308,8 @@ def get_target_aux_calculator(
     # create target_and_aux_calc
     if target_and_aux_calc == "Physical":
         target_aux = PhysicalTargetAndAux(loss_cfg, model)
-
+    elif target_and_aux_calc == "DiffusionLatentTargetEncoder":
+        target_aux = DiffusionLatentTargetEncoder(model)
     elif target_and_aux_calc == "EMATeacher":
         # work around for problems with FSDP2
         assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"

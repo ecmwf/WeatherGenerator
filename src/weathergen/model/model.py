@@ -22,6 +22,7 @@ import torch.nn as nn
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
+from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -318,6 +319,7 @@ class Model(torch.nn.Module):
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
+
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
@@ -370,10 +372,15 @@ class Model(torch.nn.Module):
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
 
+        # Initialize forecasting engine: standard or diffusion-wrapped
         mode_cfg = cf.training_config
         self.forecast_engine = None
         if cf.fe_num_blocks > 0:
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            if cf.get("fe_diffusion_model", False):
+                self.forecast_engine = DiffusionForecastEngine(
+                    cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                )
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -613,7 +620,13 @@ class Model(torch.nn.Module):
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
         num_params_fe = (
-            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
+            get_num_parameters(
+                self.forecast_engine.net.fe_blocks
+                if cf.fe_diffusion_model
+                else self.forecast_engine.fe_blocks
+            )
+            if self.forecast_engine
+            else 0
         )
 
         mdict = self.embed_target_coords
@@ -698,7 +711,12 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+                tokens = self.forecast_engine(
+                    tokens,
+                    step,
+                    meta_info=batch.samples[0].meta_info,
+                    coords=model_params.rope_coords,
+                )
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
@@ -755,6 +773,7 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
         # Empty dicts evaluate to False in python
+        # breakpoint()
         if not self.pred_heads:
             return output
 
@@ -772,6 +791,8 @@ class Model(torch.nn.Module):
         )
         tokens_nbors_lens[0] = 0
 
+        # breakpoint()
+
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
@@ -782,6 +803,7 @@ class Model(torch.nn.Module):
             t_coords_lens = [len(t) for t in t_coords]
             t_coords = torch.cat(t_coords)
 
+            # breakpoint()
             if len(t_coords) == 0:
                 continue
 
@@ -833,6 +855,7 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
+            # breakpoint()
             output.add_physical_prediction(step, stream_name, pred)
 
         return output
