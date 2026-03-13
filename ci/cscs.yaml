@@ -1,0 +1,31 @@
+include:
+  - remote: 'https://gitlab.com/cscs-ci/recipes/-/raw/master/templates/v2/.ci-ext.yml'
+
+stages:
+  - test-single
+
+test_job:
+  stage: test-single
+  extends: .uenv-runner-santis-gh200
+  image: prgenv-gnu/25.6:v2
+  script: |
+    ml gcc/14.2.0
+
+    export PRIVATE_REPO_BRANCH="${PRIVATE_REPO_BRANCH:-main}"
+    echo "PRIVATE_REPO_BRANCH=$PRIVATE_REPO_BRANCH"
+    export WEATHERGEN_PRIVATE_REPO_PATH="$PWD/WeatherGenerator-private"
+    echo "WEATHERGEN_PRIVATE_REPO_PATH=$WEATHERGEN_PRIVATE_REPO_PATH"
+
+    git clone \
+      --depth 1 --single-branch \
+      --branch "$PRIVATE_REPO_BRANCH" \
+      https://oauth2:${PRIVATE_REPO_TOKEN}@gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private.git
+
+    ./scripts/actions.sh sync
+    ./scripts/actions.sh create-links
+    ./scripts/actions.sh integration-test-single
+  variables:
+    SLURM_JOB_NUM_NODES: 1
+    WITH_UENV_VIEW: 'modules'
+    SLURM_TIMELIMIT: '00:10:00'
+    UV_CACHE_DIR: /iopsstor/scratch/cscs/thunter/uv_cache_shared
