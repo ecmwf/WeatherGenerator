@@ -244,13 +244,13 @@ class BatchSamples:
         """
         Check if sources for all samples are all NaN
         """
-        return all([s.sources_nan() if s is not None else True for s in self.samples])
+        return all([s.sources_nan() if s is not None else False for s in self.samples])
 
     def targets_nan(self) -> bool:
         """
         Check if targets for all samples are all NaN
         """
-        return all([s.targets_nan() if s is not None else True for s in self.samples])
+        return all([s.targets_nan() if s is not None else False for s in self.samples])
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""

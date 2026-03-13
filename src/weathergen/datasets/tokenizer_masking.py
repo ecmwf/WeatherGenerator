@@ -13,6 +13,7 @@ import torch
 
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
