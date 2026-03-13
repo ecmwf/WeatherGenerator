@@ -35,16 +35,15 @@ if not _logger.handlers:
 
 
 def parse_range(value: str) -> list[int]:
-        """Parse fsteps argument, supporting both individual values and range tuples like (0,360,2)."""
-        value = value.strip()
-        if value.startswith("(") and value.endswith(")"):
-            parts = [int(x.strip()) for x in value[1:-1].split(",")]
-            if len(parts) not in (2, 3):
-                raise argparse.ArgumentTypeError(
-                    f"Range tuple must have 2 or 3 elements, got: {value}"
-                )
-            return list(range(*parts))
-        return [int(value)]
+    """Parse fsteps argument, supporting both individual values and range tuples like (0,360,2)."""
+    value = value.strip()
+    if value.startswith("(") and value.endswith(")"):
+        parts = [int(x.strip()) for x in value[1:-1].split(",")]
+        if len(parts) not in (2, 3):
+            raise argparse.ArgumentTypeError(f"Range tuple must have 2 or 3 elements, got: {value}")
+        return list(range(*parts))
+    return [int(value)]
+
 
 def flatten_lists(kwargs: object) -> object:
     """Flatten a list of lists into a single list."""
@@ -52,6 +51,7 @@ def flatten_lists(kwargs: object) -> object:
         if isinstance(value, list) and all(isinstance(i, list) for i in value):
             kwargs[key] = [item for sublist in value for item in sublist]
     return kwargs
+
 
 def parse_args(args: list) -> argparse.Namespace:
     """
@@ -122,7 +122,8 @@ def parse_args(args: list) -> argparse.Namespace:
         type=parse_range,
         nargs="+",
         default=None,
-        help="List of samples to process (e.g. 0 1 2) or a range tuple like (0,10,2). If not provided, processes all samples.",
+        help="List of samples to process (e.g. 0 1 2) or a range tuple like (0,10,2)."
+        "If not provided, processes all samples.",
     )
 
     parser.add_argument(
