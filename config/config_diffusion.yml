@@ -72,7 +72,7 @@ sigma_min: 0.002
 sigma_max: 50000
 sigma_data: 0.5
 rho: 7
-p_mean: -1.2
+p_mean: 1.2
 p_std: 1.2
 
 
@@ -220,6 +220,11 @@ training_config:
 
 # validation config; full validation config is merge of training and validation config
 validation_config: 
+
+  # Noise levels (eta values in standard normal space) at which to evaluate the
+  # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
+  # Each value produces a separate validation pass with independently logged metrics.
+  validation_noise_levels: [0.03, 0.3, 3.0]
 
   samples_per_mini_epoch: 16
   shuffle: False

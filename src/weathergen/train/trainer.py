@@ -10,6 +10,7 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
+import re
 import time
 
 import numpy as np
@@ -543,92 +544,162 @@ class Trainer(TrainerBase):
 
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
-        Perform validation / test computation as specified by mode_cfg
+        Perform validation / test computation as specified by mode_cfg.
+
+        For diffusion models, runs separate validation passes for each noise level
+        specified in ``validation_noise_levels`` (defaults to ``[0.0]``).
+        Losses are logged with a per-noise-level suffix so they can be compared.
         """
 
         cf = self.cf
         self.model.eval()
 
-        dataset_val_iter = iter(self.data_loader_validation)
+        is_diffusion = cf.get("fe_diffusion_model", False)
+        noise_levels = list(mode_cfg.get("validation_noise_levels", [0.0]))
+        if not is_diffusion:
+            noise_levels = [0.0]
 
-        num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+        # Accumulate losses across noise levels with suffixed keys so they are
+        # logged as a single "val" entry (e.g. LossLatentDiff.LossLatentDiff.mse.eta0.03)
+        all_losses: dict[str, list] = {}
+        all_stddev: dict[str, list] = {}
 
-        with torch.no_grad():
-            # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
-            ) as pbar:
-                for bidx, batch in enumerate(dataset_val_iter):
-                    if cf.data_loading.get("memory_pinning", False):
-                        # pin memory for faster CPU-GPU transfer
-                        batch = batch.pin_memory()
+        for noise_idx, noise_level in enumerate(noise_levels):
+            if is_diffusion:
+                self._set_validation_noise_level(noise_level)
 
-                    batch.to_device(self.device)
+            eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.0e}'))
+            loss_suffix = f".eta{eta_str}" if len(noise_levels) > 1 else ""
+            stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
 
-                    # evaluate model
-                    with torch.autocast(
-                        device_type=f"cuda:{cf.local_rank}",
-                        dtype=self.mixed_precision_dtype,
-                        enabled=cf.with_mixed_precision,
-                    ):
-                        if self.ema_model is None:
-                            preds = self.model(
-                                self.model_params,
-                                batch.get_source_samples(),
-                            )
-                        else:
-                            preds = self.ema_model.forward_eval(
-                                self.model_params,
-                                batch.get_source_samples(),
-                            )
+            dataset_val_iter = iter(self.data_loader_validation)
+            num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
-                        targets_and_auxs = {}
-                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
-                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
-                            targets_and_auxs[loss_name] = target_aux.compute(
-                                self.cf.general.istep,
-                                batch.get_target_samples(target_idxs),
-                                self.model_params,
-                                self.model,
-                            )
+            with torch.no_grad():
+                # print progress bar but only in interactive mode, i.e. when without ddp
+                with tqdm.tqdm(
+                    total=len(self.data_loader_validation), disable=self.cf.with_ddp
+                ) as pbar:
+                    for bidx, batch in enumerate(dataset_val_iter):
+                        if cf.data_loading.get("memory_pinning", False):
+                            # pin memory for faster CPU-GPU transfer
+                            batch = batch.pin_memory()
 
-                    _ = self.loss_calculator_val.compute_loss(
-                        preds=preds,
-                        targets_and_aux=targets_and_auxs,
-                        metadata=extract_batch_metadata(batch),
-                    )
+                        batch.to_device(self.device)
 
-                    # log output
-                    if bidx < num_samples_write:
-                        # denormalization function for data
-                        denormalize_data_fct = (
-                            (lambda x0, x1: x1)
-                            if mode_cfg.get("output", {}).get("normalized_samples", False)
-                            else self.dataset_val.denormalize_target_channels
-                        )
-                        # write output
-                        write_output(
-                            self.cf,
-                            mode_cfg,
-                            batch_size,
-                            mini_epoch,
-                            bidx,
-                            denormalize_data_fct,
-                            batch,
-                            preds,
-                            targets_and_auxs,
+                        # evaluate model
+                        with torch.autocast(
+                            device_type=f"cuda:{cf.local_rank}",
+                            dtype=self.mixed_precision_dtype,
+                            enabled=cf.with_mixed_precision,
+                        ):
+                            if self.ema_model is None:
+                                preds = self.model(
+                                    self.model_params,
+                                    batch.get_source_samples(),
+                                )
+                            else:
+                                preds = self.ema_model.forward_eval(
+                                    self.model_params,
+                                    batch.get_source_samples(),
+                                )
+
+                            targets_and_auxs = {}
+                            for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                                target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
+                                targets_and_auxs[loss_name] = target_aux.compute(
+                                    self.cf.general.istep,
+                                    batch.get_target_samples(target_idxs),
+                                    self.model_params,
+                                    self.model,
+                                )
+
+                        _ = self.loss_calculator_val.compute_loss(
+                            preds=preds,
+                            targets_and_aux=targets_and_auxs,
+                            metadata=extract_batch_metadata(batch),
                         )
 
-                    pbar.update(batch_size)
+                        # log output
+                        if bidx < num_samples_write:
+                            # denormalization function for data
+                            denormalize_data_fct = (
+                                (lambda x0, x1: x1)
+                                if mode_cfg.get("output", {}).get("normalized_samples", False)
+                                else self.dataset_val.denormalize_target_channels
+                            )
+                            # write output (zarr only for first noise level, plots for all)
+                            write_output(
+                                self.cf,
+                                mode_cfg,
+                                batch_size,
+                                mini_epoch,
+                                bidx,
+                                denormalize_data_fct,
+                                batch,
+                                preds,
+                                targets_and_auxs,
+                                noise_level=noise_level if is_diffusion and len(noise_levels) > 1 else None,
+                                write_zarr=(noise_idx == 0),
+                            )
 
-                    if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
-                        break
+                        pbar.update(batch_size)
 
-                self._log_terminal(0, mini_epoch, VAL)
-                self._log(VAL)
+                        if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
+                            break
+
+                    # Terminal logging per noise level for progress visibility
+                    self._log_terminal(0, mini_epoch, VAL, stage_suffix=stage_suffix)
+
+            # Extract losses for this noise level, suffix keys, and accumulate
+            loss_calc = self.loss_calculator_val
+            _, losses_level, stddev_level = prepare_losses_for_logging(
+                loss_calc.loss_hist,
+                loss_calc.losses_unweighted_hist,
+                loss_calc.stddev_unweighted_hist,
+            )
+            for key, value in losses_level.items():
+                all_losses[f"{key}{loss_suffix}"] = value
+            for key, value in stddev_level.items():
+                all_stddev[f"{key}{loss_suffix}"] = value
+            loss_calc.loss_hist = []
+            loss_calc.losses_unweighted_hist = []
+            loss_calc.stddev_unweighted_hist = []
+
+        # Log all noise levels as a single "val" entry with suffixed loss keys
+        samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
+        if is_root():
+            self.train_logger.add_logs(VAL, samples, all_losses, all_stddev)
+
+        # reset fixed noise level
+        if is_diffusion:
+            self._set_validation_noise_level(None)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
+
+    def _set_validation_noise_level(self, noise_level: float | None):
+        """Set fixed noise level on diffusion components for validation.
+
+        Args:
+            noise_level: The eta value (standard normal space) to fix for validation.
+                         sigma = exp(eta * p_std + p_mean). None resets to default (0.0).
+        """
+        # Set on the base model
+        if hasattr(self.model, "forecast_engine") and hasattr(
+            self.model.forecast_engine, "_fixed_noise_level"
+        ):
+            self.model.forecast_engine._fixed_noise_level = noise_level
+        # Also set on the EMA model (separate model copy used during validation)
+        if self.ema_model is not None:
+            ema_net = self.ema_model.ema_model
+            if hasattr(ema_net, "forecast_engine") and hasattr(
+                ema_net.forecast_engine, "_fixed_noise_level"
+            ):
+                ema_net.forecast_engine._fixed_noise_level = noise_level
+        for calc in self.target_and_aux_calculators_val.values():
+            if hasattr(calc, "_fixed_noise_level"):
+                calc._fixed_noise_level = noise_level
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
@@ -704,13 +775,15 @@ class Trainer(TrainerBase):
             # save config
             config.save(self.cf, mini_epoch)
 
-    def _log(self, stage: Stage):
+    def _log(self, stage: Stage, stage_suffix: str = ""):
         """
         Logs training or validation metrics.
 
         Args:
             stage: Stage Is it's VAL, logs are treated as validation logs.
                         If TRAIN, logs are treated as training logs
+            stage_suffix: Optional suffix appended to the logged stage name
+                          (e.g. "_eta0.00" for per-noise-level validation).
 
         Notes:
             - This method only executes logging on the main process (rank 0).
@@ -724,15 +797,16 @@ class Trainer(TrainerBase):
         )
 
         samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
+        log_stage = f"{stage}{stage_suffix}" if stage_suffix else stage
 
         if is_root():
             # plain logger
             if stage == VAL:
-                self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
+                self.train_logger.add_logs(log_stage, samples, losses_all, stddev_all)
 
             elif self.cf.general.istep >= 0:
                 self.train_logger.add_logs(
-                    stage,
+                    log_stage,
                     samples,
                     losses_all,
                     stddev_all,
@@ -764,7 +838,7 @@ class Trainer(TrainerBase):
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)
 
-    def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage):
+    def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage, stage_suffix: str = ""):
         print_freq = self.train_logging.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
@@ -778,7 +852,7 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
+                        f"""validation{stage_suffix} ({self.cf.general.run_id}) : {mini_epoch:03d} : 
                         {np.nanmean(avg_loss)}"""
                     )
 
