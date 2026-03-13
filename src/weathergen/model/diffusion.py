@@ -99,11 +99,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
 
-        if self.training:
-            eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
-        else:
-            # During validation, fix sigma to exp(p_mean) by setting eta to the mean of N(0,1)
-            eta = torch.zeros(1, device=tokens.device)
+        eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
 
         # Compute sigma (noise level) from eta and create noise tensor
         sigma = (eta * self.p_std + self.p_mean).exp()
