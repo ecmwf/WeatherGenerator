@@ -10,6 +10,7 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
+import re
 import time
 
 import numpy as np
@@ -558,19 +559,21 @@ class Trainer(TrainerBase):
         if not is_diffusion:
             noise_levels = [0.0]
 
+        # Accumulate losses across noise levels with suffixed keys so they are
+        # logged as a single "val" entry (e.g. LossLatentDiff.LossLatentDiff.mse.eta0.03)
+        all_losses: dict[str, list] = {}
+        all_stddev: dict[str, list] = {}
+
         for noise_idx, noise_level in enumerate(noise_levels):
             if is_diffusion:
                 self._set_validation_noise_level(noise_level)
 
-            stage_suffix = f"_eta{noise_level:.2f}" if len(noise_levels) > 1 else ""
-            write_samples = noise_idx == 0
+            eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.0e}'))
+            loss_suffix = f".eta{eta_str}" if len(noise_levels) > 1 else ""
+            stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
 
             dataset_val_iter = iter(self.data_loader_validation)
-            num_samples_write = (
-                mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
-                if write_samples
-                else 0
-            )
+            num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
             with torch.no_grad():
                 # print progress bar but only in interactive mode, i.e. when without ddp
@@ -625,7 +628,7 @@ class Trainer(TrainerBase):
                                 if mode_cfg.get("output", {}).get("normalized_samples", False)
                                 else self.dataset_val.denormalize_target_channels
                             )
-                            # write output
+                            # write output (zarr only for first noise level, plots for all)
                             write_output(
                                 self.cf,
                                 mode_cfg,
@@ -636,6 +639,8 @@ class Trainer(TrainerBase):
                                 batch,
                                 preds,
                                 targets_and_auxs,
+                                noise_level=noise_level if is_diffusion and len(noise_levels) > 1 else None,
+                                write_zarr=(noise_idx == 0),
                             )
 
                         pbar.update(batch_size)
@@ -643,8 +648,28 @@ class Trainer(TrainerBase):
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                             break
 
+                    # Terminal logging per noise level for progress visibility
                     self._log_terminal(0, mini_epoch, VAL, stage_suffix=stage_suffix)
-                    self._log(VAL, stage_suffix=stage_suffix)
+
+            # Extract losses for this noise level, suffix keys, and accumulate
+            loss_calc = self.loss_calculator_val
+            _, losses_level, stddev_level = prepare_losses_for_logging(
+                loss_calc.loss_hist,
+                loss_calc.losses_unweighted_hist,
+                loss_calc.stddev_unweighted_hist,
+            )
+            for key, value in losses_level.items():
+                all_losses[f"{key}{loss_suffix}"] = value
+            for key, value in stddev_level.items():
+                all_stddev[f"{key}{loss_suffix}"] = value
+            loss_calc.loss_hist = []
+            loss_calc.losses_unweighted_hist = []
+            loss_calc.stddev_unweighted_hist = []
+
+        # Log all noise levels as a single "val" entry with suffixed loss keys
+        samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
+        if is_root():
+            self.train_logger.add_logs(VAL, samples, all_losses, all_stddev)
 
         # reset fixed noise level
         if is_diffusion:
@@ -660,10 +685,18 @@ class Trainer(TrainerBase):
             noise_level: The eta value (standard normal space) to fix for validation.
                          sigma = exp(eta * p_std + p_mean). None resets to default (0.0).
         """
+        # Set on the base model
         if hasattr(self.model, "forecast_engine") and hasattr(
             self.model.forecast_engine, "_fixed_noise_level"
         ):
             self.model.forecast_engine._fixed_noise_level = noise_level
+        # Also set on the EMA model (separate model copy used during validation)
+        if self.ema_model is not None:
+            ema_net = self.ema_model.ema_model
+            if hasattr(ema_net, "forecast_engine") and hasattr(
+                ema_net.forecast_engine, "_fixed_noise_level"
+            ):
+                ema_net.forecast_engine._fixed_noise_level = noise_level
         for calc in self.target_and_aux_calculators_val.values():
             if hasattr(calc, "_fixed_noise_level"):
                 calc._fixed_noise_level = noise_level
