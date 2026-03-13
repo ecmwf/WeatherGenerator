@@ -628,7 +628,7 @@ class VerifParser(CfParser):
             if all(v is None for v in var_list):
                 _logger.warning(f"No data to save for variable {verif_var}. Skipping.")
                 continue
-            ds = xr.concat(var_list, data_vars="all", dim="location")
+            ds = xr.concat(var_list, dim="time", data_vars="minimal", coords="minimal", join="exact")
             out_fname = self.get_output_filename(verif_var)
             _logger.info(f"Saving to {out_fname}.")
             ds.to_netcdf(out_fname)
