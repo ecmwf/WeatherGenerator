@@ -640,7 +640,7 @@ class Trainer(TrainerBase):
                                 preds,
                                 targets_and_auxs,
                                 noise_level=noise_level if is_diffusion and len(noise_levels) > 1 else None,
-                                write_zarr=(noise_idx == 0),
+                                write_zarr=False, #(noise_idx == 0),
                             )
 
                         pbar.update(batch_size)
