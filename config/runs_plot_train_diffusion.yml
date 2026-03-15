@@ -1,8 +1,8 @@
 train : 
   plot : 
-    # crn7ov5y:
-    #   slurm_id: 0
-    #   description: "crn7ov5y: no noise, lat 1, phys 0, start_lr=1e-5, max_lr=1e-4"
+    gfaszkoh:
+      slurm_id: 0
+      description: "gfaszkoh: EDM settings, single sample, lat 1, phys 0, start_lr=1e-5, max_lr=1e-4"
 
     # h3of5mec:
     #   slurm_id: 0
