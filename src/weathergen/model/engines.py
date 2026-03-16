@@ -386,7 +386,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
     def forward(self, tokens, coords=None):
         aux_info = None
         for block in self.ae_global_blocks:
-            tokens = block(tokens, coords, aux_info)
+            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -478,7 +478,7 @@ class ForecastingEngine(torch.nn.Module):
         aux_info = None
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
-                tokens = block(tokens)
+                tokens = checkpoint(block, tokens, use_reentrant=False)
             else:
                 tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
@@ -630,14 +630,16 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = block(tc_tokens, tcs_lens, tcs_aux)
+                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
             else:
-                tc_tokens = block(
+                tc_tokens = checkpoint(
+                    block,
                     tc_tokens,
                     tokens_stream,
                     tcs_lens,
                     tokens_lens,
                     tcs_aux,
+                    use_reentrant=False,
                 )
         return tc_tokens
 
