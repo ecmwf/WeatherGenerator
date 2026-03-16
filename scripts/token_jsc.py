@@ -111,11 +111,27 @@ def create_token(
 
     # Log what identity the server sees before attempting token issuance
     try:
-        client_info = client.properties.get("client", {})
-        log.info("  Server sees DN:   %s", client_info.get("dn", "N/A"))
-        log.info("  Server sees role: %s", client_info.get("role", {}).get("selected", "N/A"))
-    except Exception as e:
-        log.debug("Could not query access info: %s", e)
+        props = client.properties
+        client_info = props.get("client", {})
+        dn = client_info.get("dn", "N/A")
+        role = client_info.get("role", {}).get("selected", "N/A")
+        log.info("  Server sees DN:   %s", dn)
+        log.info("  Server sees role: %s", role)
+        if role == "anonymous":
+            log.error(
+                "Your credential is not recognized by %s (role is anonymous). "
+                "Ensure your SSH public key is registered in JUDOOR for UNICORE access.",
+                base_url,
+            )
+            raise uc_credentials.AuthenticationFailedException(
+                f"Anonymous on {base_url} — cannot issue token"
+            )
+    except requests.exceptions.HTTPError as e:
+        log.error(
+            "Could not query %s: HTTP %s — your credential may not be accepted by this site.",
+            base_url, e.response.status_code if e.response is not None else "?",
+        )
+        raise
 
     token = client.issue_auth_token(
         lifetime=lifetime,
