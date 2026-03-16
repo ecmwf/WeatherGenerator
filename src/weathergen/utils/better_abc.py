@@ -1,3 +1,5 @@
+# pylint: disable=bad-builtin
+
 """
 Coding recipe for abstract fields in Python.
 
