@@ -10,10 +10,9 @@ import torch
 import xarray as xr
 from numpy.typing import NDArray
 
+from weathergen.common.data import ReaderData, DTRange
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    DTRange,
-    ReaderData,
     TimeWindowHandler,
     TIndex,
 )
