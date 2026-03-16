@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# dependencies = [  "requests", "pyunicore" ]
+# dependencies = [  "requests", "pyunicore", "cryptography" ]
 # [tool.uv.sources]
 # ///
 """
@@ -35,7 +35,7 @@ import re
 import time
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import requests
 
@@ -63,22 +63,12 @@ class TokenResponse(TypedDict):
     token: str
 
 
-def discover_sites(username: str, password: str) -> SiteMap:
-    """Query the JSC UNICORE registry and return {site_name: base_url}."""
-    log.info("Querying registry: %s", REGISTRY_URL)
-    resp = requests.get(
-        REGISTRY_URL,
-        auth=(username, password),
-        headers={"Accept": "application/json"},
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
+def _parse_sites(data: dict[str, Any]) -> SiteMap:
+    """Extract {site_name: base_url} from a registry JSON response."""
     sites: SiteMap = {}
     for entry in data.get("entries", []):
         href = entry.get("href", "")
         if entry.get("type", "") == "TargetSystemFactory":
-            # Extract the base /rest/core URL and site name
             m = re.match(r"(https://\S+/rest/core).*", href)
             n = re.match(r"https://\S+/(\S+)/rest/core", href)
             if m and n:
@@ -86,10 +76,23 @@ def discover_sites(username: str, password: str) -> SiteMap:
     return sites
 
 
+def discover_sites(credential: uc_credentials.Credential) -> SiteMap:
+    """Query the JSC UNICORE registry and return {site_name: base_url}."""
+    log.info("Querying registry: %s", REGISTRY_URL)
+    resp = requests.get(
+        REGISTRY_URL,
+        headers={
+            "Accept": "application/json",
+            "Authorization": credential.get_auth_header(),
+        },
+    )
+    resp.raise_for_status()
+    return _parse_sites(resp.json())
+
+
 def create_token(
     base_url: str,
-    username: str,
-    password: str,
+    credential: uc_credentials.Credential,
     lifetime: int,
     limited: bool,
     renewable: bool,
@@ -97,18 +100,22 @@ def create_token(
     """
     Create a JWT token via pyunicore's Client.issue_auth_token().
 
-    Uses UsernamePassword credential → Client → issue_auth_token(), which
-    is pyunicore's own token-issuing path and handles all UNICORE-specific
-    headers (security sessions, preferences, Accept: text/plain).
+    Accepts any pyunicore Credential (UsernamePassword, JWTToken from SSH key, etc.).
     """
     log.info(
         "Requesting token from: %s  (lifetime=%ds ~%dd, limited=%s, renewable=%s)",
         base_url, lifetime, lifetime // 86400, limited, renewable,
     )
 
-    credential = uc_credentials.UsernamePassword(username, password)
-    client = uc_client.Client(credential, site_url=base_url)
-    log.debug("Client created for: %s", base_url)
+    client = uc_client.Client(credential, site_url=base_url, check_authentication=False)
+
+    # Log what identity the server sees before attempting token issuance
+    try:
+        client_info = client.properties.get("client", {})
+        log.info("  Server sees DN:   %s", client_info.get("dn", "N/A"))
+        log.info("  Server sees role: %s", client_info.get("role", {}).get("selected", "N/A"))
+    except Exception as e:
+        log.debug("Could not query access info: %s", e)
 
     token = client.issue_auth_token(
         lifetime=lifetime,
@@ -121,26 +128,7 @@ def create_token(
 
 def discover_sites_bearer(token: str) -> SiteMap:
     """Query the registry using a Bearer token; return {site_name: base_url}."""
-    log.info("Querying registry: %s", REGISTRY_URL)
-    resp = requests.get(
-        REGISTRY_URL,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        },
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    sites: SiteMap = {}
-    for entry in data.get("entries", []):
-        href = entry.get("href", "")
-        if entry.get("type", "") == "TargetSystemFactory":
-            m = re.match(r"(https://\S+/rest/core).*", href)
-            n = re.match(r"https://\S+/(\S+)/rest/core", href)
-            if m and n:
-                sites[n.group(1)] = m.group(1)
-    return sites
+    return discover_sites(uc_credentials.BearerToken(token=token))
 
 def run_command(client: uc_client.Client, command: str, project: str | None,
                 poll_interval: float) -> None:
@@ -311,6 +299,11 @@ Examples:
              "No credentials required. Use --site to target a specific site.",
     )
     parser.add_argument(
+        "-i", "--identity",
+        help="Path to SSH private key for authentication (e.g. ~/.ssh/id_rsa). "
+             "If given, authenticates via a locally-signed JWT instead of password.",
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable debug logging (shows raw HTTP response details)",
@@ -393,17 +386,34 @@ Examples:
 
     # ── Gather credentials ────────────────────────────────────────────
     log.info("JSC UNICORE Long-Lived Token Creator")
-    log.info("Authenticate with your JUDOOR (webservice) credentials.")
 
     username = args.username or input("Username: ")
-    password = getpass.getpass("Password: ")
+
+    if args.identity:
+        # SSH key authentication: sign a short-lived JWT locally.
+        # pyunicore's create_credential handles key loading and algorithm detection.
+        key_path = os.path.expanduser(args.identity)
+        if not os.path.isfile(key_path):
+            log.error("SSH key not found: %s", key_path)
+            sys.exit(1)
+        log.info("Authenticating with SSH key: %s", key_path)
+        key_password = getpass.getpass("Key passphrase (empty if none): ")
+        credential = uc_credentials.create_credential(
+            username=username,
+            password=key_password or None,
+            identity=key_path,
+        )
+    else:
+        log.info("Authenticating with JUDOOR username/password.")
+        password = getpass.getpass("Password: ")
+        credential = uc_credentials.UsernamePassword(username, password)
 
     # ── Discover sites from registry ──────────────────────────────────
     try:
-        sites = discover_sites(username, password)
+        sites = discover_sites(credential)
     except requests.exceptions.HTTPError as e:
         if e.response is not None and e.response.status_code == 401:
-            log.error("Authentication failed. Check your JUDOOR username/password.")
+            log.error("Authentication failed. Check your credentials.")
         else:
             log.error("%s", e)
         sys.exit(1)
@@ -448,8 +458,7 @@ Examples:
     try:
         result = create_token(
             base_url=base_url,
-            username=username,
-            password=password,
+            credential=credential,
             lifetime=args.lifetime,
             limited=args.limited,
             renewable=renewable,
@@ -458,10 +467,11 @@ Examples:
         status = e.response.status_code if e.response is not None else "?"
         log.error("Token creation failed (HTTP %s).", status)
         if e.response is not None:
-            try:
-                log.error("Server response: %s", e.response.text[:500])
-            except Exception:
-                pass
+            log.error("Response headers: %s", dict(e.response.headers))
+            log.error("Response body:    %s", e.response.text[:500] or "(empty)")
+        sys.exit(1)
+    except uc_credentials.AuthenticationFailedException as e:
+        log.error("Authentication rejected by server: %s", e)
         sys.exit(1)
 
     token = result["token"]
@@ -491,7 +501,6 @@ Examples:
         log.info('       %s', base_url)
 
     # ── Quick verification ────────────────────────────────────────────
-    print(base_url, token)
     verify_token(base_url, token)
 
 
