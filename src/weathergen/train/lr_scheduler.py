@@ -102,9 +102,10 @@ class LearningRateScheduler:
         elif self.policy_warmup == "cosine":
             n_steps = self.n_steps_warmup + self.n_steps_decay + 1
             pct_start = self.n_steps_warmup / n_steps
+            max_lrs = [self.lr_max_scaled * g.get("lr_scale", 1.0) for g in optimizer.param_groups]
             self.scheduler_warmup = OneCycleLR(
                 optimizer,
-                max_lr=self.lr_max_scaled,
+                max_lr=max_lrs,
                 total_steps=n_steps,
                 pct_start=pct_start,
                 div_factor=self.lr_max_scaled / lr_cfg.lr_start,
@@ -209,14 +210,14 @@ class LearningRateScheduler:
                 else self.lr_max_scaled
             )
             for g in self.optimizer.param_groups:
-                g["lr"] = self.lr
+                g["lr"] = self.lr * g.get("lr_scale", 1.0)
         elif self.policy_decay == "constant" and phase_decay:
             cur_lr = self.lr
             self.lr = self.lr_max_scaled
             # make sure lr_max_scaled rate is used if warm-up end is not lr_max_scaled
             if cur_lr < self.lr:
                 for g in self.optimizer.param_groups:
-                    g["lr"] = self.lr
+                    g["lr"] = self.lr * g.get("lr_scale", 1.0)
         else:
             self.cur_scheduler.step()
             self.lr = self.cur_scheduler.get_last_lr()[0]

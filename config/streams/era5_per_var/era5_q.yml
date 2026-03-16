@@ -1,4 +1,4 @@
-# (C) Copyright 2024 WeatherGenerator contributors.
+# (C) Copyright 2026 WeatherGenerator contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,12 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-ERA5 :
+ERA5_q:
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   stream_id : 0
-  source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
-  target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
+  source : ['q_']
+  target: ['q_']
   loss_weight : 1.
   location_weight : cosine_latitude
   masking_rate : 0.6
@@ -37,4 +37,6 @@ ERA5 :
     ens_size : 1
     num_layers : 1
   optimizer :
-    lr_scale : 1.0
+    lr_scale : 1.2
+
+
