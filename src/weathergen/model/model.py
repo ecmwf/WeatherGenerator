@@ -437,7 +437,7 @@ class Model(torch.nn.Module):
                             with_residual=False,
                             dropout_rate=dropout_rate,
                             norm_eps=self.cf.mlp_norm_eps,
-                            stream_name=f"embed_target_coords_{stream_name}",
+                            name=f"embed_target_coords_{stream_name}",
                         )
                     else:
                         assert False
