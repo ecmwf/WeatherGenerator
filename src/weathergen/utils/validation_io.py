@@ -10,6 +10,7 @@
 import logging
 import shutil
 
+import astropy_healpix as hp
 import numpy as np
 import torch
 
@@ -32,7 +33,6 @@ def write_output(
     batch,
     model_output,
     target_aux_out,
-    model_params=None,
 ):
     """
     Interface for writing model output
@@ -198,22 +198,22 @@ def write_output(
             _write_latent_data_to_zarr(
                 zio,
                 data,
+                cf,
                 batch,
                 batch_idx,
                 batch_size,
-                model_params,
             )
 
 
 def _write_latent_data_to_zarr(
-    zio, data, batch, batch_idx, batch_size, model_params
+    zio, data, cf, batch, batch_idx, batch_size
 ):
     """Write latent data directly to zarr store.
     
     This bypasses OutputItem validation which incorrectly requires source datasets
     for latent-only items.
     
-    Also writes coordinate and time metadata using ModelParams healpix coordinates.
+    Also writes coordinate and time metadata using config healpix coordinates.
     """
     # Calculate sample start index for this batch
     sample_start = batch_idx * batch_size
@@ -241,7 +241,7 @@ def _write_latent_data_to_zarr(
             
             npoints = _infer_latent_points_for_metadata(latents_for_sample)
             coords_array, geoinfo_array, times_array, coords_len, num_extra_tokens = (
-                _build_latent_metadata(model_params, batch, sample_idx_in_batch, npoints)
+                _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints)
             )
 
             extra_written = False
@@ -322,17 +322,31 @@ def _split_extra_tokens(
         return latent_array[:num_extra_tokens], latent_array[num_extra_tokens:]
     return None, latent_array
 
-def _build_latent_metadata(model_params, batch, sample_idx_in_batch, npoints):
-    num_extra_tokens = 0
-    if model_params is not None and hasattr(model_params, "cf"):
-        num_extra_tokens = int(getattr(model_params.cf, "num_register_tokens", 0)) + int(
-            getattr(model_params.cf, "num_class_tokens", 0)
-        )
+_HEALPIX_COORDS_CACHE: dict[int, tuple[np.ndarray, np.ndarray]] = {}
 
-    if model_params is None or not hasattr(model_params, "healpix_coords"):
-        return None, None, None, None, num_extra_tokens
 
-    healpix_coords = model_params.healpix_coords
+def _get_healpix_coords(cf) -> tuple[np.ndarray, np.ndarray] | None:
+    if cf is None or not hasattr(cf, "healpix_level"):
+        return None
+    healpix_level = int(cf.healpix_level)
+    cached = _HEALPIX_COORDS_CACHE.get(healpix_level)
+    if cached is not None:
+        return cached
+
+    num_healpix_cells = 12 * 4**healpix_level
+    ipix = np.arange(num_healpix_cells)
+    lon, lat = hp.healpix_to_lonlat(ipix, 2**healpix_level, order="nested")
+    coords = (lon.to_value("deg"), lat.to_value("deg"))
+    _HEALPIX_COORDS_CACHE[healpix_level] = coords
+    return coords
+
+
+def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
+    num_extra_tokens = int(getattr(cf, "num_register_tokens", 0)) + int(
+        getattr(cf, "num_class_tokens", 0)
+    )
+
+    healpix_coords = _get_healpix_coords(cf)
     if healpix_coords is None or len(healpix_coords) != 2:
         return None, None, None, None, num_extra_tokens
 

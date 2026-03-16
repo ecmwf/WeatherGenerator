@@ -619,7 +619,6 @@ class Trainer(TrainerBase):
                             batch,
                             preds,
                             targets_and_auxs,
-                            self.model_params,
                         )
 
                     pbar.update(batch_size)
