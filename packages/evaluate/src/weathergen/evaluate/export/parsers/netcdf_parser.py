@@ -128,7 +128,7 @@ class NetcdfParser(CfParser):
         grid_type = self.grid_type
 
         # Original logic
-        var_dict, pl = find_pl(data.channel.values)
+        var_dict = find_pl(data.channel.values)
         data_vars = {}
 
         for new_var, pls in var_dict.items():
