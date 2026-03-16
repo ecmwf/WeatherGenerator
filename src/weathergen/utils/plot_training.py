@@ -363,7 +363,9 @@ def plot_loss_per_stream(
                         data_cols = []
                         for col in run_data_mode.columns:
                             col_split = col.split(".")
-                            if len(col_split) < 4:
+                            if col == stream_name:
+                                data_cols += [col]
+                            elif len(col_split) < 4:
                                 if stream_name in col:
                                     data_cols += [col]
                             elif col_split[3] == "avg":
