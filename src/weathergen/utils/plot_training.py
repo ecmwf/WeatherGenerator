@@ -263,14 +263,9 @@ def plot_loss_avg(
 
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if stage == TRAIN:
-            x_vals = np.array(run_data.train["num_samples"])
-            y_vals = np.array(run_data.train["loss_avg_mean"])
-        elif stage == VAL:
-            x_vals = np.array(run_data.val["num_samples"])
-            y_vals = np.array(run_data.val["loss_avg_mean"])
-        else:
-            assert False
+        run_data_stage = run_data.train if stage == TRAIN else run_data.val
+        x_vals = np.array(run_data_stage["num_samples"])
+        y_vals = np.array(run_data_stage["loss_avg_mean"])
 
         mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
 
@@ -314,8 +309,11 @@ def plot_loss_per_stream(
     plot_dir: Path,
     errs: list[str],
     channels: list[str],
+    forecast_steps: list[int],
     x_axis: str = "samples",
     x_type: str = "step",
+    x_lim: list[float] | None = None,
+    y_lim: list[float] | None = None,
     x_scale_log: bool = False,
     legend_outside: bool = False,
 ):
@@ -379,14 +377,23 @@ def plot_loss_per_stream(
                         for col in run_data_mode.columns:
                             col_split = col.split(".")
                             if len(col_split) < 4:
-                                if col == stream_name.lower():
+                                if stream_name in col:
                                     data_cols += [col]
-                            elif (
-                                col_split[1].lower() == stream_name.lower()
-                                and col_split[2].lower() == err.lower()
-                                and col_split[3] == channel
-                            ):
-                                data_cols += [col]
+                            elif len(col_split) == 4:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] == channel
+                                ):
+                                    data_cols += [col]
+                            elif len(col_split) == 5:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] == channel
+                                    and int(col_split[4]) in forecast_steps
+                                ):
+                                    data_cols += [col]
 
                         for col in data_cols:
                             x_vals = np.array(run_data_mode[x_col])
@@ -440,10 +447,14 @@ def plot_loss_per_stream(
             for line in legend.get_lines():
                 line.set(alpha=1.0)
             plt.grid(True, which="both", ls="-")
-            # cap at 1.0 in case of divergence of run (through normalziation, max should be
-            # around 1.0)
-            # plt.ylim([0.95 * min_val, (None if max_val < 2.0 else min(1.1, 1.025 * max_val))])
-            plt.ylim([0.95 * min_val, 1.025 * max_val])
+
+            if y_lim is not None:
+                plt.ylim(y_lim)
+            else:
+                plt.ylim([0.95 * min_val, 1.025 * max_val])
+            if x_lim is not None:
+                plt.xlim(x_lim)
+
             plt.yscale("log")
             if x_scale_log:
                 plt.xscale("log")
@@ -652,12 +663,36 @@ def plot_train(args=None):
         help="List of channels to plot",
     )
     parser.add_argument(
+        "--forecast-steps",
+        dest="forecast_steps",
+        default=[0, 1],
+        type=int,
+        nargs="+",
+        help="List of channels to plot",
+    )
+    parser.add_argument(
         "--metrics",
         dest="metrics",
         default=["mse"],
         type=str,
         nargs="+",
         help="List of metrics (e.g. mse) to plot",
+    )
+    parser.add_argument(
+        "--per-stream-x-lim",
+        dest="per_stream_x_lim",
+        default=None,
+        type=float,
+        nargs="+",
+        help="x-lim for per-stream plots",
+    )
+    parser.add_argument(
+        "--per-stream-y-lim",
+        dest="per_stream_y_lim",
+        default=None,
+        type=float,
+        nargs="+",
+        help="x-lim for per-stream plots",
     )
     parser.add_argument(
         "--x_type",
@@ -720,14 +755,41 @@ def plot_train(args=None):
         clean_plot_folder(out_dir)
 
     # read logged data, skipping faulty run IDs
-    valid_runs_ids = {}
+    valid_runs_ids = []
     runs_data = []
-    for run_id, run_config in runs_ids.items():
+    # collect all physical streams from all run_ids if requested
+    if "all" in streams:
+        for run_id in runs_ids:
+            # Load config from given model_path if provided, otherwise use path from private config
+            if model_base_dir:
+                cf = config.load_run_config(
+                    run_id=run_id, mini_epoch=None, model_path=model_base_dir
+                )
+            else:
+                cf = config.load_merge_configs(
+                    private_home=None,
+                    from_run_id=run_id,
+                    mini_epoch=None,
+                )
+            for stream_info in cf.streams:
+                streams += [stream_info["name"]]
+        # ensure items are unique
+        streams = list(set(streams))
+        # remove "all" key that is a special flag and not an actual stream name
+        streams.remove("all")
+
+    # read logged data
+
+    runs_data = [
+        TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
+        for run_id in runs_ids
+    ]
+    for run_id in runs_ids:
         try:
             runs_data.append(
                 TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
             )
-            valid_runs_ids[run_id] = run_config
+            valid_runs_ids.append(run_id)
         except Exception as e:
             _logger.warning(f"Skipping run_id '{run_id}': {e}")
     runs_ids = valid_runs_ids
@@ -759,8 +821,11 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
         legend_outside=legend_outside,
     )
@@ -772,8 +837,11 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
         legend_outside=legend_outside,
     )
@@ -785,8 +853,11 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
+        x_lim=args.per_stream_x_lim,
+        y_lim=args.per_stream_y_lim,
         plot_dir=out_dir,
         legend_outside=legend_outside,
     )
