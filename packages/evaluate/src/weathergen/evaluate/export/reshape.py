@@ -110,9 +110,7 @@ class Regridder:
         ds = self.dataset
         x = ds["longitude"].values[:, 0]
         y = ds["latitude"].values[:, 0]
-        tuples = list(zip(x, y, strict=False))
-        ordered_tuples = sorted(tuples, key=lambda t: (-t[1], t[0]))
-        indices = [tuples.index(t) for t in ordered_tuples]
+        indices = np.lexsort((x, -y))
         return indices
 
     def detect_input_grid_type(self) -> str:

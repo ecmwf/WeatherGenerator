@@ -28,6 +28,7 @@ class RegionLibrary:
         "shem": (-90.0, 0.0, -180.0, 180.0),
         "tropics": (-30.0, 30.0, -180.0, 180.0),
         "belgium": (49, 52, 2, 7),
+        "europe": (35, 70, -10, 40),
         "madagaskar": (-25, -10, 43, 50),
     }
 
@@ -100,7 +101,6 @@ class RegionBoundingBox:
             & (lon >= self.lon_min)
             & (lon <= self.lon_max)
         )
-
         return data.sel({data_dim: mask})
 
     @classmethod

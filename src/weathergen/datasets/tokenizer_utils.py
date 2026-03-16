@@ -17,16 +17,6 @@ from weathergen.datasets.utils import (
 numpy_argsort_args = {"stable": True} if int(np.__version__.split(".")[0]) >= 2 else {}
 
 
-def arc_alpha(sin_alpha, cos_alpha):
-    """Maps a point on the unit circle (np.array or torch.tensor), defined by its (cosine, sine)
-    coordinates to its spherical coordinate in [0,2pi)
-    """
-    t = torch.arccos(cos_alpha)
-    mask = sin_alpha < 0.0
-    t[mask] = (2.0 * np.pi) - t[mask]
-    return t
-
-
 def theta_phi_to_standard_coords(coords):
     thetas = ((90.0 - coords[:, 0]) / 180.0) * np.pi
     phis = ((coords[:, 1] + 180.0) / 360.0) * 2.0 * np.pi
