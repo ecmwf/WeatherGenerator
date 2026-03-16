@@ -72,9 +72,10 @@ def find_pl(vars: list) -> tuple[dict[str, list[str]], list[int]]:
         match = re.search(r"^([a-zA-Z0-9_]+)_(\d+)$", var)
         if match:
             var_name = match.group(1)
-            pressure_level = int(match.group(2))                
+            pressure_level = int(match.group(2))
             if pressure_level == 0:
                 var_dict.setdefault(var, []).append(None)
+                return var_dict
             var_dict.setdefault(var_name, []).append(pressure_level)
         else:
             var_dict.setdefault(var, []).append(None)
