@@ -161,11 +161,8 @@ st.markdown(
 
 st.plotly_chart(
     px.scatter(
-        all_runs_pdf
-        .with_columns(
-            pl.col("params.world_size").fill_null(0)
-            .cast(int)
-            .alias("world_size")
+        all_runs_pdf.with_columns(
+            pl.col("params.world_size").fill_null(0).cast(int).alias("world_size")
         )
         .filter(pl.col("world_size") > 0)
         .select(["world_size", "start_time", "tags.hpc"])

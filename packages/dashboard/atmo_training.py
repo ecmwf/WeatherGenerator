@@ -1,8 +1,6 @@
 import logging
 
-import plotly.express as px
 import plotly.graph_objects as go
-import polars as pl
 import streamlit as st
 from plotly.subplots import make_subplots
 
@@ -49,9 +47,7 @@ runs = latest_runs(keep_metrics=accepted_metrics, keep_params=False, latest_runs
 all_runs_pdf = all_runs(keep_metrics=accepted_metrics, keep_params=False, latest_runs=True)
 
 
-
 def make_plot(df):
-    print("df columns", df.columns)
     def filter_met(c: str) -> bool:
         return c in accepted_metrics
 
@@ -95,7 +91,7 @@ st.plotly_chart(make_plot(runs.filter(stage_is_val)))
 # # Scaling
 
 # Hypothesis: loss ~ O(num_samples ^ {-alpha})
-            
+
 
 # The deep blue dots are the most recent runs, the light blue are the eldest.
 # """)

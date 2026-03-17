@@ -16,6 +16,7 @@ def get_logger():
     print("_logger being returned", logger)  # noqa: T201
     return logger
 
+
 _logger = get_logger()
 _logger.info(f"Current page query param: {st.query_params.get('page')}")
 
@@ -54,8 +55,8 @@ pages = {
         _make_page("exp_tracker.py", title="run details", url_path="run-details"),
     ],
     "Model:atmo": [
-         _make_page("atmo_training.py", "training", "training"),
-         _make_page("atmo_eval.py", "evaluation", "evaluation"),
+        _make_page("atmo_training.py", "training", "training"),
+        _make_page("atmo_eval.py", "evaluation", "evaluation"),
     ],
     "Data": [
         _make_page("data_overview.py", "overview", "data-overview"),
