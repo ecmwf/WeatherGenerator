@@ -42,7 +42,7 @@ accepted_metrics = tuple(
     + ["metrics.loss_avg_mean"]
 )
 
-runs = latest_runs(keep_metrics=accepted_metrics, keep_params=False, latest_runs=True)
+runs = latest_runs(keep_metrics=accepted_metrics, keep_params=False)
 
 all_runs_pdf = all_runs(keep_metrics=accepted_metrics, keep_params=False, latest_runs=True)
 

@@ -40,7 +40,7 @@ def get_runs_with_scores() -> pl.DataFrame:
     """
     # Fully encapsulated logic to allow caching
     cols = tuple([c for c, _ in important_scores])
-    runs = latest_runs(keep_metrics=cols, keep_params=False, latest_runs=True)
+    runs = latest_runs(keep_metrics=cols, keep_params=False)
     eval_runs = runs.filter(stage_is_eval)
     _logger.info(f"Found {len(eval_runs)} evaluation runs with scores")
     _logger.info(f"Eval runs columns: {eval_runs.columns}")
