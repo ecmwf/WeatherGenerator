@@ -597,6 +597,24 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # max(1, ...) : self.output_offset and num_forecast_steps are zero for pure masking
         return max(1, self.output_offset + num_forecast_steps)
 
+    def _create_excluded_stream_data(
+        self, base_idx: TIndex, num_steps_input: int, num_forecast_steps: int
+    ) -> StreamData:
+        """Create an empty StreamData for a stream excluded from a particular view.
+
+        Used by ``teacher_only`` / ``student_only`` stream flags to prevent a
+        stream from contributing tokens to one side of student-teacher training.
+        The EmbeddingEngine skips any stream whose concatenated source data has
+        ``numel() == 0``, so this is the natural exclusion mechanism.
+        """
+        num_output_steps = self._get_output_length(num_forecast_steps)
+        sd = StreamData(base_idx, num_steps_input, num_output_steps, self.num_healpix_cells)
+        for i in range(num_steps_input):
+            sd.source_tokens_cells[i] = torch.empty(0)
+            sd.source_tokens_lens[i] = torch.zeros(self.num_healpix_cells, dtype=torch.int32)
+        sd.source_is_spoof = True
+        return sd
+
     def _preprocess_model_batch(
         self, batch: ModelBatch, source_input_steps: int, target_input_steps: int
     ):
@@ -645,11 +663,25 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             num_output_steps,
         )
 
+        # pre-compute target input steps (needed for excluded stream creation)
+        target_in_arr = np.array(
+            [tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()]
+        )
+        target_in_steps = 1 if len(target_in_arr) == 0 else target_in_arr.max().item()
+
         # for all streams
         for stream_info, (stream_name, stream_ds) in zip(
             self.streams, self.streams_datasets.items(), strict=True
         ):
             (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
+
+            # per-stream view flags for asymmetric student-teacher training
+            is_teacher_only = stream_info.get("teacher_only", False)
+            is_student_only = stream_info.get("student_only", False)
+            if is_teacher_only and is_student_only:
+                raise ValueError(
+                    f"Stream '{stream_name}' cannot be both teacher_only and student_only."
+                )
 
             # max number of input steps
             input_steps = np.array([sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()])
@@ -673,19 +705,23 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
                 tidx = source_to_target[sidx].item()
-                sdata = self._build_stream_data(
-                    source_select,
-                    tidx,
-                    num_forecast_steps,
-                    stream_info,
-                    source_masks.metadata[sidx].params.get("num_steps_input", 1),
-                    input_data,
-                    output_data,
-                    input_tokens,
-                    output_tokens,
-                    output_mask=target_masks.masks[tidx],
-                    input_mask=source_mask,
-                )
+                if is_teacher_only:
+                    # exclude this stream from the student (source) view
+                    sdata = self._create_excluded_stream_data(tidx, i_max, num_forecast_steps)
+                else:
+                    sdata = self._build_stream_data(
+                        source_select,
+                        tidx,
+                        num_forecast_steps,
+                        stream_info,
+                        source_masks.metadata[sidx].params.get("num_steps_input", 1),
+                        input_data,
+                        output_data,
+                        input_tokens,
+                        output_tokens,
+                        output_mask=target_masks.masks[tidx],
+                        input_mask=source_mask,
+                    )
 
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
@@ -693,19 +729,25 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
-                sdata = self._build_stream_data(
-                    target_select,
-                    tidx,
-                    num_forecast_steps,
-                    stream_info,
-                    target_masks.metadata[tidx].params.get("num_steps_input", 1),
-                    input_data,
-                    output_data,
-                    input_tokens,
-                    output_tokens,
-                    output_mask=target_mask,
-                    input_mask=target_mask,
-                )
+                if is_student_only:
+                    # exclude this stream from the teacher (target) view
+                    sdata = self._create_excluded_stream_data(
+                        tidx, target_in_steps, num_forecast_steps
+                    )
+                else:
+                    sdata = self._build_stream_data(
+                        target_select,
+                        tidx,
+                        num_forecast_steps,
+                        stream_info,
+                        target_masks.metadata[tidx].params.get("num_steps_input", 1),
+                        input_data,
+                        output_data,
+                        input_tokens,
+                        output_tokens,
+                        output_mask=target_mask,
+                        input_mask=target_mask,
+                    )
                 target_metadata = target_masks.metadata[tidx]
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
@@ -716,8 +758,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
 
         source_in_steps = input_steps.max().item()
-        target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
-        target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
         return batch
