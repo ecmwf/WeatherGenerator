@@ -647,6 +647,11 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
+    if config is not None and config.get("results_path", None):
+        base = Path(config.results_path)
+        if not base.is_absolute():
+            base = (Path.cwd() / base).resolve()
+        return base / get_run_id_from_config(config)
     return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
 
 
