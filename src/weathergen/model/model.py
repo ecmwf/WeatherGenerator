@@ -52,10 +52,16 @@ class ModelOutput:
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
+    batch: BatchSamples | None
+    step_offset: int
 
-    def __init__(self, len_output: int) -> None:
+    def __init__(
+        self, len_output: int, batch: BatchSamples | None = None, step_offset: int = 0
+    ) -> None:
         self.physical = [{} for _ in range(len_output)]
         self.latent = [{} for _ in range(len_output)]
+        self.batch = batch
+        self.step_offset = step_offset
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
@@ -78,6 +84,20 @@ class ModelOutput:
 
     def get_latent_prediction(self, fstep: int):
         return self.latent[fstep]
+
+    def get_last_latent_state(self) -> LatentState:
+        for latent_pred in reversed(self.latent):
+            latent_state = latent_pred.get("latent_state", None)
+            if latent_state is not None:
+                return latent_state
+
+        raise ValueError("ModelOutput does not contain a latent_state prediction to continue from.")
+
+    def get_batch_size(self) -> int:
+        if self.batch is not None:
+            return len(self.batch)
+
+        return self.get_last_latent_state().z_pre_norm.shape[0]
 
 
 class ModelParams(torch.nn.Module):
@@ -673,10 +693,18 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
+    def _resolve_forward_input(
+        self, batch: BatchSamples | ModelOutput
+    ) -> tuple[BatchSamples | None, LatentState | None, int]:
+        if isinstance(batch, BatchSamples):
+            return batch, None, 0
+
+        return batch.batch, batch.get_last_latent_state(), batch.step_offset + len(batch.physical)
+
     def forward(
         self,
         model_params: ModelParams,
-        batch: ModelBatch | BatchSamples | LatentState,
+        batch: BatchSamples | ModelOutput,
         rollout_steps: int,
     ) -> ModelOutput:
         """Forward pass of the model
@@ -689,21 +717,22 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        output = ModelOutput(rollout_steps)
+        batch_ctx, latent_state, step_offset = self._resolve_forward_input(batch)
+        output = ModelOutput(rollout_steps, batch=batch_ctx, step_offset=step_offset)
 
-        if isinstance(batch, (ModelBatch, BatchSamples)):
-            tokens, posteriors = self.encoder(model_params, batch)
+        if batch_ctx is not None and latent_state is None:
+            tokens, posteriors = self.encoder(model_params, batch_ctx)
             output.add_latent_prediction(0, "posteriors", posteriors)
 
             # recover batch dimension and separate input_steps
-            shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+            shape = (len(batch_ctx), batch_ctx.get_num_steps(), *tokens.shape[1:])
             # collapse along input step dimension
             tokens = tokens.reshape(shape).sum(axis=1)
         else:
-            if batch.z_pre_norm is None:
+            if latent_state is None or latent_state.z_pre_norm is None:
                 raise ValueError("LatentState.z_pre_norm must be provided to run the model.")
-            tokens = batch.z_pre_norm
-            output.add_latent_prediction(0, "posteriors", batch)
+            tokens = latent_state.z_pre_norm
+            output.add_latent_prediction(0, "posteriors", latent_state)
 
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in range(rollout_steps):
@@ -712,9 +741,11 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
 
             # decoder predictions
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
+            output = self.predict_decoders(
+                model_params, step, step + step_offset, tokens, batch_ctx, output
+            )
             # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output)
+            output = self.predict_latent(model_params, step, tokens, batch_ctx, output)
 
         return output
 
@@ -744,9 +775,10 @@ class Model(torch.nn.Module):
     def predict_decoders(
         self,
         model_params: ModelParams,
-        step: int,
+        output_step: int,
+        batch_step: int,
         tokens: torch.Tensor,
-        batch: ModelBatch,
+        batch: BatchSamples | None,
         output: ModelOutput,
     ) -> ModelOutput:
         """
@@ -769,6 +801,12 @@ class Model(torch.nn.Module):
         if not self.pred_heads:
             return output
 
+        if batch is None:
+            raise ValueError(
+                "Decoder predictions require BatchSamples metadata. "
+                "Pass a BatchSamples/ModelBatch or a ModelOutput created from one."
+            )
+
         # remove register  and class tokens
         tokens = tokens[:, self.num_aux_tokens :]
 
@@ -787,7 +825,7 @@ class Model(torch.nn.Module):
         for stream_name in self.stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
-                batch.samples[i_b].streams_data[stream_name].target_coords[step]
+                batch.samples[i_b].streams_data[stream_name].target_coords[batch_step]
                 for i_b in range(batch_size)
             ]
             t_coords_lens = [len(t) for t in t_coords]
@@ -818,7 +856,7 @@ class Model(torch.nn.Module):
                 # lens for varlen attention
                 tcls = torch.cat(
                     [
-                        sample.streams_data[stream_name].target_coords_lens[step]
+                        sample.streams_data[stream_name].target_coords_lens[batch_step]
                         for sample in batch.samples
                     ]
                 )
@@ -844,6 +882,6 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-            output.add_physical_prediction(step, stream_name, pred)
+            output.add_physical_prediction(output_step, stream_name, pred)
 
         return output
