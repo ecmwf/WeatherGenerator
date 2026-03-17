@@ -1745,7 +1745,7 @@ requires-dist = [
     { name = "astropy-healpix", specifier = "~=1.1.2" },
     { name = "dask", specifier = ">=2024.9.1" },
     { name = "gitpython", specifier = "~=3.1.44" },
-    { name = "numcodecs", specifier = "<0.16.0" },
+    { name = "numcodecs", specifier = ">=0.15" },
     { name = "omegaconf", specifier = "~=2.3.0" },
     { name = "pyyaml" },
     { name = "tqdm" },
