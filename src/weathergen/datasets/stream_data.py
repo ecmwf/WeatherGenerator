@@ -14,20 +14,62 @@ import torch
 from weathergen.common.io import IOReaderData
 
 
+def _pin_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    """Pin a tensor to CPU pinned memory.
+
+    Parameters
+    ----------
+    tensor : torch.Tensor
+
+    Returns
+    -------
+    torch.Tensor
+        The pinned tensor.
+    """
+    return tensor.pin_memory() if isinstance(tensor, torch.Tensor) else tensor
+
+
+def _pin_tensor_list(tensor_list: list) -> list:
+    """Pin all tensors in a list to CPU pinned memory.
+
+    Parameters
+    ----------
+    tensor_list : list
+        List of tensors (or other objects) to pin.
+
+    Returns
+    -------
+    list
+        List with all torch.Tensor elements pinned to CPU pinned memory.
+    """
+    return [_pin_tensor(t) for t in tensor_list]
+
+
 class StreamData:
     """
     StreamData object that encapsulates all data the model ingests for one batch item
     for one stream.
     """
 
-    def __init__(self, idx: int, input_steps: int, forecast_steps: int, healpix_cells: int) -> None:
+    def __init__(
+        self,
+        idx: int,
+        input_steps: int,
+        output_steps: int,
+        healpix_cells: int,
+    ) -> None:
         """
         StreamData object
 
         Parameters
         ----------
-        forecast_steps : int
-            Number of forecast steps
+        idx: int
+            Time index for this sample
+        input_steps : int
+            Number of input steps
+        output_steps : int
+            Number of output steps
+            Note -- Last input step and first output step always overlap.
         healpix_cells : int
             Number of healpix cells for source
 
@@ -39,7 +81,7 @@ class StreamData:
         self.mask_value = 0.0
 
         self.input_steps = input_steps
-        self.forecast_steps = forecast_steps
+        self.output_steps = output_steps
         self.healpix_cells = healpix_cells
 
         self.source_is_spoof = False
@@ -47,20 +89,15 @@ class StreamData:
 
         # initialize empty members
         self.sample_idx = idx
-        self.target_coords = [torch.tensor([]) for _ in range(forecast_steps + 1)]
-        self.target_coords_raw = [[] for _ in range(forecast_steps + 1)]
-        self.target_times_raw = [
-            np.array([], dtype="datetime64[ns]") for _ in range(forecast_steps + 1)
-        ]
+        self.target_coords = [torch.tensor([]) for _ in range(output_steps)]
+        self.target_coords_raw = [[] for _ in range(output_steps)]
+        self.target_times_raw = [np.array([], dtype="datetime64[ns]") for _ in range(output_steps)]
         # this is not directly used but to precompute index in compute_idxs_predict()
         self.target_coords_lens = [
-            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
+            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
         ]
-        self.target_tokens = [torch.tensor([]) for _ in range(forecast_steps + 1)]
-        self.target_tokens_lens = [
-            torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(forecast_steps + 1)
-        ]
-        self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(forecast_steps + 1)]
+        self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
+        self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
 
         # source tokens per cell
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
@@ -74,6 +111,30 @@ class StreamData:
         # processing after embedding
         self.source_idxs_embed = [torch.tensor([]) for _ in range(self.input_steps)]
         self.source_idxs_embed_pe = [torch.tensor([]) for _ in range(self.input_steps)]
+
+    def pin_memory(self):
+        """Pin all tensors in this StreamData object to CPU pinned memory"""
+
+        # Pin target tensors
+        self.target_coords = _pin_tensor_list(self.target_coords)
+        self.target_coords_lens = _pin_tensor_list(self.target_coords_lens)
+        self.target_tokens = _pin_tensor_list(self.target_tokens)
+        self.idxs_inv = _pin_tensor_list(self.idxs_inv)
+        self.target_coords_raw = _pin_tensor_list(self.target_coords_raw)
+
+        # Pin source tensors
+        self.source_tokens_cells = _pin_tensor_list(self.source_tokens_cells)
+        self.source_tokens_lens = _pin_tensor_list(self.source_tokens_lens)
+        self.source_idxs_embed = _pin_tensor_list(self.source_idxs_embed)
+        self.source_idxs_embed_pe = _pin_tensor_list(self.source_idxs_embed_pe)
+
+        # Pin source_raw (list of IOReaderData objects)
+        if hasattr(self, "source_raw"):
+            for raw_data in self.source_raw:
+                if raw_data is not None and hasattr(raw_data, "pin_memory"):
+                    raw_data.pin_memory()
+
+        return self
 
     def to_device(self, device: str) -> None:
         """
@@ -289,6 +350,44 @@ class StreamData:
             torch.tensor([s.sum() if len(s) > 0 else 0 for s in self.source_tokens_lens]).sum() == 0
         )
 
+    def target_nan(self) -> bool:
+        """
+        Check if target for stream is all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if target is empty for stream, else False
+        """
+
+        return torch.isnan(torch.cat(self.target_tokens)).all()
+
+    def source_nan(self) -> bool:
+        """
+        Check if source for stream is all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if source is all NaN for stream, else False
+        """
+
+        return torch.tensor(
+            [
+                torch.isnan(s.coords).all() or torch.isnan(s.data).all()
+                for s in self.source_raw
+                if s is not None
+            ]
+        ).all()
+
     def empty(self):
         """
         Test if stream (source and target) are empty
@@ -305,17 +404,27 @@ class StreamData:
 
         return self.source_empty() and self.target_empty()
 
+    def nan(self) -> bool:
+        """
+        Check if stream (source and target) are all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if stream is all NaN
+        """
+
+        return self.source_nan() and self.target_nan()
+
     def is_spoof(self) -> bool:
         """
         Either source or target is spoof
         """
         return self.source_is_spoof or self.target_is_spoof
-
-    def get_forecast_steps(self) -> int:
-        """
-        Get number of forecast steps
-        """
-        return self.forecast_steps
 
 
 def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:

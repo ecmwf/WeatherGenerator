@@ -188,9 +188,9 @@ class ReaderData:
         """
         return len(self.data)
 
-    def remove_nan_coords(self) -> "ReaderData":
+    def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
         """
-        Remove all data points where coords are NaN
+        Remove all data points where coords or geoinfos contain NaN
 
         Returns
         -------
@@ -200,6 +200,10 @@ class ReaderData:
         # filter should be if any (of the two) coords is NaN
         idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
 
+        # also filter rows where any geoinfo field is NaN
+        idx_valid_geoinfos = ~np.isnan(self.geoinfos).any(axis=1)
+        idx_valid = np.logical_and(idx_valid, idx_valid_geoinfos)
+
         # apply
         return ReaderData(
             self.coords[idx_valid],
@@ -207,6 +211,42 @@ class ReaderData:
             self.data[idx_valid],
             self.datetimes[idx_valid],
         )
+
+    def shuffle(self, rng, shuffle: bool, num_subset: int) -> "ReaderData":
+        """
+        Drop a random subset of points as specified by num_subset
+        num_subset = -1 indicates no points to be dropped
+
+        Returns
+        -------
+        self
+        """
+
+        # nothing to be done
+        if num_subset < 0 and shuffle is False:
+            return self
+
+        num_datapoints = self.coords.shape[0]
+        if (num_datapoints == 0) or (num_datapoints < num_subset and shuffle is False):
+            return self
+
+        # only shuffling
+        if num_subset == -1 and shuffle is True:
+            num_subset = num_datapoints
+
+        # ensure num_subset <= num_datapoints
+        num_subset = min(num_subset, num_datapoints)
+
+        idxs_subset = rng.choice(num_datapoints, num_subset, replace=False)
+        if shuffle is False:
+            idxs_subset = np.sort(idxs_subset)
+
+        self.coords = self.coords[idxs_subset]
+        self.geoinfos = self.geoinfos[idxs_subset]
+        self.data = self.data[idxs_subset]
+        self.datetimes = self.datetimes[idxs_subset]
+
+        return self
 
 
 def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
@@ -574,7 +614,9 @@ class DataReaderBase(metaclass=ABCMeta):
 
         assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
         for i, _ in enumerate(self.geoinfo_idx):
-            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / self.stdev_geoinfo[i]
+            # for constant fields, just center the data (resulting in 0s after subtracting mean)
+            stdev = 1.0 if np.isclose(self.stdev_geoinfo[i], 0) else self.stdev_geoinfo[i]
+            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / stdev
 
         return geoinfos
 
