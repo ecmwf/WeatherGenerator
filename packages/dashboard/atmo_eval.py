@@ -12,8 +12,10 @@ _logger = logging.getLogger(__name__)
 _logger.info("Setting up MLFlow")
 client: MlflowClient = setup_mflow()
 
+# The scorest that will be presented, as mlflow metrics.
+# The second element of the tuple is the unit to display in the dashboard.
 important_scores = [
-    ("metrics.score.global.rmse.ERA5.2t", "deg K"),
+    ("metrics.LossPhysical.loss_avg", "N/A"),
 ]
 
 st.markdown("""
@@ -33,8 +35,11 @@ def get_runs_with_scores() -> pl.DataFrame:
     - Only keep the metrics.score.* metrics
     """
     # Fully encapsulated logic to allow caching
-    runs = latest_runs()
+    cols = tuple([c for c, _ in important_scores])
+    runs = latest_runs(keep_metrics=cols, keep_params=False, latest_runs=True)
     eval_runs = runs.filter(stage_is_eval)
+    _logger.info(f"Found {len(eval_runs)} evaluation runs with scores")
+    _logger.info(f"Eval runs columns: {eval_runs.columns}")
     # Keep all non-metrics columns, plus metrics.score.* columns
     # Do not keep gradient metrics or other metrics.
     target_cols = [

@@ -162,11 +162,8 @@ st.markdown(
 st.plotly_chart(
     px.scatter(
         all_runs_pdf
-        # world_size used to be called num_ranks
         .with_columns(
-            pl.max_horizontal(
-                pl.col("params.num_ranks").fill_null(0), pl.col("params.world_size").fill_null(0)
-            )
+            pl.col("params.world_size").fill_null(0)
             .cast(int)
             .alias("world_size")
         )
@@ -261,7 +258,7 @@ st.plotly_chart(
     )
 )
 
-all_metrics = sorted(all_runs_pdf.select(ps.starts_with("metrics.")).columns)
+all_metrics = sorted(runs.select(ps.starts_with("metrics.")).columns)
 
 st.markdown(
     f"""

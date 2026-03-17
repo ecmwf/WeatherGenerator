@@ -2,6 +2,7 @@
 Downloads metrics from MLFlow.
 """
 
+import datetime
 import logging
 
 import mlflow
@@ -18,7 +19,7 @@ phase = "train"
 exp_lifecycle = "test"
 project = "WeatherGenerator"
 # experiment_id = "384213844828345"
-all_stages = ["train", "val", "eval"]
+all_stages = ["train", "val", "eval", "inference"]
 
 # Polars utilities
 stage_is_eval = pl.col("tags.stage") == "eval"
@@ -49,19 +50,39 @@ def get_experiment_id() -> str:
     return exp.experiment_id
 
 
-@st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
-def latest_runs():
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=20)
+def latest_runs(keep_metrics: bool | tuple[str, ...] = True, keep_params: bool | tuple[str, ...] = True, latest_runs: bool = False):
     """
     Get the latest runs for each WG run_id and stage.
     """
     _logger.info("Downloading latest runs from MLFlow")
+    # A month ago timestamp in milliseconds
+    month_ago_ts = int((datetime.datetime.now() - datetime.timedelta(days=30)).timestamp() * 1000)
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
             experiment_ids=[get_experiment_id()],
-            # filter_string="status='FINISHED' AND tags.completion_status = 'success'",
+            filter_string=f"attributes.start_time >= {month_ago_ts}",
         )
     )
+    if keep_metrics is True:
+        _logger.info("Keeping metrics columns")
+    else:
+        _logger.info("Dropping metrics columns")
+        # Keep num_samples as it is useful for filtering and grouping.
+        keep_metrics_list = ["metrics.num_samples"] if keep_metrics is False else list(keep_metrics)
+        runs_pdf = runs_pdf.select(_start_with_reduce("metrics.", keep_metrics_list))
+    if keep_params is True:
+        _logger.info("Keeping params columns")
+    else:
+        _logger.info("Dropping params columns")
+        # Still keep the wgtags params, as they are useful for filtering and grouping.
+        keep_param_prefixes = ["params.wgtags.", "params.world_size"] if keep_params is False else list(keep_params)
+
+        runs_pdf = runs_pdf.select(
+            _start_with_reduce("params.", keep_param_prefixes)
+        )
     runs_pdf = runs_pdf.filter(pl.col("tags.stage").is_in(all_stages))
+
     latest_run_by_exp = (
         runs_pdf.sort(by="end_time", descending=True)
         .group_by(["tags.run_id", "tags.stage"])
@@ -72,29 +93,41 @@ def latest_runs():
     return latest_run_by_exp
 
 
-@st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
-def all_runs(keep_metrics: bool, keep_params: bool) -> pl.DataFrame:
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=10)
+def all_runs(keep_metrics: bool | tuple[str, ...], keep_params: bool | tuple[str, ...], latest_runs: bool = False) -> pl.DataFrame:
     _logger.info("Downloading all runs from MLFlow")
+    month_ago_ts = int((datetime.datetime.now() - datetime.timedelta(days=30)).timestamp() * 1000)
     runs_pdf = pl.DataFrame(
         mlflow.search_runs(
             experiment_ids=[get_experiment_id()],
-            # filter_string="status='FINISHED' AND tags.completion_status = 'success'",
-        )
+            filter_string=f"attributes.start_time >= {month_ago_ts} " if latest_runs else "",
+            max_results=10000)
     )
     _logger.info("Number of all runs: %d %d", len(runs_pdf), len(runs_pdf.columns))
-    if keep_metrics:
+    if keep_metrics is True:
         _logger.info("Keeping metrics columns")
     else:
         _logger.info("Dropping metrics columns")
         # Keep num_samples as it is useful for filtering and grouping.
-        runs_pdf = runs_pdf.select((~ps.starts_with("metrics.")) | ps.starts_with("metrics.num_samples"))
-    if keep_params:
+        keep_metrics_list = ["metrics.num_samples"] if keep_metrics is False else list(keep_metrics)
+        runs_pdf = runs_pdf.select(_start_with_reduce("metrics.", keep_metrics_list))
+    if keep_params is True:
         _logger.info("Keeping params columns")
     else:
         _logger.info("Dropping params columns")
         # Still keep the wgtags params, as they are useful for filtering and grouping.
-        runs_pdf = runs_pdf.select((~ps.starts_with("params.")) | ps.starts_with("params.wgtags."))
+        keep_param_prefixes = ["params.wgtags.", "params.world_size"] if keep_params is False else list(keep_params)
+
+        runs_pdf = runs_pdf.select(
+            _start_with_reduce("params.", keep_param_prefixes)
+        )
     _logger.info("Number of all runs after filtering: %d %d", len(runs_pdf), len(runs_pdf.columns))        
     _logger.info("Columns in all runs: %s", runs_pdf.columns)
     _logger.info("Columns in all runs: %s", runs_pdf)
     return runs_pdf
+
+def _start_with_reduce(remove: str, keep: list[str]) -> pl.Expr:
+    e = ~ps.starts_with(remove)
+    for p in keep:
+        e = e | ps.starts_with(p)
+    return e

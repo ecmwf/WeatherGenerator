@@ -30,25 +30,33 @@ Note: num_samples only shows the number of sample per run.
 It does not include chained runs or total steps with finetuning included. 
 """)
 
-runs = latest_runs()
-all_runs_pdf = all_runs(keep_metrics=True, keep_params=False)
+# Only keep a few metrics.
 
 
-accepted_metrics = (
+accepted_metrics = tuple(
     [
-        f"metrics.stream.{stream}.loss_mse.loss_avg"
-        for stream in ["ERA5", "SurfaceCombined", "NPPATMS"]
+        "metrics.LossPhysical.loss_avg",
+        "metrics.LossPhysical.ERA5.mse.avg",
+        "metrics.LossLatentSSLStudentTeacher.loss_avg",
+        "metrics.LossLatentSSLStudentTeacher.JEPA",
     ]
     + ["metrics.num_samples"]
     + ["metrics.loss_avg_mean"]
 )
 
+runs = latest_runs(keep_metrics=accepted_metrics, keep_params=False, latest_runs=True)
+
+all_runs_pdf = all_runs(keep_metrics=accepted_metrics, keep_params=False, latest_runs=True)
+
+
 
 def make_plot(df):
+    print("df columns", df.columns)
     def filter_met(c: str) -> bool:
         return c in accepted_metrics
 
     plot_metrics = sorted([c for c in df.columns if filter_met(c)])
+    _logger.info("Metrics to plot: %s", plot_metrics)
     hovertemplate = "".join(
         [
             f"{col}: %{{customdata[{idx}]}}<br>"
@@ -83,36 +91,36 @@ st.markdown("# Validation")
 
 st.plotly_chart(make_plot(runs.filter(stage_is_val)))
 
-st.markdown("""
-# Scaling
+# st.markdown("""
+# # Scaling
 
-Hypothesis: loss ~ O(num_samples ^ {-alpha})
+# Hypothesis: loss ~ O(num_samples ^ {-alpha})
             
 
-The deep blue dots are the most recent runs, the light blue are the eldest.
-""")
+# The deep blue dots are the most recent runs, the light blue are the eldest.
+# """)
 
-train_runs = runs.filter(stage_is_train)
-min_end_date = train_runs["start_time"].cast(pl.Float64).min()
-max_end_date = train_runs["start_time"].cast(pl.Float64).max()
-train_runs = train_runs.with_columns(
-    (
-        (pl.col("start_time").cast(pl.Float64) - pl.lit(min_end_date))
-        / (pl.lit(max_end_date) - pl.lit(min_end_date))
-    ).alias("idx")
-)
+# train_runs = runs.filter(stage_is_train)
+# min_end_date = train_runs["start_time"].cast(pl.Float64).min()
+# max_end_date = train_runs["start_time"].cast(pl.Float64).max()
+# train_runs = train_runs.with_columns(
+#     (
+#         (pl.col("start_time").cast(pl.Float64) - pl.lit(min_end_date))
+#         / (pl.lit(max_end_date) - pl.lit(min_end_date))
+#     ).alias("idx")
+# )
 
-_logger.info("Number of training runs: %d", len(train_runs))
+# _logger.info("Number of training runs: %d", len(train_runs))
 
 
-st.plotly_chart(
-    px.scatter(
-        train_runs.to_pandas(),
-        x="metrics.num_samples",
-        y="metrics.loss_avg_mean",
-        color="idx",
-        hover_data=["start_time", "tags.hpc", "tags.uploader"],
-        log_y=True,
-        log_x=True,
-    )
-)
+# st.plotly_chart(
+#     px.scatter(
+#         train_runs.to_pandas(),
+#         x="metrics.num_samples",
+#         y="metrics.loss_avg_mean",
+#         color="idx",
+#         hover_data=["start_time", "tags.hpc", "tags.uploader"],
+#         log_y=True,
+#         log_x=True,
+#     )
+# )
