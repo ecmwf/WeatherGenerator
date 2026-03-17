@@ -20,7 +20,6 @@ setup_mflow()
 st.markdown("# Engineering overview")
 
 
-runs = latest_runs()
 all_runs_pdf = all_runs(keep_metrics=False, keep_params=False)
 
 st.markdown("""The number of runs by month and by HPC.""")
@@ -254,6 +253,7 @@ st.plotly_chart(
         color_discrete_map=_present_colors,
     )
 )
+runs = latest_runs(keep_metrics=True, keep_params=False, latest_runs=True)
 
 all_metrics = sorted(runs.select(ps.starts_with("metrics.")).columns)
 
