@@ -311,7 +311,7 @@ def _apply_fixes(config: Config) -> Config:
     "outdatet" run configurations. The fixes in this function should be
     eventually removed.
     """
-    config = _check_logging(config)
+    #config = _check_logging(config)
     config = _check_datasets(config)
     return config
 
