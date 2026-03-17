@@ -483,7 +483,17 @@ class ZarrIO:
 
     @functools.cached_property
     def forecast_offset(self) -> int:
-        fstep0_datasets = self._get_datasets(self.example_key)
+        try:
+            sample, example_sample = next(self.data_root.groups())
+            stream, example_stream = next(example_sample.groups())
+        except StopIteration as e:
+            msg = f"Data store at: {self._store_path} is empty."
+            raise FileNotFoundError(msg) from e
+
+        fstep0_key = ItemKey(int(sample), 0, stream)
+        if self.data_root.get(fstep0_key.path) is None:
+            return 1
+        fstep0_datasets = self._get_datasets(fstep0_key)
         return ItemKey._infer_forecast_offset(fstep0_datasets)
 
     @functools.cached_property
@@ -491,12 +501,15 @@ class ZarrIO:
         try:
             sample, example_sample = next(self.data_root.groups())
             stream, example_stream = next(example_sample.groups())
-            fstep = 0
+            forecast_steps = list(example_stream.group_keys())
+            if len(forecast_steps) == 0:
+                raise StopIteration
+            fstep = int(forecast_steps[0])
         except StopIteration as e:
             msg = f"Data store at: {self._store_path} is empty."
             raise FileNotFoundError(msg) from e
 
-        return ItemKey(sample, fstep, stream)
+        return ItemKey(int(sample), fstep, stream)
 
     @functools.cached_property
     def samples(self) -> list[int]:
