@@ -14,7 +14,6 @@ dependencies = [
  'astropy_healpix~=1.1.2',
  'zarr~=3.1.3',
  'pandas~=2.2',
- 'pynvml',
  'tqdm',
  'matplotlib',
  'packaging',
@@ -58,7 +57,7 @@ packages = ["src/weathergen"]
 dev = [
  "ipykernel>=6.30.0",
  "jupytext>=1.17.2",
- "pytest~=8.3.5",
+ "pytest>=8.3",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
  "tensorboard>=2.20.0",
@@ -81,7 +80,7 @@ cpu = [
 ]
 
 gpu = [
-  'torch==2.6.0',
+  "torch==2.6.0; sys_platform == 'linux'",
   # flash-attn also has a torch dependency.
   "flash-attn",
 ]
@@ -164,7 +163,7 @@ link-mode = "symlink"
 # by future releases of dependencies or sub-dependencies. 
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
-# exclude-newer = "2025-03-14T00:00:00Z"
+exclude-newer = "2026-02-27T00:00:00Z"
 
 # The minimum version of uv required.
 # It is tightly controlled because the format of uv.lock has changed 
@@ -243,7 +242,8 @@ flash-attn = [
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'linux'"},
 ]
-anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", branch = "feature/zarr3" }
+# branch = "feature/any-zarr-version-in-pyproject/"
+anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", branch = "feature/any-zarr-version-in-pyproject"}
 
 [tool.pytest.ini_options]
 log_cli = true

@@ -13,7 +13,7 @@ dependencies = [
     "plotly~=6.1.2",
     "polars~=1.30.0",
     "requests~=2.32.4",
-    "streamlit~=1.46.0",
+    "streamlit~=1.55.0",
     "streamlit-authenticator>=0.4.2",
     "watchdog",
     "weathergen-common",
@@ -22,7 +22,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
- "pytest~=8.3.5",
+ "pytest>=8.3",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
  "pyrefly==0.36.0",

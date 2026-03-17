@@ -19,7 +19,7 @@ st.markdown("# Data sources usage")
 
 
 runs = latest_runs()
-all_runs_pdf = all_runs()
+all_runs_pdf = all_runs(keep_metrics=True, keep_params=False)
 
 
 # The name of all the streams metrics

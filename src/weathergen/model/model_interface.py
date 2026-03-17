@@ -11,9 +11,9 @@
 
 import itertools
 import logging
-import re
 from pathlib import Path
 
+import omegaconf
 import torch
 from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
@@ -21,7 +21,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import distribute_tensor
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, merge_configs
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -32,10 +32,11 @@ from weathergen.model.attention import (
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import freeze_weights
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import apply_overrides_to_dict, get_dtype
+from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -45,35 +46,38 @@ type TrainingMode = str
 
 
 def init_model_and_shard(
-    cf, dataset, run_id_contd, mini_epoch_contd, training_mode, device, overrides={}
+    cf,
+    dataset,
+    run_id_contd,
+    mini_epoch_contd,
+    training_mode,
+    device,
+    with_ddp,
+    with_fsdp,
+    overrides={},
 ):
-    model_creation_device = "meta" if cf.with_ddp and cf.with_fsdp else "cuda"
+    model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
     # freeze request model part
-    for name, module in model.named_modules():
-        name = module.name if hasattr(module, "name") else name
-        # avoid the whole model element which has name ''
-        if name == "":
-            continue
-        if re.fullmatch(cf.freeze_modules, name) is not None:
-            freeze_weights(module)
+    apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
+
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
 
-    if cf.with_ddp and not cf.with_fsdp:
+    if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             broadcast_buffers=True,
-            find_unused_parameters=True,
+            find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
         )
 
-    elif cf.with_ddp and cf.with_fsdp:
+    elif with_ddp and with_fsdp:
         # with DDP *and() FSDP
         fsdp_kwargs = {
             "mp_policy": (
@@ -110,6 +114,10 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
+        for module in model.latent_heads.modules():
+            if isinstance(module, modules_to_shard):
+                fully_shard(module, **fsdp_kwargs)
+
         full_precision_fsdp_kwargs = {
             "mp_policy": (
                 MixedPrecisionPolicy(
@@ -125,7 +133,7 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
-    if cf.with_ddp and cf.with_fsdp:
+    if with_ddp and with_fsdp:
         fully_shard(model)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
@@ -140,15 +148,21 @@ def init_model_and_shard(
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
     # complete initalization and load model if inference/continuing a run
-    if run_id_contd is None:
-        if cf.with_ddp and cf.with_fsdp:
-            model.to_empty(device="cuda")
-            if cf.with_fsdp:
-                model.reset_parameters()
-    else:
+    if run_id_contd is not None:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
         model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
+    elif cf.get("load_chkpt", {}).get("run_id", None):
+        run_id = cf.load_chkpt.run_id
+        mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
+        if is_root():
+            logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
+        model = load_model(cf, model, device, run_id, mini_epoch)
+    else:
+        if with_ddp and with_fsdp:
+            model.to_empty(device="cuda")
+            if with_fsdp:
+                model.reset_parameters()
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -170,10 +184,6 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
     )
     filename = f"{run_id}_{mini_epoch_id}.chkpt"
-
-    if not (path_run / filename).exists():
-        mini_epoch_id = f"epoch{mini_epoch:05d}"
-        filename = f"{run_id}_{mini_epoch_id}.chkpt"
 
     params = torch.load(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
@@ -216,11 +226,22 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
                 module_to_init.reset_parameters()
 
     else:
-        if not cf.with_ddp:
+        # fix mismatch between state_dict keys that can occur between interactive/non-interactive
+        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
+        params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
+        if model_has_prefix_module and not params_has_prefix_module:
+            # add "module." prefix
+            params_temp = {}
+            for k in params.keys():
+                params_temp["module." + k] = params[k]
+            params = params_temp
+        elif not model_has_prefix_module and params_has_prefix_module:
+            # remove "module." prefix
             params_temp = {}
             for k in params.keys():
                 params_temp[k.replace("module.", "")] = params[k]
             params = params_temp
+        # load checkpoint
         mkeys, ukeys = model.load_state_dict(params, strict=False)
         model = model.to(device)
 
@@ -230,7 +251,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     if len(mkeys) > 0:
         logger.warning(f"Missing keys when loading model: {mkeys}")
     if len(ukeys) > 0:
-        logger.warning(f"Unused keys when loading model: {mkeys}")
+        logger.warning(f"Unused keys when loading model: {ukeys}")
 
     return model
 
@@ -249,36 +270,62 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
     targets_num_channels = dataset.get_targets_num_channels()
     targets_coords_size = dataset.get_targets_coords_size()
 
-    cf_with_overrides = apply_overrides_to_dict(cf, overrides)
+    cf_with_overrides = merge_configs(cf, overrides)
     return Model(
         cf_with_overrides, sources_size, targets_num_channels, targets_coords_size
     ).create()
 
 
-def get_target_aux_calculator(cf: Config, dataset, model, device, **kwargs):
+def get_target_aux_calculator(
+    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
+):
     """
     Create target aux calculator
     """
 
-    target_aux = None
+    target_and_aux_calc_cfg = loss_cfg.get("target_and_aux_calc", "Physical")
 
-    target_and_aux_calc = cf.get("target_and_aux_calc", "physical")
-    if target_and_aux_calc == "physical":
-        target_aux = PhysicalTargetAndAux(cf, model)
+    # parse target_and_aux_calc_cfg specification which can either be a string or config dict
+    if type(target_and_aux_calc_cfg) is str:
+        target_and_aux_calc = target_and_aux_calc_cfg
+        target_and_aux_calc_params = {}
+    elif type(target_and_aux_calc_cfg) is omegaconf.dictconfig.DictConfig:
+        # single key is the target_and_aux_calc type
+        target_and_aux_calc = list(target_and_aux_calc_cfg.keys())[0]
+        # value is dict with the target_and_aux_calc parameters
+        target_and_aux_calc_params = list(target_and_aux_calc_cfg.values())[0]
+    else:
+        assert False, "target_and_aux_calc needs either be name or config dict."
+
+    # create target_and_aux_calc
+    if target_and_aux_calc == "Physical":
+        target_aux = PhysicalTargetAndAux(loss_cfg, model)
 
     elif target_and_aux_calc == "EMATeacher":
-        # batch_size = get_batch_size(cf, cf.world_size_original)
+        # work around for problems with FSDP2
+        assert not cf.with_fsdp, "EMATeacher not supported with FSDP(2) at the moment"
 
-        meta_ema_model, _ = init_model_and_shard(cf, dataset, None, None, "student", device)
+        meta_ema_model, _ = init_model_and_shard(
+            cf,
+            dataset,
+            None,
+            None,
+            "student",
+            device,
+            with_ddp=False,
+            with_fsdp=False,
+            overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
+        )
         ema_model = EMAModel(
             model,
             meta_ema_model,
-            halflife_steps=cf.get("ema_halflife_in_thousands", 1e-3),
-            rampup_ratio=cf.get("ema_ramp_up_ratio", 0.09),
+            halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
+            rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
             is_model_sharded=(cf.with_ddp and cf.with_fsdp),
         )
 
-        raise NotImplementedError(f"{target_and_aux_calc} is not implemented : {type(ema_model)}")
+        batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
+        target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
 
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")

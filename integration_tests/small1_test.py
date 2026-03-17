@@ -12,11 +12,12 @@ import logging
 import os
 import shutil
 from pathlib import Path
+
 import omegaconf
 import pytest
 
 from weathergen.evaluate.run_evaluation import evaluate_from_config
-from weathergen.run_train import inference_from_args, train_with_args
+from weathergen.run_train import main
 from weathergen.utils.metrics import get_train_metrics_path
 
 logger = logging.getLogger(__name__)
@@ -48,13 +49,13 @@ def setup(test_run_id):
 def test_train(setup, test_run_id):
     logger.info(f"test_train with run_id {test_run_id} {WEATHERGEN_HOME}")
 
-    train_with_args(
-        f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml".split()
-        + [
-            "--run_id",
+    main(
+        [
+            "inference",
+            f"--config={WEATHERGEN_HOME}/integration_tests/small1.yaml",
+            "--run-id",
             test_run_id,
-        ],
-        f"{WEATHERGEN_HOME}/config/streams/streams_test/",
+        ]
     )
 
     infer_with_missing(test_run_id)
@@ -67,12 +68,19 @@ def test_train(setup, test_run_id):
 
 def infer(run_id):
     logger.info("run inference")
-    inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
-        + [
-            "--from_run_id",
+    main(
+        [
+            "-start",
+            "2022-10-10",
+            "-end",
+            "2022-10-11",
+            "--samples",
+            "10",
+            "--mini-epoch",
+            "0",
+            "--from-run-id",
             run_id,
-            "--run_id",
+            "--run-id",
             run_id,
             "--config",
             f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
@@ -82,12 +90,19 @@ def infer(run_id):
 
 def infer_with_missing(run_id):
     logger.info("run inference")
-    inference_from_args(
-        ["-start", "2022-10-10", "-end", "2022-10-11", "--samples", "10", "--mini_epoch", "0"]
-        + [
-            "--from_run_id",
+    main(
+        [
+            "-start",
+            "2021-10-10",
+            "-end",
+            "2022-10-11",
+            "--samples",
+            "10",
+            "--mini-epoch",
+            "0",
+            "--from-run-id",
             run_id,
-            "--run_id",
+            "--run-id",
             run_id,
             "--config",
             f"{WEATHERGEN_HOME}/integration_tests/small1.yaml",
@@ -104,6 +119,7 @@ def evaluate_results(run_id):
                 "dpi_val": 300,
             },
             "evaluation": {
+                "regions": ["global"],
                 "metrics": ["rmse", "l1", "mse"],
                 "verbose": True,
                 "summary_plots": True,
@@ -134,7 +150,7 @@ def evaluate_results(run_id):
         }
     )
     # Not passing the mlflow client for tests.
-    evaluate_from_config(cfg, None, None )
+    evaluate_from_config(cfg, None, None)
 
 
 def load_metrics(run_id):
@@ -157,43 +173,39 @@ def assert_missing_metrics_file(run_id):
 
 
 def assert_train_loss_below_threshold(run_id):
-    """Test that the 'stream.ERA5.loss_mse.loss_avg' metric is below a threshold."""
+    """Test that the 'LossPhysical.ERA5.mse.avg' metric is below a threshold."""
     metrics = load_metrics(run_id)
+    loss_avg_name = "LossPhysical.ERA5.mse.avg"
     loss_metric = next(
         (
-            metric.get("loss.LossPhysical.ERA5.mse.loss_avg", None)
+            metric.get(loss_avg_name, None)
             for metric in reversed(metrics)
             if metric.get("stage") == "train"
         ),
         None,
     )
-    assert loss_metric is not None, (
-        "'loss.LossPhysical.ERA5.mse.loss_avg' metric is missing in metrics file"
-    )
+    assert loss_metric is not None, f"'{loss_avg_name}' metric is missing in metrics file"
     # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
     target = 0.25
     assert loss_metric < target, (
-        f"'loss.LossPhysical.ERA5.mse.loss_avg' is {loss_metric}, expected to be below {target}"
+        f"'{loss_avg_name}' is {loss_metric}, expected to be below {target}"
     )
 
 
 def assert_val_loss_below_threshold(run_id):
-    """Test that the 'stream.ERA5.loss_mse.loss_avg' metric is below a threshold."""
+    """Test that the 'LossPhysical.ERA5.mse.avg' metric is below a threshold."""
     metrics = load_metrics(run_id)
+    loss_avg_name = "LossPhysical.ERA5.mse.avg"
     loss_metric = next(
         (
-            metric.get("loss.LossPhysical.ERA5.mse.loss_avg", None)
+            metric.get(loss_avg_name, None)
             for metric in reversed(metrics)
             if metric.get("stage") == "val"
         ),
         None,
     )
-    assert loss_metric is not None, (
-        "'stream.ERA5.loss_mse.loss_avg' metric is missing in metrics file"
-    )
+    assert loss_metric is not None, f"'{loss_avg_name}' metric is missing in metrics file"
     # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
-    assert loss_metric < 0.25, (
-        f"'loss.LossPhysical.ERA5.mse.loss_avg' is {loss_metric}, expected to be below 0.25"
-    )
+    assert loss_metric < 0.25, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.25"

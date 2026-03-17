@@ -68,7 +68,6 @@ CAMSANALYSIS :
     net : linear
     dim_embed : 512
   target_readout :
-    type : 'obs_value'  # token or obs_value
     num_layers : 2
     num_heads : 4
     # sampling_rate : 0.2

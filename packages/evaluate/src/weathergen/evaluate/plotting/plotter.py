@@ -2,6 +2,7 @@ import datetime
 import glob
 import logging
 import os
+import re
 from pathlib import Path
 
 import cartopy
@@ -10,6 +11,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import omegaconf as oc
+import seaborn as sns
 import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
@@ -370,7 +372,11 @@ class Plotter:
                     _logger.info(
                         f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
                     )
-
+                    if ntimes_unique == 0:
+                        _logger.warning(
+                            f"No valid times found for variable {var} - {tag}. Skipping."
+                        )
+                        continue
                     groups = da.groupby("valid_time")
                 else:
                     _logger.info(f"Creating maps for all valid times of {var} - {tag}")
@@ -381,7 +387,12 @@ class Plotter:
                         _logger.debug(f"Plotting map for {var} at valid_time {valid_time}")
 
                     da_t = da_t.dropna(dim="ipoint")
-                    assert da_t.size > 0, "Data array must not be empty or contain only NAs"
+                    if da_t.size == 0:
+                        _logger.warning(
+                            f"Data array for {var} at valid_time {valid_time} is empty after "
+                            f"dropping NAs. Skipping this plot."
+                        )
+                        continue
 
                     name = self.scatter_plot(
                         da_t,
@@ -390,7 +401,7 @@ class Plotter:
                         region,
                         tag=tag,
                         map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
-                        title=f"{self.stream}, {var} : fstep = {self.fstep:03} ({valid_time})",
+                        title=self.get_map_title(var, valid_time, da_t),
                     )
                     plot_names.append(name)
 
@@ -492,7 +503,7 @@ class Plotter:
         )
 
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
-        plt.title(title)
+        plt.title(title, fontsize=9.5)
         if regionname == "global":
             ax.set_global()
         else:
@@ -575,7 +586,6 @@ class Plotter:
                     _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
                     image_paths = []
                     for _, fstep in enumerate(fsteps):
-                        # breakpoint()
                         # TODO: refactor to avoid code duplication with scatter_plot
                         parts = [
                             "map",
@@ -597,6 +607,7 @@ class Plotter:
                         image_paths += names
 
                     if image_paths:
+                        image_paths = sorted(image_paths)
                         images = [Image.open(path) for path in image_paths]
                         images[0].save(
                             f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",
@@ -613,6 +624,22 @@ class Plotter:
 
     def get_map_output_dir(self, tag):
         return self.out_plot_basedir / self.stream / "maps" / tag
+
+    def get_map_title(self, var, valid_time, data):
+        title = f"{self.stream}, {var} : fstep = {self.fstep:03}"
+        if valid_time is not None:
+            title += f" ({format_datetime(valid_time)})"
+        elif "valid_time" in data.coords:
+            valid_time_start = data["valid_time"].values.min()
+            valid_time_end = data["valid_time"].values.max()
+            if valid_time_start != valid_time_end:
+                title += (
+                    f" ({format_datetime(valid_time_start)} - {format_datetime(valid_time_end)})"
+                )
+            else:
+                title += f" ({format_datetime(valid_time_start)})"
+
+        return title
 
 
 class LinePlots:
@@ -645,7 +672,7 @@ class LinePlots:
         self.log_scale = plotter_cfg.get("log_scale")
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
-
+        self.baseline = plotter_cfg.get("baseline")
         self.out_plot_dir = Path(output_basedir) / "line_plots"
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
@@ -692,7 +719,9 @@ class LinePlots:
                 label = line.get_label()
                 _logger.info(f"Summary for {label} plot:")
                 for xi, yi in zip(xdata, ydata, strict=False):
-                    _logger.info(f"  x: {xi:.3f}, y: {yi:.3f}")
+                    xi = xi if isinstance(xi, str) else f"{float(xi):.3f}"
+                    yi = yi if isinstance(yi, str) else f"{float(yi):.3f}"
+                    _logger.info(f"  x: {xi}, y: {yi}")
                 _logger.info("--------------------------")
         return
 
@@ -768,84 +797,48 @@ class LinePlots:
                 "Skipping ensemble plotting."
             )
 
-    def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
+    def _preprocess_data(
+        self, data: xr.DataArray, x_dim: str | list[str], verbose: bool = True
+    ) -> xr.DataArray:
         """
-        Plot ensemble spread for a data array.
+        Average all dimensions except x_dim (which may be a string or list)
+        and then sort the result.
 
         Parameters
         ----------
-        data: xr.xArray
-            DataArray to be plotted
-        x_dim: str
-            Dimension to be used for the x-axis.
-        label: str
-            Label for the dataset
+        data : xr.DataArray
+            DataArray to be preprocessed.
+        x_dim : str or list of str
+            Dimension(s) to be preserved for the x-axis.
+        verbose : bool
+            Log information about averaging.
+
         Returns
         -------
-            None
+        xr.DataArray
+            Preprocessed DataArray.
         """
-        averaged = data.mean(dim=[dim for dim in data.dims if dim != x_dim], skipna=True).sortby(
-            x_dim
-        )
 
-        lines = plt.plot(
-            averaged[x_dim],
-            averaged.values,
-            label=label,
-            marker="o",
-            linestyle="-",
-        )
-        line = lines[0]
-        color = line.get_color()
+        x_dims = [x_dim] if isinstance(x_dim, str) else list(x_dim)
 
-        ens = data.mean(
-            dim=[dim for dim in data.dims if dim not in [x_dim, "ens"]], skipna=True
-        ).sortby(x_dim)
+        non_x_dims = [dim for dim in data.dims if dim not in x_dims]
 
-        if self.plot_ensemble == "std":
-            std_dev = ens.std(dim="ens", skipna=True).sortby(x_dim)
-            plt.fill_between(
-                averaged[x_dim],
-                (averaged - std_dev).values,
-                (averaged + std_dev).values,
-                label=f"{label} - std dev",
-                color=color,
-                alpha=0.2,
-            )
+        if any(data.sizes.get(dim, 1) > 1 for dim in non_x_dims) and verbose:
+            logging.info(f"Averaging over dimensions: {non_x_dims}")
 
-        elif self.plot_ensemble == "minmax":
-            ens_min = ens.min(dim="ens", skipna=True).sortby(x_dim)
-            ens_max = ens.max(dim="ens", skipna=True).sortby(x_dim)
+        out = data.mean(dim=non_x_dims, skipna=True)
 
-            plt.fill_between(
-                averaged[x_dim],
-                ens_min.values,
-                ens_max.values,
-                label=f"{label} - min max",
-                color=color,
-                alpha=0.2,
-            )
+        for xd in x_dims:
+            out = out.sortby(xd)
 
-        elif self.plot_ensemble == "members":
-            for j in range(ens.ens.size):
-                plt.plot(
-                    ens[x_dim],
-                    ens.isel(ens=j).values,
-                    color=color,
-                    alpha=0.2,
-                )
-        else:
-            _logger.warning(
-                f"LinePlot:: Unknown option for plot_ensemble: {self.plot_ensemble}. "
-                "Skippingensemble plotting."
-            )
+        return out
 
     def plot(
         self,
         data: xr.DataArray | list,
         labels: str | list,
         tag: str = "",
-        x_dim: str = "forecast_step",
+        x_dim: str = "lead_time",
         y_dim: str = "value",
         print_summary: bool = False,
         plot_ensemble: str | bool = False,
@@ -874,8 +867,9 @@ class LinePlots:
 
         data_list, label_list = self._check_lengths(data, labels)
 
-        assert x_dim in data_list[0].dims, (
-            "x dimension '{x_dim}' not found in data dimensions {data_list[0].dims}"
+        assert x_dim in data_list[0].dims or x_dim in data_list[0].coords, (
+            f"x dimension '{x_dim}' not found in data dimensions "
+            f"{data_list[0].dims} or coords {data_list[0].coords}."
         )
 
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
@@ -887,15 +881,7 @@ class LinePlots:
                 _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
                 self._plot_ensemble(data, x_dim, label_list[i])
             else:
-                if non_zero_dims:
-                    _logger.info(
-                        f"LinePlot:: Found multiple entries for dimensions: {non_zero_dims}. "
-                        "Averaging..."
-                    )
-
-                averaged = data.mean(
-                    dim=[dim for dim in data.dims if dim != x_dim], skipna=True
-                ).sortby(x_dim)
+                averaged = self._preprocess_data(data, x_dim)
 
                 plt.plot(
                     averaged[x_dim],
@@ -905,14 +891,48 @@ class LinePlots:
                     linestyle="-",
                 )
 
-        xlabel = "".join(c if c.isalnum() else " " for c in x_dim)
-        plt.xlabel(xlabel)
+        parts = ["compare", tag]
+        name = "_".join(filter(None, parts))
+        self._plot_base(fig, name, x_dim, y_dim, print_summary)
 
-        ylabel = "".join(c if c.isalnum() else " " for c in y_dim)
-        plt.ylabel(ylabel)
-
-        title = "".join(c if c.isalnum() else " " for c in tag)
-        plt.title(title)
+    def _plot_base(
+        self,
+        fig: plt.Figure,
+        name: str,
+        x_dim: str,
+        y_dim: str,
+        print_summary: bool = False,
+        line: float | None = None,
+        vlines: bool = False,
+        title: str | None = None,
+    ) -> None:
+        """
+        Apply labels, title, legend, save and optionally print summary.
+        Parameters
+        ----------
+        fig:
+            Matplotlib figure to be finalized
+        name:
+            Name of the plot file
+        x_dim:
+            Label for the x-axis
+        y_dim:
+            Label for the y-axis
+        print_summary:
+            If True, print a summary of the values from the graph.
+        line:
+            If provided, draw a horizontal line at the given y-value.
+        vlines:
+            If True, draw vertical lines to separate each group of variables.
+        title:
+            Title for the plot.
+        Returns
+        -------
+            None
+        """
+        plt.xlabel("".join(c if c.isalnum() else " " for c in x_dim))
+        plt.ylabel("".join(c if c.isalnum() else " " for c in y_dim))
+        plt.title(title if title is not None else " ".join(c if c.isalnum() else " " for c in name))
         plt.legend(frameon=False)
 
         if self.add_grid:
@@ -922,13 +942,429 @@ class LinePlots:
             plt.yscale("log")
 
         if print_summary:
-            _logger.info(f"Summary values for {tag}")
+            _logger.info(f"Summary values for {name}")
             self.print_all_points_from_graph(fig)
 
-        parts = ["compare", tag]
-        name = "_".join(filter(None, parts))
+        if line:
+            plt.axhline(y=line, color="black", linestyle="--", linewidth=1, zorder=1)
+
+        if vlines:
+            vlines = []
+            last_prefix = None
+
+            channels = [t.get_text() for t in fig.gca().get_xticklabels() if t.get_text()]
+
+            for idx, ch in enumerate(channels):
+                m = re.match(r"([a-zA-Z]+)_\d+", ch)
+                prefix = m.group(1) if m else ch
+                if last_prefix is not None and prefix != last_prefix:
+                    vlines.append(idx - 0.5)
+                last_prefix = prefix
+            for vl in vlines:
+                plt.axvline(x=vl, color="#001f3f", linestyle="-", linewidth=0.5, zorder=1)
+
+        plt.tight_layout()
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
         plt.close()
+
+    def ratio_plot(
+        self,
+        data: xr.DataArray | list,
+        run_ids: list[str],
+        labels: str | list,
+        tag: str = "",
+        x_dim: str = "forecast_step",
+        y_dim: str = "value",
+        print_summary: bool = False,
+    ) -> None:
+        """
+        Plot a ratio plot comparing multiple datasets to the first dataset.
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        run_ids:
+            List of run IDs corresponding to each dataset
+        labels:
+            Label or list of labels for each dataset
+        tag:
+            Tag to be added to the plot title and filename
+        x_dim:
+            Dimension to be used for the x-axis. The code will average over all other dimensions.
+        y_dim:
+            Name of the dimension to be used for the y-axis.
+        print_summary:
+            If True, print a summary of the values from the graph.
+        Returns
+        -------
+            None
+        """
+
+        data_list, label_list = self._check_lengths(data, labels)
+
+        if len(data_list) < 2:
+            baseline = xr.full_like(data_list[0], 1.0)
+            baseline_name = "ones"
+            descr = "scores"
+        else:
+            descr = "ratio_plot"
+            baseline_name = self.baseline
+            baseline_idx = run_ids.index(self.baseline) if self.baseline in run_ids else None
+            if baseline_idx is not None:
+                _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
+                baseline = data_list[baseline_idx]
+
+            else:
+                baseline_name = run_ids[0]
+                baseline = data_list[0]
+
+        ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
+
+        channel_names = set(ref_raw.channel.values)
+        # Merge channels from remaining datasets
+        for data in data_list[1:]:
+            channel_names.update(data.channel.values)  # add new channels
+
+        # Sort the merged list
+        ref_channel_names = sorted(channel_names, key=channel_sort_key)
+
+        ref = align_labels(ref_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
+
+        fig = plt.figure(figsize=(max(12, len(ref_channel_names) * 0.25), 6))
+
+        for data, run_id, lbl in zip(data_list, run_ids, label_list, strict=False):
+            if run_id == baseline_name:
+                continue  # skip baseline
+
+            num_raw = self._preprocess_data(data, x_dim, verbose=False)
+            num = align_labels(num_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
+
+            ratio = num.sel(channel=ref_channel_names) / ref.sel(channel=ref_channel_names)
+
+            plt.plot(
+                ref_channel_names,
+                ratio.values,
+                label=lbl,
+                marker="o",
+                linestyle="-",
+            )
+
+        parts = [descr, tag]
+        name = "_".join(filter(None, parts))
+        plt.xticks(rotation=90, ha="right")
+        plt.grid(True, linestyle="--", color="gray", alpha=0.2)
+        title = (
+            f"{descr.replace('_', ' ')} {tag.split('_')[0]} -"
+            f" {tag.split('_')[-1]} (baseline: {baseline_name})"
+        )
+        self._plot_base(fig, name, x_dim, y_dim, print_summary, line=1.0, vlines=True, title=title)
+
+    def heat_map(
+        self,
+        data: xr.DataArray | list,
+        labels: str | list,
+        metric: str,
+        x_dim,
+        tag: str = "",
+    ) -> None:
+        """
+        Plot a heat map comparing multiple datasets.
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        labels:
+            Label or list of labels for each dataset
+        metric:
+            Metric for which we are plotting
+        x_dim:
+            Dimension to be used for the x-axis. The code will average over all other dimensions.
+        tag:
+            Tag to be added to the plot title and filename
+        Returns
+        -------
+            None
+        """
+
+        data_list, label_list = self._check_lengths(data, labels)
+
+        n_runs = len(data_list)
+
+        x_ticks_names = set()
+
+        for data in data_list:
+            da = data.isel({x_dim: 0})
+            x_ticks_names.update(map(str, da.channel.values))
+
+        ref_ticks_names = sorted(x_ticks_names, key=channel_sort_key)
+
+        fig, axes = plt.subplots(
+            1, n_runs, figsize=(8 * n_runs, max(12, len(ref_ticks_names) * 0.25)), squeeze=False
+        )
+
+        global_min = float("inf")
+        global_max = float("-inf")
+
+        for ax, data, label in zip(axes[0], data_list, labels, strict=False):
+            time_steps = sorted(data[x_dim].values)
+
+            # Use the first time step as reference
+            ref = data.reindex(channel=ref_ticks_names).sel({x_dim: time_steps[0]})
+            ref = self._preprocess_data(ref, "channel", verbose=False)
+
+            if ref.isnull().all():
+                _logger.warning(
+                    f"Heatmap:: Reference data for metric {metric} and label {label} contains "
+                    "only NaNs. Skipping heatmap."
+                )
+                continue
+
+            # Compute ratio for all time steps
+            num = self._preprocess_data(data, [x_dim, "channel"], verbose=False)
+            num = num.reindex(channel=ref_ticks_names).sel({x_dim: time_steps})
+
+            heatmap_data = num / ref
+
+            cmap = plt.get_cmap("magma_r") if lower_is_better(metric) else plt.get_cmap("magma")
+            global_min = min(global_min, float(heatmap_data.min()))
+            global_max = max(global_max, float(heatmap_data.max()))
+
+            last_hm = sns.heatmap(
+                heatmap_data.values.T,
+                ax=ax,
+                cmap=cmap,
+                vmin=global_min,
+                vmax=global_max,
+                xticklabels=time_steps,
+                yticklabels=ref_ticks_names,
+                annot=False,
+                fmt=".2f",
+                cbar=False,
+            )
+            ax.set_title(f"Heatmap {metric} – {label}")
+            ax.set_xlabel(f"{x_dim.replace('_', ' ').title()} (h)")
+            ax.set_ylabel("Variable")
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+
+        cbar = fig.colorbar(
+            last_hm.collections[0], ax=axes.ravel().tolist(), shrink=0.6, location="right", pad=0.02
+        )
+        cbar.set_label(rf"{metric} - $t_{{\mathrm{{step}}}}[0] / t_{{\mathrm{{step}}}}[x]$")
+        parts = ["heat_map", metric, tag]
+        name = "_".join(filter(None, parts))
+        plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
+
+
+class QuantilePlots:
+    def __init__(self, plotter_cfg: dict, output_basedir: str | Path):
+        """
+        Initialize the QuantilePlots class.
+
+        Parameters
+        ----------
+        plotter_cfg:
+            Configuration dictionary containing basic information for plotting.
+            Expected keys are:
+                - image_format: Format of the saved images (e.g., 'png', 'pdf', etc.)
+                - dpi_val: DPI value for the saved images
+                - fig_size: Size of the figure (width, height) in inches
+        output_basedir:
+            Base directory under which the plots will be saved.
+            Expected scheme `<results_base_dir>/<run_id>`.
+        """
+        self.image_format = plotter_cfg.get("image_format")
+        self.dpi_val = plotter_cfg.get("dpi_val")
+        self.fig_size = plotter_cfg.get("fig_size")
+        self.out_plot_dir = Path(output_basedir) / "quantile_plots"
+
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
+
+    def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
+        """
+        Check if the lengths of data and labels match.
+
+        Parameters
+        ----------
+        data:
+            DataArray or list of DataArrays to be plotted
+        labels:
+            Label or list of labels for each dataset
+
+        Returns
+        -------
+            data_list, label_list - lists of data and labels
+        """
+        assert isinstance(data, xr.DataArray | list), (
+            "QuantilePlots::_check_lengths - Data should be of type xr.DataArray or list"
+        )
+        assert isinstance(labels, str | list), (
+            "QuantilePlots::_check_lengths - Labels should be of type str or list"
+        )
+
+        data_list = [data] if isinstance(data, xr.DataArray) else data
+        label_list = [labels] if isinstance(labels, str) else labels
+
+        assert len(data_list) == len(label_list), (
+            "QuantilePlots::_check_lengths - Data and Labels do not match"
+        )
+
+        return data_list, label_list
+
+    def qq_plot(
+        self,
+        qq_data: list[xr.Dataset],
+        labels: str | list,
+        tag: str = "",
+        metric: str = "qq_analysis",
+        extreme_percentiles: tuple[float, float] | None = None,
+    ) -> None:
+        """
+        Create quantile-quantile (Q-Q) plots for extreme value analysis.
+
+        This method generates comprehensive Q-Q plots comparing forecast quantiles
+        against ground truth quantiles, with emphasis on extreme values.
+
+        Parameters
+        ----------
+        qq_data:
+            Dataset or list of Datasets containing Q-Q analysis results.
+            Each dataset should contain:
+            - 'quantile_levels': Theoretical quantile levels (0 to 1)
+            - 'p_quantiles': Quantile values from prediction data
+            - 'gt_quantiles': Quantile values from ground truth data
+            - 'qq_deviation': Absolute difference between quantiles
+            - 'extreme_low_mse': MSE for lower extreme quantiles
+            - 'extreme_high_mse': MSE for upper extreme quantiles
+        labels:
+            Label or list of labels for each dataset
+        tag:
+            Tag to be added to the plot title and filename
+        metric:
+            Name of the metric (default: 'qq_analysis')
+        extreme_percentiles:
+            Lower and upper percentile thresholds for extreme regions.
+
+        Returns
+        -------
+            None
+        """
+        data_list, label_list = self._check_lengths(qq_data, labels)
+
+        # Use extreme_percentiles from data if not explicitly provided
+        if extreme_percentiles is None:
+            extreme_percentiles = tuple(data_list[0].attrs.get("extreme_percentiles", (5.0, 95.0)))
+
+        # Create figure with subplots
+        fig = plt.figure(figsize=(16, 6), dpi=self.dpi_val)
+        gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], wspace=0.3)
+
+        ax_qq = fig.add_subplot(gs[0])  # Main Q-Q plot
+        ax_dev = fig.add_subplot(gs[1])  # Deviation plot
+
+        colors = plt.cm.tab10(np.linspace(0, 1, len(data_list)))
+
+        for _i, (ds, label, color) in enumerate(zip(data_list, label_list, colors, strict=False)):
+            # Extract quantile data
+            quantile_levels = ds["quantile_levels"].values
+            p_quantiles = ds["p_quantiles"].values
+            gt_quantiles = ds["gt_quantiles"].values
+            qq_deviation = ds["qq_deviation"].values
+
+            # Main Q-Q plot
+            ax_qq.scatter(
+                gt_quantiles,
+                p_quantiles,
+                alpha=0.6,
+                s=20,
+                c=[color],
+                label=label,
+                edgecolors="none",
+            )
+
+            # Deviation plot
+            ax_dev.plot(
+                quantile_levels,
+                qq_deviation,
+                label=label,
+                color=color,
+                linewidth=2,
+                alpha=0.8,
+            )
+
+        # Format main Q-Q plot
+        ax_qq.set_xlabel("Ground Truth Quantiles", fontsize=12)
+        ax_qq.set_ylabel("Prediction Quantiles", fontsize=12)
+        ax_qq.set_title("Quantile-Quantile Plot for Extreme Value Analysis", fontsize=14)
+
+        # Add perfect agreement line (y=x)
+        min_val = min([ds["gt_quantiles"].min().values for ds in data_list])
+        max_val = max([ds["gt_quantiles"].max().values for ds in data_list])
+        ax_qq.plot(
+            [min_val, max_val],
+            [min_val, max_val],
+            "k--",
+            linewidth=2,
+            label="Perfect Agreement",
+            alpha=0.7,
+        )
+
+        # Add shaded regions for extremes
+        if len(data_list) > 0:
+            ds_ref = data_list[0]
+            quantile_levels = ds_ref["quantile_levels"].values
+
+            # Find extreme regions using configurable thresholds
+            lower_extreme_idx = quantile_levels < (extreme_percentiles[0] / 100)
+            upper_extreme_idx = quantile_levels > (extreme_percentiles[1] / 100)
+
+            if np.any(lower_extreme_idx):
+                lower_q = ds_ref["gt_quantiles"].values[lower_extreme_idx]
+                ax_qq.axvspan(
+                    min_val,
+                    lower_q.max() if len(lower_q) > 0 else min_val,
+                    alpha=0.1,
+                    color="blue",
+                    label="Lower Extreme Zone",
+                )
+
+            if np.any(upper_extreme_idx):
+                upper_q = ds_ref["gt_quantiles"].values[upper_extreme_idx]
+                ax_qq.axvspan(
+                    upper_q.min() if len(upper_q) > 0 else max_val,
+                    max_val,
+                    alpha=0.1,
+                    color="red",
+                    label="Upper Extreme Zone",
+                )
+
+        ax_qq.legend(frameon=False, loc="upper left", fontsize=10)
+        ax_qq.grid(True, linestyle="--", alpha=0.3)
+
+        # Format deviation plot
+        ax_dev.set_xlabel("Quantile Level", fontsize=12)
+        ax_dev.set_ylabel("Absolute Deviation", fontsize=12)
+        ax_dev.set_title("Quantile Deviation", fontsize=14)
+        ax_dev.legend(frameon=False, fontsize=10)
+        ax_dev.grid(True, linestyle="--", alpha=0.3)
+
+        # Highlight extreme regions in deviation plot
+        lower_threshold = extreme_percentiles[0] / 100
+        upper_threshold = extreme_percentiles[1] / 100
+        ax_dev.axvspan(0.0, lower_threshold, alpha=0.1, color="blue")
+        ax_dev.axvspan(upper_threshold, 1.0, alpha=0.1, color="red")
+
+        plt.tight_layout()
+
+        # Save the plot
+        parts = ["qq_analysis", tag]
+        name = "_".join(filter(None, parts))
+        save_path = self.out_plot_dir.joinpath(f"{name}.{self.image_format}")
+        plt.savefig(save_path, bbox_inches="tight")
+        plt.close()
+
+        _logger.info(f"Q-Q plot saved to {save_path}")
 
 
 class ScoreCards:
@@ -1014,7 +1450,7 @@ class ScoreCards:
                 ax.scatter(x, y, marker=triangle, color=color, s=size.values, zorder=3)
 
                 # Perform Wilcoxon test
-                if diff["forecast_step"].item() > 1.0:
+                if len(diff["forecast_step"].values) > 1:
                     stat, p = wilcoxon(diff, alternative=alt)
 
                     # Draw rectangle border for significance
@@ -1286,7 +1722,6 @@ class BarPlots:
         self.cmap = plotter_cfg.get("cmap", "bwr")
         self.out_plot_dir = Path(output_basedir) / "bar_plots"
         self.baseline = plotter_cfg.get("baseline")
-        _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
         if not os.path.exists(self.out_plot_dir):
             _logger.info(f"Creating dir {self.out_plot_dir}")
             os.makedirs(self.out_plot_dir, exist_ok=True)
@@ -1319,39 +1754,51 @@ class BarPlots:
 
         fig, ax = plt.subplots(
             1,
-            len(runs) - 1,
+            len(runs) - 1 if len(runs) > 1 else 1,
             figsize=(5 * len(runs), 2 * len(channels)),
             dpi=self.dpi_val,
             squeeze=False,
         )
         ax = ax.flatten()
-
         if self.baseline and self.baseline in runs:
             baseline_idx = runs.index(self.baseline)
             runs = [runs[baseline_idx]] + runs[:baseline_idx] + runs[baseline_idx + 1 :]
             data = [data[baseline_idx]] + data[:baseline_idx] + data[baseline_idx + 1 :]
+        elif len(runs) < 2:
+            _logger.warning(
+                "BarPlots:: Less than two runs provided. Generating bar plot against ones."
+            )
+            ones_array = xr.full_like(data[0], 1.0)
+            runs = [""] + runs
+            data = [ones_array] + data
 
         for run_index in range(1, len(runs)):
-            ratio_score, channels_per_comparison = self.calc_ratio_per_run_id(
-                data, channels, run_index
-            )
-            if len(ratio_score) > 0:
+            score, channels_per_comparison = self.calc_ratio_per_run_id(data, channels, run_index)
+            if len(score) > 0:
                 ax[run_index - 1].barh(
-                    np.arange(len(ratio_score)),
-                    ratio_score,
-                    color=self.colors(ratio_score, metric),
+                    np.arange(len(score)),
+                    score,
+                    color=self.colors(score, metric),
                     align="center",
                     edgecolor="black",
                     linewidth=0.5,
                 )
-                ax[run_index - 1].set_yticks(
-                    np.arange(len(ratio_score)), labels=channels_per_comparison
-                )
+                ax[run_index - 1].set_yticks(np.arange(len(score)), labels=channels_per_comparison)
                 ax[run_index - 1].invert_yaxis()
-                ax[run_index - 1].set_xlabel(
+
+                xlabel = (
                     f"Relative {data[0].coords['metric'].item().upper()}: "
                     f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})"
                 )
+
+                if len(runs) == 2 and runs[0] == "":
+                    xlabel = xlabel.replace("Relative ", "")
+                    xlabel = xlabel.replace(
+                        f"Target Model ({runs[run_index]}) / Reference Model ({runs[0]})",
+                        f"Model ({runs[run_index]})",
+                    )
+
+                ax[run_index - 1].set_xlabel(xlabel)
             else:
                 ax[run_index - 1].set_visible(False)  # or annotate as missing
                 # Or show a message:
@@ -1365,7 +1812,7 @@ class BarPlots:
                 )
 
         _logger.info(f"Saving bar plots to: {self.out_plot_dir}")
-        parts = ["bar_plot_compare", tag] + runs
+        parts = ["bar_plot", tag] + runs
         name = "_".join(filter(None, parts))
         plt.savefig(
             f"{self.out_plot_dir.joinpath(name)}.{self.image_format}",
@@ -1405,6 +1852,7 @@ class BarPlots:
         """
         ratio_score = []
         channels_per_comparison = []
+
         for _, var in enumerate(channels):
             if var not in data[0].channel.values or var not in data[run_index].channel.values:
                 continue
@@ -1416,7 +1864,11 @@ class BarPlots:
 
             ratio_score.append(model_score / baseline_score)
 
-        ratio_score = np.array(ratio_score) - 1
+        if np.allclose(baseline_score, 1.0, atol=1e-6):
+            ratio_score = np.array(ratio_score)
+        else:
+            ratio_score = np.array(ratio_score) - 1
+
         return ratio_score, channels_per_comparison
 
     def colors(self, ratio_score: np.array, metric: str) -> list[tuple]:
@@ -1485,3 +1937,45 @@ def calculate_average_over_dim(
 def lower_is_better(metric: str) -> bool:
     # Determine whether lower or higher is better
     return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
+
+
+def compute_offsets(n, spacing=0.11):
+    idx = np.arange(n)
+    return (idx - (n - 1) / 2.0) * spacing
+
+
+def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArray:
+    """
+    Reindex a DataArray to include all labels in the canonical order.
+    Missing variables are filled with NaN.
+    """
+    # Convert labels → index format expected by xarray
+    labels = np.array(labels, dtype=object)
+
+    # Reindex, inserting NaN for missing labels
+    return da.reindex({x_dim: labels})
+
+
+def format_datetime(dt):
+    return dt.astype("datetime64[m]").astype(datetime.datetime).strftime("%Y-%m-%d T%H:%M:%S")
+
+
+def channel_sort_key(name: str) -> tuple[int, str, int]:
+    """
+    Sorting key for channel names like 't_850', 'z_500', etc.
+    Splits the name into a prefix and a number suffix for sorting.
+    Parameters
+    ----------
+    name : str
+        Channel name to be sorted.
+    Returns
+    -------
+    tuple[int, str, int]
+        Sorting key: (0, prefix, number) if pattern matches, else (1,
+    """
+    m = re.match(r"(.+?)_(\d+)$", name)
+    if m:
+        prefix, number = m.groups()
+        return (0, prefix, int(number))
+    else:
+        return (1, name, float("inf"))

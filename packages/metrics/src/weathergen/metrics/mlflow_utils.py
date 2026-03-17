@@ -41,6 +41,7 @@ class MlFlowUpload:
             "stage": phase,
             "project": project_name,
             "uploader": get_platform_env().get_hpc_user() or "unknown",
+            "organization": get_platform_env().get_hpc_user_org() or "unknown",
             "completion_status": "success",
         }
         if from_run_id:
@@ -151,6 +152,13 @@ def setup_mlflow(private_config: Config | None) -> MlflowClient:
         tracking_uri=MlFlowUpload.tracking_uri, registry_uri=MlFlowUpload.registry_uri
     )
     return mlflow_client
+
+
+def get_experiment_id(private_config: Config | None) -> str:
+    client = setup_mlflow(private_config)
+    exp = client.get_experiment_by_name(MlFlowUpload.experiment_name)
+    assert exp is not None
+    return exp.experiment_id
 
 
 def get_or_create_mlflow_parent_run(mlflow_client: MlflowClient, run_id: str) -> Run:

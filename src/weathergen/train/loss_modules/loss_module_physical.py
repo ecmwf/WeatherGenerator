@@ -16,11 +16,18 @@ import numpy as np
 import torch
 from omegaconf import DictConfig
 
-import weathergen.train.loss_modules.loss_functions as losses
+import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
-from weathergen.utils.train_logger import TRAIN, VAL, Stage
+from weathergen.train.utils import TRAIN, VAL, Stage
 
 _logger = logging.getLogger(__name__)
+
+
+def get_num_samples(config) -> np.typing.NDArray:
+    """
+    Get number of samples in source/target config
+    """
+    return np.array([s_cfg.get("num_samples", 1) for _, s_cfg in config.items()])
 
 
 class LossPhysical(LossModuleBase):
@@ -37,20 +44,26 @@ class LossPhysical(LossModuleBase):
     def __init__(
         self,
         cf: DictConfig,
-        loss_fcts: list,
+        mode_cfg: DictConfig,
         stage: Stage,
         device: str,
+        **loss_fcts,
     ):
         LossModuleBase.__init__(self)
         self.cf = cf
+        self.mode_cfg = mode_cfg
         self.stage = stage
         self.device = device
         self.name = "LossPhysical"
 
-        # Dynamically load loss functions based on configuration and stage
+        # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
-            [getattr(losses, name if name != "mse" else "mse_channel_location_weighted"), w, name]
-            for name, w in loss_fcts
+            [
+                getattr(loss_fns, name),
+                params.get("weight", 1.0),
+                name,
+            ]
+            for name, params in loss_fcts.items()
         ]
 
     def _get_weights(self, stream_info):
@@ -78,24 +91,25 @@ class LossPhysical(LossModuleBase):
 
         return stream_info_loss_weight, weights_channels
 
-    def _get_fstep_weights(self, forecast_steps):
-        timestep_weight_config = self.cf.get("timestep_weight")
-        if timestep_weight_config is None:
-            return [1.0 for _ in range(forecast_steps)]
-        weights_timestep_fct = getattr(losses, timestep_weight_config[0])
-        return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
+    def _get_output_step_weights(self, len_forecast_steps):
+        timestep_weight_config = self.mode_cfg.get("forecast", {}).get("timestep_weight", {})
+        if len(timestep_weight_config) == 0:
+            return [1.0 for _ in range(len_forecast_steps)]
+        weights_timestep_fct = getattr(loss_fns, list(timestep_weight_config.keys())[0])
+        decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
+        return weights_timestep_fct(len_forecast_steps, decay_factor)
 
-    def _get_location_weights(self, stream_info, stream_data, forecast_offset, fstep):
+    def _get_location_weights(self, stream_info, target_coords):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
             return None
-        weights_locations_fct = getattr(losses, location_weight_type)
-        weights_locations = weights_locations_fct(stream_data, forecast_offset, fstep)
+        weights_locations_fct = getattr(loss_fns, location_weight_type)
+        weights_locations = weights_locations_fct(target_coords)
         weights_locations = weights_locations.to(device=self.device, non_blocking=True)
 
         return weights_locations
 
-    def _get_substep_masks(self, stream_info, fstep, target_times):
+    def _get_substep_masks(self, stream_info, output_step, target_times):
         """
         Find substeps and create corresponding masks (reused across loss functions)
         """
@@ -154,7 +168,7 @@ class LossPhysical(LossModuleBase):
 
         The computed loss is:
 
-        Mean_{stream}( Mean_{fsteps}( Mean_{loss_fcts}( loss_fct( target, pred, weigths) )))
+        Mean_{stream}( Mean_{output_steps}( Mean_{loss_fcts}( loss_fct( target, pred, weigths) )))
 
         This method orchestrates the calculation of the overall loss by iterating through
         different data streams, forecast steps, channels, and configured loss functions.
@@ -187,9 +201,12 @@ class LossPhysical(LossModuleBase):
         # create tensor for each stream
         losses_all = defaultdict(dict)
 
+        source2target_idxs, output_info, target2source_idxs, target_info = metadata
+
         # TODO: iterate over batch dimension
         for stream_info in self.cf.streams:
             stream_name = stream_info["name"]
+            # TODO: avoid this
             target_channels = (
                 stream_info.val_target_channels
                 if self.stage == "val"
@@ -200,105 +217,149 @@ class LossPhysical(LossModuleBase):
 
             stream_loss_weight, weights_channels = self._get_weights(stream_info)
 
-            fstep_loss_weights = self._get_fstep_weights(targets.num_forecast_steps)
+            # TODO: make nicer
+            output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
+            if len(targets.physical) - len(targets.output_idxs) > 0:
+                output_step_loss_weights.insert(0, None)
 
-            loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
-            ctr_fsteps = 0
-
-            # spoofed inputs are masked in the output calculations
-            stream_is_spoof = targets.aux_outputs[stream_name].get("is_spoof", False)
-            spoof_weight = 0.0 if stream_is_spoof else 1.0
-            spoof_weight = torch.tensor(spoof_weight, device=self.device, requires_grad=False)
-
-            for fstep in range(self.cf.forecast_offset, targets.num_forecast_steps):
-                fstep_weight = fstep_loss_weights[fstep]
-
-                # get current prediction and target
-                # TODO: consistent ordering of preds and targets
-                pred = preds.physical[fstep].get(stream_name, torch.tensor([]))
-
-                target = targets.physical[stream_name][fstep]["target"]
-                target_times = targets.physical[stream_name][fstep]["target_times"]
-
-                # skip if either target or prediction has no data points
-                if not (target.shape[0] > 0 and pred.shape[0] > 0):
+            # loss_stream: loss for given stream
+            loss_stream = torch.tensor(0.0, device=self.device, requires_grad=True)
+            ctr_timesteps = 0
+            for timestep_idx, (preds_cur, target_cur) in enumerate(
+                zip(preds.physical, targets.physical, strict=True)
+            ):
+                preds_batch = preds_cur.get(stream_name, [])
+                if not preds_batch:
+                    # skip to next timestep if preds of current timestep are empty
                     continue
 
-                # reshape prediction tensor to match target's dimensions: extract data/coords and
-                # remove token dimension if it exists.
-                # expected final shape of pred is [ensemble_size, num_samples, num_channels].
-                pred = pred.reshape([pred.shape[0], *target.shape])
-                assert pred.shape[1] > 0
+                targets_batch = target_cur[stream_name]["target"]
+                targets_coords_batch = target_cur[stream_name]["target_coords"]
+                targets_times_batch = target_cur[stream_name]["target_times"]
+                targets_params = target_cur[stream_name]["target_metda_data"]
+                targets_is_spoof = target_cur[stream_name]["is_spoof"]
 
-                # get weights for locations
-                # TODO: fix
-                # weights_locations = self._get_location_weights(
-                #     stream_info, stream_data, self.cf.forecast_offset, fstep
-                # )
-                weights_locations = None
-                weights_channels = None
+                output_step_weight = output_step_loss_weights[timestep_idx]
 
-                # get masks for sub-time steps
-                substep_masks = self._get_substep_masks(stream_info, fstep, target_times)
+                # loss_timestep: loss for given timestep
+                loss_timestep = torch.tensor(0.0, device=self.device, requires_grad=True)
+                ctr_batch = 0
+                for pred, pred_params in zip(preds_batch, output_info, strict=True):
+                    # source has a unique target but index is not invariant with multiple
+                    # target_aux calculators
+                    target_idx_native = pred_params.global_params.get("correspondence", -1)
+                    target_idx = [
+                        i
+                        for i, t in enumerate(targets_params)
+                        if t[stream_name].global_params["idx"] == target_idx_native
+                    ]
+                    # source/model_input has no target for physical loss
+                    if len(target_idx) == 0:
+                        continue
+                    # source -> target correspondence has to be unique
+                    assert len(target_idx) == 1
+                    target_idx = target_idx[0]
 
-                # accumulate loss from different loss functions
-                loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
-                ctr_loss_fcts = 0
-                for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
-                    losses_all[stream_name][str(fstep)][loss_fct_name] = defaultdict(dict)
-                    # loss for current loss function
-                    loss_lfct, loss_lfct_chs = self._loss_per_loss_function(
-                        loss_fct,
-                        target,
-                        pred,
-                        substep_masks,
-                        weights_channels,
-                        weights_locations,
+                    # get weights for locations
+                    weights_locations = self._get_location_weights(
+                        stream_info, targets_coords_batch[target_idx]
                     )
 
-                    for ch_n, v in zip(target_channels, loss_lfct_chs, strict=True):
-                        losses_all[stream_name][str(fstep)][loss_fct_name][ch_n] = (
-                            spoof_weight * v if v != 0.0 else torch.nan
+                    # loss_st_corr: loss for give source-target correspondence
+                    loss_st_corr = torch.tensor(0.0, device=self.device, requires_grad=True)
+                    ctr_loss_fcts = 0
+                    for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
+                        # skip is loss is not computed for this sample
+                        if loss_fct_name not in pred_params.global_params["loss"]:
+                            continue
+
+                        target = targets_batch[target_idx]
+                        target_times = targets_times_batch[target_idx]
+
+                        # spoofed inputs are masked in the output calculations
+                        sw = 0.0 if targets_is_spoof[target_idx] else 1.0
+                        spoof_weight = torch.tensor(sw, device=self.device, requires_grad=False)
+
+                        # skip if either target or prediction has no data points
+                        if not (target.shape[0] > 0 and pred.shape[0] > 0):
+                            continue
+
+                        # reshape prediction tensor to match target's dimensions: extract
+                        # data/coords and remove token dimension if it exists.
+                        # expected shape of pred is [ensemble_size, num_samples, num_channels].
+                        pred = pred.reshape([pred.shape[0], *target.shape])
+                        assert pred.shape[1] > 0
+
+                        # get masks for sub-time steps
+                        substep_masks = self._get_substep_masks(
+                            stream_info, timestep_idx, target_times
                         )
 
-                    # Add the weighted and normalized loss from this loss function to the total
-                    # batch loss
-                    loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct * fstep_weight)
-                    ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
+                        losses_all[stream_name][str(timestep_idx)][loss_fct_name] = defaultdict(
+                            dict
+                        )
+                        # loss_lfct: loss for given loss function aggregated over all channels
+                        # loss_lfct_chs: loss for given loss function per channel
+                        loss_lfct, loss_lfct_chs = self._loss_per_loss_function(
+                            loss_fct,
+                            target,
+                            pred,
+                            substep_masks,
+                            weights_channels,
+                            weights_locations,
+                        )
 
-                loss_fsteps = loss_fsteps + loss_fstep
-                ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
+                        for ch_n, v in zip(target_channels, loss_lfct_chs, strict=True):
+                            losses_all[stream_name][str(timestep_idx)][loss_fct_name][ch_n] = (
+                                spoof_weight * v if v != 0.0 else torch.nan
+                            )
 
-            loss = loss + (
-                (spoof_weight * stream_loss_weight * loss_fsteps)
-                / (ctr_fsteps if ctr_fsteps > 0 else 1.0)
-            )
-            ctr_streams += 1 if ctr_fsteps > 0 and not stream_is_spoof else 0
+                        # Add the weighted and normalized loss from this loss function to the total
+                        # batch loss
+                        loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
+                        loss_st_corr = loss_st_corr + loss_cur_w
+                        ctr_loss_fcts += 1 if (loss_lfct > 0.0 and sw > 0.0) else 0
+
+                    loss_timestep = loss_timestep + loss_st_corr
+                    ctr_batch += 1 if ctr_loss_fcts > 0.0 else 0
+
+                loss_stream = loss_stream + loss_timestep
+                ctr_timesteps += 1 if ctr_batch > 0 else 0
+
+            denom = ctr_timesteps if ctr_timesteps > 0 else 1.0
+            loss = loss + (stream_loss_weight * loss_stream) / denom
+
+            ctr_streams += 1 if ctr_timesteps > 0 else 0
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
-        loss = loss / ctr_streams
+        if loss == 0.0:
+            _logger.warning(
+                "Loss is 0.0, likely incorrect configuration. Check stream"
+                " support time and training configuration."
+            )
+        loss = loss / ctr_streams if ctr_streams > 0 else loss
 
         def _nested_dict():
             return defaultdict(dict)
 
-        # Reorder losses_all to [stream_name][loss_fct_name][ch_n][fstep]
+        # Reorder losses_all to [stream_name][loss_fct_name][ch_n][output_step]
         reordered_losses = defaultdict(dict)
-        for stream_name, fstep_dict in losses_all.items():
+        for stream_name, output_step_dict in losses_all.items():
             reordered_losses[stream_name] = defaultdict(_nested_dict)
-            for fstep, lfct_dict in fstep_dict.items():
+            for output_step, lfct_dict in output_step_dict.items():
                 for loss_fct_name, ch_dict in lfct_dict.items():
                     for ch_n, v in ch_dict.items():
-                        reordered_losses[stream_name][loss_fct_name][ch_n][fstep] = v
+                        reordered_losses[stream_name][loss_fct_name][ch_n][output_step] = v
 
-        # Calculate per stream, per lfct average across channels and fsteps
+        # Calculate per stream, per lfct average across channels and output_steps
         for stream_name, lfct_dict in reordered_losses.items():
             for loss_fct_name, ch_dict in lfct_dict.items():
                 reordered_losses[stream_name][loss_fct_name]["avg"] = 0
                 count = 0
-                for ch_n, fstep_dict in ch_dict.items():
+                for ch_n, output_step_dict in ch_dict.items():
                     if ch_n != "avg":
-                        for _, v in fstep_dict.items():
+                        for _, v in output_step_dict.items():
                             reordered_losses[stream_name][loss_fct_name]["avg"] += v
                             count += 1
                 reordered_losses[stream_name][loss_fct_name]["avg"] /= count

@@ -21,7 +21,7 @@ st.markdown("# Engineering overview")
 
 
 runs = latest_runs()
-all_runs_pdf = all_runs()
+all_runs_pdf = all_runs(keep_metrics=False, keep_params=False)
 
 st.markdown("""The number of runs by month and by HPC.""")
 # TODO: this is here just the number of root run ids.
@@ -161,14 +161,8 @@ st.markdown(
 
 st.plotly_chart(
     px.scatter(
-        all_runs_pdf
-        # world_size used to be called num_ranks
-        .with_columns(
-            pl.max_horizontal(
-                pl.col("params.num_ranks").fill_null(0), pl.col("params.world_size").fill_null(0)
-            )
-            .cast(int)
-            .alias("world_size")
+        all_runs_pdf.with_columns(
+            pl.col("params.world_size").fill_null(0).cast(int).alias("world_size")
         )
         .filter(pl.col("world_size") > 0)
         .select(["world_size", "start_time", "tags.hpc"])
@@ -261,7 +255,7 @@ st.plotly_chart(
     )
 )
 
-all_metrics = sorted(all_runs_pdf.select(ps.starts_with("metrics.")).columns)
+all_metrics = sorted(runs.select(ps.starts_with("metrics.")).columns)
 
 st.markdown(
     f"""
@@ -271,7 +265,7 @@ st.markdown(
 There is a hard limit of 1000 metrics per run in MLFlow.
 
 
-Total number of metrics tracked: {len(all_metrics)}.
+Total number of metrics tracked: {len(all_metrics)}. 
 """
 )
 
@@ -281,7 +275,7 @@ st.dataframe(
     # - example_run_id: str (a run id associated with this metric)
     # - count: int
     # Unpivot take a list of columns and converts them to values
-    all_runs_pdf.unpivot(ps.starts_with("metrics."), index="tags.run_id", variable_name="metric")
+    runs.unpivot(ps.starts_with("metrics."), index="tags.run_id", variable_name="metric")
     .drop_nulls()
     .group_by("metric")
     .agg(

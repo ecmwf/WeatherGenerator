@@ -7,7 +7,7 @@ from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from weathergen.common.config import get_model_results
-from weathergen.common.io import ZarrIO
+from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.export.parser_factory import CfParserFactory
 from weathergen.evaluate.export.reshape import detect_grid_type
 
@@ -21,7 +21,7 @@ def get_data_worker(args: tuple) -> xr.DataArray:
 
     Parameters
     ----------
-        args : Tuple containing (sample, fstep, run_id, stream, type).
+        args : Tuple containing (sample, fstep, run_id, stream).
 
     Returns
     -------
@@ -29,7 +29,7 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     """
     sample, fstep, run_id, stream, dtype, epoch, rank = args
     fname_zarr = get_model_results(run_id, epoch, rank)
-    with ZarrIO(fname_zarr) as zio:
+    with zarrio_reader(fname_zarr) as zio:
         out = zio.get_data(sample, stream, fstep)
         if dtype == "target":
             data = out.target
@@ -55,7 +55,7 @@ def get_fsteps(fsteps, fname_zarr: str):
         list[str]
             List of forecast steps to be used for data retrieval.
     """
-    with ZarrIO(fname_zarr) as zio:
+    with zarrio_reader(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
     return zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
 
@@ -75,7 +75,7 @@ def get_samples(samples, fname_zarr: str):
         list[str]
             List of samples to be used for data retrieval.
     """
-    with ZarrIO(fname_zarr) as zio:
+    with zarrio_reader(fname_zarr) as zio:
         zio_samples = sorted([int(sample) for sample in zio.samples])
     samples = (
         zio_samples
@@ -101,7 +101,7 @@ def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
         list[str]
             List of channels to be used for data retrieval.
     """
-    with ZarrIO(fname_zarr) as zio:
+    with zarrio_reader(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
         all_channels = dummy_out.target.channels
@@ -133,7 +133,7 @@ def get_grid_type(data_type, stream: str, fname_zarr: str) -> str:
         str
             Grid type ('regular' or 'gaussian').
     """
-    with ZarrIO(fname_zarr) as zio:
+    with zarrio_reader(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         dummy_out = zio.get_data(0, stream, zio_forecast_steps[0])
         data = dummy_out.target if data_type == "target" else dummy_out.prediction
@@ -160,7 +160,7 @@ def get_ref_times(fname_zarr, stream, samples, fstep_hours) -> list[np.datetime6
             List of reference times corresponding to the samples.
     """
     ref_times = []
-    with ZarrIO(fname_zarr) as zio:
+    with zarrio_reader(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
         for sample in samples:
             data = zio.get_data(sample, stream, zio_forecast_steps[0])
