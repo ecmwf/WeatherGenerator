@@ -24,6 +24,7 @@ import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
+from weathergen.model.model import ModelOutput
 from weathergen.model.model_interface import (
     get_target_aux_calculator,
     init_model_and_shard,
@@ -183,16 +184,11 @@ class Trainer(TrainerBase):
 
     def _init_fcst_chunks(self, mode_cfg):
         forecast_cfg = mode_cfg.get("forecast", {})
-        rollout_steps = forecast_cfg.get("num_steps", 0)
-        if isinstance(rollout_steps, list):
-            rollout_steps = max(rollout_steps) if len(rollout_steps) > 0 else 0
-        fcst_chunk_size = forecast_cfg.get("fstep_chunk_size", rollout_steps)
-        nchunks = (rollout_steps + fcst_chunk_size - 1) // fcst_chunk_size if rollout_steps else 0
-        remainder = rollout_steps % fcst_chunk_size if rollout_steps else 0
-        chunks = [fcst_chunk_size] * nchunks
-        if chunks:
-            chunks[-1] = remainder or fcst_chunk_size
-        return chunks
+        rollout_steps = forecast_cfg.get("num_steps", 1)
+        chunk_size = forecast_cfg.get("fstep_chunk_size", rollout_steps)
+        return [chunk_size] * (rollout_steps // chunk_size) + (
+            [rollout_steps % chunk_size] if rollout_steps % chunk_size else []
+        )
 
     def _get_fcst_chunks(self, mode_cfg):
         if mode_cfg is self.test_cfg:
@@ -463,9 +459,11 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
+                x = batch.get_source_samples()
                 preds = self.model(
                     self.model_params,
-                    batch.get_source_samples(),
+                    x,
+                    x.get_output_len(),
                 )
 
                 targets_and_auxs = {}
@@ -598,6 +596,12 @@ class Trainer(TrainerBase):
                     ):
                         chunks = self._get_fcst_chunks(mode_cfg)
                         x = batch.get_source_samples()
+                        total_steps = batch.get_output_len()
+                        preds_full = (
+                            ModelOutput(total_steps, batch=batch.get_source_samples())
+                            if total_steps > 0
+                            else None
+                        )
                         targets_and_auxs = {}
                         for loss_name, target_aux in self.target_and_aux_calculators_val.items():
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
@@ -608,7 +612,7 @@ class Trainer(TrainerBase):
                                 self.model,
                             )
                         fstep_offset = 0
-                        for chunk_size in chunks:
+                        for chunk_idx, chunk_size in enumerate(chunks):
                             if self.ema_model is None:
                                 x = self.model(
                                     self.model_params,
@@ -628,6 +632,12 @@ class Trainer(TrainerBase):
                                     if mode_cfg.get("output", {}).get("normalized_samples", False)
                                     else self.dataset_val.denormalize_target_channels
                                 )
+                                chunk_step_offset = x.step_offset
+                                timestep_idxs = [
+                                    step
+                                    for step in batch.get_output_idxs()
+                                    if chunk_step_offset <= step < chunk_step_offset + chunk_size
+                                ]
                                 write_output(
                                     self.cf,
                                     mode_cfg,
@@ -638,15 +648,26 @@ class Trainer(TrainerBase):
                                     batch,
                                     x,
                                     targets_and_auxs,
-                                    timestep_idxs=list(
-                                        range(fstep_offset, fstep_offset + chunk_size)
-                                    ),
-                                    fstep_offset=fstep_offset,
+                                    timestep_idxs=timestep_idxs,
+                                    fstep_offset=chunk_step_offset,
                                 )
-                            fstep_offset += chunk_size
+                            if preds_full is not None:
+                                for step_idx in range(chunk_size):
+                                    preds_full.physical[x.step_offset + step_idx].update(
+                                        x.physical[step_idx]
+                                    )
+                                    preds_full.latent[x.step_offset + step_idx].update(
+                                        x.latent[step_idx]
+                                    )
+                            if chunk_size and chunk_idx < len(chunks) - 1:
+                                if not x.latent or "latent_state" not in x.latent[chunk_size - 1]:
+                                    raise ValueError(
+                                        "Missing latent_state for chunked forecast continuation."
+                                    )
+                            fstep_offset = x.step_offset + chunk_size
 
                     _ = self.loss_calculator_val.compute_loss(
-                        preds=x,
+                        preds=preds_full if preds_full is not None else preds,
                         targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
                     )
