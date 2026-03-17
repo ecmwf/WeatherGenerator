@@ -232,7 +232,11 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
 
     mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
     if mask.sum() == 0:
-        logger.warning("jepa_loss mask is all true, likely incorrect masking config.")
+        logger.warning(
+            "jepa_loss mask is empty; teacher-visible cells do not extend beyond the student "
+            "view. Check target/source masking correspondence."
+        )
+        return student_patches_masked.sum() * 0.0
 
     assert mask.shape[0] == student_patches_masked.shape[0], (
         "mask.shape[0], batch dimension, has to match batch dimension for student_patches_masked."
@@ -241,12 +245,8 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
     teacher_patches = teacher_patches_masked.expand((mask.shape[0], -1, -1))
     # compute loss
     loss = F.l1_loss(student_patches_masked[mask], teacher_patches[mask])
-    
-    #import pdb; pdb.set_trace()
-    
+
     loss = loss * masks_weight[mask]
-    
-    #import pdb; pdb.set_trace()
 
     return loss.sum()  # / student_masks.shape[0]
 

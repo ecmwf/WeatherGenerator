@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 
 from weathergen.common import config
 from weathergen.common.config import Config, merge_configs
+from weathergen.datasets.batch import SampleMetaData
 
 # Run stages
 Stage = Literal["train", "val", "test"]
@@ -127,12 +128,49 @@ def unflatten_dict(d, separator="."):
     return unflattened
 
 
+def _get_effective_stream_mask(meta: SampleMetaData, stream_data) -> torch.Tensor | None:
+    if meta.mask is None:
+        return None
+
+    populated_cells = [lens > 0 for lens in stream_data.source_tokens_lens if len(lens) > 0]
+    if len(populated_cells) == 0:
+        return torch.zeros_like(meta.mask)
+
+    visible_cells = torch.stack(populated_cells, dim=0).any(dim=0)
+    return meta.mask & visible_cells
+
+
+def merge_sample_metadata(sample) -> SampleMetaData:
+    active_metadata = []
+    effective_masks = []
+    for stream_name, meta in sample.meta_info.items():
+        stream_data = sample.streams_data.get(stream_name)
+        if meta is None or stream_data is None or stream_data.source_empty():
+            continue
+        active_metadata.append(meta)
+        effective_mask = _get_effective_stream_mask(meta, stream_data)
+        if effective_mask is not None:
+            effective_masks.append(effective_mask)
+
+    if len(active_metadata) == 0:
+        active_metadata = [meta for meta in sample.meta_info.values() if meta is not None]
+        effective_masks = [meta.mask for meta in active_metadata if meta.mask is not None]
+
+    assert len(active_metadata) > 0, "Sample metadata is unexpectedly empty."
+
+    merged_meta = copy.deepcopy(active_metadata[0])
+    if len(effective_masks) > 0:
+        merged_meta.mask = torch.stack(effective_masks, dim=0).any(dim=0)
+
+    return merged_meta
+
+
 def extract_batch_metadata(batch):
     return (
         batch.source2target_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.source_samples.get_samples()],
+        [merge_sample_metadata(sample) for sample in batch.source_samples.get_samples()],
         batch.target2source_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.target_samples.get_samples()],
+        [merge_sample_metadata(sample) for sample in batch.target_samples.get_samples()],
     )
 
 
