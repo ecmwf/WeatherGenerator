@@ -50,65 +50,12 @@ def get_experiment_id() -> str:
     return exp.experiment_id
 
 
-@st.cache_data(ttl=ST_TTL_SEC, max_entries=20, persist="disk")
-def latest_runs(
-    keep_metrics: bool | tuple[str, ...] = True,
-    keep_params: bool | tuple[str, ...] = True,
-    latest_runs: bool = False,
-):
-    """
-    Get the latest runs for each WG run_id and stage.
-    Returns only specified metrics and params to reduce memory usage.
-    """
-    _logger.info("Downloading latest runs from MLFlow")
-    # A month ago timestamp in milliseconds
-    month_ago_ts = int((datetime.datetime.now() - datetime.timedelta(days=30)).timestamp() * 1000)
-    runs_pdf = pl.DataFrame(
-        mlflow.search_runs(
-            experiment_ids=[get_experiment_id()],
-            filter_string=f"attributes.start_time >= {month_ago_ts}",
-        )
-    )
-    if keep_metrics is True:
-        _logger.info("Keeping metrics columns")
-    else:
-        _logger.info("Dropping metrics columns")
-        # Keep num_samples as it is useful for filtering and grouping.
-        keep_metrics_list = ["metrics.num_samples"] if keep_metrics is False else list(keep_metrics)
-        runs_pdf = runs_pdf.select(_start_with_reduce("metrics.", keep_metrics_list))
-    if keep_params is True:
-        _logger.info("Keeping params columns")
-    else:
-        _logger.info("Dropping params columns")
-        # Still keep the wgtags params, as they are useful for filtering and grouping.
-        keep_param_prefixes = (
-            ["params.wgtags.", "params.world_size"] if keep_params is False else list(keep_params)
-        )
-
-        runs_pdf = runs_pdf.select(_start_with_reduce("params.", keep_param_prefixes))
-    runs_pdf = runs_pdf.filter(pl.col("tags.stage").is_in(all_stages))
-
-    latest_run_by_exp = (
-        runs_pdf.sort(by="end_time", descending=True)
-        .group_by(["tags.run_id", "tags.stage"])
-        .agg(pl.col("*").last())
-        .sort(by="tags.run_id")
-    )
-    _logger.info("Number of latest runs: %d", len(runs_pdf))
-    return latest_run_by_exp
-
-
-@st.cache_data(ttl=ST_TTL_SEC, max_entries=10, persist="disk")
-def all_runs(
+def _fetch_runs(
+    filter_string: str,
     keep_metrics: bool | tuple[str, ...],
     keep_params: bool | tuple[str, ...],
-    latest_runs: bool = False,
 ) -> pl.DataFrame:
-    """Download all runs, filtering columns per batch to limit memory usage."""
-    _logger.info("Downloading all runs from MLFlow (streaming)")
-    month_ago_ts = int((datetime.datetime.now() - datetime.timedelta(days=30)).timestamp() * 1000)
-    filter_string = f"attributes.start_time >= {month_ago_ts} " if latest_runs else ""
-
+    """Fetch runs from MLFlow in batches, filtering columns early to limit memory usage."""
     # Determine which metric/param prefixes to keep
     if keep_metrics is True:
         keep_metrics_list = None  # keep all
@@ -174,10 +121,54 @@ def all_runs(
         _logger.info("No runs found")
         return pl.DataFrame()
 
-    runs_pdf = pl.concat(batches, how="diagonal")
-    _logger.info("Number of all runs after filtering: %d %d", len(runs_pdf), len(runs_pdf.columns))
-    _logger.info("Columns in all runs: %s", runs_pdf.columns)
-    return runs_pdf
+    result = pl.concat(batches, how="diagonal")
+    _logger.info("Fetched %d runs with %d columns", len(result), len(result.columns))
+    return result
+
+
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=20, persist="disk")
+def latest_runs(
+    keep_metrics: bool | tuple[str, ...] = True,
+    keep_params: bool | tuple[str, ...] = True,
+):
+    """
+    Get the latest runs for each WG run_id and stage.
+    Returns only specified metrics and params to reduce memory usage.
+    """
+    _logger.info("Downloading latest runs from MLFlow")
+    month_ago_ts = int((datetime.datetime.now() - datetime.timedelta(days=30)).timestamp() * 1000)
+    runs_pdf = _fetch_runs(
+        filter_string=f"attributes.start_time >= {month_ago_ts}",
+        keep_metrics=keep_metrics,
+        keep_params=keep_params,
+    )
+    runs_pdf = runs_pdf.filter(pl.col("tags.stage").is_in(all_stages))
+
+    latest_run_by_exp = (
+        runs_pdf.sort(by="end_time", descending=True)
+        .group_by(["tags.run_id", "tags.stage"])
+        .agg(pl.col("*").last())
+        .sort(by="tags.run_id")
+    )
+    _logger.info("Number of latest runs: %d", len(latest_run_by_exp))
+    return latest_run_by_exp
+
+
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=10, persist="disk")
+def all_runs(
+    keep_metrics: bool | tuple[str, ...],
+    keep_params: bool | tuple[str, ...],
+    latest_runs: bool = False,
+) -> pl.DataFrame:
+    """Download all runs, filtering columns per batch to limit memory usage."""
+    _logger.info("Downloading all runs from MLFlow")
+    month_ago_ts = int((datetime.datetime.now() - datetime.timedelta(days=30)).timestamp() * 1000)
+    filter_string = f"attributes.start_time >= {month_ago_ts} " if latest_runs else ""
+    return _fetch_runs(
+        filter_string=filter_string,
+        keep_metrics=keep_metrics,
+        keep_params=keep_params,
+    )
 
 
 def _start_with_reduce(remove: str, keep: list[str]) -> pl.Expr:
