@@ -42,7 +42,7 @@ def setup_mflow() -> MlflowClient:
     return setup_mlflow_utils(private_config=None)
 
 
-@st.cache_data(ttl=ST_TTL_SEC)
+@st.cache_data(ttl=ST_TTL_SEC, persist="disk")
 def get_experiment_id() -> str:
     client = setup_mflow()
     exp = client.get_experiment_by_name(MlFlowUpload.experiment_name)
@@ -50,7 +50,7 @@ def get_experiment_id() -> str:
     return exp.experiment_id
 
 
-@st.cache_data(ttl=ST_TTL_SEC, max_entries=20)
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=20, persist="disk")
 def latest_runs(
     keep_metrics: bool | tuple[str, ...] = True,
     keep_params: bool | tuple[str, ...] = True,
@@ -98,7 +98,7 @@ def latest_runs(
     return latest_run_by_exp
 
 
-@st.cache_data(ttl=ST_TTL_SEC, max_entries=10)
+@st.cache_data(ttl=ST_TTL_SEC, max_entries=10, persist="disk")
 def all_runs(
     keep_metrics: bool | tuple[str, ...],
     keep_params: bool | tuple[str, ...],
