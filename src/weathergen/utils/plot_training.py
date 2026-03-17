@@ -26,6 +26,7 @@ from weathergen.utils.train_logger import Metrics, TrainLogger
 _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
+MAX_FILENAME_LEN = 255
 
 
 ####################################################################################################
@@ -237,6 +238,9 @@ def plot_lr(
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
 
+    if len(rstr) + 6 > MAX_FILENAME_LEN:
+        rstr = rstr[:MAX_FILENAME_LEN - 6] 
+
     # save the plot
     plt_fname = plot_dir / f"{rstr}lr.png"
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
@@ -442,13 +446,18 @@ def plot_loss_per_stream(
             rstr = "".join([f"{r}_" for r in runs_ids])
 
             # save the plot
-            plt_fname = plot_dir / "{}{}fs_{}{}_{}.png".format(
+            fname = "{}{}fs_{}{}_{}.png".format(
                 rstr,
                 "".join([f"{m}_" for m in modes]),
                 "".join([f"{fs}_" for fs in forecast_steps]),
                 stream_name,
                 channel,
             )
+            if len(fname) + 4 > MAX_FILENAME_LEN:
+                fname = fname[:MAX_FILENAME_LEN - 4] + ".png"
+
+            plt_fname = plot_dir / fname
+
             _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
             plt.savefig(plt_fname)
             plt.close()
@@ -568,7 +577,13 @@ def plot_loss_per_run(
     )
 
     # save the plot
-    plt_fname = plot_dir / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
+    fname = "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
+
+    if len(fname) + 4 > MAX_FILENAME_LEN:
+        fname = fname[:MAX_FILENAME_LEN - 4] + ".png"  # keep extension
+
+    plt_fname = plot_dir / fname
+
     _logger.info(f"Saving loss plot for {run_id}-run to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
