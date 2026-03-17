@@ -26,10 +26,8 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
 from weathergen.common.io import StoreType
+from weathergen.common.paths import _REPO_ROOT, get_wg_private_path
 
-_REPO_ROOT = Path(
-    __file__
-).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
 _DATETIME_TYPE_NAME = "datetime"  # Names for custom resolvers used in Omegaconf
@@ -512,7 +510,7 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     """
     Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
     """
-    env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
+    env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
 
     if private_home is not None and private_home.is_file():
         _logger.info(f"Loading private config from {private_home}.")
