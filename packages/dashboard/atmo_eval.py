@@ -24,8 +24,11 @@ st.markdown("""
 
 The evaluation scores logged during the main model training runs.
 
+TODO: the evaluation logic has changed.
+
 """)
 
+st.stop()
 
 @st.cache_data(ttl=ST_TTL_SEC, max_entries=2)
 def get_runs_with_scores() -> pl.DataFrame:

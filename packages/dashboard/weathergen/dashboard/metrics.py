@@ -54,6 +54,7 @@ def get_experiment_id() -> str:
 def latest_runs(keep_metrics: bool | tuple[str, ...] = True, keep_params: bool | tuple[str, ...] = True, latest_runs: bool = False):
     """
     Get the latest runs for each WG run_id and stage.
+    Returns only specified metrics and params to reduce memory usage.
     """
     _logger.info("Downloading latest runs from MLFlow")
     # A month ago timestamp in milliseconds

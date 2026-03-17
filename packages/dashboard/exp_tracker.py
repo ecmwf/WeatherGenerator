@@ -26,7 +26,7 @@ lineage information.
 
 run_id = st.text_input(label="A run id, for example bl4butd8")
 
-all_runs_pdf = all_runs()
+all_runs_pdf = all_runs(keep_metrics=False, keep_params=False, latest_runs=True)
 
 # The current algorithm is brute-forcing the information search.
 
