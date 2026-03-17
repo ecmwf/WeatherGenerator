@@ -1,0 +1,39 @@
+# Plot config for iBOT finetuning runs (auto-generated)
+train:
+  plot:
+    00wrjn8k-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=1.49e-05 mask=0.28"
+    fqpz2zdm-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=1.08e-05 mask=0.38"
+    u38ubygb-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=5.56e-06 mask=0.35"
+    q5xv3vr7-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=4.32e-05 mask=0.12"
+    97nffyiy-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=1.33e-05 mask=0.19"
+    pq9hghut-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=5.32e-05 mask=0.82"
+    m7w6ap07-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=7.80e-06 mask=0.47"
+    0hclu8sy-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=3.84e-05 mask=0.15"
+    10wvhy1a-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=2.43e-05 mask=0.56"
+    dbe4l1u8-stage2:
+      slurm_id: 0
+      description: "JEPA new L2G engine frozen MTM lr=3.10e-05 mask=0.83"
+    i4e3vxp5:
+      slurm_id: 0
+      description: "IASI, 31 epochs trained forecast model"
+    bf9est8a:
+      slurm_id: 0
+      description: "IASI, 128 epochs trained mtm model"

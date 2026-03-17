@@ -12,6 +12,7 @@ import copy
 import logging
 import time
 
+from math import sqrt
 import numpy as np
 import torch
 import tqdm
@@ -774,7 +775,7 @@ class Trainer(TrainerBase):
         grad_norms = {"grad_norm.total": self.last_grad_norm}
         for name, param in self.model.named_parameters():
             if param.grad is not None:
-                grad_norms["grad_norm." + name] = self._get_tensor_item(param.grad.norm())
+                grad_norms["grad_norm." + name] = self._get_tensor_item(param.grad.norm()/ sqrt(param.numel()))
 
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)
