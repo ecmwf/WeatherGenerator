@@ -163,47 +163,17 @@ data_loading :
   rng_seed: ???
 
 
-# config for training
 training_config:
 
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
-
-  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
-  # Detects representation collapse via various metrics
-  # For forecasting, supports sequences of latents with per-step and aggregate metrics
-  collapse_monitoring:
-    enabled: true
-    compute_frequency: 100  # batches between metric computations
-    log_frequency: 100      # batches between metric logging
-    metrics:
-      effective_rank:
-        enabled: true
-        tensor_source: "both"  # "student", "teacher", or "both"
-        sample_size: 2048      # max samples for SVD (0 = no sampling)
-        # For forecasting sequences: "all" (per-step + aggregates),
-        # "aggregate_only" (mean/min/max/degradation), "per_step_only"
-        forecast_aggregation: "all"
-      singular_values:
-        enabled: true
-        tensor_source: "both"
-        sample_size: 2048
-        forecast_aggregation: "all"
-      dimension_variance:
-        enabled: true
-        tensor_source: "both"  # cheap to compute, good early indicator
-        forecast_aggregation: "all"
-      prototype_entropy:
-        enabled: true  # only applies to DINO
-      ema_beta:
-        enabled: true
 
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
 
   start_date: 1979-01-01T00:00
-  end_date: 2022-12-31T00:00
+  end_date: 2022-08-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -211,7 +181,7 @@ training_config:
   window_offset_prediction : 0
   
   learning_rate_scheduling :
-    lr_start: 1e-6
+    lr_start: 5e-7
     lr_max: 5e-5
     lr_final_decay: 1e-6
     lr_final: 0.0
@@ -224,7 +194,7 @@ training_config:
 
   optimizer:
     grad_clip: 1.0
-    weight_decay: 0.1
+    weight_decay: 0.02
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.975
@@ -238,44 +208,39 @@ training_config:
         weight: 1.0,
         loss_fcts : {
           "JEPA": {
-            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
-            "dropout_rate": 0.1,
+            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": mlp,
+            "dropout_rate": 0.2, "num_layers": 2, "hidden_factor":2, "with_residual":True,
             target_source_correspondence: {0 : {0 : "subset"} },
         },
         },
-        target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 1e-1,
-            model_param_overrides : { 
-              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
-            },
-          }
+        target_and_aux_calc: { "FrozenTeacher" : 
+            {teacher_run_id: "p43hxwic",      # run ID of the pre-trained model
+            teacher_mini_epoch: -1            # -1 = latest checkpoint
+          },
         }
       }
   }
-  
-  model_input: {
-    "random_easy" : {
-      # masking strategy: "random", "forecast"
-      masking_strategy: "random",
-      num_samples: 1,
-      num_steps_input: 1,
-      masking_strategy_config : { 
-        diffusion_rn : True, 
-        rate : 0.6,
-        rate_sampling: False
-      },
-    },
-  }
 
+  model_input: {                                                                     
+    "spectral_source" : { 
+     masking_strategy: "spectral", 
+     num_samples: 1, 
+     num_steps_input: 1,
+     masking_strategy_config : {
+     lmax: 128,           # max multipole (default: 2*nside)
+     max_num_bands: 1,    # number of frequency bands to remove
+     max_log_fraction: 0.10,  # budget as fraction of log-range
+     min_log_fraction: 0.01,  # minimum band width
+     },
+     },
+  } 
+  
   target_input: {
-    "random_easy_target" : {
-      masking_strategy: "healpix",
-      num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+    "full_target" : {
+    masking_strategy: "forecast",  # all cells kept, unmodified data
+    num_samples: 1,
     },
-  }
+  } 
 
   forecast :
     time_step: 00:00:00

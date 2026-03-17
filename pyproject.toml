@@ -16,6 +16,7 @@ dependencies = [
  'pandas~=2.2',
  'tqdm',
  'matplotlib',
+ 'healpy',
  'packaging',
  'wheel',
  'psutil',

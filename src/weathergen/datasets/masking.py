@@ -9,6 +9,7 @@ import torch
 from numpy.typing import NDArray
 
 from weathergen.datasets.batch import SampleMetaData
+from weathergen.datasets.spectral_masking import generate_spectral_mask_bands
 from weathergen.train.utils import Stage
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
@@ -574,6 +575,20 @@ class Masker:
                 ).reshape(-1)
                 mask = np.zeros(num_cells, dtype=bool)
                 mask[child_indices] = True
+
+        elif strategy == "spectral":
+            mask = np.ones(num_cells, dtype=np.bool_)
+            nside = 2**self.healpix_level_data
+            lmax = masking_strategy_config.get("lmax", 2 * nside)
+            bands = generate_spectral_mask_bands(
+                lmax=lmax,
+                max_num_bands=masking_strategy_config.get("max_num_bands", 1),
+                max_log_fraction=masking_strategy_config.get("max_log_fraction", 0.10),
+                min_log_fraction=masking_strategy_config.get("min_log_fraction", 0.01),
+                rng=np.random.default_rng(self.rng.integers(0, 2**32)),
+            )
+            masking_params["spectral_bands"] = bands
+            masking_params["spectral_lmax"] = lmax
 
         # Spatial healpix based cropping, select contiguous region
         elif strategy == "cropping_healpix":

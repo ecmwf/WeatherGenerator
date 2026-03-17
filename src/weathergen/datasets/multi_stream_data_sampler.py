@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
 import logging
 import pathlib
 
@@ -25,6 +26,7 @@ from weathergen.datasets.data_reader_base import (
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
+from weathergen.datasets.spectral_masking import apply_spectral_masking_binned
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
@@ -74,6 +76,33 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
         rdatas += [rdata]
 
     return IOReaderData.combine(rdatas)
+
+
+def _apply_spectral_to_rdata_list(
+    rdata_list: list[IOReaderData],
+    bands: list[tuple[int, int]],
+    lmax: int,
+) -> list[IOReaderData]:
+    """Apply spectral masking to each IOReaderData in the list.
+
+    Bins data onto the HEALPix grid closest in size to the input, applies
+    SHT-based band removal, and scatters the removed content back.
+
+    Returns new list with copied data arrays (does not modify originals).
+    """
+    result = []
+    for rdata in rdata_list:
+        if rdata.is_spoof or rdata.is_empty():
+            result.append(rdata)
+            continue
+        # apply_spectral_masking_binned works on numpy; convert back to match input type
+        masked_np = apply_spectral_masking_binned(rdata.data, rdata.coords, lmax, bands)
+        if isinstance(rdata.data, torch.Tensor):
+            masked_data = torch.from_numpy(masked_np)
+        else:
+            masked_data = masked_np
+        result.append(dataclasses.replace(rdata, data=masked_data))
+    return result
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
@@ -672,13 +701,25 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
                 tidx = source_to_target[sidx].item()
+                source_params = source_masks.metadata[sidx].params
+
+                # Apply spectral masking to input data if configured
+                if "spectral_bands" in source_params:
+                    input_data_for_source = _apply_spectral_to_rdata_list(
+                        input_data,
+                        source_params["spectral_bands"],
+                        source_params["spectral_lmax"],
+                    )
+                else:
+                    input_data_for_source = input_data
+
                 sdata = self._build_stream_data(
                     source_select,
                     idx,
                     num_forecast_steps,
                     stream_info,
-                    source_masks.metadata[sidx].params.get("num_steps_input", 1),
-                    input_data,
+                    source_params.get("num_steps_input", 1),
+                    input_data_for_source,
                     output_data,
                     input_tokens,
                     output_tokens,
@@ -751,8 +792,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 batch = self._get_batch(idx, num_forecast_steps)
 
+                # ensure the batch is valid, i.e. not completely empty and no NaN values
+                # student-teacher has no classical targets so target empty/NaN
+                # checks are only meaningful in masking mode
+                mode = self.mode_cfg.get("training_mode")
+                check_targets = "masking" in mode
+                not_valid = batch.source_samples.sources_empty()
+                not_valid = not_valid or batch.source_samples.sources_nan()
+                if check_targets:
+                    not_valid = not_valid or batch.target_samples.targets_empty()
+                    not_valid = not_valid or batch.target_samples.targets_nan()
+
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if batch.is_empty() or batch.is_nan():
+                if not_valid:
                     logger.warning(f"Skipping empty batch with idx={idx}.")
                 else:
                     break

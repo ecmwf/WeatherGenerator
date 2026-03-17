@@ -230,7 +230,11 @@ def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, tea
         .expand_as(student_masks)  # [student_masks_flat]
     )
 
-    mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+    mask = (
+        torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+        if not student_masks.all()
+        else student_masks
+    )
     if mask.sum() == 0:
         logger.warning("jepa_loss mask is all true, likely incorrect masking config.")
 
