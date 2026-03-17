@@ -220,8 +220,10 @@ class LossPhysical(LossModuleBase):
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
-            if len(targets.physical) - len(targets.output_idxs) > 0:
-                output_step_loss_weights.insert(0, None)
+            # Pad with Nones for forecast offsets so indices align with targets.physical
+            output_offset = len(targets.physical) - len(targets.output_idxs)
+            if output_offset > 0:
+                output_step_loss_weights = [None] * output_offset + list(output_step_loss_weights)
 
             # loss_stream: loss for given stream
             loss_stream = torch.tensor(0.0, device=self.device, requires_grad=True)
