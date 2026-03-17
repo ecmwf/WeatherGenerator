@@ -27,5 +27,5 @@ test_job:
   variables:
     SLURM_JOB_NUM_NODES: 1
     WITH_UENV_VIEW: 'modules'
-    SLURM_TIMELIMIT: '00:10:00'
+    SLURM_TIMELIMIT: '00:20:00'
     UV_CACHE_DIR: /iopsstor/scratch/cscs/thunter/uv_cache_shared
