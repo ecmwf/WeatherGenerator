@@ -20,12 +20,13 @@ import numpy as np
 import yaml
 
 import weathergen.common.config as config
-from weathergen.train.utils import TRAIN, VAL
+from weathergen.train.utils import TRAIN
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
+MAX_FILENAME_LEN = 255
 
 
 ####################################################################################################
@@ -237,6 +238,9 @@ def plot_lr(
     plt.tight_layout()
     rstr = "".join([f"{r}_" for r in runs_ids])
 
+    if len(rstr) + 6 > MAX_FILENAME_LEN:
+        rstr = rstr[: MAX_FILENAME_LEN - 6]
+
     # save the plot
     plt_fname = plot_dir / f"{rstr}lr.png"
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
@@ -252,14 +256,9 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
 
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
-        if stage == TRAIN:
-            x_vals = np.array(run_data.train["num_samples"])
-            y_vals = np.array(run_data.train["loss_avg_mean"])
-        elif stage == VAL:
-            x_vals = np.array(run_data.val["num_samples"])
-            y_vals = np.array(run_data.val["loss_avg_mean"])
-        else:
-            assert False
+        run_data_stage = run_data.train if stage == TRAIN else run_data.val
+        x_vals = np.array(run_data_stage["num_samples"])
+        y_vals = np.array(run_data_stage["loss_avg_mean"])
 
         mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
 
@@ -302,6 +301,7 @@ def plot_loss_per_stream(
     plot_dir: Path,
     errs: list[str],
     channels: list[str],
+    forecast_steps: list[int],
     x_axis: str = "samples",
     x_type: str = "step",
     x_lim: list[float] | None = None,
@@ -340,16 +340,16 @@ def plot_loss_per_stream(
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "m", "y"]
 
-    for channel in channels:
-        for stream_name in stream_names:
-            _fig = plt.figure(figsize=(10, 7), dpi=300)
+    for err in errs:
+        for channel in channels:
+            for stream_name in stream_names:
+                _fig = plt.figure(figsize=(10, 7), dpi=300)
 
-            legend_strs = []
-            min_val = np.finfo(np.float32).max
-            max_val = 0.0
-            for mode in modes:
-                legend_strs += [[]]
-                for err in errs:
+                legend_strs = []
+                min_val = np.finfo(np.float32).max
+                max_val = 0.0
+                for mode in modes:
+                    legend_strs += [[]]
                     linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
                     linestyle = ":" if "stddev" in err else linestyle
                     alpha = 1.0
@@ -370,12 +370,21 @@ def plot_loss_per_stream(
                             if len(col_split) < 4:
                                 if stream_name in col:
                                     data_cols += [col]
-                            elif (
-                                col_split[1].lower() == stream_name.lower()
-                                and col_split[2].lower() == err.lower()
-                                and col_split[3] == channel
-                            ):
-                                data_cols += [col]
+                            elif len(col_split) == 4:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] == channel
+                                ):
+                                    data_cols += [col]
+                            elif len(col_split) == 5:
+                                if (
+                                    col_split[1].lower() == stream_name.lower()
+                                    and col_split[2].lower() == err.lower()
+                                    and col_split[3] == channel
+                                    and int(col_split[4]) in forecast_steps
+                                ):
+                                    data_cols += [col]
 
                         for col in data_cols:
                             x_vals = np.array(run_data_mode[x_col])
@@ -404,45 +413,62 @@ def plot_loss_per_stream(
                                 min_val = np.min([min_val, np.nanmin(y_data)])
                                 max_val = np.max([max_val, np.nanmax(y_data)])
 
-            # TODO: ensure that legend is plotted with full opacity
-            legend_str = legend_strs[0]
-            if len(legend_str) < 1:
+                # TODO: ensure that legend is plotted with full opacity
+                legend_str = legend_strs[0]
+                if len(legend_str) < 1:
+                    plt.close()
+                    _logger.warning(f"Could not find any data for stream: {stream_name}")
+                    continue
+
+                # no valid data found
+                if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
+                    continue
+
+                legend = plt.legend(
+                    legend_str, loc="upper right" if not x_scale_log else "lower left"
+                )
+                for line in legend.get_lines():
+                    line.set(alpha=1.0)
+                plt.grid(True, which="both", ls="-")
+
+                if y_lim is not None:
+                    plt.ylim(y_lim)
+                else:
+                    plt.ylim([0.95 * min_val, 1.025 * max_val])
+                if x_lim is not None:
+                    plt.xlim(x_lim)
+
+                plt.yscale("log")
+                if x_scale_log:
+                    plt.xscale("log")
+                plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
+                plt.ylabel(err)
+                plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
+                plt.tight_layout()
+
+                # construct file name
+
+                run_ids_str = "".join([f"{r}_" for r in runs_ids])
+                fname_tail = "{}fs_{}{}_{}_{}.png".format(
+                    "".join([f"{m}_" for m in modes]),
+                    "".join([f"{fs}_" for fs in forecast_steps]),
+                    err,
+                    stream_name,
+                    channel,
+                )
+                # ensure file name is not too long
+                if len(run_ids_str) + len(fname_tail) > MAX_FILENAME_LEN:
+                    # cut off run_ids_str so that the tail with err, channel etc is preserved
+                    # required to retain unique names
+                    run_ids_str = run_ids_str[: -(len(fname_tail) + 1)]
+                fname = run_ids_str + fname_tail
+
+                # save the plot
+                plt_fname = plot_dir / fname
+
+                _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
+                plt.savefig(plt_fname)
                 plt.close()
-                _logger.warning(f"Could not find any data for stream: {stream_name}")
-                continue
-
-            # no valid data found
-            if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
-                continue
-
-            legend = plt.legend(legend_str, loc="upper right" if not x_scale_log else "lower left")
-            for line in legend.get_lines():
-                line.set(alpha=1.0)
-            plt.grid(True, which="both", ls="-")
-
-            if y_lim is not None:
-                plt.ylim(y_lim)
-            else:
-                plt.ylim([0.95 * min_val, 1.025 * max_val])
-            if x_lim is not None:
-                plt.xlim(x_lim)
-
-            plt.yscale("log")
-            if x_scale_log:
-                plt.xscale("log")
-            plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
-            plt.ylabel("loss")
-            plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
-            plt.tight_layout()
-            rstr = "".join([f"{r}_" for r in runs_ids])
-
-            # save the plot
-            plt_fname = plot_dir / "{}{}{}_{}.png".format(
-                rstr, "".join([f"{m}_" for m in modes]), stream_name, channel
-            )
-            _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
-            plt.savefig(plt_fname)
-            plt.close()
 
 
 ####################################################################################################
@@ -554,12 +580,20 @@ def plot_loss_per_run(
     plt.ylabel("loss")
     plt.xlabel("samples")
     plt.tight_layout()
+
     sstr = "".join(
         [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
     )
 
     # save the plot
-    plt_fname = plot_dir / "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
+    fname_base = "{}_{}".format(run_id, "".join([f"{m}_" for m in modes]))
+
+    if len(fname_base) + len(sstr) + 4 > MAX_FILENAME_LEN:
+        sstr = sstr[: -(len(fname_base) + 4)]
+    fname = fname_base + sstr + ".png"
+
+    plt_fname = plot_dir / fname
+
     _logger.info(f"Saving loss plot for {run_id}-run to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -624,6 +658,14 @@ def plot_train(args=None):
         dest="channels",
         default=["avg"],
         type=str,
+        nargs="+",
+        help="List of channels to plot",
+    )
+    parser.add_argument(
+        "--forecast-steps",
+        dest="forecast_steps",
+        default=[0, 1],
+        type=int,
         nargs="+",
         help="List of channels to plot",
     )
@@ -756,6 +798,7 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
@@ -770,6 +813,7 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
@@ -784,6 +828,7 @@ def plot_train(args=None):
         streams,
         errs=args.metrics,
         channels=args.channels,
+        forecast_steps=args.forecast_steps,
         x_type=args.x_type,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
