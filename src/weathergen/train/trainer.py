@@ -10,6 +10,7 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
+import platform
 import time
 from contextlib import nullcontext
 from functools import partial
@@ -850,13 +851,22 @@ class ProfilingTrainer(Trainer):
 
         handler = partial(trace_handler, cf)
 
+        # Detect ARM architecture (e.g., NVIDIA GH200 uses aarch64 CPU)
+        # PyTorch's memory timeline profiler (export_memory_timeline) internally requires
+        # with_stack=True, which relies on C++ stack unwinding (record_context_cpp).
+        # This is only supported on Linux x86_64 — on aarch64 it silently fails during
+        # profiler teardown, causing a "Python replay stack is empty" RuntimeError.
+        # Therefore, on aarch64 we disable with_stack and skip the memory timeline export.
+        # CUDA kernel profiling, FLOPS, shapes, and chrome traces are unaffected.
+        on_aarch64 = platform.machine() == "aarch64"
+
         # Determine profiler setup
         if cf.local_rank == 0:
             prof = profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=True,
                 profile_memory=True,
-                with_stack=True,
+                with_stack=not on_aarch64,
                 with_modules=True,
                 with_flops=True,
                 schedule=torch.profiler.schedule(
@@ -923,9 +933,9 @@ class ProfilingTrainer(Trainer):
                 )
 
                 if self.log_grad_norms:
-                    if bidx % self.train_log_freq.terminal == 0:
+                    if bidx % self.train_logging.terminal == 0:
                         self.last_grad_norm = self._get_tensor_item(total_norm)
-                    if bidx % self.train_log_freq.metrics == 0:
+                    if bidx % self.train_logging.metrics == 0:
                         self._log_instant_grad_norms(TRAIN)
 
                 self.grad_scaler.step(self.optimizer)
@@ -951,10 +961,10 @@ class ProfilingTrainer(Trainer):
                     )
 
                 self._log_terminal(bidx, mini_epoch, TRAIN)
-                if bidx % self.train_log_freq.metrics == 0:
+                if bidx % self.train_logging.metrics == 0:
                     self._log(TRAIN)
 
-                if bidx % self.train_log_freq.checkpoint == 0 and bidx > 0:
+                if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
                     self.save_model(-1)
 
                 self.cf.general.istep += 1

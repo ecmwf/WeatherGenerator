@@ -10,6 +10,7 @@
 import copy
 import json
 import logging
+import platform
 from datetime import datetime
 from typing import Literal
 
@@ -247,7 +248,11 @@ def trace_handler(cfg: dict | OmegaConf, prof: torch.profiler.profile) -> None:
     prof.export_chrome_trace(f"{file_prefix}.json.gz")
 
     # Construct the memory timeline file.
-    prof.export_memory_timeline(f"{file_prefix}.html", device="cuda:0")
+    on_aarch64 = platform.machine() == "aarch64"
+    if not on_aarch64:
+        prof.export_memory_timeline(f"{file_prefix}.html", device="cuda:0")
+    else:
+        logger.info("[profiler] Memory distribution timeline skipped on aarch64")
 
 
 def wrap_module_forward_with_profiling(model, prefix=""):
