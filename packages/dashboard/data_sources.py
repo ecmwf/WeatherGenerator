@@ -6,7 +6,7 @@ import polars.selectors as ps
 import streamlit as st
 from polars import col as C
 
-from weathergen.dashboard.metrics import all_runs, latest_runs, setup_mflow
+from weathergen.dashboard.metrics import all_runs, setup_mflow
 
 _logger = logging.getLogger(__name__)
 
@@ -15,11 +15,18 @@ _logger.info("Setting up MLFlow")
 setup_mflow()
 
 
-st.markdown("# Data sources usage")
+st.markdown("""# Data sources usage
 
+            
+Disabled for now, the logging of sources has changed.
+""")
 
-runs = latest_runs()
-all_runs_pdf = all_runs(keep_metrics=True, keep_params=False)
+st.stop()
+
+# TODO: this logic is broken right now, because it is too expensive to run.
+# It should be based on configuration rather than on metrics, and should be cached more aggressively.
+
+all_runs_pdf = all_runs(keep_metrics=False, keep_params=True, latest_runs=True)
 
 
 # The name of all the streams metrics

@@ -7,7 +7,7 @@ import streamlit as st
 from polars import col as C
 
 from weathergen.dashboard.colors import clusters_color_map, unknown_color
-from weathergen.dashboard.metrics import all_runs, latest_runs, setup_mflow
+from weathergen.dashboard.metrics import all_runs, latest_runs, metric_counts, setup_mflow
 
 _logger = logging.getLogger("eng_overview")
 
@@ -254,35 +254,18 @@ st.plotly_chart(
         color_discrete_map=_present_colors,
     )
 )
-runs = latest_runs(keep_metrics=True, keep_params=False)
-
-all_metrics = sorted(runs.select(ps.starts_with("metrics.")).columns)
+metrics_df = metric_counts()
 
 st.markdown(
     f"""
-            
+
 **List of MLFlow metrics by number of runs**
 
 There is a hard limit of 1000 metrics per run in MLFlow.
 
 
-Total number of metrics tracked: {len(all_metrics)}. 
+Total number of metrics tracked: {len(metrics_df)}.
 """
 )
 
-st.dataframe(
-    # The final dataframe is of the form:
-    # - metric: str (the name of the metric)
-    # - example_run_id: str (a run id associated with this metric)
-    # - count: int
-    # Unpivot take a list of columns and converts them to values
-    runs.unpivot(ps.starts_with("metrics."), index="tags.run_id", variable_name="metric")
-    .drop_nulls()
-    .group_by("metric")
-    .agg(
-        pl.col("tags.run_id").first().alias("example_run_id"),
-        pl.col("tags.run_id").count().alias("count"),
-    )
-    .sort(by="count", descending=True)
-    .to_pandas()
-)
+st.dataframe(metrics_df.to_pandas())
