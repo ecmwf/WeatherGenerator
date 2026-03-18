@@ -200,7 +200,6 @@ def run_train(args):
     else:
         trainer = Trainer(cf.train_logging)
 
-
     try:
         trainer.run(cf, devices)
     except Exception:
