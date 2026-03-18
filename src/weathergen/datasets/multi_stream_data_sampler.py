@@ -96,15 +96,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
-        self._init_forecast_cfg(mode_cfg)
+        self.forecast_cfg = mode_cfg.get("forecast", {})
+        self._init_forecast_cfg()
+
         # initialise fsm, but can change for future mini_epochs
         self.fsm = self.list_num_forecast_steps[0]
         self.batch_size = get_batch_size_from_config(mode_cfg)
-
-        # check samples per mini epoch
-        self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
-        self.check_samples()
-
         self.shuffle = mode_cfg.shuffle
         
         self.len_timedelta = mode_cfg.time_window_len
@@ -121,35 +118,33 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             logger.info(self.time_window_handler)
         self.index_range = tw.get_index_range()
 
+        # check samples per mini epoch
+        self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
+        self.check_samples()
         self.calc_baseperms()
         self._init_stream_datasets(cf)
-        self._init_sampler_length()
 
         # RNG seed setup
         rs = cf.data_loading.rng_seed
         nw = cf.data_loading.num_workers
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
-        self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level, stage))
-
         self.rng = None
         self.perms = None
         self.perms_num_forecast_steps = None
 
-    def _init_forecast_cfg(self, mode_cfg):
-        forecast_cfg = mode_cfg.get("forecast", {})
-        self.forecast_cfg = forecast_cfg
+    def _init_forecast_cfg(self):
 
-        if len(forecast_cfg) == 0:
+        if len(self.forecast_cfg) == 0:
             self.list_num_forecast_steps = np.array([0], dtype=np.int32)
             self.output_offset = 0
             self.forecast_policy = None
             self.time_step = np.timedelta64(0, "ms")
             return
 
-        self.output_offset = forecast_cfg.get("offset", 0)
-        self.time_step = forecast_cfg.get("time_step", np.timedelta64(0, "ms"))
-        self.forecast_policy = forecast_cfg.get("policy", None)
+        self.output_offset = self.forecast_cfg.get("offset", 0)
+        self.time_step = self.forecast_cfg.get("time_step", np.timedelta64(0, "ms"))
+        self.forecast_policy = self.forecast_cfg.get("policy", None)
 
         if isinstance(self.forecast_cfg.num_steps, int):
             steps = [self.forecast_cfg.num_steps]
@@ -172,14 +167,23 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if self.samples_per_mini_epoch >= available_samples:
                 logger.warning(
                     f"""There are only {available_samples} available_samples,
-                    samples_per_mini_epoch reduced to avoid repeating data.
-                    Set repeat_data_in_mini_epoch to True if preferred."""
+samples_per_mini_epoch reduced to {available_samples} to avoid repeating data.
+Set repeat_data_in_mini_epoch to True if this is undesired."""
                 )
                 self.samples_per_mini_epoch = available_samples - 1
             else:
                 logger.info("Sufficient available samples in the time range specified")
         else:
             logger.info("Samples will be repeated within the time range")
+
+        #streamlined calculation of length
+        self.len = self.samples_per_mini_epoch
+        # adjust len to split loading across all workers and ensure it is multiple of batch_size
+        len_chunk = ((self.len // self.world_size) // self.batch_size) * self.batch_size
+        self.len = min(self.len, len_chunk)
+        n_duplicates = self.len - available_samples
+        if not self.repeat_data:
+            assert n_duplicates <= 0
 
     def calc_baseperms(self):
         """This calculates the base permutation array and
@@ -252,25 +256,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 )
 
                 self.streams_datasets[stream_info["name"]] += [ds]
-
-    def set_sampler_length(self):
-        """Compute static sampler length (self.len)."""
-
-        perms_len = int(self.index_range.end - self.index_range.start)
-        forecast_len = (self.time_step * (self.fsm + 1)) // self.step_timedelta
-        perms_len = perms_len - (forecast_len + self.output_offset)
-
-        self.len = self.samples_per_mini_epoch
-        # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((self.len // self.world_size) // self.batch_size) * self.batch_size
-        self.len = min(self.len, len_chunk)
-
-        n_duplicates = self.len - perms_len
-        if not self.repeat_data_in_mini_epoch:
-            assert n_duplicates <= 0, (
-                f"Length of sampler {self.len} cannot be larger than number of available samples"
-                f"{perms_len} if repeat_data_in_mini_epoch is False."
-            )
 
     def reset(self):
         """Reset RNG, shuffle perms, compute forecast steps."""
