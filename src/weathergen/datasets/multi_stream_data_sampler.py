@@ -95,14 +95,31 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells = 12 * 4**self.healpix_level
 
         self._init_forecast_cfg(mode_cfg)
-        # initialise fsm, can change for future mini_epochs
+        # initialise fsm, but can change for future mini_epochs
         self.fsm = self.list_num_forecast_steps[0]
         self.batch_size = get_batch_size_from_config(mode_cfg)
+
+        # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
+        self.check_samples()
+
         self.shuffle = mode_cfg.shuffle
+        
         self.len_timedelta = mode_cfg.time_window_len
         self.step_timedelta = mode_cfg.time_window_step
-        self.set_time_window()
+        tw = TimeWindowHandler(
+            self.mode_cfg.start_date,
+            self.mode_cfg.end_date,
+            self.len_timedelta,
+            self.step_timedelta,
+        )
+
+        self.time_window_handler = tw
+        if is_root():
+            logger.info(self.time_window_handler)
+        self.index_range = tw.get_index_range()
+
+        self.calc_baseperms()
         self._init_stream_datasets(cf)
         self._init_sampler_length()
 
@@ -139,55 +156,35 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
 
-    def set_time_window(self):
-        """Compute time window and permutation base array (perms).
+    def check_samples(self):
+        """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
         forecast_win = self.time_step * (self.fsm + self.output_offset)  # in time units
-        # tw_length = max(forecast_win, self.len_timedelta)
-        ## trying to ensure time window is large enough to accomodate forecast steps
-        ## why does this break the code???
-        tw_length = self.len_timedelta
-
         available_samples = (
             self.mode_cfg.end_date - self.mode_cfg.start_date - forecast_win
         ) // self.step_timedelta
 
-        # choose correct time window
+        # choose correct num samples
         if not self.repeat_data and self.samples_per_mini_epoch:
             if self.samples_per_mini_epoch >= available_samples:
-                samples_diff = self.samples_per_mini_epoch - available_samples + 1
-                new_end_date = self.mode_cfg.end_date + samples_diff * self.step_timedelta
                 logger.warning(
-                    f"Using adjusted end date {new_end_date} instead of {self.mode_cfg.end_date} \
-                to avoid repeating data. Set repeat_data_in_mini_epoch to True if preferred."
+                    f"""There are only {available_samples} available_samples,
+                    samples_per_mini_epoch reduced to avoid repeating data.
+                    Set repeat_data_in_mini_epoch to True if preferred."""
                 )
-                end_date = new_end_date
+                self.samples_per_mini_epoch = available_samples - 1
             else:
                 logger.info("Sufficient available samples in the time range specified")
-                end_date = self.mode_cfg.end_date
         else:
             logger.info("Samples will be repeated within the time range")
-            end_date = self.mode_cfg.end_date
 
-        tw = TimeWindowHandler(
-            self.mode_cfg.start_date,
-            end_date,
-            tw_length,
-            self.step_timedelta,
-        )
-
-        self.time_window_handler = tw
-        if is_root():
-            logger.info(self.time_window_handler)
-
-        # compute permutation range
-        index_range = tw.get_index_range()
-        perms_len = int(index_range.end - index_range.start)
+    def calc_baseperms(self):
+        """This calculates the base permutation array and
+          depends on fsm so must be repeated for __init__ and reset"""
+        perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (self.fsm + self.output_offset) * (self.time_step // self.step_timedelta)
-
         self.base_perms = np.arange(perms_len)
-        self.index_range = index_range
 
     def _init_stream_datasets(self, cf):
         """Load dataset readers for all streams from config."""
@@ -254,41 +251,24 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 self.streams_datasets[stream_info["name"]] += [ds]
 
-    def _init_sampler_length(self):
+    def set_sampler_length(self):
         """Compute static sampler length (self.len)."""
 
         perms_len = int(self.index_range.end - self.index_range.start)
         forecast_len = (self.time_step * (self.fsm + 1)) // self.step_timedelta
         perms_len = perms_len - (forecast_len + self.output_offset)
 
-        # length of dataset; check the repeat data flag and adjust len accordingly
-        ## TO BE REMOVED AFTER TESTING
-
-        self.len = int(self.index_range.end - self.index_range.start)
-        if not self.repeat_data:
-            if self.samples_per_mini_epoch:
-                if self.samples_per_mini_epoch <= self.len:
-                    self.len = self.samples_per_mini_epoch
-                else:
-                    msg = (
-                        f"WARNING: Adjusted length of data sampler to {self.len} "
-                        f"(<samples_per_mini_epoch={self.samples_per_mini_epoch}) "
-                        "due to insufficient number of data samples. "
-                        "Enable repeat_data_in_mini_epoch to instead duplicate samples "
-                        "to fill samples_per_mini_epoch."
-                    )
-                    logger.warning(msg)
-        else:
-            self.len = self.samples_per_mini_epoch
+        self.len = self.samples_per_mini_epoch
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // self.world_size) // self.batch_size) * self.batch_size
         self.len = min(self.len, len_chunk)
 
         n_duplicates = self.len - perms_len
-        assert n_duplicates <= 0, (
-            f"Length of sampler {self.len} cannot be larger than number of available samples"
-            f"{perms_len} if repeat_data_in_mini_epoch is False."
-        )
+        if not self.repeat_data_in_mini_epoch:
+            assert n_duplicates <= 0, (
+                f"Length of sampler {self.len} cannot be larger than number of available samples"
+                f"{perms_len} if repeat_data_in_mini_epoch is False."
+            )
 
     def reset(self):
         """Reset RNG, shuffle perms, compute forecast steps."""
@@ -296,13 +276,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # reset fsm for each mini epoch
         fsm = self.reset_fsm()
         if fsm != self.fsm:
-            logger.info(f"Changing fixed number of forecast steps from {self.fsm} to {fsm}.")
+            logger.info(f"Number of forecast steps updated from {self.fsm} to {fsm}.")
             self.fsm = fsm
-            self.set_time_window()
+            self.check_samples()
+            self.calc_baseperms()
 
         perms = self.base_perms.copy()
 
-        # repeat if needed
+        # rng changed, repeat if needed
         if self.repeat_data and len(perms) < self.samples_per_mini_epoch:
             perms = np.tile(perms, self.samples_per_mini_epoch // len(perms))
             filler = self.rng.choice(
