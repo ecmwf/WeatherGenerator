@@ -21,7 +21,6 @@ st.markdown("# Engineering overview")
 
 
 all_runs_pdf = all_runs(keep_metrics=False, keep_params=False)
-runs = latest_runs(keep_metrics=True, keep_params=False)
 
 st.markdown("""The number of runs by month and by HPC.""")
 # TODO: this is here just the number of root run ids.
