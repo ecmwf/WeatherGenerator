@@ -611,7 +611,6 @@ class Trainer(TrainerBase):
                                 self.model_params,
                                 self.model,
                             )
-                        fstep_offset = 0
                         for chunk_idx, chunk_size in enumerate(chunks):
                             if self.ema_model is None:
                                 x = self.model(
@@ -664,13 +663,13 @@ class Trainer(TrainerBase):
                                     raise ValueError(
                                         "Missing latent_state for chunked forecast continuation."
                                     )
-                            fstep_offset = x.step_offset + chunk_size
 
-                    _ = self.loss_calculator_val.compute_loss(
-                        preds=preds_full if preds_full is not None else preds,
-                        targets_and_aux=targets_and_auxs,
-                        metadata=extract_batch_metadata(batch),
-                    )
+                    if preds_full is not None:
+                        _ = self.loss_calculator_val.compute_loss(
+                            preds=preds_full,
+                            targets_and_aux=targets_and_auxs,
+                            metadata=extract_batch_metadata(batch),
+                        )
 
                     pbar.update(batch_size)
 
