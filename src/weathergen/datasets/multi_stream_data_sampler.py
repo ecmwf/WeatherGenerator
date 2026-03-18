@@ -103,7 +103,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.fsm = self.list_num_forecast_steps[0]
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.shuffle = mode_cfg.shuffle
-        
+
         self.len_timedelta = mode_cfg.time_window_len
         self.step_timedelta = mode_cfg.time_window_step
         tw = TimeWindowHandler(
@@ -134,7 +134,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.perms_num_forecast_steps = None
 
     def _init_forecast_cfg(self):
-
         if len(self.forecast_cfg) == 0:
             self.list_num_forecast_steps = np.array([0], dtype=np.int32)
             self.output_offset = 0
@@ -176,7 +175,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."""
         else:
             logger.info("Samples will be repeated within the time range")
 
-        #streamlined calculation of length
+        # streamlined calculation of length
         self.len = self.samples_per_mini_epoch
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // self.world_size) // self.batch_size) * self.batch_size
@@ -187,7 +186,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."""
 
     def calc_baseperms(self):
         """This calculates the base permutation array and
-          depends on fsm so must be repeated for __init__ and reset"""
+        depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (self.fsm + self.output_offset) * (self.time_step // self.step_timedelta)
         self.base_perms = np.arange(perms_len)
