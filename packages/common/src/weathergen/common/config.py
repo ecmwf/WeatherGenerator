@@ -646,12 +646,12 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
 
 def get_path_run(config: Config) -> Path:
-    """Get the current runs results_path for storing run results and logs."""
+    """Get the path for storing profiling logs."""
     return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
 
 
 def get_path_profiler(config: Config) -> Path:
-    """Get the current runs results_path for storing run results and logs."""
+    """Get the path for storing profiling logs."""
     return _get_shared_wg_path() / "profiler_logs" / get_run_id_from_config(config)
 
 
