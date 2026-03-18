@@ -18,6 +18,7 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import BatchSamples, ModelBatch
@@ -457,7 +458,7 @@ class Model(torch.nn.Module):
                             with_residual=False,
                             dropout_rate=dropout_rate,
                             norm_eps=self.cf.mlp_norm_eps,
-                            stream_name=f"embed_target_coords_{stream_name}",
+                            name=f"embed_target_coords_{stream_name}",
                         )
                     else:
                         assert False
@@ -836,7 +837,7 @@ class Model(torch.nn.Module):
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = tc_embed(t_coords)
+            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
