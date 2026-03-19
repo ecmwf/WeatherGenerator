@@ -107,8 +107,8 @@ def calc_scores_per_stream(
     samples = available_data.samples
     channels = available_data.channels
     ensemble = available_data.ensemble
-    is_regular = reader.is_regular(stream)
-    group_by_coord = None if is_regular else "sample"
+    is_gridded_data = reader.is_gridded_data(stream)
+    group_by_coord = None if is_gridded_data else "sample"
 
     output_data = reader.get_data(
         stream,
@@ -116,11 +116,11 @@ def calc_scores_per_stream(
         samples=samples,
         channels=channels,
         ensemble=ensemble,
-        return_counts=True,
     )
+
     da_preds = output_data.prediction
     da_tars = output_data.target
-
+    fsteps = sorted(list(da_preds.keys()))
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
     for region in regions:
@@ -129,7 +129,7 @@ def calc_scores_per_stream(
 
         _logger.info(
             f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
-            f" and metrics {metrics}..."
+            f" and metrics {list(metrics.keys())}..."
         )
         metric_stream = xr.DataArray(
             np.full(
@@ -145,13 +145,21 @@ def calc_scores_per_stream(
             },
         )
 
-        lead_time_map = {}
+        if "lead_time" in da_preds[fsteps[0]].coords:
+            metric_stream = metric_stream.assign_coords(
+                lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
+            )
+
         # Store metric-specific attributes that get lost during concat
         # Key: (fstep, metric) -> attrs dict
         all_metric_attrs = {}
 
-        for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
-            if preds.ipoint.size == 0:
+        for (fstep, tars), (_, preds) in tqdm(
+            zip(da_tars.items(), da_preds.items(), strict=False),
+            total=len(da_tars),
+            desc=f"Computing scores for {reader.run_id} - stream {stream} and region {region}",
+        ):
+            if preds.sizes.get("ipoint") == 0:
                 _logger.warning(
                     f"No data for stream {stream} at fstep {fstep} in region {region}. Skipping."
                 )
@@ -216,7 +224,6 @@ def calc_scores_per_stream(
 
             combined_metrics = combined_metrics.assign_coords(metric=valid_metric_names)
             combined_metrics = combined_metrics.compute()
-
             for coord in ["channel", "sample", "ens"]:
                 combined_metrics = scalar_coord_to_dim(combined_metrics, coord)
 
@@ -237,54 +244,46 @@ def calc_scores_per_stream(
                 # Skip coordinates that are already dimensions (no need to restore)
                 if coord_name in combined_metrics.dims or coord_name in metric_stream.dims:
                     continue
-
-                # Only restore coordinates whose dimensions exist in metric_stream
-                # (e.g., skip coords with 'quantile' dim if metric_stream doesn't have it)
-                coord_dims = combined_metrics.coords[coord_name].dims
-                if not all(dim in metric_stream.dims for dim in coord_dims):
-                    _logger.debug(
-                        f"Skipping coordinate '{coord_name}' with incompatible "
-                        f"dimensions {coord_dims} (metric_stream has {metric_stream.dims})"
+                if coord_name == "lead_time":
+                    metric_stream.coords["lead_time"].loc[{"forecast_step": int(fstep)}] = (
+                        combined_metrics.coords["lead_time"]
+                        .values.astype("timedelta64[h]")
+                        .astype(int)
                     )
-                    continue
+                else:
+                    # Only restore coordinates whose dimensions exist in metric_stream
+                    # (e.g., skip coords with 'quantile' dim if metric_stream doesn't have it)
+                    coord_dims = combined_metrics.coords[coord_name].dims
+                    if not all(dim in metric_stream.dims for dim in coord_dims):
+                        _logger.debug(
+                            f"Skipping coordinate '{coord_name}' with incompatible "
+                            f"dimensions {coord_dims} (metric_stream has {metric_stream.dims})"
+                        )
+                        continue
 
-                # Initialize coordinate in metric_stream if it doesn't exist yet
-                if coord_name not in metric_stream.coords:
-                    coord_shape = tuple(len(metric_stream.coords[dim]) for dim in coord_dims)
-                    metric_stream = metric_stream.assign_coords(
-                        {
-                            coord_name: xr.DataArray(
-                                np.full(coord_shape, "", dtype=object),
-                                dims=coord_dims,
-                                coords={dim: metric_stream.coords[dim] for dim in coord_dims},
-                            )
-                        }
-                    )
+                    # Initialize coordinate in metric_stream if it doesn't exist yet
+                    if coord_name not in metric_stream.coords:
+                        coord_shape = tuple(len(metric_stream.coords[dim]) for dim in coord_dims)
+                        metric_stream = metric_stream.assign_coords(
+                            {
+                                coord_name: xr.DataArray(
+                                    np.full(coord_shape, "", dtype=object),
+                                    dims=coord_dims,
+                                    coords={dim: metric_stream.coords[dim] for dim in coord_dims},
+                                )
+                            }
+                        )
 
-                # Build indexers to select the right location in metric_stream
-                indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
-                metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[coord_name]
+                    # Build indexers to select the right location in metric_stream
+                    indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
+                    metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[
+                        coord_name
+                    ]
 
-            lead_time_map[fstep] = (
-                np.unique(combined_metrics.lead_time.values.astype("timedelta64[h]"))
-                if "lead_time" in combined_metrics.coords
-                else None
-            )
-
-            if is_regular and plot_score_maps:
+            if is_gridded_data and plot_score_maps:
                 _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
                 _plot_score_maps_per_stream(
                     reader, map_dir, stream, region, score_data, metrics, fstep
-                )
-
-        if all(lead_time_map[f] is not None for f in lead_time_map):
-            lead_time_values = np.array(
-                [lead_time_map[f].astype(int) for f in metric_stream.forecast_step.values]
-            ).squeeze()
-
-            if lead_time_values.shape == metric_stream.forecast_step.shape:
-                metric_stream = metric_stream.assign_coords(
-                    lead_time=("forecast_step", lead_time_values)
                 )
 
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
@@ -442,6 +441,10 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     if not isinstance(plot_maps, bool):
         raise TypeError("plot_maps must be a boolean.")
 
+    plot_bias = plot_settings.get("plot_bias", True)
+    if not isinstance(plot_bias, bool):
+        raise TypeError("plot_bias must be a boolean.")
+
     plot_target = plot_settings.get("plot_target", True)
     if not isinstance(plot_target, bool):
         raise TypeError("plot_target must be a boolean.")
@@ -476,6 +479,9 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     maps_config = common_ranges(
         da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
     )
+    bias_config = bias_ranges(
+        da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
+    )
 
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         plot_chs = list(np.atleast_1d(tars.channel.values))
@@ -493,6 +499,12 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
                     plotter.create_maps_per_sample(
                         tars, plot_chs, data_selection, "targets", maps_config
                     )
+
+                if plot_bias:
+                    plotter.create_maps_per_sample(
+                        preds - tars, plot_chs, data_selection, "bias", bias_config
+                    )
+
                 for ens in available_data.ensemble:
                     preds_ens = (
                         preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
@@ -520,7 +532,8 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
         if plot_target:
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
-
+        if plot_bias:
+            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "bias")
     return
 
 
@@ -653,7 +666,7 @@ def common_ranges(
     data_tars: list[dict],
     data_preds: list[dict],
     plot_chs: list[str],
-    maps_config: oc.dictconfig.DictConfig,
+    global_plotting_opts_stream: oc.dictconfig.DictConfig,
 ) -> oc.dictconfig.DictConfig:
     """
     Calculate common ranges per stream and variables.
@@ -666,14 +679,15 @@ def common_ranges(
         the (prediction) list of dictionaries with the forecasteps and respective xarray
     plot_chs:
         the variables to be plotted as given by the configuration file
-    maps_config:
-        the global plotting configuration
+    global_plotting_opts_stream:
+        the global plotting configuration for the stream as given by the configuration file, which
+        may or may not include predefined ranges for some variables.
     Returns
     -------
     maps_config :
-        the global plotting configuration with the ranges added and included for each variable (and
-        for each stream).
+        the global plotting configuration with the ranges added and included for each variable.
     """
+    maps_config = global_plotting_opts_stream.copy()
     for var in plot_chs:
         if var in maps_config:
             if not isinstance(maps_config[var].get("vmax"), (int | float)):
@@ -695,6 +709,44 @@ def common_ranges(
             maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
 
     return maps_config
+
+
+def bias_ranges(
+    data_tars: dict,
+    data_preds: dict,
+    plot_chs: list[str],
+    global_plotting_opts_stream: oc.dictconfig.DictConfig,
+) -> oc.dictconfig.DictConfig:
+    """
+    Calculate symmetric bias ranges (preds - tars) per variable.
+
+    Parameters
+    ----------
+    data_tars :
+        Dictionary mapping forecast steps to target xarray DataArrays.
+    data_preds :
+        Dictionary mapping forecast steps to prediction xarray DataArrays.
+    plot_chs :
+        List of variable (channel) names to compute bias ranges for.
+    global_plotting_opts_stream :
+        The global plotting configuration for the stream, used as the base config.
+
+    Returns
+    -------
+    oc.dictconfig.DictConfig
+        Per-variable symmetric ranges (vmin = -abs_max, vmax = abs_max) for bias.
+    """
+    bias_config = global_plotting_opts_stream.copy()
+    for var in plot_chs:
+        bias_vals = [
+            (p - t).sel(channel=var).values
+            for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
+        ]
+        abs_max = float(
+            max(abs(np.concatenate(bias_vals).max()), abs(np.concatenate(bias_vals).min()))
+        )
+        bias_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
+    return bias_config
 
 
 def calc_val(x: xr.DataArray, bound: str) -> list[float]:

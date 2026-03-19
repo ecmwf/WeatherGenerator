@@ -8,7 +8,7 @@
  
 # git clone / fork WeatherGenerator repo
 %>cd WeatherGenerator
-%>uv sync
+%>./scripts/actions.sh sync
  
  
 %>uv run train
