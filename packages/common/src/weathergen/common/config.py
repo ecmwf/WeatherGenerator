@@ -348,6 +348,35 @@ def _check_logging(config: Config) -> Config:
     return config
 
 
+def _check_profiling(config: Config) -> Config:
+    """
+    Apply fixes to profiling config. If profiling section is missing, inject defaults.
+    If profiling exists but some fields are missing, fill in defaults.
+    Always forces enabled=True since this is called from run_profile.
+    """
+    config = config.copy()
+
+    defaults = {
+        "enabled": True,
+        "wait_samples": 1,
+        "warmup_samples": 1,
+        "active_samples": 1,
+        "repeat": 1,
+    }
+
+    if config.get("profiling") is None:
+        # no profiling section at all — inject full defaults
+        config.profiling = OmegaConf.create(defaults)
+    else:
+        # profiling section exists — fill in any missing fields and force enabled=True
+        for key, value in defaults.items():
+            if config.profiling.get(key) is None:
+                config.profiling[key] = value
+        config.profiling.enabled = True  # always True when called from run_profile
+
+    return config
+
+
 def merge_configs(base_config: Config, update_config: Config):
     """
     Merge two configs using OmegaConf's default strategy
