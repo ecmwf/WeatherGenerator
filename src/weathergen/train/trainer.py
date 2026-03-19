@@ -156,14 +156,13 @@ class Trainer(TrainerBase):
         cf.world_size_original = self.world_size_original
 
         self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
-
         # create output directory
         if is_root():
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
             # create profiler trace directory
-            if cf.get("run_profiler", False):
+            if cf.get("profiling", {}).get("enabled", False):
                 config.get_path_profiler(cf).mkdir(exist_ok=True, parents=True)
 
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
@@ -389,7 +388,7 @@ class Trainer(TrainerBase):
 
             self.train(mini_epoch)
 
-            if cf.run_profiler:
+            if cf.profiling.enabled:
                 # Skip validation.
                 break
 
@@ -404,7 +403,7 @@ class Trainer(TrainerBase):
             self.save_model(mini_epoch)
 
         # Log the final model only when profiling is not enabled.
-        if not cf.run_profiler:
+        if not cf.profiling.enabled:
             self.save_model(self.training_cfg.num_mini_epochs)
 
     def validate_before_training(self):
@@ -845,9 +844,9 @@ class ProfilingTrainer(Trainer):
 
         wrap_module_forward_with_profiling(self.model, prefix="model")
 
-        wait, warmup, active, repeat = 2, 4, 2, 1
-
-        max_profile_steps = (wait + warmup + active) * repeat
+        max_profile_steps = (
+            cf.profiling.wait + cf.profiling.warmup + cf.profiling.active
+        ) * cf.profiling.repeat
 
         handler = partial(trace_handler, cf)
 
@@ -870,11 +869,12 @@ class ProfilingTrainer(Trainer):
                 with_modules=True,
                 with_flops=True,
                 schedule=torch.profiler.schedule(
-                    wait=wait, warmup=warmup, active=active, repeat=repeat
+                    wait=cf.profiling.wait,
+                    warmup=cf.profiling.warmup,
+                    active=cf.profiling.active,
+                    repeat=cf.profiling.repeat,
                 ),
                 on_trace_ready=handler,
-                # on_trace_ready=torch.profiler.tensorboard_trace_handler('./profiler_logs/'),
-                # schedule=torch.profiler.schedule(wait=2, warmup=4, active=2, repeat=1),
             )
         else:
             prof = nullcontext()
