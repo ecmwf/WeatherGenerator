@@ -70,6 +70,11 @@ healpix_level: 5
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
 rope_2D: False
+# Preferred generalized RoPE selector. Leave null to keep legacy rope_2D behavior.
+rope_mode: null  # one of: none, 2d, spherical
+# Optional spherical harmonic band index l for spherical RoPE. If null, the model picks one
+# conservative shared band that fits all spherical-RoPE attention modules.
+rope_spherical_l: null
 
 with_mixed_precision: True
 with_flash_attention: True

@@ -36,6 +36,11 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
+from weathergen.model.positional_encoding import (
+    get_rope_mode,
+    get_rope_spherical_l,
+    spherical_harmonics_band_all_pixels,
+)
 from weathergen.model.utils import get_num_parameters
 from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
@@ -109,8 +114,8 @@ class ModelParams(torch.nn.Module):
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         ### ROPE COORDS ###
-        self.rope_2D = cf.get("rope_2D", False)
-        if self.rope_2D:
+        self.rope_mode = get_rope_mode(cf)
+        if self.rope_mode != "none":
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
             total_tokens = (
                 self.num_healpix_cells + self.num_extra_tokens
@@ -132,9 +137,31 @@ class ModelParams(torch.nn.Module):
                     dtype=self.dtype,
                 ),
             )
+            if self.rope_mode == "spherical":
+                rope_spherical_l = get_rope_spherical_l(cf)
+                num_modes = 2 * int(rope_spherical_l) + 1
+                self.register_buffer(
+                    "rope_spherical_coeffs",
+                    torch.zeros(1, total_tokens, num_modes, 2, dtype=self.dtype),
+                )
+                self.register_buffer(
+                    "rope_spherical_cell_coeffs",
+                    torch.zeros(self.num_healpix_cells, num_modes, 2, dtype=self.dtype),
+                )
+                self.register_buffer(
+                    "rope_spherical_extra_coeffs",
+                    torch.zeros(self.num_extra_tokens, num_modes, 2, dtype=self.dtype),
+                )
+            else:
+                self.rope_spherical_coeffs = None
+                self.rope_spherical_cell_coeffs = None
+                self.rope_spherical_extra_coeffs = None
         else:
             self.rope_coords = None
             self.rope_cell_coords = None
+            self.rope_spherical_coeffs = None
+            self.rope_spherical_cell_coeffs = None
+            self.rope_spherical_extra_coeffs = None
 
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
@@ -194,18 +221,42 @@ class ModelParams(torch.nn.Module):
 
         dim_embed = cf.ae_global_dim_embed
 
-        if self.rope_2D:
-            # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
-            # Shape: (num_healpix_cells, ae_local_num_queries, 2)
+        if self.rope_mode != "none":
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
-            # Per-cell coords for QueryAggregationEngine (no query expansion)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
             coords_flat = coords.flatten(0, 1).unsqueeze(0)
             offset = self.num_extra_tokens * cf.ae_local_num_queries
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
+
+            if self.rope_mode == "spherical":
+                band = int(get_rope_spherical_l(cf))
+                coeff_real, coeff_imag = spherical_harmonics_band_all_pixels(
+                    nside=2**self.healpix_level,
+                    l=band,
+                    device=self.rope_spherical_coeffs.device,
+                    dtype=self.rope_spherical_coeffs.dtype,
+                )
+                self.rope_spherical_cell_coeffs.data[..., 0].copy_(coeff_real)
+                self.rope_spherical_cell_coeffs.data[..., 1].copy_(coeff_imag)
+
+                self.rope_spherical_extra_coeffs.data.fill_(0.0)
+                self.rope_spherical_extra_coeffs.data[..., 0].fill_(1.0)
+
+                coeff_real = coeff_real.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+                coeff_imag = coeff_imag.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+                coeff_real = coeff_real.flatten(0, 1).unsqueeze(0)
+                coeff_imag = coeff_imag.flatten(0, 1).unsqueeze(0)
+                self.rope_spherical_coeffs.data.fill_(0.0)
+                self.rope_spherical_coeffs.data[:, :, :, 0].fill_(1.0)
+                self.rope_spherical_coeffs.data[:, offset : offset + coeff_real.shape[1], :, 0].copy_(
+                    coeff_real
+                )
+                self.rope_spherical_coeffs.data[:, offset : offset + coeff_imag.shape[1], :, 1].copy_(
+                    coeff_imag
+                )
 
         # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
         # provides per-cell token identity which is critical for masked cells that have no
@@ -699,7 +750,12 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+                rope_data = (
+                    model_params.rope_spherical_coeffs.unbind(dim=-1)
+                    if model_params.rope_spherical_coeffs is not None
+                    else model_params.rope_coords
+                )
+                tokens = self.forecast_engine(tokens, step, coords=rope_data)
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)

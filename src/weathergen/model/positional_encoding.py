@@ -8,7 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import math
+from functools import lru_cache
 
+import healpy as hp
 import numpy as np
 import torch
 
@@ -173,3 +175,148 @@ def rotary_pos_emb_2d(q, k, coords, base=10000.0, unsqueeze_dim=1):
 
     cos, sin = rotary_embedding_2d(coords, q.shape[-1], base=base)
     return apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=unsqueeze_dim)
+
+####################################################################################################
+# Spherical RoPE
+####################################################################################################
+
+def get_rope_mode(cf) -> str:
+    """Resolve the configured RoPE mode while keeping legacy rope_2D compatibility."""
+
+    rope_mode = cf.get("rope_mode", None)
+    if rope_mode is None:
+        return "2d" if cf.get("rope_2D", False) else "none"
+    rope_mode = str(rope_mode).lower()
+    assert rope_mode in {"none", "2d", "spherical"}, f"Unsupported rope_mode={rope_mode}"
+    return rope_mode
+
+
+def _max_supported_spherical_l(dim_embed: int, num_heads: int) -> int:
+    head_dim = dim_embed // num_heads
+    max_complex = (head_dim - (head_dim % 2)) // 2
+    return max(0, (max_complex - 1) // 2)
+
+
+def get_rope_spherical_l(cf) -> int | None:
+    """Resolve spherical band index, supporting explicit config or automatic selection."""
+
+    rope_mode = get_rope_mode(cf)
+    if rope_mode != "spherical":
+        return cf.get("rope_spherical_l", None)
+
+    rope_spherical_l = cf.get("rope_spherical_l", None)
+    if rope_spherical_l is not None:
+        return int(rope_spherical_l)
+
+    candidates = [
+        _max_supported_spherical_l(cf.ae_global_dim_embed, cf.ae_aggregation_num_heads),
+        _max_supported_spherical_l(cf.ae_global_dim_embed, cf.ae_global_num_heads),
+    ]
+    if cf.get("fe_num_blocks", 0) > 0:
+        candidates.append(_max_supported_spherical_l(cf.ae_global_dim_embed, cf.fe_num_heads))
+    return min(candidates)
+
+
+@lru_cache(maxsize=32)
+def _healpy_band_maps(nside: int, l: int) -> tuple[np.ndarray, np.ndarray]:
+    """Precompute a spherical-harmonic band on the HEALPix grid using healpy."""
+
+    num_pixels = hp.nside2npix(nside)
+    real_maps = np.zeros((num_pixels, 2 * l + 1), dtype=np.float64)
+    imag_maps = np.zeros((num_pixels, 2 * l + 1), dtype=np.float64)
+    alm_size = hp.sphtfunc.Alm.getsize(l, l)
+
+    for m in range(0, l + 1):
+        alm_real = np.zeros(alm_size, dtype=np.complex128)
+        alm_real[hp.sphtfunc.Alm.getidx(l, l, m)] = 1.0
+        real_map = hp.alm2map(alm_real, nside=nside, lmax=l, mmax=l, pol=False)
+        real_map = hp.reorder(real_map, r2n=True)
+
+        if m == 0:
+            real_maps[:, l] = real_map
+            continue
+
+        alm_imag = np.zeros(alm_size, dtype=np.complex128)
+        alm_imag[hp.sphtfunc.Alm.getidx(l, l, m)] = 1.0j
+        imag_map = hp.alm2map(alm_imag, nside=nside, lmax=l, mmax=l, pol=False)
+        imag_map = hp.reorder(imag_map, r2n=True)
+
+        pos_idx = l + m
+        neg_idx = l - m
+        sign = -1.0 if m % 2 else 1.0
+
+        real_maps[:, pos_idx] = real_map / 2.0
+        imag_maps[:, pos_idx] = -imag_map / 2.0
+        real_maps[:, neg_idx] = sign * real_map / 2.0
+        imag_maps[:, neg_idx] = sign * imag_map / 2.0
+
+    return real_maps, imag_maps
+
+
+def spherical_harmonics_band_all_pixels(
+    nside: int, l: int, device=None, dtype=torch.float32
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return a full HEALPix-grid spherical harmonic band precomputed via healpy."""
+
+    real_maps, imag_maps = _healpy_band_maps(nside, l)
+    return (
+        torch.as_tensor(real_maps, device=device, dtype=dtype),
+        torch.as_tensor(imag_maps, device=device, dtype=dtype),
+    )
+
+
+def _apply_complex_modulation(
+    x: torch.Tensor,
+    coeff_real: torch.Tensor,
+    coeff_imag: torch.Tensor,
+    unsqueeze_dim: int,
+    conjugate: bool = False,
+) -> torch.Tensor:
+    coeff_real = coeff_real.unsqueeze(unsqueeze_dim).to(dtype=x.dtype)
+    coeff_imag = coeff_imag.unsqueeze(unsqueeze_dim).to(dtype=x.dtype)
+    if conjugate:
+        coeff_imag = -coeff_imag
+    num_complex = coeff_real.shape[-1]
+    max_complex = (x.shape[-1] - (x.shape[-1] % 2)) // 2
+    if num_complex > max_complex:
+        raise ValueError(
+            f"Spherical RoPE requires {num_complex} complex modes but the head only supports "
+            f"{max_complex}. Reduce rope_spherical_l or increase the head dimension."
+        )
+    num_rotary_dims = 2 * num_complex
+    if num_rotary_dims == 0:
+        return x
+
+    num_pairs = num_rotary_dims // 2
+    coeff_real = coeff_real[..., :num_pairs]
+    coeff_imag = coeff_imag[..., :num_pairs]
+
+    x_rot = x[..., :num_rotary_dims].reshape(*x.shape[:-1], num_pairs, 2)
+    x_real = x_rot[..., 0]
+    x_imag = x_rot[..., 1]
+    out_real = (x_real * coeff_real) - (x_imag * coeff_imag)
+    out_imag = (x_real * coeff_imag) + (x_imag * coeff_real)
+    out = torch.stack((out_real, out_imag), dim=-1).flatten(-2, -1)
+    if num_rotary_dims < x.shape[-1]:
+        out = torch.cat((out, x[..., num_rotary_dims:]), dim=-1)
+    return out
+
+
+def rotary_pos_emb_spherical(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    coeffs: tuple[torch.Tensor, torch.Tensor],
+    unsqueeze_dim: int = 1,
+):
+    """Apply spherical-harmonic RoPE-style modulation to q/k using precomputed coefficients.
+
+    Both q and k are multiplied by Y_lm(omega) at their respective positions. The real dot product
+    in attention naturally conjugates k, producing the addition-theorem kernel
+    sum_m Y_lm(omega_r) Y_lm*(omega_s) q_m k_m*.
+    """
+
+    coeff_real, coeff_imag = coeffs
+    return (
+        _apply_complex_modulation(q, coeff_real, coeff_imag, unsqueeze_dim),
+        _apply_complex_modulation(k, coeff_real, coeff_imag, unsqueeze_dim),
+    )
