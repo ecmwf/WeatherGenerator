@@ -960,7 +960,6 @@ class ProfilingTrainer(Trainer):
                         self.cf.general.istep * batch_size_total, batch_size_total
                     )
 
-                self._log_terminal(bidx, mini_epoch, TRAIN)
                 if bidx % self.train_logging.metrics == 0:
                     self._log(TRAIN)
 
