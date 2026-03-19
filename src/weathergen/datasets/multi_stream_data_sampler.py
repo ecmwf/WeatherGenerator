@@ -758,11 +758,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."""
 
                 batch = self._get_batch(idx, num_forecast_steps)
 
+                # ensure the batch is valid, i.e. not completely empty and no NaN values
+                # student teacher has no classical targets
+                mode = self.mode_cfg.get("training_mode")
+                not_valid = batch.sources_empty() or batch.is_nan()
+                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
+
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if not batch.is_empty():
-                    break
-                else:
+                if not_valid:
                     logger.warning(f"Skipping empty batch with idx={idx}.")
+                else:
+                    break
 
             yield batch
 
