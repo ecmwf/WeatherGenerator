@@ -93,9 +93,9 @@ norm_type: "LayerNorm"
 
 profiling:
   enabled: True 
-  wait_samples: 2
-  warmup_samples: 4
-  active_samples: 2
+  wait_iteration: 2
+  warmup_iteration: 4
+  active_iteration: 2
   repeat: 1
 #####################################
 

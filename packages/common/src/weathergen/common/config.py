@@ -358,9 +358,9 @@ def _check_profiling(config: Config) -> Config:
 
     defaults = {
         "enabled": True,
-        "wait_samples": 1,
-        "warmup_samples": 1,
-        "active_samples": 1,
+        "wait_iteration": 1,
+        "warmup_iteration": 1,
+        "active_iteration": 1,
         "repeat": 1,
     }
 

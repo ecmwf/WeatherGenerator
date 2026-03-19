@@ -845,7 +845,7 @@ class ProfilingTrainer(Trainer):
         wrap_module_forward_with_profiling(self.model, prefix="model")
 
         max_profile_steps = (
-            cf.profiling.wait + cf.profiling.warmup + cf.profiling.active
+            cf.profiling.wait_iteration + cf.profiling.warmup_iteration + cf.profiling.active_iteration
         ) * cf.profiling.repeat
 
         handler = partial(trace_handler, cf)
