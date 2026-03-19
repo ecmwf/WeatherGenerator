@@ -87,10 +87,6 @@ def run_inference(args):
     inference_overwrite = {
         "test_config": dict(
             shuffle=False,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            samples_per_mini_epoch=args.samples,
-            output=dict(num_samples=args.samples if args.save_samples else 0),
             streams_output=args.streams_output,
         )
     }
