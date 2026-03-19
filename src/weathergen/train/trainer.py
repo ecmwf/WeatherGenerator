@@ -869,9 +869,9 @@ class ProfilingTrainer(Trainer):
                 with_modules=True,
                 with_flops=True,
                 schedule=torch.profiler.schedule(
-                    wait=cf.profiling.wait,
-                    warmup=cf.profiling.warmup,
-                    active=cf.profiling.active,
+                    wait=cf.profiling.wait_iteration,
+                    warmup=cf.profiling.warmup_iteration,
+                    active=cf.profiling.active_iteration,
                     repeat=cf.profiling.repeat,
                 ),
                 on_trace_ready=handler,
