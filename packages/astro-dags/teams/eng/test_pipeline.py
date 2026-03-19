@@ -34,7 +34,7 @@ import requests
 # instantiate a DAG with the @dag decorator and set DAG parameters (see: https://www.astronomer.io/docs/learn/airflow-dag-parameters)
 @dag(
     start_date=datetime(2025, 4, 1),  # date after which the DAG can be scheduled
-    schedule="@daily",  # see: https://www.astronomer.io/docs/learn/scheduling-in-airflow for options
+    schedule="@monthly",  # see: https://www.astronomer.io/docs/learn/scheduling-in-airflow for options
     max_consecutive_failed_dag_runs=5,  # auto-pauses the DAG after 5 consecutive failed runs, experimental
     doc_md=__doc__,  # add DAG Docs in the UI, see https://www.astronomer.io/docs/learn/custom-airflow-ui-docs-tutorial
     default_args={
@@ -42,7 +42,7 @@ import requests
         "retries": 3,  # tasks retry 3 times before they fail
         "retry_delay": duration(seconds=5),  # tasks wait 30s in between retries
     },  # default_args are applied to all tasks in a DAG
-    tags=["example", "space"],  # add tags in the UI
+    tags=["example", "space", "team:eng"],  # add tags in the UI
     is_paused_upon_creation=False, # start running the DAG as soon as its created
 )
 def example_astronauts():
