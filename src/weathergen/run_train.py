@@ -98,8 +98,8 @@ def run_inference(args):
         args.mini_epoch,
         args.base_config,
         *args.config,
-        inference_overwrite,
         cli_overwrite,
+        inference_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
