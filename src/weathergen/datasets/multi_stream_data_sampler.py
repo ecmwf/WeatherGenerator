@@ -24,7 +24,6 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
-#from weathergen.datasets.data_reader_seviri import DataReaderSeviri
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -175,8 +174,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         dataset = DataReaderAnemoi
                     case "fesom":
                         dataset = DataReaderFesom
-#                    case "msg_lst":
-#                        dataset = DataReaderSeviri
                     case type_name:
                         dataset = get_extra_reader(type_name)
                         if dataset is None:
