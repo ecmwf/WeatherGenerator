@@ -38,7 +38,7 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.positional_encoding import (
     get_rope_mode,
-    get_rope_spherical_l,
+    get_rope_spherical_band,
     spherical_harmonics_band_all_pixels,
 )
 from weathergen.model.utils import get_num_parameters
@@ -138,8 +138,8 @@ class ModelParams(torch.nn.Module):
                 ),
             )
             if self.rope_mode == "spherical":
-                rope_spherical_l = get_rope_spherical_l(cf)
-                num_modes = 2 * int(rope_spherical_l) + 1
+                rope_spherical_band = get_rope_spherical_band(cf)
+                num_modes = 2 * int(rope_spherical_band) + 1
                 self.register_buffer(
                     "rope_spherical_coeffs",
                     torch.zeros(1, total_tokens, num_modes, 2, dtype=self.dtype),
@@ -232,10 +232,10 @@ class ModelParams(torch.nn.Module):
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
 
             if self.rope_mode == "spherical":
-                band = int(get_rope_spherical_l(cf))
+                band = int(get_rope_spherical_band(cf))
                 coeff_real, coeff_imag = spherical_harmonics_band_all_pixels(
                     nside=2**self.healpix_level,
-                    l=band,
+                    band=band,
                     device=self.rope_spherical_coeffs.device,
                     dtype=self.rope_spherical_coeffs.dtype,
                 )
@@ -251,12 +251,12 @@ class ModelParams(torch.nn.Module):
                 coeff_imag = coeff_imag.flatten(0, 1).unsqueeze(0)
                 self.rope_spherical_coeffs.data.fill_(0.0)
                 self.rope_spherical_coeffs.data[:, :, :, 0].fill_(1.0)
-                self.rope_spherical_coeffs.data[:, offset : offset + coeff_real.shape[1], :, 0].copy_(
-                    coeff_real
-                )
-                self.rope_spherical_coeffs.data[:, offset : offset + coeff_imag.shape[1], :, 1].copy_(
-                    coeff_imag
-                )
+                self.rope_spherical_coeffs.data[
+                    :, offset : offset + coeff_real.shape[1], :, 0
+                ].copy_(coeff_real)
+                self.rope_spherical_coeffs.data[
+                    :, offset : offset + coeff_imag.shape[1], :, 1
+                ].copy_(coeff_imag)
 
         # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
         # provides per-cell token identity which is critical for masked cells that have no

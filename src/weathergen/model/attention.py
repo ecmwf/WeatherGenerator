@@ -24,7 +24,7 @@ provide per-token coordinates aligned with the token order (lat, lon in radians)
 """
 
 
-def _apply_rope(qs, ks, coords, rope_mode, rope_spherical_l, rope_healpix_level, unsqueeze_dim):
+def _apply_rope(qs, ks, coords, rope_mode, rope_spherical_band, rope_healpix_level, unsqueeze_dim):
     if rope_mode == "none":
         return qs, ks
     if coords is None:
@@ -52,7 +52,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         rope_mode="none",
-        rope_spherical_l=None,
+        rope_spherical_band=None,
         rope_healpix_level=0,
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
@@ -63,7 +63,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.softcap = softcap
         self.with_residual = with_residual
         self.rope_mode = rope_mode
-        self.rope_spherical_l = rope_spherical_l
+        self.rope_spherical_band = rope_spherical_band
         self.rope_healpix_level = rope_healpix_level
 
         assert dim_embed % num_heads == 0
@@ -107,7 +107,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         vs = self.proj_heads_v(x).reshape(s)
 
         qs, ks = _apply_rope(
-            qs, ks, coords, self.rope_mode, self.rope_spherical_l, self.rope_healpix_level, 1
+            qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 1
         )
 
         # set dropout rate according to training/eval mode as required by flash_attn
@@ -228,7 +228,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         rope_mode="none",
-        rope_spherical_l=None,
+        rope_spherical_band=None,
         rope_healpix_level=0,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
@@ -238,7 +238,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.softcap = softcap
         self.with_residual = with_residual
         self.rope_mode = rope_mode
-        self.rope_spherical_l = rope_spherical_l
+        self.rope_spherical_band = rope_spherical_band
         self.rope_healpix_level = rope_healpix_level
 
         assert dim_embed % num_heads == 0
@@ -290,7 +290,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
 
         qs, ks = _apply_rope(
-            qs, ks, coords, self.rope_mode, self.rope_spherical_l, self.rope_healpix_level, 1
+            qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 1
         )
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
@@ -528,7 +528,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         rope_mode="none",
-        rope_spherical_l=None,
+        rope_spherical_band=None,
         rope_healpix_level=0,
     ):
         super(MultiSelfAttentionHead, self).__init__()
@@ -539,7 +539,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
         self.rope_mode = rope_mode
-        self.rope_spherical_l = rope_spherical_l
+        self.rope_spherical_band = rope_spherical_band
         self.rope_healpix_level = rope_healpix_level
 
         assert dim_embed % num_heads == 0
@@ -586,7 +586,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
 
         qs, ks = _apply_rope(
-            qs, ks, coords, self.rope_mode, self.rope_spherical_l, self.rope_healpix_level, 2
+            qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 2
         )
 
         # set dropout rate according to training/eval mode as required by flash_attn

@@ -12,6 +12,7 @@ from functools import lru_cache
 
 import healpy as hp
 import numpy as np
+import numpy.typing as npt
 import torch
 
 
@@ -176,9 +177,11 @@ def rotary_pos_emb_2d(q, k, coords, base=10000.0, unsqueeze_dim=1):
     cos, sin = rotary_embedding_2d(coords, q.shape[-1], base=base)
     return apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=unsqueeze_dim)
 
+
 ####################################################################################################
 # Spherical RoPE
 ####################################################################################################
+
 
 def get_rope_mode(cf) -> str:
     """Resolve the configured RoPE mode while keeping legacy rope_2D compatibility."""
@@ -191,58 +194,61 @@ def get_rope_mode(cf) -> str:
     return rope_mode
 
 
-def _max_supported_spherical_l(dim_embed: int, num_heads: int) -> int:
+def _max_supported_spherical_band(dim_embed: int, num_heads: int) -> int:
     head_dim = dim_embed // num_heads
     max_complex = (head_dim - (head_dim % 2)) // 2
     return max(0, (max_complex - 1) // 2)
 
 
-def get_rope_spherical_l(cf) -> int | None:
+def get_rope_spherical_band(cf) -> int | None:
     """Resolve spherical band index, supporting explicit config or automatic selection."""
 
     rope_mode = get_rope_mode(cf)
     if rope_mode != "spherical":
-        return cf.get("rope_spherical_l", None)
+        rope_spherical_band = cf.get("rope_spherical_band", None)
+        return None if rope_spherical_band is None else int(rope_spherical_band)
 
-    rope_spherical_l = cf.get("rope_spherical_l", None)
-    if rope_spherical_l is not None:
-        return int(rope_spherical_l)
+    rope_spherical_band = cf.get("rope_spherical_band", None)
+    if rope_spherical_band is not None:
+        return int(rope_spherical_band)
 
     candidates = [
-        _max_supported_spherical_l(cf.ae_global_dim_embed, cf.ae_aggregation_num_heads),
-        _max_supported_spherical_l(cf.ae_global_dim_embed, cf.ae_global_num_heads),
+        _max_supported_spherical_band(cf.ae_global_dim_embed, cf.ae_aggregation_num_heads),
+        _max_supported_spherical_band(cf.ae_global_dim_embed, cf.ae_global_num_heads),
     ]
     if cf.get("fe_num_blocks", 0) > 0:
-        candidates.append(_max_supported_spherical_l(cf.ae_global_dim_embed, cf.fe_num_heads))
+        candidates.append(_max_supported_spherical_band(cf.ae_global_dim_embed, cf.fe_num_heads))
     return min(candidates)
 
 
 @lru_cache(maxsize=32)
-def _healpy_band_maps(nside: int, l: int) -> tuple[np.ndarray, np.ndarray]:
+def _healpy_band_maps(
+    nside: int, band: int
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """Precompute a spherical-harmonic band on the HEALPix grid using healpy."""
 
     num_pixels = hp.nside2npix(nside)
-    real_maps = np.zeros((num_pixels, 2 * l + 1), dtype=np.float64)
-    imag_maps = np.zeros((num_pixels, 2 * l + 1), dtype=np.float64)
-    alm_size = hp.sphtfunc.Alm.getsize(l, l)
+    real_maps = np.zeros((num_pixels, 2 * band + 1), dtype=np.float64)
+    imag_maps = np.zeros((num_pixels, 2 * band + 1), dtype=np.float64)
+    alm_size = hp.sphtfunc.Alm.getsize(band, band)
 
-    for m in range(0, l + 1):
+    for m in range(0, band + 1):
         alm_real = np.zeros(alm_size, dtype=np.complex128)
-        alm_real[hp.sphtfunc.Alm.getidx(l, l, m)] = 1.0
-        real_map = hp.alm2map(alm_real, nside=nside, lmax=l, mmax=l, pol=False)
+        alm_real[hp.sphtfunc.Alm.getidx(band, band, m)] = 1.0
+        real_map = hp.alm2map(alm_real, nside=nside, lmax=band, mmax=band, pol=False)
         real_map = hp.reorder(real_map, r2n=True)
 
         if m == 0:
-            real_maps[:, l] = real_map
+            real_maps[:, band] = real_map
             continue
 
         alm_imag = np.zeros(alm_size, dtype=np.complex128)
-        alm_imag[hp.sphtfunc.Alm.getidx(l, l, m)] = 1.0j
-        imag_map = hp.alm2map(alm_imag, nside=nside, lmax=l, mmax=l, pol=False)
+        alm_imag[hp.sphtfunc.Alm.getidx(band, band, m)] = 1.0j
+        imag_map = hp.alm2map(alm_imag, nside=nside, lmax=band, mmax=band, pol=False)
         imag_map = hp.reorder(imag_map, r2n=True)
 
-        pos_idx = l + m
-        neg_idx = l - m
+        pos_idx = band + m
+        neg_idx = band - m
         sign = -1.0 if m % 2 else 1.0
 
         real_maps[:, pos_idx] = real_map / 2.0
@@ -254,11 +260,11 @@ def _healpy_band_maps(nside: int, l: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 def spherical_harmonics_band_all_pixels(
-    nside: int, l: int, device=None, dtype=torch.float32
+    nside: int, band: int, device=None, dtype=torch.float32
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return a full HEALPix-grid spherical harmonic band precomputed via healpy."""
 
-    real_maps, imag_maps = _healpy_band_maps(nside, l)
+    real_maps, imag_maps = _healpy_band_maps(nside, band)
     return (
         torch.as_tensor(real_maps, device=device, dtype=dtype),
         torch.as_tensor(imag_maps, device=device, dtype=dtype),
@@ -281,7 +287,7 @@ def _apply_complex_modulation(
     if num_complex > max_complex:
         raise ValueError(
             f"Spherical RoPE requires {num_complex} complex modes but the head only supports "
-            f"{max_complex}. Reduce rope_spherical_l or increase the head dimension."
+            f"{max_complex}. Reduce rope_spherical_band or increase the head dimension."
         )
     num_rotary_dims = 2 * num_complex
     if num_rotary_dims == 0:

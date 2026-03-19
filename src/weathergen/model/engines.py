@@ -28,7 +28,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.positional_encoding import get_rope_mode, get_rope_spherical_l
+from weathergen.model.positional_encoding import get_rope_mode, get_rope_spherical_band
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -256,7 +256,7 @@ class QueryAggregationEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         rope_mode = get_rope_mode(self.cf)
-        rope_spherical_l = get_rope_spherical_l(self.cf)
+        rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
 
         self.ae_aggregation_blocks = torch.nn.ModuleList()
@@ -278,7 +278,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         rope_mode=rope_mode,
-                        rope_spherical_l=rope_spherical_l,
+                        rope_spherical_band=rope_spherical_band,
                         rope_healpix_level=rope_healpix_level,
                     )
                 )
@@ -335,7 +335,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         rope_mode = get_rope_mode(self.cf)
-        rope_spherical_l = get_rope_spherical_l(self.cf)
+        rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
 
         self.ae_global_blocks = torch.nn.ModuleList()
@@ -357,7 +357,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         rope_mode=rope_mode,
-                        rope_spherical_l=rope_spherical_l,
+                        rope_spherical_band=rope_spherical_band,
                         rope_healpix_level=rope_healpix_level,
                     )
                 )
@@ -375,7 +375,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         rope_mode=rope_mode,
-                        rope_spherical_l=rope_spherical_l,
+                        rope_spherical_band=rope_spherical_band,
                         rope_healpix_level=rope_healpix_level,
                     )
                 )
@@ -417,7 +417,7 @@ class ForecastingEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         rope_mode = get_rope_mode(self.cf)
-        rope_spherical_l = get_rope_spherical_l(self.cf)
+        rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
         self.fe_blocks = torch.nn.ModuleList()
 
@@ -438,7 +438,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             rope_mode=rope_mode,
-                            rope_spherical_l=rope_spherical_l,
+                            rope_spherical_band=rope_spherical_band,
                             rope_healpix_level=rope_healpix_level,
                         )
                     )
@@ -457,7 +457,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             rope_mode=rope_mode,
-                            rope_spherical_l=rope_spherical_l,
+                            rope_spherical_band=rope_spherical_band,
                             rope_healpix_level=rope_healpix_level,
                         )
                     )

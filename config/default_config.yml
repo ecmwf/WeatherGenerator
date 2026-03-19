@@ -72,9 +72,9 @@ healpix_level: 5
 rope_2D: False
 # Preferred generalized RoPE selector. Leave null to keep legacy rope_2D behavior.
 rope_mode: null  # one of: none, 2d, spherical
-# Optional spherical harmonic band index l for spherical RoPE. If null, the model picks one
+# Optional spherical harmonic band for spherical RoPE. If null, the model picks one
 # conservative shared band that fits all spherical-RoPE attention modules.
-rope_spherical_l: null
+rope_spherical_band: null
 
 with_mixed_precision: True
 with_flash_attention: True

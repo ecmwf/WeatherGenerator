@@ -73,7 +73,7 @@ rope_2D: False
 rope_mode: null
 # If null, spherical RoPE uses one conservative shared band that fits all spherical-RoPE
 # attention modules.
-rope_spherical_l: null
+rope_spherical_band: null
 
 with_mixed_precision: True
 with_flash_attention: True
