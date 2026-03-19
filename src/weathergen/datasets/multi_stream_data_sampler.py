@@ -24,7 +24,7 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
-from weathergen.datasets.data_reader_seviri import DataReaderSeviri
+#from weathergen.datasets.data_reader_seviri import DataReaderSeviri
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -162,6 +162,27 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         msg = f"Unsupported stream type {stream_info['type']}"
                         f"for stream name '{stream_info['name']}'."
                         raise ValueError(msg)
+            for fname in stream_info["filenames"]:
+                kwargs = {
+                    "tw_handler": self.time_window_handler,
+                    "stream_info": stream_info,
+                }
+                dataset: type[AnyDataReader] | None = None
+                match stream_info["type"]:
+                    case "obs":
+                        dataset = DataReaderObs
+                    case "anemoi":
+                        dataset = DataReaderAnemoi
+                    case "fesom":
+                        dataset = DataReaderFesom
+#                    case "msg_lst":
+#                        dataset = DataReaderSeviri
+                    case type_name:
+                        dataset = get_extra_reader(type_name)
+                        if dataset is None:
+                            msg = f"Unsupported stream type {stream_info['type']}"
+                            f"for stream name '{stream_info['name']}'."
+                            raise ValueError(msg)
 
             for fname in stream_info["filenames"]:
                 fname = pathlib.Path(fname)

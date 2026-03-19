@@ -228,3 +228,5 @@ output
 models
 results
 reports
+config/streams/seviri_lst/seviri_lst.yml
+config/lst_config.yml
