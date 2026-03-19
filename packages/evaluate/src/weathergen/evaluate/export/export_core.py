@@ -27,8 +27,8 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     -------
         xarray DataArray for the specified sample and forecast step.
     """
-    sample, fstep, run_id, stream, dtype, epoch, rank = args
-    fname_zarr = get_model_results(run_id, epoch, rank)
+    sample, fstep, run_id, stream, dtype, istep, rank = args
+    fname_zarr = get_model_results(run_id, istep, rank)
     with zarrio_reader(fname_zarr) as zio:
         out = zio.get_data(sample, stream, fstep)
         if dtype == "target":
@@ -200,8 +200,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             List of channels to retrieve. If None, retrieves all available channels.
         n_processes : list
             Number of parallel processes to use for data retrieval.
-        ecpoch : int
-            Epoch number to identify the Zarr store.
+        istep : int
+            istep number to identify the Zarr store.
         rank : int
             Rank number to identify the Zarr store.
         regrid_degree : float
@@ -220,14 +220,14 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     stream = kwargs.stream
     channels = kwargs.channels
     n_processes = kwargs.n_processes
-    epoch = kwargs.epoch
+    istep = kwargs.istep
     rank = kwargs.rank
     fstep_hours = np.timedelta64(kwargs.fstep_hours, "h")
 
     if data_type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
 
-    fname_zarr = get_model_results(run_id, epoch, rank)
+    fname_zarr = get_model_results(run_id, istep, rank)
     fsteps = get_fsteps(fsteps, fname_zarr)
     samples = get_samples(samples, fname_zarr)
     grid_type = get_grid_type(data_type, stream, fname_zarr)
@@ -245,7 +245,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             ref_time = ref_times[s_idx]
 
             step_tasks = [
-                (sample, fstep, run_id, stream, data_type, epoch, rank) for fstep in fsteps
+                (sample, fstep, run_id, stream, data_type, istep, rank) for fstep in fsteps
             ]
 
             results_iterator = pool.imap_unordered(get_data_worker, step_tasks, chunksize=1)

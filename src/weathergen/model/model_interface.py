@@ -48,7 +48,7 @@ def init_model_and_shard(
     cf,
     dataset,
     run_id_contd,
-    mini_epoch_contd,
+    istep_contd,
     training_mode,
     device,
     with_ddp,
@@ -149,14 +149,14 @@ def init_model_and_shard(
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is not None:
         if is_root():
-            logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
-        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
+            logger.info(f"Continuing run with id={run_id_contd} at istep {istep_contd}.")
+        model = load_model(cf, model, device, run_id_contd, istep_contd)
     elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
-        mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
+        istep = cf.load_chkpt.get("istep", -1)
         if is_root():
-            logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
-        model = load_model(cf, model, device, run_id, mini_epoch)
+            logger.info(f"Loading checkpoint from id={run_id} at istep {istep}.")
+        model = load_model(cf, model, device, run_id, istep)
     else:
         if with_ddp and with_fsdp:
             model.to_empty(device="cuda")
@@ -171,18 +171,18 @@ def init_model_and_shard(
     return model, model_params
 
 
-def load_model(cf, model, device, run_id: str, mini_epoch=-1):
+def load_model(cf, model, device, run_id: str, istep=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
         run_id : model_id of the trained model
-        mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
+        istep : The istep to load. Default (-1) is the latest istep
     """
 
     path_run = get_path_model(run_id=run_id)
-    mini_epoch_id = (
-        f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
+    istep_id = (
+        f"chkpt{istep:06d}" if istep != -1 and istep is not None else "latest"
     )
-    filename = f"{run_id}_{mini_epoch_id}.chkpt"
+    filename = f"{run_id}_{istep_id}.chkpt"
 
     params = torch.load(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True

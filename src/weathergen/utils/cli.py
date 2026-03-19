@@ -176,12 +176,12 @@ def _add_model_loading_params(parser: argparse.ArgumentParser):
         ),
     )
     parser.add_argument(
-        "-e",
-        "--mini-epoch",
+        "-i",
+        "--istep",
         type=int,
         default=-1,
         help=(
-            "Mini-epoch of pretrained WeatherGenerator model used"
+            "istep of pretrained WeatherGenerator model used"
             " (Default -1 corresponds to the last checkpoint)."
         ),
     )

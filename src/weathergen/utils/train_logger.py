@@ -130,7 +130,7 @@ class TrainLogger:
     def read(
         run_id: str,
         model_path: str = None,
-        mini_epoch: int | None = None,
+        istep: int | None = None,
         cols_patterns: list[str] | None = None,
     ) -> Metrics:
         """
@@ -139,10 +139,10 @@ class TrainLogger:
 
         # Load config from given model_path if provided, otherwise use path from private config
         if model_path:
-            cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
+            cf = config.load_run_config(run_id=run_id, istep=istep, model_path=model_path)
         else:
             cf = config.load_merge_configs(
-                private_home=None, from_run_id=run_id, mini_epoch=mini_epoch
+                private_home=None, from_run_id=run_id, istep=istep
             )
         run_id = cf.general.run_id
 

@@ -87,7 +87,7 @@ def infer_multi_stream(run_id):
             "2022-10-11",
             "--samples",
             "10",
-            "--mini-epoch",
+            "--istep",
             "0",
             "--from-run-id",
             run_id,
@@ -158,7 +158,7 @@ def evaluate_multi_stream_results(run_id):
                         },
                     },
                     "label": "Multi-Stream Test",
-                    "mini_epoch": 0,
+                    "istep": 0,
                     "rank": 0,
                 }
             },

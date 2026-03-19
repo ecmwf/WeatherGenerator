@@ -55,7 +55,7 @@ class WeatherGenMergeReader(Reader):
         super().__init__(eval_cfg, run_id, private_paths)
         self.run_ids = eval_cfg.get("merge_run_ids", [])
         self.metrics_dir = Path(eval_cfg.get("merge_metrics_dir"))
-        self.mini_epoch = eval_cfg.get("mini_epoch", 0)
+        self.istep = eval_cfg.get("istep", 0)
 
         assert self.run_ids, (
             f"'merge_run_ids' must be non-empty in eval_cfg, but got: {self.run_ids}"
@@ -191,7 +191,7 @@ class WeatherGenMergeReader(Reader):
         self, stream: str, regions: list[str], metrics: list[str]
     ) -> xr.DataArray | None:
         """
-        Load the pre-computed scores for a given run, stream and metric and epoch.
+        Load the pre-computed scores for a given run, stream and metric and istep.
 
         Parameters
         ----------

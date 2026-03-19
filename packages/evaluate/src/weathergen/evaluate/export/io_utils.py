@@ -59,8 +59,8 @@ def get_data_worker(args: tuple) -> xr.DataArray:
     -------
         xarray DataArray for the specified sample and forecast step.
     """
-    sample, fstep, run_id, stream, dtype, epoch, rank = args
-    fname_zarr = get_model_results(run_id, epoch, rank)
+    sample, fstep, run_id, stream, dtype, istep, rank = args
+    fname_zarr = get_model_results(run_id, istep, rank)
     with zarrio_reader(fname_zarr) as zio:
         out = zio.get_data(sample, stream, fstep)
         if dtype == "target":

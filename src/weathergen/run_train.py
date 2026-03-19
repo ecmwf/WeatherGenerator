@@ -99,7 +99,7 @@ def run_inference(args):
     cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
-        args.mini_epoch,
+        args.istep,
         args.base_config,
         *args.config,
         inference_overwrite,
@@ -118,7 +118,7 @@ def run_inference(args):
 
     trainer = Trainer(cf.train_logging)
     try:
-        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+        trainer.inference(cf, devices, args.from_run_id, args.istep)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -137,7 +137,7 @@ def run_continue(args):
     cf = config.load_merge_configs(
         args.private_config,
         args.from_run_id,
-        args.mini_epoch,
+        args.istep,
         args.base_config,
         *args.config,
         {},
@@ -157,7 +157,7 @@ def run_continue(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+        trainer.run(cf, devices, args.from_run_id, args.istep)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

@@ -727,13 +727,13 @@ def plot_train(args=None):
             # Load config from given model_path if provided, otherwise use path from private config
             if model_base_dir:
                 cf = config.load_run_config(
-                    run_id=run_id, mini_epoch=None, model_path=model_base_dir
+                    run_id=run_id, istep=None, model_path=model_base_dir
                 )
             else:
                 cf = config.load_merge_configs(
                     private_home=None,
                     from_run_id=run_id,
-                    mini_epoch=None,
+                    istep=None,
                 )
             for stream_info in cf.streams:
                 streams += [stream_info["name"]]

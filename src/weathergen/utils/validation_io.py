@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
+    cf, val_cfg, batch_size, istep, batch_idx, dn_data, batch, model_output, target_aux_out
 ):
     """
     Interface for writing model output
@@ -171,6 +171,6 @@ def write_output(
         sample_start,
         forecast_offset,
     )
-    with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
+    with zarrio_writer(config.get_path_results(cf, istep)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)

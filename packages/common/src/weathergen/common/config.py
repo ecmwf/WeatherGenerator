@@ -195,31 +195,31 @@ def format_cf(config: Config) -> str:
     return stream.getvalue()
 
 
-def save(config: Config, mini_epoch: int | None):
+def save(config: Config, istep: int | None):
     """Save current config into the current runs model directory."""
     # save in directory with model files
     dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_write_name(get_run_id_from_config(config), mini_epoch)
+    fname = _get_model_config_file_write_name(get_run_id_from_config(config), istep)
 
     json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with (dirname / fname).open("w") as f:
         f.write(json_str)
 
 
-def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
+def load_run_config(run_id: str, istep: int | None, model_path: str | None) -> Config:
     """
-    Load a configuration file from a given run_id and mini_epoch.
+    Load a configuration file from a given run_id and istep.
     If run_id is a full path, loads it from the full path.
 
     Args:
         run_id: Run ID of the pretrained WeatherGenerator model
-        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        istep: istep of the checkpoint to load. -1 indicates last checkpoint available.
         model_path: Path to the model directory. If None, uses the model_path from private config.
 
     Returns:
-        Configuration object loaded from the specified run and mini_epoch.
+        Configuration object loaded from the specified run and istep.
     """
     # Loading path
     if Path(run_id).exists():  # load from the full path if a full path is provided
@@ -232,24 +232,24 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path) / run_id
 
-        config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
-        config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
+        config_path_with_istep = path / _get_model_config_file_read_name(run_id, istep)
+        config_path_without_istep = path / _get_model_config_file_read_name(run_id, None)
 
-        if config_path_with_epoch.exists():
-            fname = config_path_with_epoch
-            _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
-        elif config_path_without_epoch.exists():
-            fname = config_path_without_epoch
+        if config_path_with_istep.exists():
+            fname = config_path_with_istep
+            _logger.info(f"Loading config from specified run_id and istep: {fname}")
+        elif config_path_without_istep.exists():
+            fname = config_path_without_istep
             _logger.info(
-                f"Config for mini_epoch {mini_epoch} not found. "
-                f"Falling back to config without mini_epoch: {fname}"
+                f"Config for istep {istep} not found. "
+                f"Falling back to config without istep: {fname}"
             )
         else:
             raise FileNotFoundError(
                 f"Could not find model config for run_id '{run_id}' "
-                f"(mini_epoch={mini_epoch}) in '{path}'. "
-                f"Tried: '{config_path_with_epoch.name}' and '{config_path_without_epoch.name}'. "
-                f"Please check run_id and mini_epoch."
+                f"(istep={istep}) in '{path}'. "
+                f"Tried: '{config_path_with_istep.name}' and '{config_path_without_istep.name}'. "
+                f"Please check run_id and istep."
             )
 
     with fname.open() as f:
@@ -261,43 +261,43 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
     return _apply_fixes(config)
 
 
-def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
+def _get_model_config_file_write_name(run_id: str, istep: int | None):
     """Generate the filename for writing a model config file."""
-    if mini_epoch is None:
-        mini_epoch_str = ""
-    elif mini_epoch == -1:
-        mini_epoch_str = "_latest"
+    if istep is None:
+        istep_str = ""
+    elif istep == -1:
+        istep_str = "_latest"
     else:
-        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+        istep_str = f"_chkpt{istep:06d}"
 
-    return f"model_{run_id}{mini_epoch_str}.json"
+    return f"model_{run_id}{istep_str}.json"
 
 
-def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
+def _get_model_config_file_read_name(run_id: str, istep: int | None):
     """Generate the filename for reading a model config file."""
-    if mini_epoch is None:
-        mini_epoch_str = ""
-    elif mini_epoch == -1:
-        mini_epoch_str = "_latest"
+    if istep is None:
+        istep_str = ""
+    elif istep == -1:
+        istep_str = "_latest"
     else:
-        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+        istep_str = f"_chkpt{istep:06d}"
 
-    return f"model_{run_id}{mini_epoch_str}.json"
+    return f"model_{run_id}{istep_str}.json"
 
 
-def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
+def get_model_results(run_id: str, istep: int, rank: int) -> Path:
     """
-    Get the path to the model results zarr store from a given run_id and mini_epoch.
+    Get the path to the model results zarr store from a given run_id and istep.
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
     for ext in StoreType.extensions():
-        zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
+        zarr_path = run_results / f"validation_chkpt{istep:06d}_rank{rank:04d}.{ext}"
 
         if zarr_path.exists() or zarr_path.is_dir():
             return zarr_path
     raise FileNotFoundError(
-        f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
+        f"Zarr file with run_id {run_id}, istep {istep} and rank {rank} does not "
         f"exist or is not a directory."
     )
 
@@ -358,7 +358,7 @@ def merge_configs(base_config: Config, update_config: Config):
 def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
-    mini_epoch: int | None = None,
+    istep: int | None = None,
     base: Path | Config | None = None,
     *overwrites: Path | dict | Config,
 ) -> Config:
@@ -370,7 +370,7 @@ def load_merge_configs(
         private_home: Configuration file containing platform dependent information and secrets
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
-        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        istep: istep of the checkpoint to load. -1 indicates last checkpoint available.
         base: Path to the base configuration file. Uses default configuration if None.
         *overwrites: Additional overwrites from different sources
 
@@ -402,7 +402,7 @@ def load_merge_configs(
     if from_run_id is None:
         base_config = _load_base_conf(base)
     else:
-        base_config = load_run_config(from_run_id, mini_epoch, None)
+        base_config = load_run_config(from_run_id, istep, None)
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
@@ -660,11 +660,11 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
     return _get_shared_wg_path() / "models" / run_id
 
 
-def get_path_results(config: Config, mini_epoch: int) -> Path:
-    """Get the path to validation results for a specific mini_epoch and rank."""
+def get_path_results(config: Config, istep: int) -> Path:
+    """Get the path to validation results for a specific istep and rank."""
     ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
+    fname = f"validation_chkpt{istep:06d}_rank{config.rank:04d}.{ext}"
 
     return base_path / fname
 
@@ -716,7 +716,7 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     valid_forecast_policies = (
         "Valid values for '{mode}.forecast.policy' are, e.g., 'fixed' when using constant number "
         "of forecast steps throughout the training, or 'sequential' when varying the number of "
-        "forecast steps over mini_epochs, such as, e.g., 'forecast.num_steps: [2, 2, 4, 4]'. "
+        "forecast steps over data chunks, such as, e.g., 'forecast.num_steps: [2, 2, 4, 4]'. "
     )
     valid_forecast_offset = f"'{mode}.forecast.offset' must be an integer of either value 0 or 1. "
     valid_forecast_steps_offset0 = (

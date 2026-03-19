@@ -248,8 +248,7 @@ class LearningRateScheduler:
         Use as LearningRateScheduler.plot()
         """
 
-        num_mini_epochs = 42
-        num_samples_per_mini_epoch = 4096
+        num_isteps = 42 * 4096
 
         lr_start = 0.000001
         lr_max = 0.000015
@@ -275,7 +274,7 @@ class LearningRateScheduler:
             lr_final_decay,
             lr_final,
             lr_steps_warmup,
-            num_mini_epochs * num_samples_per_mini_epoch,
+            num_isteps,
             lr_steps_cooldown,
             lr_policy_warmup,
             lr_policy_decay,
@@ -284,7 +283,7 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_mini_epochs * num_samples_per_mini_epoch
+            num_isteps
             + lr_steps_warmup
             + lr_steps_cooldown
             + 1023
@@ -312,7 +311,7 @@ class LearningRateScheduler:
             lr_final_decay,
             lr_final,
             lr_steps_warmup,
-            num_mini_epochs * num_samples_per_mini_epoch,
+            num_isteps,
             lr_steps_cooldown,
             lr_policy_warmup,
             lr_policy_decay,
@@ -321,7 +320,7 @@ class LearningRateScheduler:
         lrs = []
 
         for _ in range(
-            num_mini_epochs * num_samples_per_mini_epoch
+            num_isteps
             + lr_steps_warmup
             + lr_steps_cooldown
             + 1023

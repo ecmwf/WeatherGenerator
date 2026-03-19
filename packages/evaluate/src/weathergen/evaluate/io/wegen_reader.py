@@ -38,8 +38,7 @@ class WeatherGenReader(Reader):
     def __init__(self, eval_cfg: dict, run_id: str, private_paths: dict | None = None):
         super().__init__(eval_cfg, run_id, private_paths)
 
-        # TODO: remove backwards compatibility to "epoch" in Feb. 2026
-        self.mini_epoch = eval_cfg.get("mini_epoch", 0)
+        self.istep = eval_cfg.get("istep", 0)
         self.rank = eval_cfg.get("rank", 0)
 
         # Load model configuration and set (run-id specific) directories
@@ -84,12 +83,12 @@ class WeatherGenReader(Reader):
             _logger.info(
                 f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
             )
-            config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
+            config = load_merge_configs(self.private_paths, self.run_id, self.istep)
         else:
             _logger.info(
                 f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
             )
-            config = load_run_config(self.run_id, self.mini_epoch, self.model_base_dir)
+            config = load_run_config(self.run_id, self.istep, self.model_base_dir)
 
         if not isinstance(config, dict | oc.DictConfig):
             _logger.warning("Model config not found. inference config will be empty.")
@@ -159,7 +158,7 @@ class WeatherGenReader(Reader):
     ) -> tuple[dict, dict]:
         """
         Load multiple pre-computed scores for a given run, stream and metric
-        and epoch.
+        and istep.
 
         Parameters
         ----------
@@ -215,7 +214,7 @@ class WeatherGenReader(Reader):
             parameters = {}
         score_path = (
             Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.mini_epoch:05d}.json"
+            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.istep:06d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
 
@@ -345,7 +344,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         # For backwards compatibility, assume zarr store is local (.zarr format).
 
         fname_zarr = self.results_dir.joinpath(
-            f"validation_chkpt{self.mini_epoch:05d}_rank{self.rank:04d}.{zarr_ext}"
+            f"validation_chkpt{self.istep:06d}_rank{self.rank:04d}.{zarr_ext}"
         )
 
         assert fname_zarr.exists(), f"Zarr file {fname_zarr} does not exist."

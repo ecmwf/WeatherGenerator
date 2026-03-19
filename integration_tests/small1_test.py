@@ -77,7 +77,7 @@ def infer(run_id):
             "2022-10-11",
             "--samples",
             "10",
-            "--mini-epoch",
+            "--istep",
             "0",
             "--from-run-id",
             run_id,
@@ -122,7 +122,7 @@ def evaluate_results(run_id):
                         }
                     },
                     "label": "MTM ERA5",
-                    "mini_epoch": 0,
+                    "istep": 0,
                     "rank": 0,
                 }
             },
@@ -164,7 +164,7 @@ def assert_train_loss_below_threshold(run_id):
         None,
     )
     assert loss_metric is not None, f"'{loss_avg_name}' metric is missing in metrics file"
-    # Check that the loss does not explode in a single mini_epoch
+    # Check that the loss does not explode in a single chkpt
     # This is meant to be a quick test, not a convergence test
     target = 0.25
     assert loss_metric < target, (
@@ -185,6 +185,6 @@ def assert_val_loss_below_threshold(run_id):
         None,
     )
     assert loss_metric is not None, f"'{loss_avg_name}' metric is missing in metrics file"
-    # Check that the loss does not explode in a single mini_epoch
+    # Check that the loss does not explode in a single chkpt
     # This is meant to be a quick test, not a convergence test
     assert loss_metric < 0.2, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.2"

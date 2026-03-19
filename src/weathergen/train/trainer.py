@@ -176,7 +176,7 @@ class Trainer(TrainerBase):
 
         return target_and_aux_calculators
 
-    def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
+    def inference(self, cf, devices, run_id_contd, istep_contd):
         # general initalization
         self.init(cf, devices)
 
@@ -210,7 +210,7 @@ class Trainer(TrainerBase):
             cf,
             self.dataset,
             run_id_contd,
-            mini_epoch_contd,
+            istep_contd,
             self.test_cfg.training_mode,
             devices[0],
             cf.with_ddp,
@@ -223,7 +223,7 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
         if is_root():
-            config.save(self.cf, mini_epoch=0)
+            config.save(self.cf, istep=0)
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -231,7 +231,7 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
+    def run(self, cf, devices, run_id_contd=None, istep_contd=None):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
@@ -261,7 +261,7 @@ class Trainer(TrainerBase):
             cf,
             self.dataset,
             run_id_contd,
-            mini_epoch_contd,
+            istep_contd,
             self.training_cfg.training_mode,
             devices[0],
             cf.with_ddp,
@@ -280,7 +280,7 @@ class Trainer(TrainerBase):
                 cf,
                 self.dataset,
                 run_id_contd,
-                mini_epoch_contd,
+                istep_contd,
                 cf.training_config.training_mode,
                 devices[0],
                 cf.with_ddp,
@@ -328,7 +328,7 @@ class Trainer(TrainerBase):
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
         len_ds = len(self.dataset)
-        lr_steps = int((len_ds * self.training_cfg.num_mini_epochs) / self.batch_size_per_gpu)
+        lr_steps = self.training_cfg.num_isteps
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             self.batch_size_per_gpu,
@@ -348,21 +348,6 @@ class Trainer(TrainerBase):
         val_cfg = self.validation_cfg
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
 
-        # recover mini_epoch when continuing run
-        if self.world_size_original is None:
-            mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
-        else:
-            len_per_rank = (
-                len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu)
-            ) * self.batch_size_per_gpu
-            mini_epoch_base = int(
-                self.cf.general.istep
-                / (
-                    min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
-                    * self.world_size_original
-                )
-            )
-
         if is_root():
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
@@ -372,22 +357,22 @@ class Trainer(TrainerBase):
 
         # training loop
 
-        for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
-            logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
-            self.train(mini_epoch)
+        while self.cf.general.istep < self.training_cfg.num_isteps:
+            logger.info(f"Training chunk starting at step {self.cf.general.istep} of {self.training_cfg.num_isteps}.")
+            self.train(self.cf.general.istep)
 
             logger.info(
-                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
+                f"Validation at step {self.cf.general.istep} of {self.training_cfg.num_isteps}."
             )
-            self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
+            self.validate(self.cf.general.istep, self.validation_cfg, self.batch_size_validation_per_gpu)
 
             logger.info(
-                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
+                f"Saving model at step {self.cf.general.istep} of {self.training_cfg.num_isteps}."
             )
-            self.save_model(mini_epoch)
+            self.save_model(self.cf.general.istep)
 
         # log final model
-        self.save_model(self.training_cfg.num_mini_epochs)
+        self.save_model(self.training_cfg.num_isteps)
 
     def validate_before_training(self):
         """
@@ -410,9 +395,9 @@ class Trainer(TrainerBase):
             else:
                 assert False, "validate_before_training must be integer or boolean."
 
-    def train(self, mini_epoch):
+    def train(self, istep):
         """
-        Perform training for one epoch
+        Perform training for one data chunk
         """
 
         cf = self.cf
@@ -427,6 +412,9 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            if self.cf.general.istep >= self.training_cfg.num_isteps:
+                break
+
             if cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
                 batch = batch.pin_memory()
@@ -526,7 +514,7 @@ class Trainer(TrainerBase):
                     targets_and_auxs,
                 )
 
-            self._log_terminal(bidx, mini_epoch, TRAIN)
+            self._log_terminal(bidx, istep, TRAIN)
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log collapse metrics
@@ -541,7 +529,7 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch, mode_cfg, batch_size):
+    def validate(self, istep, mode_cfg, batch_size):
         """
         Perform validation / test computation as specified by mode_cfg
         """
@@ -611,7 +599,7 @@ class Trainer(TrainerBase):
                             self.cf,
                             mode_cfg,
                             batch_size,
-                            mini_epoch,
+                            istep,
                             bidx,
                             denormalize_data_fct,
                             batch,
@@ -621,10 +609,7 @@ class Trainer(TrainerBase):
 
                     pbar.update(batch_size)
 
-                    if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
-                        break
-
-                self._log_terminal(0, mini_epoch, VAL)
+                self._log_terminal(0, istep, VAL)
                 self._log(VAL)
 
         # avoid that there is a systematic bias in the validation subset
@@ -676,10 +661,10 @@ class Trainer(TrainerBase):
         else:
             return {}
 
-    def save_model(self, mini_epoch: int, name=None):
-        # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
-        max_mini_epoch = self.training_cfg.num_mini_epochs
-        assert mini_epoch <= max_mini_epoch, (mini_epoch, max_mini_epoch)
+    def save_model(self, istep: int, name=None):
+        # Saving at istep == max_istep means that we are saving the latest checkpoint.
+        max_istep = self.training_cfg.num_isteps
+        assert istep <= max_istep, (istep, max_istep)
         model_state_dict = self._get_full_model_state_dict()
 
         if is_root():
@@ -687,7 +672,7 @@ class Trainer(TrainerBase):
                 [
                     self.cf.general.run_id,
                     "_",
-                    "latest" if mini_epoch == -1 else f"chkpt{mini_epoch:05d}",
+                    "latest" if istep == -1 else f"chkpt{istep:06d}",
                     ("_" + name) if name is not None else "",
                 ]
             )
@@ -702,7 +687,7 @@ class Trainer(TrainerBase):
                 logger.info(f"Saved model to {file_out}")
 
             # save config
-            config.save(self.cf, mini_epoch)
+            config.save(self.cf, istep)
 
     def _log(self, stage: Stage):
         """
@@ -764,7 +749,7 @@ class Trainer(TrainerBase):
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)
 
-    def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage):
+    def _log_terminal(self, bidx: int, istep: int, stage: Stage):
         print_freq = self.train_logging.terminal
         if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
             # compute from last iteration
@@ -778,7 +763,7 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
+                        f"""validation ({self.cf.general.run_id}) : {istep:04d} : 
                         {np.nanmean(avg_loss)}"""
                     )
 
@@ -787,7 +772,7 @@ class Trainer(TrainerBase):
                     dt = time.time() - self.t_start
                     len_dataset = len(self.data_loader) // self.batch_size_per_gpu
                     pstr = (
-                        f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
+                        f"{istep:04d} : {bidx:05d}/{len_dataset:05d} : "
                         + f"{self.cf.general.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )

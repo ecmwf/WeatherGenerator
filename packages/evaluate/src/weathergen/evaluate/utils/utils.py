@@ -564,7 +564,7 @@ def metric_list_to_json(
                 # Match the expected filename pattern
                 save_path = (
                     reader.metrics_dir
-                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.mini_epoch:05d}.json"
+                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.istep:06d}.json"
                 )
                 metric_data_dict = metric_data.to_dict()
 
@@ -596,7 +596,7 @@ def metric_list_to_json(
                     json.dump(data_dict, f, indent=4)
 
     _logger.info(
-        f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "
+        f"Saved all results of inference run {reader.run_id} - istep {reader.istep:d} "
         f"successfully to {reader.metrics_dir}."
     )
 

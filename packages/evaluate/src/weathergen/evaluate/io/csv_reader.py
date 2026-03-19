@@ -83,7 +83,7 @@ class CsvReader(Reader):
         )
         self.samples = [0]
         self.forecast_steps = sorted(self.data["step"].dropna().unique().tolist())
-        self.epoch = [0]
+        self.istep = [0]
 
     def get_samples(self) -> set[int]:
         """

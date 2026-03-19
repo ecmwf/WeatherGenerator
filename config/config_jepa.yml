@@ -197,7 +197,7 @@ training_config:
       ema_beta:
         enabled: true
 
-  num_mini_epochs: 32
+  num_isteps: 131072 # 32 * 4096 = 131072
   samples_per_mini_epoch: 4096
   shuffle: True
 

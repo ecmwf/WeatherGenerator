@@ -6,7 +6,7 @@ import weathergen.utils.cli as cli
 
 DATE_FORMATS = ["2022-12-01T00:00:00", "20221201", "2022-12-01", "12.01.2022"]
 EXPECTED_DATE_STR = "202212010000"
-MODEL_LOADING_ARGS = ["from-run-id", "mini-epoch", "reuse-run-id"]
+MODEL_LOADING_ARGS = ["from-run-id", "istep", "reuse-run-id"]
 GENERAL_ARGS = ["config", "private-config", "options", "run-id"]
 MODEL_LOADING_PARSERS = [cli.get_continue_parser(), cli.get_inference_parser()]
 BASIC_ARGLIST = ["--from-run-id", "test123"]
@@ -80,7 +80,7 @@ def test_inference_defaults(inference_parser):
         "end-date",
         "samples",
         "streams-output",
-        "mini-epoch",
+        "istep",
         "private-config",
     ]
     default_values = [inference_parser.get_default(arg) for arg in default_args]

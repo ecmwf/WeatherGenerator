@@ -3,7 +3,7 @@ run_path: "./results"
 model_path: "./models"
 loss_fcts: [["mse", 1.0]]
 loss_fcts_val: [["mse", 1.0]]
-num_mini_epochs: 1
+num_isteps: 100
 samples_per_mini_epoch: 100
 samples_per_validation: 5
 lr_steps: 4

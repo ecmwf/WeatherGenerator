@@ -9,7 +9,7 @@ import weathergen.common.config as config
 TEST_RUN_ID = "test123"
 SECRET_COMPONENT = "53CR3T"
 DUMMY_PRIVATE_CONF = {
-    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"]
+    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"],
     "secrets": {
         "my_big_secret": {
             "my_secret_id": f"{SECRET_COMPONENT}01234",
@@ -18,7 +18,7 @@ DUMMY_PRIVATE_CONF = {
     },
 }
 
-DUMMY_OVERWRITES = [("num_mini_epochs", 42), ("healpix_level", 42)]
+DUMMY_OVERWRITES = [("num_isteps", 42 * 1024), ("healpix_level", 42)]
 
 DUMMY_STREAM_CONF = {
     "ERA5": {
@@ -232,16 +232,16 @@ def test_load_multiple_overwrites(private_config_file):
     assert contains(cf, expected)
 
 
-@pytest.mark.parametrize("mini_epoch", [None, 0, 1, 2, -1])
-def test_load_existing_config(mini_epoch, private_config_file, config_fresh):
-    test_num_mini_epochs = 3000
+@pytest.mark.parametrize("istep", [None, 0, 1, 2, -1])
+def test_load_existing_config(istep, private_config_file, config_fresh):
+    test_num_isteps = 3000 * 1024
 
-    config_fresh.num_mini_epochs = test_num_mini_epochs  # some specific change
-    config.save(config_fresh, mini_epoch)
+    config_fresh.num_isteps = test_num_isteps  # some specific change
+    config.save(config_fresh, istep)
 
-    cf = config.load_merge_configs(private_config_file, config_fresh.run_id, mini_epoch)
+    cf = config.load_merge_configs(private_config_file, config_fresh.run_id, istep)
 
-    assert cf.num_mini_epochs == test_num_mini_epochs
+    assert cf.num_isteps == test_num_isteps
 
 
 @pytest.mark.parametrize("options,cf", [(["foo=1", "bar=2"], {"foo": 1, "bar": 2}), ([], {})])
@@ -344,9 +344,9 @@ def test_load_duplicate_streams_same_file(streams_dir):
         config.load_streams(streams_dir)
 
 
-@pytest.mark.parametrize("mini_epoch", [None, 0, 1, 2, -1])  # maybe add -5 as test case
-def test_save(mini_epoch, config_fresh):
-    config.save(config_fresh, mini_epoch)
+@pytest.mark.parametrize("istep", [None, 0, 1, 2, -1])  # maybe add -5 as test case
+def test_save(istep, config_fresh):
+    config.save(config_fresh, istep)
 
-    cf = config.load_run_config(config_fresh.run_id, mini_epoch, config_fresh.model_path)
+    cf = config.load_run_config(config_fresh.run_id, istep, config_fresh.model_path)
     assert is_equal(cf, config_fresh)
