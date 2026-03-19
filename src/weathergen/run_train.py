@@ -42,6 +42,11 @@ def inference():
     main([cli.Stage.inference] + sys.argv[1:])
 
 
+def profile():
+    """Entry point for calling the inference code from the command line."""
+    main([cli.Stage.profile] + sys.argv[1:])
+
+
 def main(argl: list[str]):
     try:
         argl = _fix_argl(argl)
@@ -57,6 +62,8 @@ def main(argl: list[str]):
             run_continue(args)
         case cli.Stage.inference:
             run_inference(args)
+        case cli.Stage.profile:
+            run_profile(args)
         case _:
             logger.error("No stage was found.")
 
@@ -195,10 +202,50 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    if cf.get("run_profiler", False):
-        trainer = ProfilingTrainer(cf.train_logging)
-    else:
-        trainer = Trainer(cf.train_logging)
+    trainer = Trainer(cf.train_logging)
+
+    try:
+        trainer.run(cf, devices)
+    except Exception:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        if cf.world_size == 1:
+            pdb.post_mortem(tb)
+
+
+def run_profile(args):
+    """
+    Training function for WeatherGenerator model.
+
+    Note: All model configurations are set in the function body.
+    """
+
+    cli_overwrite = config.from_cli_arglist(args.options)
+
+    cf = config.load_merge_configs(
+        args.private_config, None, None, args.base_config, *args.config, cli_overwrite
+    )
+    cf = config.set_run_id(cf, args.run_id, False)
+
+    cf = config._check_profiling(cf)
+
+    cf.data_loading.rng_seed = int(time.time())
+    mp_method = cf.general.get("multiprocessing_method", "fork")
+    devices = Trainer.init_torch(multiprocessing_method=mp_method)
+    cf = Trainer.init_ddp(cf)
+
+    # this line should probably come after the processes have been sorted out else we get lots
+    # of duplication due to multiple process in the multiGPU case
+    init_loggers(cf.general.run_id)
+
+    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
+
+    cf.streams = config.load_streams(Path(cf.streams_directory))
+
+    if cf.with_flash_attention:
+        assert cf.with_mixed_precision
+
+    trainer = ProfilingTrainer(cf.train_logging)
 
     try:
         trainer.run(cf, devices)
