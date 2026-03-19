@@ -274,7 +274,7 @@ class DataReaderSynop(DataReaderTimestep):
         # flatten along time dimension
         data = data.transpose([1, 2, 0]).reshape((data.shape[1] * data.shape[2], data.shape[0]))
         # set invalid values to NaN for MetNo nc files
-        if self.ds_type == "MetNo":
+        if self.fillvalue is not None:
             mask = data == self.fillvalue
             data[mask] = np.nan
 
