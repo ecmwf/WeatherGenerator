@@ -91,7 +91,12 @@ load_chkpt: {}
 
 norm_type: "LayerNorm"
 
-run_profiler: True
+profiling:
+  enabled: True 
+  wait_samples: 2
+  warmup_samples: 4
+  active_samples: 2
+  repeat: 1
 #####################################
 
 streams_directory: "./config/streams/era5_1deg/"
