@@ -10,8 +10,8 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
-import re
 import time
+from decimal import Decimal
 
 import numpy as np
 import torch
@@ -568,7 +568,9 @@ class Trainer(TrainerBase):
             if is_diffusion:
                 self._set_validation_noise_level(noise_level)
 
-            eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.0e}'))
+            _d = Decimal(str(noise_level)).normalize()
+            _sign, _digits, _exp = _d.as_tuple()
+            eta_str = f"{'-' if _sign else ''}{''.join(map(str, _digits))}e{_exp}"
             loss_suffix = f".eta{eta_str}" if len(noise_levels) > 1 else ""
             stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
 
