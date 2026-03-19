@@ -2,7 +2,6 @@
 name = "weathergen-common-core"
 version = "0.1.0"
 description = "Basic logic used everywhere in WeatherGenerator."
-readme = "../../README.md"
 requires-python = ">=3.12,<3.13"
 # Keep the number of depedencies extremely low.
 # Mor depedencies will bring more maintenance burden and more potential 

@@ -2,11 +2,15 @@
 name = "weathergen-astro-dags"
 version = "0.1.0"
 description = "Airflow DAGs for the WeatherGenerator project."
-readme = "../../README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "weathergen-common-core",
+    "weathergen-astro-extras",
 ]
+
+[tool.uv.sources]
+weathergen-astro-extras = { workspace = true }
+weathergen-common-core = { workspace = true }
 
 [dependency-groups]
 dev = [

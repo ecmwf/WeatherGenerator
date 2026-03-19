@@ -2,11 +2,15 @@
 name = "weathergen-astro-extras"
 version = "0.1.0"
 description = "Extra utilities for the WeatherGenerator Airflow deployment."
-readme = "../../README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "weathergen-common-core",
+    "apache-airflow>=3.0.0,<3.1.0",
 ]
+
+[tool.uv.sources]
+weathergen-common-core = { workspace = true }
+
 
 [dependency-groups]
 dev = [
