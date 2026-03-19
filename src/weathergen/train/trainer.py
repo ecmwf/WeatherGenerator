@@ -860,7 +860,7 @@ class ProfilingTrainer(Trainer):
         on_aarch64 = platform.machine() == "aarch64"
 
         # Determine profiler setup
-        if cf.local_rank == 0:
+        if is_root():
             prof = profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=True,
@@ -879,7 +879,7 @@ class ProfilingTrainer(Trainer):
         else:
             prof = nullcontext()
 
-        if cf.local_rank == 0:
+        if is_root():
             # Start recording memory snapshot history
             start_record_memory_history()
 
@@ -973,7 +973,7 @@ class ProfilingTrainer(Trainer):
                     prof.step()
 
             # Print only on rank 0
-            if cf.local_rank == 0 and hasattr(prof, "key_averages"):
+            if is_root() and hasattr(prof, "key_averages"):
                 logger.info("\n" + "=" * 80)
                 logger.info("PROFILING SUMMARY")
                 logger.info("=" * 80)
@@ -997,7 +997,7 @@ class ProfilingTrainer(Trainer):
                     prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=20)
                 )
 
-        if cf.local_rank == 0:
+        if is_root():
             # Create the memory snapshot file
             export_memory_snapshot(cf)
 
@@ -1006,7 +1006,7 @@ class ProfilingTrainer(Trainer):
 
         torch.distributed.barrier()
 
-        if cf.local_rank == 0:
+        if is_root():
             logger.info("Training loop profiling is complete.")
             logger.info(
                 "The memory snapshot, memory usage distribution, and PyTorch profiler"
