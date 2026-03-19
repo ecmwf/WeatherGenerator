@@ -7,16 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
 from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
 
+from weathergen.common.config import timedelta_to_str
 from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 
 _logger = logging.getLogger(__name__)
@@ -65,57 +64,6 @@ class DTRange:
         assert self.start > _DT_ZERO, "start time must be after 1850-01-01T00:00"
 
 
-def str_to_datetime64(s: str | int | NPDT64) -> NPDT64:
-    """
-    Convert a string to a numpy datetime64 object.
-    """
-    if isinstance(s, datetime64):
-        return s
-    s_str = str(s)
-
-    supported_formats = [
-        "%Y%m%d%H%M%S",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-    ]
-
-    for fmt in supported_formats:
-        try:
-            dt_obj = datetime.datetime.strptime(s_str, fmt)
-            return np.datetime64(dt_obj)
-        except ValueError:
-            pass
-
-    raise ValueError(f"Unable to parse the date string '{s}'. Original string might be invalid.")
-
-
-def str_to_timedelta(s: str | datetime.timedelta) -> pd.Timedelta:
-    """
-    Convert a string or datetime.timedelta object to a pd.Timedelta object.
-    The string format is expected to be "HH:MM:SS".
-    Hours are not limited to two digits. Minutes and seconds must be in the range 0-59.
-    """
-
-    if not isinstance(s, str) and not isinstance(s, datetime.timedelta):
-        raise TypeError("Input must be a string or a datetime.timedelta object")
-    if isinstance(s, datetime.timedelta):
-        # If input is a timedelta object, convert it directly to pd.Timedelta
-        return pd.Timedelta(s)
-    if isinstance(s, str):
-        # ensure that the string is in "HH:MM:SS" format
-        parts = s.split(":")
-        if not len(parts) == 3:
-            raise ValueError("String must be in 'HH:MM:SS' format")
-        if not all(part.isdigit() for part in parts):
-            raise ValueError("String must be in 'HH:MM:SS' format")
-        # ensure that minutes and seconds do not exceed 59
-        if int(parts[1]) > 59 or int(parts[2]) > 59:
-            raise ValueError("Minutes and seconds must be in the range 0-59")
-    return pd.to_timedelta(s)
-
-
 class TimeWindowHandler:
     """
     Handler for time windows and translation of indices to times
@@ -123,10 +71,10 @@ class TimeWindowHandler:
 
     def __init__(
         self,
-        t_start: str | int | NPDT64,
-        t_end: str | int | NPDT64,
-        t_window_len_hours: int,
-        t_window_step_hours: int,
+        t_start: NPDT64,
+        t_end: NPDT64,
+        t_window_len_hours: NPTDel64,
+        t_window_step_hours: NPTDel64,
     ):
         """
         Parameters
@@ -141,13 +89,21 @@ class TimeWindowHandler:
             delta hours between start times of windows
 
         """
-        self.t_start: NPDT64 = str_to_datetime64(t_start)
-        self.t_end: NPDT64 = str_to_datetime64(t_end)
-        self.t_window_len: NPTDel64 = np.timedelta64(t_window_len_hours, "h")
-        self.t_window_step: NPTDel64 = np.timedelta64(t_window_step_hours, "h")
+        self.t_start: NPDT64 = t_start
+        self.t_end: NPDT64 = t_end
+        self.t_window_len: NPTDel64 = t_window_len_hours
+        self.t_window_step: NPTDel64 = t_window_step_hours
 
         assert self.t_start < self.t_end, "end datetime has to be in the past of start datetime"
         assert self.t_start > _DT_ZERO, "start datetime has to be >= 1850-01-01T00:00."
+
+    def __str__(self) -> str:
+        # Helper to ensure readable timedelta formatting
+        l_str = timedelta_to_str(self.t_window_len)
+        s_str = timedelta_to_str(self.t_window_step)
+        return (
+            f"TimeWindowHandler: start={self.t_start}, end={self.t_end}, len={l_str}, step={s_str}"
+        )
 
     def get_index_range(self) -> TimeIndexRange:
         """
@@ -199,6 +155,7 @@ class ReaderData:
     geoinfos: NDArray[DType]
     data: NDArray[DType]
     datetimes: NDArray[NPDT64]
+    is_spoof: bool = False
 
     @staticmethod
     def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
@@ -215,6 +172,7 @@ class ReaderData:
             geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
             data=np.zeros((0, num_data_fields), dtype=np.float32),
             datetimes=np.zeros((0,), dtype=np.datetime64),
+            is_spoof=False,
         )
 
     def is_empty(self):
@@ -230,9 +188,9 @@ class ReaderData:
         """
         return len(self.data)
 
-    def remove_nan_coords(self) -> "ReaderData":
+    def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
         """
-        Remove all data points where coords are NaN
+        Remove all data points where coords or geoinfos contain NaN
 
         Returns
         -------
@@ -242,6 +200,10 @@ class ReaderData:
         # filter should be if any (of the two) coords is NaN
         idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
 
+        # also filter rows where any geoinfo field is NaN
+        idx_valid_geoinfos = ~np.isnan(self.geoinfos).any(axis=1)
+        idx_valid = np.logical_and(idx_valid, idx_valid_geoinfos)
+
         # apply
         return ReaderData(
             self.coords[idx_valid],
@@ -249,6 +211,42 @@ class ReaderData:
             self.data[idx_valid],
             self.datetimes[idx_valid],
         )
+
+    def shuffle(self, rng, shuffle: bool, num_subset: int) -> "ReaderData":
+        """
+        Drop a random subset of points as specified by num_subset
+        num_subset = -1 indicates no points to be dropped
+
+        Returns
+        -------
+        self
+        """
+
+        # nothing to be done
+        if num_subset < 0 and shuffle is False:
+            return self
+
+        num_datapoints = self.coords.shape[0]
+        if (num_datapoints == 0) or (num_datapoints < num_subset and shuffle is False):
+            return self
+
+        # only shuffling
+        if num_subset == -1 and shuffle is True:
+            num_subset = num_datapoints
+
+        # ensure num_subset <= num_datapoints
+        num_subset = min(num_subset, num_datapoints)
+
+        idxs_subset = rng.choice(num_datapoints, num_subset, replace=False)
+        if shuffle is False:
+            idxs_subset = np.sort(idxs_subset)
+
+        self.coords = self.coords[idxs_subset]
+        self.geoinfos = self.geoinfos[idxs_subset]
+        self.data = self.data[idxs_subset]
+        self.datetimes = self.datetimes[idxs_subset]
+
+        return self
 
 
 def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
@@ -488,9 +486,11 @@ class DataReaderBase(metaclass=ABCMeta):
         self,
     ) -> list[float] | None:
         target_channel_weights = [
-            self.stream_info["channel_weights"].get(ch, 1.0)
-            if self.stream_info.get("channel_weights", None)
-            else 1.0
+            (
+                self.stream_info["channel_weights"].get(ch, 1.0)
+                if self.stream_info.get("channel_weights", None)
+                else 1.0
+            )
             for ch in self.target_channels
         ]
 
@@ -614,7 +614,9 @@ class DataReaderBase(metaclass=ABCMeta):
 
         assert geoinfos.shape[-1] == len(self.geoinfo_idx), "incorrect number of geoinfo channels"
         for i, _ in enumerate(self.geoinfo_idx):
-            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / self.stdev_geoinfo[i]
+            # for constant fields, just center the data (resulting in 0s after subtracting mean)
+            stdev = 1.0 if np.isclose(self.stdev_geoinfo[i], 0) else self.stdev_geoinfo[i]
+            geoinfos[..., i] = (geoinfos[..., i] - self.mean_geoinfo[i]) / stdev
 
         return geoinfos
 

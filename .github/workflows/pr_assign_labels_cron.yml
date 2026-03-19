@@ -1,0 +1,128 @@
+name: Sync PR labels to issues
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Every hour
+  workflow_dispatch:      # Allow manual triggering
+  push:
+    branches:
+      # Trying on the dev branch.
+      - "tjh/dev/1877-pr-labels"
+permissions:
+  pull-requests: write
+#  contents: write
+#  issues: write
+
+jobs:
+  sync-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync PR labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // The labels that will be transferred. 
+            // Operating on a whitelist to keep the list clean.
+            const LABEL_WHITELIST = ["bug", "data", 
+            "documentation", "eval", 
+            "model", "model:inference", "model:pretrain", "model:rollout",
+            "performance", "science"];
+            const LABEL_PATHS = {
+              "packages/common": ["infra"],
+              "packages/dashboard": ["infra"],
+              "packages/evaluate": ["eval"],
+              "packages/metrics": ["infra"],
+              "packages/readers_extra": ["data"],
+              "src/weathergen/model": ["model"],
+            };
+
+            const { data: pullRequests } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page: 100,
+            });
+
+            for (const pr of pullRequests) {
+              console.log(`Processing PR #${pr.number}: ${pr.title}`);
+
+              const labelsToAdd = new Set();
+
+              // --- Rule 1: Skip issue-label sync if PR already has labels ---
+              if (pr.labels.length > 0) {
+                console.log(`  PR #${pr.number} already has labels, skipping issue-label sync.`);
+              } else {
+                // --- Rule 2: Collect labels from linked issues via GraphQL ---
+                const { repository } = await github.graphql(`
+                  query($owner: String!, $repo: String!, $pr: Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $pr) {
+                        closingIssuesReferences(first: 50) {
+                          nodes {
+                            number
+                            labels(first: 20) {
+                              nodes {
+                                name
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                `, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pr: pr.number,
+                });
+
+                const linkedIssues = repository.pullRequest.closingIssuesReferences.nodes;
+                const issueNumbers = linkedIssues.map(i => i.number);
+                console.log(`  Found linked issues: ${issueNumbers.join(", ") || "none"}`);
+
+                for (const issue of linkedIssues) {
+                  for (const label of issue.labels.nodes) {
+                    if (LABEL_WHITELIST.includes(label.name)) {
+                      labelsToAdd.add(label.name);
+                    }
+                  }
+                }
+              }
+
+              // --- Rule 3: Check if PR touches any path in LABEL_PATHS ---
+              const files = await github.paginate(github.rest.pulls.listFiles, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                per_page: 100,
+              });
+
+              for (const [path, labels] of Object.entries(LABEL_PATHS)) {
+                const normalizedPath = path.replace(/\/?$/, "/"); // ensure trailing slash
+                const touches = files.some(f =>
+                  f.filename.startsWith(normalizedPath) || f.filename === path
+                );
+
+                if (touches) {
+                  console.log(`  PR #${pr.number} touches "${path}", adding labels: ${labels.join(", ")}`);
+                  for (const label of labels) labelsToAdd.add(label);
+                }
+              }
+
+              // --- Apply labels ---
+              if (labelsToAdd.size > 0) {
+                console.log(`  Adding labels to PR #${pr.number}: ${[...labelsToAdd].join(", ")}`);
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: [...labelsToAdd],
+                });
+              } else {
+                console.log(`  No labels to add for PR #${pr.number}.`);
+              }
+            }

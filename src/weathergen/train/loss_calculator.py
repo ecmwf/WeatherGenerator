@@ -1,3 +1,4 @@
+# pylint: disable=bad-builtin
 # ruff: noqa: T201
 
 # (C) Copyright 2025 WeatherGenerator contributors.
@@ -9,29 +10,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import dataclasses
 import logging
+from collections import defaultdict
+from copy import deepcopy
 
 import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules as LossModules
 from weathergen.model.model import ModelOutput
-from weathergen.train.loss_modules.loss_module_base import LossValues
 from weathergen.train.target_and_aux_module_base import TargetAuxOutput
-from weathergen.utils.train_logger import TRAIN, Stage
+from weathergen.utils.train_logger import Stage
 
 _logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass
-class LossTerms:
-    """
-    A dataclass which combines the LossValues of all loss modules
-    """
-
-    # Dictionary containing the LossValues of each loss module.
-    loss_terms: dict[str, LossValues]
 
 
 class LossCalculator:
@@ -43,6 +34,7 @@ class LossCalculator:
     def __init__(
         self,
         cf: DictConfig,
+        mode_cfg: DictConfig,
         stage: Stage,
         device: str,
     ):
@@ -63,28 +55,53 @@ class LossCalculator:
         self.cf = cf
         self.stage = stage
         self.device = device
+        self.loss_hist = []
+        self.losses_unweighted_hist = []
+        self.stddev_unweighted_hist = []
 
-        calculator_configs = (
-            cf.training_mode_config.losses if stage == TRAIN else cf.validation_mode_config.losses
+        loss_term_configs = deepcopy(mode_cfg.losses)
+
+        self.loss_calculators = dict(
+            [
+                (
+                    loss_term_name,
+                    [
+                        (
+                            params.get("weight", 1.0),
+                            getattr(LossModules, params.type)(
+                                cf, mode_cfg, stage, self.device, **params.loss_fcts
+                            ),
+                        )
+                    ],
+                )
+                for loss_term_name, params in loss_term_configs.items()
+            ]
         )
-        calculator_configs = [
-            (getattr(LossModules, Cls), config) for (Cls, config) in calculator_configs.items()
-        ]
-
-        self.loss_calculators = [
-            (config.weight, Cls(cf=cf, loss_fcts=config.loss_fcts, stage=stage, device=self.device))
-            for (Cls, config) in calculator_configs
-        ]
 
     def compute_loss(
         self,
         preds: ModelOutput,
-        targets: TargetAuxOutput,
+        targets_and_aux: TargetAuxOutput,
+        metadata: dict,
     ):
-        loss_terms = {}
+        losses_all = defaultdict(dict)
+        stddev_all = defaultdict(dict)
         loss = torch.tensor(0.0, requires_grad=True)
-        for weight, calculator in self.loss_calculators:
-            loss_terms[calculator.name] = calculator.compute_loss(preds=preds, targets=targets)
-            loss = loss + weight * loss_terms[calculator.name].loss
+        for loss_term_name, calc_term in self.loss_calculators.items():
+            target = targets_and_aux[loss_term_name]
+            for weight, calculator in calc_term:
+                if weight > 0.0:
+                    loss_values = calculator.compute_loss(
+                        preds=preds, targets=target, metadata=metadata
+                    )
+                    loss = loss + weight * loss_values.loss
+                    losses_all[calculator.name] = loss_values.losses_all
+                    losses_all[calculator.name]["loss_avg"] = loss_values.loss
+                    stddev_all[calculator.name] = loss_values.stddev_all
 
-        return loss, LossTerms(loss_terms=loss_terms)
+        # Keep histories for logging
+        self.loss_hist += [loss.detach()]
+        self.losses_unweighted_hist += [losses_all]
+        self.stddev_unweighted_hist += [stddev_all]
+
+        return loss

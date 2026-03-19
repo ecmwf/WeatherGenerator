@@ -5,6 +5,7 @@
 
 SurfaceCombined :
   type : obs
+  stream_id : 2
   filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
   loss_weight : 1.0
   masking_rate : 0.6
@@ -22,7 +23,6 @@ SurfaceCombined :
     net : linear
     dim_embed : 256
   target_readout :
-    type : 'obs_value'  # token or obs_value
     num_layers : 2
     num_heads : 4
   pred_head : 

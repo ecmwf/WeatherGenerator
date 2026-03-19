@@ -9,7 +9,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import dataclasses
 import logging
 import math
 import warnings
@@ -19,38 +18,67 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
-from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
+from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
-    EmbeddingEngine,
+    BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
-    GlobalAssimilationEngine,
-    Local2GlobalAssimilationEngine,
-    LocalAssimilationEngine,
-    QueryAggregationEngine,
+    LatentPredictionHeadIdentity,
+    LatentPredictionHeadMLP,
+    LatentPredictionHeadTransformer,
+    LatentState,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
-from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.utils import get_num_parameters
+from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype
+from weathergen.utils.utils import get_dtype, is_stream_forcing
 
 logger = logging.getLogger(__name__)
 
+type StreamName = str
 
-@dataclasses.dataclass
+
 class ModelOutput:
     """
-    A dataclass to encapsulate the model output and give a clear API.
+    Representation of model output
     """
 
-    physical: dict[str, torch.Tensor]
-    latent: dict[str, torch.Tensor]
+    physical: list[dict[StreamName, torch.Tensor]]
+    latent: list[dict[str, torch.Tensor | LatentState]]
+
+    def __init__(self, len_output: int) -> None:
+        self.physical = [{} for _ in range(len_output)]
+        self.latent = [{} for _ in range(len_output)]
+
+    def add_physical_prediction(
+        self, fstep: int, stream_name: StreamName, pred: torch.Tensor
+    ) -> None:
+        self.physical[fstep][stream_name] = pred
+
+    def add_latent_prediction(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
+        self.latent[fstep][latent_name] = pred
+
+    def get_physical_prediction(
+        self, fstep: int, stream_name: StreamName | None = None, sample_idx: int | None = None
+    ):
+        pred = self.physical[fstep]
+        if stream_name is not None:
+            pred = pred.get(stream_name, None)
+            if sample_idx is not None:
+                assert sample_idx < len(pred), "Invalid sample index."
+                pred = pred[sample_idx]
+        return pred
+
+    def get_latent_prediction(self, fstep: int):
+        return self.latent[fstep]
 
 
 class ModelParams(torch.nn.Module):
@@ -64,10 +92,7 @@ class ModelParams(torch.nn.Module):
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
-
-        bs = cf.batch_size_per_gpu
-        nqs = 9
-        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
+        self.batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
 
         ### POSITIONAL EMBEDDINGS ###
         len_token_seq = 1024
@@ -83,6 +108,34 @@ class ModelParams(torch.nn.Module):
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
+        ### ROPE COORDS ###
+        self.rope_2D = cf.get("rope_2D", False)
+        if self.rope_2D:
+            self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
+            total_tokens = (
+                self.num_healpix_cells + self.num_extra_tokens
+            ) * cf.ae_local_num_queries
+            self.register_buffer(
+                "rope_coords",
+                torch.zeros(
+                    1,
+                    total_tokens,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+            self.register_buffer(
+                "rope_cell_coords",
+                torch.zeros(
+                    self.num_healpix_cells,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+        else:
+            self.rope_coords = None
+            self.rope_cell_coords = None
+
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
         with warnings.catch_warnings(action="ignore"):
@@ -96,16 +149,6 @@ class ModelParams(torch.nn.Module):
             torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32),
             requires_grad=False,
         )
-        # self.hp_nbours = torch.empty((temp.shape[0], (temp.shape[1] + 1)), dtype=torch.int32)
-
-        if cf.target_cell_local_prediction:
-            tokens_lens_value = nqs * s[2]
-        else:
-            tokens_lens_value = nqs * s[1] * s[2]
-        self.tokens_lens = torch.nn.Parameter(
-            tokens_lens_value * torch.ones(bs * s[1] + 1, dtype=torch.int32), requires_grad=False
-        )
-        self.tokens_lens.data[0] = 0
 
         self.q_cells_lens = torch.nn.Parameter(
             torch.ones(self.num_healpix_cells + 1, dtype=torch.int32), requires_grad=False
@@ -150,6 +193,24 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
+
+        if self.rope_2D:
+            # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
+            # Shape: (num_healpix_cells, ae_local_num_queries, 2)
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            # Per-cell coords for QueryAggregationEngine (no query expansion)
+            self.rope_cell_coords.data.copy_(coords)
+            coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0)
+            offset = self.num_extra_tokens * cf.ae_local_num_queries
+            self.rope_coords.data.fill_(0.0)
+            self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
+
+        # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
+        # provides per-cell token identity which is critical for masked cells that have no
+        # content from local assimilation. Without it, masked cells are identical and the
+        # teacher representation (evaluated without dropout) collapses to low rank.
         self.pe_global.data.fill_(0.0)
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
         self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
@@ -186,18 +247,6 @@ class ModelParams(torch.nn.Module):
         self.hp_nbours.data[:, 0] = torch.arange(temp.shape[0], device=self.hp_nbours.device)
         self.hp_nbours.data[:, 1:] = torch.from_numpy(temp).to(self.hp_nbours.device)
 
-        # varlen index set for tokens
-        assert cf.batch_size_per_gpu == cf.batch_size_validation_per_gpu
-        bs = cf.batch_size_per_gpu
-        nqs = 9
-        s = [bs, self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed]
-        if cf.target_cell_local_prediction:
-            tokens_lens_value = nqs * s[2]
-        else:
-            tokens_lens_value = nqs * s[1] * s[2]
-        self.tokens_lens.data.fill_(tokens_lens_value)
-        self.tokens_lens.data[0] = 0
-
         # precompute for varlen attention
         self.q_cells_lens.data.fill_(1)
         self.q_cells_lens.data[0] = 0
@@ -207,7 +256,6 @@ class ModelParams(torch.nn.Module):
         return
 
 
-####################################################################################################
 class Model(torch.nn.Module):
     """WeatherGenerator model architecture
 
@@ -247,7 +295,6 @@ class Model(torch.nn.Module):
         coordinates to its physical space.
     """
 
-    #########################################
     def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
         """
         Args:
@@ -269,213 +316,268 @@ class Model(torch.nn.Module):
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
 
-        self.ae_aggregation_engine: QueryAggregationEngine | None = None
-        self.ae_global_engine: GlobalAssimilationEngine | None = None
-        self.ae_local_engine: LocalAssimilationEngine | None = None
-        self.ae_local_global_engine: Local2GlobalAssimilationEngine | None = None
-        self.embed_engine: EmbeddingEngine | None = None
         self.embed_target_coords = None
+        self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
-        self.interpolate_latents: LatentInterpolator | None = None
-        self.pred_adapter_kv = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
         self.target_token_engines = None
 
-    #########################################
+        assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
+            "Local attention not adapted for register tokens"
+        )
+        self.num_register_tokens = cf.num_register_tokens
+        self.latent_heads = None
+        self.latent_pre_norm = None
+        # auxiliary tokens
+        self.class_token_idxs = list(
+            range(cf.num_register_tokens, cf.num_register_tokens + cf.num_class_tokens)
+        )
+        self.register_token_idxs = list(range(cf.num_register_tokens))
+        self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
+        self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
+
+    def _create_latent_pred_head(
+        self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
+    ):
+        if loss_cfg["head"].lower() == "mlp":
+            return LatentPredictionHeadMLP(
+                name,
+                global_cfg.ae_global_dim_embed,
+                loss_cfg,
+                use_class_token=use_class_token,
+                use_patch_token=use_patch_token,
+            )
+        elif loss_cfg["head"].lower() == "transformer":
+            return LatentPredictionHeadTransformer(
+                global_cfg,
+                name,
+                global_cfg.ae_global_dim_embed,
+                loss_cfg,
+                use_class_token=use_class_token,
+                use_patch_token=use_patch_token,
+            )
+        elif loss_cfg["head"].lower() == "identity":
+            return LatentPredictionHeadIdentity()
+        else:
+            assert False, f"Unknown latent prediction head type {loss_cfg['head']}"
+
     def create(self) -> "Model":
         """Create each individual module of the model"""
         cf = self.cf
 
-        # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
-        # separate embedding networks for differnt observation types
-        self.embed_engine = EmbeddingEngine(cf, self.sources_size, self.stream_names)
+        self.encoder = EncoderModule(
+            cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
+        )
 
-        ##############
-        # local assimilation engine
-        self.ae_local_engine = LocalAssimilationEngine(cf)
+        mode_cfg = cf.training_config
+        self.forecast_engine = None
+        if cf.fe_num_blocks > 0:
+            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
 
-        if cf.latent_noise_kl_weight > 0.0:
-            self.interpolate_latents = LatentInterpolator(
-                gamma=cf.latent_noise_gamma,
-                dim=cf.ae_local_dim_embed,
-                use_additive_noise=cf.latent_noise_use_additive_noise,
-                deterministic=cf.latent_noise_deterministic_latents,
-            )
-
-        ##############
-        # local -> global assimilation engine adapter
-        self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
-
-        ##############
-        # learnable queries
-        if cf.ae_local_queries_per_cell:
-            s = (self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed)
-            q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
-            # add meta data
-            q_cells[:, :, -8:-6] = (
-                (torch.arange(self.num_healpix_cells) / self.num_healpix_cells)
-                .unsqueeze(1)
-                .unsqueeze(1)
-                .repeat((1, cf.ae_local_num_queries, 2))
-            )
-            theta, phi = healpy.pix2ang(
-                nside=2**self.healpix_level, ipix=torch.arange(self.num_healpix_cells)
-            )
-            q_cells[:, :, -6:-3] = (
-                torch.cos(theta).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
-            )
-            q_cells[:, :, -3:] = (
-                torch.sin(phi).unsqueeze(1).unsqueeze(1).repeat((1, cf.ae_local_num_queries, 3))
-            )
-            q_cells[:, :, -9] = torch.arange(cf.ae_local_num_queries)
-            q_cells[:, :, -10] = torch.arange(cf.ae_local_num_queries)
-        else:
-            s = (1, cf.ae_local_num_queries, cf.ae_global_dim_embed)
-            q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
-        self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
-
-        ##############
-        # query aggregation engine
-        self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
-
-        ##############
-        # global assimilation engine
-        self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
-
-        ###############
-        # forecasting engine
-        if isinstance(cf.forecast_steps, int):
-            assert not (cf.forecast_steps > 0 and cf.fe_num_blocks == 0), (
-                "Empty forecast engine (fe_num_blocks = 0), but forecast_steps > 0"
-            )
-        else:
-            assert not (min(cf.forecast_steps) > 0 and cf.fe_num_blocks == 0), (
-                "Empty forecast engine (fe_num_blocks = 0), but forecast_steps[i] > 0 for some i"
-            )
-
-        self.forecast_engine = ForecastingEngine(cf, self.num_healpix_cells)
-
-        ###############
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
         self.embed_target_coords = torch.nn.ModuleDict()
         self.target_token_engines = torch.nn.ModuleDict()
-        self.pred_adapter_kv = torch.nn.ModuleDict()
         self.pred_heads = torch.nn.ModuleDict()
 
-        for i_obs, si in enumerate(cf.streams):
-            stream_name = self.stream_names[i_obs]
+        # determine stream names once so downstream components use consistent keys
+        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
 
-            # extract and setup relevant parameters
-            etc = si["embed_target_coords"]
-            tro_type = si["target_readout"]["type"] if "type" in si["target_readout"] else "token"
-            dim_embed = si["embed_target_coords"]["dim_embed"]
-            dim_out = max(
-                dim_embed,
-                si["token_size"] * self.targets_num_channels[i_obs],
-            )
-            tr = si["target_readout"]
-            num_layers = tr["num_layers"]
-            tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
-            tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
-            softcap = tr["softcap"] if "softcap" in tr else 0.0
+        for i_stream, _ in enumerate(cf.streams):
+            stream_name = self.stream_names[i_stream]
 
-            if tro_type == "obs_value":
-                # fixed dimension for obs_value type
-                dims_embed = [si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)]
-            else:
-                if cf.pred_dyadic_dims:
-                    coord_dim = self.geoinfo_sizes[i_obs] * si["token_size"]
-                    dims_embed = torch.tensor(
-                        [dim_out // 2**i for i in range(num_layers - 1, -1, -1)] + [dim_out]
+        loss_terms = [v.type for _, v in cf.training_config.losses.items()]
+        if cf.validation_config.get("losses"):
+            loss_terms += [v.type for _, v in cf.validation_config.losses.items()]
+
+        if "LossPhysical" in loss_terms:
+            for i_stream, si in enumerate(cf.streams):
+                stream_name = self.stream_names[i_stream]
+
+                # skip decoder if channels are empty
+                if is_stream_forcing(si):
+                    continue
+
+                # skip for the moment to ensure target embedding and tte exist (ordering of
+                # cf.streams is random)
+                if si.get("pred_spatial_shared") is None:
+                    # extract and setup relevant parameters
+                    etc = si["embed_target_coords"]
+                    tr = si["target_readout"]
+                    num_layers = tr["num_layers"]
+                    tr_mlp_hidden_factor = (
+                        tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
                     )
-                    dims_embed[dims_embed < coord_dim] = dims_embed[
-                        torch.where(dims_embed >= coord_dim)[0][0]
+                    tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
+                    softcap = tr["softcap"] if "softcap" in tr else 0.0
+
+                    dims_embed = [
+                        si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
                     ]
-                    dims_embed = dims_embed.tolist()
-                else:
-                    dims_embed = torch.linspace(
-                        dim_embed, dim_out, num_layers + 1, dtype=torch.int32
-                    ).tolist()
 
-            if is_root():
-                logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
+                    if is_root():
+                        logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
 
-            dim_coord_in = self.targets_coords_size[i_obs]
+                    dim_coord_in = self.targets_coords_size[i_stream]
 
-            # embedding network for coordinates
-            if etc["net"] == "linear":
-                self.embed_target_coords[stream_name] = NamedLinear(
-                    f"embed_target_coords_{stream_name}",
-                    in_features=dim_coord_in,
-                    out_features=dims_embed[0],
-                    bias=False,
-                )
-            elif etc["net"] == "mlp":
-                self.embed_target_coords[stream_name] = MLP(
-                    dim_coord_in,
-                    dims_embed[0],
-                    hidden_factor=8,
-                    with_residual=False,
-                    dropout_rate=dropout_rate,
-                    norm_eps=self.cf.mlp_norm_eps,
-                    stream_name=f"embed_target_coords_{stream_name}",
-                )
-            else:
-                assert False
+                    # embedding network for coordinates
+                    if etc["net"] == "linear":
+                        self.embed_target_coords[stream_name] = NamedLinear(
+                            f"embed_target_coords_{stream_name}",
+                            in_features=dim_coord_in,
+                            out_features=dims_embed[0],
+                            bias=False,
+                        )
+                    elif etc["net"] == "mlp":
+                        self.embed_target_coords[stream_name] = MLP(
+                            dim_coord_in,
+                            dims_embed[0],
+                            hidden_factor=8,
+                            with_residual=False,
+                            dropout_rate=dropout_rate,
+                            norm_eps=self.cf.mlp_norm_eps,
+                            name=f"embed_target_coords_{stream_name}",
+                        )
+                    else:
+                        assert False
 
-            # obs-specific adapter for tokens
-            if cf.pred_adapter_kv:
-                self.pred_adapter_kv[stream_name] = MLP(
-                    cf.ae_global_dim_embed,
-                    cf.ae_global_dim_embed,
-                    hidden_factor=2,
-                    with_residual=True,
-                    dropout_rate=dropout_rate,
-                    norm_type=cf.norm_type,
-                    norm_eps=self.cf.mlp_norm_eps,
-                    stream_name=f"pred_adapter_kv_{stream_name}",
-                )
-            else:
-                self.pred_adapter_kv[stream_name] = torch.nn.Identity()
+                    if cf.decoder_type == "Linear":
+                        tte = BilinearDecoder(
+                            stream_name,
+                            dims_embed[0],
+                            cf.ae_global_dim_embed,
+                            self.targets_num_channels[i_stream],
+                        )
+                    else:
+                        # target prediction engines
+                        tte_version = (
+                            TargetPredictionEngine
+                            if cf.decoder_type != "PerceiverIOCoordConditioning"
+                            else TargetPredictionEngineClassic
+                        )
+                        tte = tte_version(
+                            cf,
+                            dims_embed,
+                            dim_coord_in,
+                            tr_dim_head_proj,
+                            tr_mlp_hidden_factor,
+                            softcap,
+                            stream_config=si,
+                        )
 
-            # target prediction engines
-            tte_version = (
-                TargetPredictionEngine
-                if cf.decoder_type != "PerceiverIOCoordConditioning"
-                else TargetPredictionEngineClassic
-            )
-            tte = tte_version(
-                cf,
-                dims_embed,
-                dim_coord_in,
-                tr_dim_head_proj,
-                tr_mlp_hidden_factor,
-                softcap,
-                tro_type,
-                stream_name=stream_name,
-            )
+                    self.target_token_engines[stream_name] = tte
 
-            self.target_token_engines[stream_name] = tte
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of pred head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_stream],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
+                    )
 
-            # ensemble prediction heads to provide probabilistic prediction
-            final_activation = si["pred_head"].get("final_activation", "Identity")
-            if is_root():
-                logger.debug(
-                    f"{final_activation} activation of prediction head of {si['name']} stream"
-                )
-            self.pred_heads[stream_name] = EnsPredictionHead(
-                dims_embed[-1],
-                self.targets_num_channels[i_obs],
-                si["pred_head"]["num_layers"],
-                si["pred_head"]["ens_size"],
-                norm_type=cf.norm_type,
-                final_activation=final_activation,
-                stream_name=stream_name,
-            )
+            # iterate again to setup shared spatial pred heads if specified in config
+            for i_stream, si in enumerate(cf.streams):
+                stream_name = self.stream_names[i_stream]
+
+                # skip decoder if channels are empty
+                if is_stream_forcing(si):
+                    continue
+
+                pred_spatial_shared = si.get("pred_spatial_shared")
+                if pred_spatial_shared is not None:
+                    if pred_spatial_shared not in self.stream_names:
+                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
+                        msg += " but no stream with that name found."
+                        raise ValueError(msg)
+                    if pred_spatial_shared == stream_name:
+                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
+                        msg += "but cannot share with itself."
+                        raise ValueError(msg)
+                    logger.debug(
+                        f"{stream_name} shares spatial prediction head with {pred_spatial_shared}."
+                    )
+
+                    self.embed_target_coords[stream_name] = self.embed_target_coords[
+                        pred_spatial_shared
+                    ]
+                    self.target_token_engines[stream_name] = self.target_token_engines[
+                        pred_spatial_shared
+                    ]
+
+                    idx_shared_s = [
+                        i for i, so in enumerate(cf.streams) if so["name"] == pred_spatial_shared
+                    ]
+                    assert (len(idx_shared_s)) == 1
+                    si_other = cf.streams[idx_shared_s[0]]
+                    dims_embed = [
+                        si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
+                    ]
+
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of pred head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_stream],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
+                    )
+
+        # Latent heads for losses
+        self.latent_heads = nn.ModuleDict()
+        self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+
+        ssl_losses_cfgs = [
+            v
+            for _, v in cf.training_config.losses.items()
+            if v.type == "LossLatentSSLStudentTeacher"
+        ]
+
+        # TODO: support multiple LossLatentSSLStudentTeacher terms
+        assert len(ssl_losses_cfgs) <= 1, "To be implemented."
+        for ssl_target_losses in ssl_losses_cfgs:
+            self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+            for loss, loss_conf in ssl_target_losses.loss_fcts.items():
+                if loss == "iBOT":
+                    self.latent_heads[loss] = self._create_latent_pred_head(
+                        cf,
+                        f"{loss}-head",
+                        loss_conf,
+                        use_class_token=True,
+                        use_patch_token=True,
+                    )
+                elif loss == "JEPA":
+                    self.latent_heads[loss] = self._create_latent_pred_head(
+                        cf,
+                        f"{loss}-head",
+                        loss_conf,
+                        use_class_token=False,
+                        use_patch_token=True,
+                    )
+                elif loss == "DINO":
+                    self.latent_heads[loss] = self._create_latent_pred_head(
+                        cf,
+                        f"{loss}-head",
+                        loss_conf,
+                        use_class_token=True,
+                        use_patch_token=False,
+                    )
 
         return self
 
@@ -488,36 +590,48 @@ class Model(torch.nn.Module):
 
         self.apply(_reset_params)
 
-    #########################################
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
         cf = self.cf
         num_params_embed = [
-            get_num_parameters(self.embed_engine.embeds[name]) for name in self.stream_names
+            get_num_parameters(self.encoder.embed_engine.embeds[name]) for name in self.stream_names
         ]
         num_params_total = get_num_parameters(self)
-        num_params_ae_local = get_num_parameters(self.ae_local_engine.ae_local_blocks)
-        num_params_ae_global = get_num_parameters(self.ae_global_engine.ae_global_blocks)
+        num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)
+        num_params_ae_global = get_num_parameters(self.encoder.ae_global_engine.ae_global_blocks)
 
-        num_params_q_cells = np.prod(self.q_cells.shape) if self.q_cells.requires_grad else 0
-        num_params_ae_adapater = get_num_parameters(self.ae_local_global_engine.ae_adapter)
+        num_params_q_cells = (
+            np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
+        )
+        num_params_ae_adapater = get_num_parameters(self.encoder.ae_local_global_engine.ae_adapter)
+
         num_params_ae_aggregation = get_num_parameters(
-            self.ae_aggregation_engine.ae_aggregation_blocks
+            self.encoder.ae_aggregation_engine.ae_aggregation_blocks
         )
 
-        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
+        num_params_latent_heads = get_num_parameters(self.latent_heads)
+        num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_pred_adapter = [
-            get_num_parameters(self.pred_adapter_kv[name]) for name in self.stream_names
-        ]
+        num_params_fe = (
+            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
+        )
+
+        mdict = self.embed_target_coords
         num_params_embed_tcs = [
-            get_num_parameters(self.embed_target_coords[name]) for name in self.stream_names
+            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
+            for name in self.stream_names
         ]
+        mdict = self.target_token_engines
         num_params_tte = [
-            get_num_parameters(self.target_token_engines[name]) for name in self.stream_names
+            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
+            for name in self.stream_names
         ]
-        num_params_preds = [get_num_parameters(self.pred_heads[name]) for name in self.stream_names]
+        mdict = self.pred_heads
+        num_params_preds = [
+            get_num_parameters(mdict[name]) if mdict and name in mdict else 0
+            for name in self.stream_names
+        ]
 
         print("-----------------")
         print(f"Total number of trainable parameters: {num_params_total:,}")
@@ -532,318 +646,103 @@ class Model(torch.nn.Module):
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
+        print(f" Latent prediction heads and pre-norm: {num_params_latent_heads:,}")
         print(f" Forecast engine: {num_params_fe:,}")
-        print(" kv-adapter, coordinate embedding, prediction networks and prediction heads:")
+        print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
             cf.streams,
-            num_params_pred_adapter,
             num_params_embed_tcs,
             num_params_tte,
             num_params_preds,
             strict=False,
         )
         [
-            print("    {} : {:,} / {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2, np3))
-            for si, np0, np1, np2, np3 in zps
+            print("   {} : {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2))
+            for si, np0, np1, np2 in zps
         ]
         print("-----------------")
 
-    #########################################
-    def rename_old_state_dict(self, params: dict) -> dict:
-        """Checks if model from checkpoint is from the old model version and if so renames
-        the parameters accordingly to the new model version.
-
-        Args:
-            params : Dictionary with (old) model parameters from checkpoint
-        Returns:
-            new_params : Dictionary with (renamed) model parameters
+    def tokens_to_latent_state(self, tokens_post_norm, tokens) -> LatentState:
         """
-        params_cleanup = {
-            "embeds": "embed_engine.embeds",  # EmbeddingEngine
-            "ae_local_blocks": "ae_local_engine.ae_local_blocks",  # LocalAssimilationEngine
-            "ae_adapter": "ae_local_global_engine.ae_adapter",  # Local2GlobalAssimilationEngine
-            "ae_global_blocks": "ae_global_engine.ae_global_blocks",  # GlobalAssimilationEngine
-            "fe_blocks": "forecast_engine.fe_blocks",  # ForecastingEngine
-        }
+        Extract separate parts from global latent space representation and store in LatentState
+        """
+        toks_pn = tokens_post_norm
+        return LatentState(
+            register_tokens=toks_pn[:, self.register_token_idxs] if toks_pn is not None else None,
+            class_token=toks_pn[:, self.class_token_idxs] if tokens_post_norm is not None else None,
+            patch_tokens=toks_pn[:, self.num_aux_tokens :] if toks_pn is not None else None,
+            z_pre_norm=tokens,
+        )
 
-        new_params = {}
-
-        for k, v in params.items():
-            new_k = k
-            prefix = ""
-
-            # Strip "module." (prefix for DataParallel or DistributedDataParallel)
-            if new_k.startswith("module."):
-                prefix = "module."
-                new_k = new_k[len(prefix) :]
-
-            first_w, rest = new_k.split(".", 1) if "." in new_k else (new_k, "")
-            # Only check first word (root level modules) to avoid false matches.
-            if first_w in params_cleanup:
-                new_k = params_cleanup[first_w] + "." + rest
-
-            new_k = prefix + new_k
-            new_params[new_k] = v
-
-        return new_params
-
-    #########################################
-    def forward(self, model_params: ModelParams, batch, forecast_offset: int, forecast_steps: int):
-        """Performs the forward pass of the model to generate forecasts
+    def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
+        """Forward pass of the model
 
         Tokens are processed through the model components, which were defined in the create method.
         Args:
             model_params : Query and embedding parameters
-            batch :
-                streams_data : Contains tokenized source data and target data for each dataset and
-                    each stream
-                source_cell_lens : Used to identify range of tokens to use from generated tokens in
-                    cell embedding
-                target_coords_idxs : Indices of target coordinates for each dataset.
-            forecast_offset : Starting index for iteration
-            forecast_steps : Number of forecast steps to calculate from forecast_offset
+            batch
         Returns:
             A list containing all prediction results
         """
 
-        (streams_data, source_cell_lens, target_coords_idxs) = batch
+        output = ModelOutput(batch.get_output_len())
 
-        # embed
-        tokens = self.embed_cells(model_params, streams_data)
+        tokens, posteriors = self.encoder(model_params, batch)
+        output.add_latent_prediction(0, "posteriors", posteriors)
 
-        # local assimilation engine and adapter
-        tokens, posteriors = self.assimilate_local(model_params, tokens, source_cell_lens)
+        # recover batch dimension and separate input_steps
+        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+        # collapse along input step dimension
+        tokens = tokens.reshape(shape).sum(axis=1)
 
-        tokens = self.assimilate_global(model_params, tokens)
+        # roll-out in latent space, iterate and generate output over requested output steps
+        for step in batch.get_output_idxs():
+            # apply forecasting engine (if present)
+            if self.forecast_engine:
+                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
 
-        # roll-out in latent space
-        preds_all = []
-        for fstep in range(forecast_offset, forecast_offset + forecast_steps):
-            # prediction
-            preds_all += [
-                self.predict(
-                    model_params,
-                    fstep,
-                    tokens,
-                    streams_data,
-                    target_coords_idxs,
-                )
-            ]
+            # decoder predictions
+            output = self.predict_decoders(model_params, step, tokens, batch, output)
+            # latent predictions (raw and with SSL heads)
+            output = self.predict_latent(model_params, step, tokens, batch, output)
 
-            if self.training:
-                # Impute noise to the latent state
-                noise_std = self.cf.get("impute_latent_noise_std", 0.0)
-                if noise_std > 0.0:
-                    tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
+        return output
 
-            tokens = self.forecast(model_params, tokens, fstep)
-
-        # prediction for final step
-        preds_all += [
-            self.predict(
-                model_params,
-                forecast_offset + forecast_steps,
-                tokens,
-                streams_data,
-                target_coords_idxs,
-            )
-        ]
-
-        latents = {}
-        latents["posteriors"] = posteriors
-
-        return ModelOutput(physical=preds_all, latent=latents)
-
-    #########################################
-    def embed_cells(self, model_params: ModelParams, streams_data) -> torch.Tensor:
-        """Embeds input data for each stream separately and rearranges it to cell-wise order
-        Args:
-            model_params : Query and embedding parameters
-            streams_data : Used to initialize first tokens for pre-processing
-        Returns:
-            Tokens for local assimilation
-        """
-
-        device = next(self.parameters()).device
-        tokens_all = self.embed_engine(streams_data, model_params.pe_embed, self.dtype, device)
-
-        return tokens_all
-
-    #########################################
-    def assimilate_local(
-        self, model_params: ModelParams, tokens: torch.Tensor, cell_lens: torch.Tensor
-    ) -> torch.Tensor:
-        """Processes embedded tokens locally and prepares them for the global assimilation
-        Args:
-            model_params : Query and embedding parameters
-            tokens : Input tokens to be processed by local assimilation
-            cell_lens : Used to identify range of tokens to use from generated tokens in cell
-                embedding
-        Returns:
-            Tokens for global assimilation
-        """
-
-        batch_size = (
-            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
-        )
-
-        s = self.q_cells.shape
-        # print( f'{np.prod(np.array(tokens.shape))} :: {np.prod(np.array(s))}'
-        #        + ':: {np.prod(np.array(tokens.shape))/np.prod(np.array(s))}')
-        # TODO: test if positional encoding is needed here
-        if self.cf.ae_local_queries_per_cell:
-            tokens_global = (self.q_cells + model_params.pe_global).repeat(batch_size, 1, 1)
-        else:
-            tokens_global = (
-                self.q_cells.repeat(self.num_healpix_cells, 1, 1) + model_params.pe_global
-            )
-        q_cells_lens = torch.cat(
-            [model_params.q_cells_lens[0].unsqueeze(0)]
-            + [model_params.q_cells_lens[1:] for _ in range(batch_size)]
-        )
-
-        # local assimilation model
-        # for block in self.ae_local_blocks:
-        #     tokens = checkpoint(block, tokens, cell_lens, use_reentrant=False)
-
-        # if self.cf.latent_noise_kl_weight > 0.0:
-        #     tokens, posteriors = self.interpolate_latents.interpolate_with_noise(
-        #         tokens, sampling=self.training
-        #     )
-        # else:
-        #     tokens, posteriors = tokens, 0.0
-
-        # for block in self.ae_adapter:
-        #     tokens_global = checkpoint(
-        #         block,
-        #         tokens_global,
-        #         tokens,
-        #         q_cells_lens,
-        #         cell_lens,
-        #         use_reentrant=False,
-        #     )
-
-        # work around to bug in flash attention for hl>=5
-
-        cell_lens = cell_lens[1:]
-        clen = self.num_healpix_cells // (2 if self.cf.healpix_level <= 5 else 8)
-        tokens_global_unmasked_all = []
-        posteriors = []
-        zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
-        for i in range((cell_lens.shape[0]) // clen):
-            # make sure we properly catch all elements in last chunk
-            i_end = (i + 1) * clen if i < (cell_lens.shape[0] // clen) - 1 else cell_lens.shape[0]
-            l0, l1 = (
-                (0 if i == 0 else cell_lens[: i * clen].cumsum(0)[-1]),
-                cell_lens[:i_end].cumsum(0)[-1],
-            )
-
-            tokens_c = tokens[l0:l1]
-            tokens_global_c = tokens_global[i * clen : i_end]
-            cell_lens_c = torch.cat([zero_pad, cell_lens[i * clen : i_end]])
-            q_cells_lens_c = q_cells_lens[: cell_lens_c.shape[0]]
-
-            # local assimilation model
-            tokens_c = self.ae_local_engine(tokens_c, cell_lens_c, use_reentrant=False)
-
-            if self.cf.latent_noise_kl_weight > 0.0:
-                tokens_c, posteriors_c = self.interpolate_latents.interpolate_with_noise(
-                    tokens_c, sampling=self.training
-                )
-                posteriors += [posteriors_c]
-            else:
-                tokens_c, posteriors = tokens_c, 0.0
-
-            # create mask for global tokens, without first element (used for padding)
-            mask_c = cell_lens_c[1:].to(torch.bool)
-            tokens_global_unmasked_c = tokens_global_c[mask_c]
-            q_cells_lens_unmasked_c = torch.cat([zero_pad, q_cells_lens_c[1:][mask_c]])
-            cell_lens_unmasked_c = torch.cat([zero_pad, cell_lens_c[1:][mask_c]])
-
-            if l0 == l1 or tokens_c.shape[0] == 0:
-                tokens_global_unmasked_all += [tokens_global_unmasked_c]
-                continue
-
-            # local to global adapter engine
-            tokens_global_unmasked_c = self.ae_local_global_engine(
-                tokens_c,
-                tokens_global_unmasked_c,
-                q_cells_lens_unmasked_c,
-                cell_lens_unmasked_c,
-                use_reentrant=False,
-            )
-
-            tokens_global_unmasked_all += [tokens_global_unmasked_c]
-
-        tokens_global_unmasked = torch.cat(tokens_global_unmasked_all)
-
-        # query aggregation engine on the query tokens in unmasked cells
-        # (applying this here assumes batch_size=1)
-        # permute to use ae_local_num_queries as the batchsize and no_of_tokens
-        # as seq len for flash attention
-        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
-        tokens_global_unmasked = self.ae_aggregation_engine(
-            tokens_global_unmasked, use_reentrant=False
-        )
-        tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
-
-        # create mask from cell lens
-        mask = cell_lens.to(torch.bool)
-
-        # fill empty tensor using mask for positions of unmasked tokens
-        tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
-
-        # recover batch dimension and build global token list
-        tokens_global = (
-            tokens_global.reshape([batch_size, self.num_healpix_cells, s[-2], s[-1]])
-            + model_params.pe_global
-        ).flatten(1, 2)
-
-        return tokens_global, posteriors
-
-    #########################################
-    def assimilate_global(self, model_params: ModelParams, tokens: torch.Tensor) -> torch.Tensor:
-        """Performs transformer based global assimilation in latent space
-        Args:
-            model_params : Query and embedding parameters (never used)
-            tokens : Input tokens to be pre-processed by global assimilation
-        Returns:
-            Latent representation of the model
-        """
-
-        # global assimilation engine and adapter
-        tokens = self.ae_global_engine(tokens, use_reentrant=False)
-
-        return tokens
-
-    #########################################
-    def forecast(self, model_params: ModelParams, tokens: torch.Tensor, fstep: int) -> torch.Tensor:
-        """Advances latent space representation in time
-
-        Args:
-            model_params : Query and embedding parameters (never used)
-            tokens : Input tokens to be processed by the model.
-            fstep: Current forecast step index (can be used as aux info).
-        Returns:
-            Processed tokens
-        Raises:
-            ValueError: For unexpected arguments in checkpoint method
-        """
-
-        tokens = self.forecast_engine(tokens, fstep)
-
-        return tokens
-
-    #########################################
-    def predict(
+    def predict_latent(
         self,
         model_params: ModelParams,
-        fstep: int,
+        step: int,
         tokens: torch.Tensor,
-        streams_data,
-        target_coords_idxs,
-    ) -> list[torch.Tensor]:
-        """Predict outputs at the specific target coordinates based on the input weather state and
+        batch: ModelBatch,
+        output: ModelOutput,
+    ) -> ModelOutput:
+        """
+        Compute latent predictions
+        """
+
+        # safe latent prediction
+        tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
+        latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
+        output.add_latent_prediction(step, "latent_state", latent_state)
+
+        # latent predictions for SSL training
+        for name, head in self.latent_heads.items():
+            output.add_latent_prediction(step, name, head(latent_state))
+
+        return output
+
+    def predict_decoders(
+        self,
+        model_params: ModelParams,
+        step: int,
+        tokens: torch.Tensor,
+        batch: ModelBatch,
+        output: ModelOutput,
+    ) -> ModelOutput:
+        """
+        Compute decoder-based predictions
+
+        Predict outputs at the specific target coordinates based on the input weather state and
         pre-training task and projects the latent space representation back to physical space.
 
         Args:
@@ -851,85 +750,90 @@ class Model(torch.nn.Module):
             fstep : Number of forecast steps
             tokens : Tokens from global assimilation engine
             streams_data : Used to initialize target coordinates tokens and index information
+                List of StreamData len(streams_data) == batch_size_per_gpu
             target_coords_idxs : Indices of target coordinates
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
+        # Empty dicts evaluate to False in python
+        if not self.pred_heads:
+            return output
 
-        batch_size = (
-            self.cf.batch_size_per_gpu if self.training else self.cf.batch_size_validation_per_gpu
-        )
+        # remove register  and class tokens
+        tokens = tokens[:, self.num_aux_tokens :]
 
+        # get 1-ring neighborhood for prediction
+        batch_size = len(batch)
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-        tokens_stream = tokens.reshape(s).flatten(0, 1)
-        tokens_stream = tokens_stream[model_params.hp_nbours.flatten()].flatten(0, 1)
+        idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
+        tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
+        # TODO: precompute in model_params?
+        tokens_nbors_lens = torch.full(
+            (s[0] * s[1] + 1,), fill_value=9, dtype=torch.int32, device=tokens_nbors.device
+        )
+        tokens_nbors_lens[0] = 0
 
         # pair with tokens from assimilation engine to obtain target tokens
-        preds_tokens = []
-        for idx, stream_name in enumerate(self.stream_names):
-            si = self.cf.streams[idx]
-            tte = self.target_token_engines[stream_name]
-            tte_kv = self.pred_adapter_kv[stream_name]
+        for stream_name in self.stream_names:
+            # extract target coords for current stream and fstep and convert to one tensor
+            t_coords = [
+                batch.samples[i_b].streams_data[stream_name].target_coords[step]
+                for i_b in range(batch_size)
+            ]
+            t_coords_lens = [len(t) for t in t_coords]
+            t_coords = torch.cat(t_coords)
+
+            if len(t_coords) == 0:
+                continue
+
+            # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-
-            assert batch_size == 1
-
-            ## embed token coords, concatenating along batch dimension
-            # (which is taking care of through the varlen attention)
-            # arguably we should to the mixed precision policy when creating the model in FSDP
-            tc_tokens = torch.cat(
-                [
-                    checkpoint(
-                        tc_embed,
-                        streams_data[i_b][idx].target_coords[fstep],
-                        use_reentrant=False,
-                    )
-                    if len(streams_data[i_b][idx].target_coords[fstep].shape) > 1
-                    else streams_data[i_b][idx].target_coords[fstep]
-                    for i_b in range(len(streams_data))
-                ]
-            )
+            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
-                nn = si["name"]
-                if is_root():
-                    logger.warning(
-                        (
-                            f"Skipping prediction for {nn} because",
-                            f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
-                        )
+                logger.warning(
+                    (
+                        f"Skipping prediction for {stream_name} because",
+                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
                     )
-                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
-                continue
+                )
+                pred = torch.tensor([], device=tc_tokens.device)
 
             # skip empty lengths
-            if tc_tokens.shape[0] == 0:
-                preds_tokens += [torch.tensor([], device=tc_tokens.device)]
-                continue
+            elif tc_tokens.shape[0] == 0:
+                pred = torch.tensor([], device=tc_tokens.device)
 
-            # TODO: how to support tte_kv efficiently,
-            #  generate 1-ring neighborhoods here or on a per stream basis
-            assert isinstance(tte_kv, torch.nn.Identity)
+            else:
+                # lens for varlen attention
+                tcls = torch.cat(
+                    [
+                        sample.streams_data[stream_name].target_coords_lens[step]
+                        for sample in batch.samples
+                    ]
+                )
+                tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
-            # lens for varlen attention
-            tcs_lens = target_coords_idxs[idx][fstep]
-            # coord information for learnable layer norm
-            tcs_aux = torch.cat(
-                [streams_data[i_b][idx].target_coords[fstep] for i_b in range(len(streams_data))]
-            )
+                if self.cf.decoder_type == "Linear":
+                    pred = self.target_token_engines[stream_name](
+                        tc_tokens,
+                        tokens.reshape(-1, s[-1]),  # collapse the batch and token dimensions
+                        tcs_lens,
+                    ).unsqueeze(0)  # add ensemble dim: shape is then [1, preds_per_coord, channels]
+                else:
+                    tc_tokens = self.target_token_engines[stream_name](
+                        latent=tokens_nbors,
+                        output=tc_tokens,
+                        latent_lens=tokens_nbors_lens,
+                        output_lens=tcs_lens,
+                        coordinates=t_coords,
+                    )
 
-            tc_tokens = tte(
-                latent=tokens_stream,
-                output=tc_tokens,
-                latent_lens=model_params.tokens_lens,
-                output_lens=tcs_lens,
-                coordinates=tcs_aux,
-            )
+                    # final prediction head to map back to physical space
+                    pred = self.pred_heads[stream_name](tc_tokens)
 
-            # final prediction head to map back to physical space
-            preds_tokens += [
-                checkpoint(self.pred_heads[stream_name], tc_tokens, use_reentrant=False)
-            ]
+            # recover batch dimension (ragged, so as list)
+            pred = torch.split(pred, t_coords_lens, dim=1)
+            output.add_physical_prediction(step, stream_name, pred)
 
-        return preds_tokens
+        return output

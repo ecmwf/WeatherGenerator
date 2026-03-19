@@ -9,6 +9,7 @@
 
 NPPATMS :
   type : obs
+  stream_id : 1
   filenames : ['observations-ea-ofb-0001-2012-2023-npp-atms-radiances-v2.zarr']
   loss_weight : 1.0
   token_size : 32
@@ -23,7 +24,6 @@ NPPATMS :
     net : linear
     dim_embed : 128
   target_readout :
-    type : 'obs_value'
     num_layers : 1
     num_heads : 4
   pred_head :

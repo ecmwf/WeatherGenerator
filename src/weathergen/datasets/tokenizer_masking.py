@@ -7,24 +7,36 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from functools import partial
 
 import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
 from weathergen.datasets.tokenizer_utils import (
-    arc_alpha,
     encode_times_source,
     encode_times_target,
-    tokenize_window_space,
-    tokenize_window_spacetime,
+    tokenize_apply_mask_source,
+    tokenize_apply_mask_target,
+    tokenize_space,
+    tokenize_spacetime,
 )
-from weathergen.datasets.utils import (
-    get_target_coords_local_ffast,
-)
+
+
+def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
+    """
+    Convert data, coords, and geoinfos to torch tensor
+    """
+    if type(rdata.coords) is not torch.Tensor:
+        rdata.coords = torch.tensor(rdata.coords)
+    if type(rdata.geoinfos) is not torch.Tensor:
+        rdata.geoinfos = torch.tensor(rdata.geoinfos)
+    if type(rdata.data) is not torch.Tensor:
+        rdata.data = torch.tensor(rdata.data)
+
+    return rdata
 
 
 class TokenizerMasking(Tokenizer):
@@ -41,215 +53,170 @@ class TokenizerMasking(Tokenizer):
         self.masker.reset_rng(rng)
         self.rng = rng
 
-    def batchify_source(
-        self,
-        stream_info: dict,
-        rdata: IOReaderData,
-        time_win: tuple,
-        normalize_coords,  # dataset
-    ):
+    def get_tokens_windows(self, stream_info, data, pad_tokens):
+        """
+        Tokenize data (to amortize over the different views that are generated)
+
+        """
+
+        tok_spacetime = stream_info.get("tokenize_spacetime", False)
+        tok = tokenize_spacetime if tok_spacetime else tokenize_space
+        hl = self.healpix_level
         token_size = stream_info["token_size"]
-        is_diagnostic = stream_info.get("diagnostic", False)
-        tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
 
-        tokenize_window = partial(
-            tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
-            time_win=time_win,
-            token_size=token_size,
-            hl=self.hl_source,
-            hpy_verts_rots=self.hpy_verts_rots_source[-1],
-            n_coords=normalize_coords,
-            enc_time=encode_times_source,
-        )
+        tokens = []
+        for rdata in data:
+            # skip empty data
+            if rdata.is_empty():
+                continue
+            # tokenize data
+            idxs_cells, idxs_cells_lens = tok(
+                readerdata_to_torch(rdata), token_size, hl, pad_tokens
+            )
+            tokens += [(idxs_cells, idxs_cells_lens)]
 
-        self.token_size = token_size
+        return tokens
 
-        # return empty if there is no data or we are in diagnostic mode
-        if is_diagnostic or rdata.data.shape[1] == 0 or len(rdata.data) < 2:
-            source_tokens_cells = [torch.tensor([])]
-            source_tokens_lens = torch.zeros([self.num_healpix_cells_source], dtype=torch.int32)
-            source_centroids = [torch.tensor([])]
-            return (source_tokens_cells, source_tokens_lens, source_centroids)
+    def build_samples_for_stream(
+        self,
+        training_mode: str,
+        num_cells: int,
+        stream_info: dict,
+    ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
+        """
+        Create masks for samples
+        """
+        return self.masker.build_samples_for_stream(training_mode, num_cells, stream_info)
 
-        # tokenize all data first
-        tokenized_data = tokenize_window(
-            0,
-            rdata.coords,
-            rdata.geoinfos,
-            rdata.data,
-            rdata.datetimes,
-        )
+    def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
+        """ """
 
-        tokenized_data = [
-            torch.stack(c) if len(c) > 0 else torch.tensor([]) for c in tokenized_data
-        ]
+        mask_tokens, mask_channels = None, None
+        num_tokens = torch.tensor([len(t) for t in idxs_cells_lens]).sum().item()
 
-        # Use the masker to get source tokens and the selection mask for the target
-        source_tokens_cells = self.masker.mask_source(
-            tokenized_data, rdata.coords, rdata.geoinfos, rdata.data
-        )
+        # If there are no tokens, return empty lists.
+        if num_tokens == 0:
+            return (mask_tokens, mask_channels)
 
-        source_tokens_lens = torch.tensor([len(s) for s in source_tokens_cells], dtype=torch.int32)
-        if source_tokens_lens.sum() > 0:
-            source_centroids = self.compute_source_centroids(source_tokens_cells)
+        # TODO, TODO, TODO: use np.repeat
+        # https://stackoverflow.com/questions/26038778/repeat-each-values-of-an-array-different-times
+        # build token level mask: for each cell replicate the keep flag across its tokens
+        token_level_flags: list[np.typing.NDArray] = []
+        for km, lens_cell in zip(mask, idxs_cells_lens, strict=True):
+            num_tokens_cell = len(lens_cell)
+            if num_tokens_cell == 0:
+                continue
+            token_level_flags.append(
+                np.ones(num_tokens_cell, dtype=bool)
+                if km
+                else np.zeros(num_tokens_cell, dtype=bool)
+            )
+        if token_level_flags:
+            mask_tokens = np.concatenate(token_level_flags)
         else:
-            source_centroids = torch.tensor([])
+            mask_tokens = np.array([], dtype=bool)
 
-        return (source_tokens_cells, source_tokens_lens, source_centroids)
+        return (mask_tokens, mask_channels)
 
-    def batchify_target(
+    def get_source(
         self,
         stream_info: dict,
-        sampling_rate_target: float,
         rdata: IOReaderData,
+        idxs_cells_data,
         time_win: tuple,
+        cell_mask: torch.Tensor,
     ):
-        token_size = stream_info["token_size"]
-        tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
-        max_num_targets = stream_info.get("max_num_targets", -1)
+        # create tokenization index
+        (idxs_cells, idxs_cells_lens) = idxs_cells_data
 
-        target_tokens, target_coords = torch.tensor([]), torch.tensor([])
-        target_tokens_lens = torch.zeros([self.num_healpix_cells_target], dtype=torch.int32)
+        # select strategy from XXX depending on stream and if student or teacher
 
-        # target is empty
-        if len(self.masker.perm_sel) == 0:
-            return (target_tokens, target_coords, torch.tensor([]), torch.tensor([]))
-
-        # identity function
-        def id(arg):
-            return arg
-
-        # set tokenization function, no normalization of coords
-        tokenize_window = partial(
-            tokenize_window_spacetime if tokenize_spacetime else tokenize_window_space,
-            time_win=time_win,
-            token_size=token_size,
-            hl=self.hl_source,
-            hpy_verts_rots=self.hpy_verts_rots_source[-1],
-            n_coords=id,
-            enc_time=encode_times_target,
-            pad_tokens=False,
-            local_coords=False,
+        (mask_tokens, mask_channels) = self.cell_to_token_mask(
+            idxs_cells, idxs_cells_lens, cell_mask
         )
 
-        # tokenize
-        target_tokens_cells = tokenize_window(
-            0,
-            rdata.coords,
-            rdata.geoinfos,
-            rdata.data,
-            rdata.datetimes,
+        source_tokens_cells, source_tokens_lens = tokenize_apply_mask_source(
+            idxs_cells,
+            idxs_cells_lens,
+            mask_tokens,
+            mask_channels,
+            stream_info["stream_id"],
+            rdata,
+            time_win,
+            self.hpy_verts_rots_source[-1],
+            encode_times_source,
         )
 
-        target_tokens = self.masker.mask_target(
-            target_tokens_cells, rdata.coords, rdata.geoinfos, rdata.data
-        )
+        return (source_tokens_cells, source_tokens_lens)
 
-        target_tokens_lens = [len(t) for t in target_tokens]
-        total_target = sum(target_tokens_lens)
-
-        # sampling the number of targets according to per-stream sampling_rate_target
-        # otherwise take global sampling_rate_target from config
-        sampling_rate_target = stream_info.get("sampling_rate_target", sampling_rate_target)
-
-        samples = (torch.empty(total_target).uniform_() < sampling_rate_target).split(
-            target_tokens_lens
-        )
-        target_tokens = [
-            (tokens[samples]) for tokens, samples in zip(target_tokens, samples, strict=False)
-        ]
-        target_tokens_lens = [len(t) for t in target_tokens]
-
-        if torch.tensor(target_tokens_lens).sum() == 0:
-            return (torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]))
-
-        tt_lin = torch.cat(target_tokens)
-        tt_lens = target_tokens_lens
-
-        if max_num_targets > 0:
-            target_tokens = self.sample_tensors_uniform_vectorized(
-                target_tokens, torch.tensor(tt_lens), max_num_targets
-            )
-
-        tt_lin = torch.cat(target_tokens)
-        target_tokens_lens = [len(t) for t in target_tokens]
-        tt_lens = target_tokens_lens
-
-        # TODO: can we avoid setting the offsets here manually?
-        # TODO: ideally we would not have recover it; but using tokenize_window seems necessary for
-        #       consistency -> split tokenize_window in two parts with the cat only happening in the
-        #       second
-        offset = 6
-        # offset of 1 : stream_id
-        target_times = torch.split(tt_lin[..., 1:offset], tt_lens)
-        target_coords = torch.split(tt_lin[..., offset : offset + rdata.coords.shape[-1]], tt_lens)
-        offset += rdata.coords.shape[-1]
-        target_geoinfos = torch.split(
-            tt_lin[..., offset : offset + rdata.geoinfos.shape[-1]], tt_lens
-        )
-        offset += rdata.geoinfos.shape[-1]
-        target_tokens = torch.split(tt_lin[..., offset:], tt_lens)
-
-        offset = 6
-        target_coords_raw = torch.split(
-            tt_lin[:, offset : offset + rdata.coords.shape[-1]], tt_lens
-        )
-        # recover absolute time from relatives in encoded ones
-        # TODO: avoid recover; see TODO above
-        deltas_sec = (
-            arc_alpha(tt_lin[..., 1] - 0.5, tt_lin[..., 2] - 0.5) / (2.0 * np.pi) * (12 * 3600)
-        )
-        deltas_sec = deltas_sec.numpy().astype("timedelta64[s]")
-        target_times_raw = np.split(time_win[0] + deltas_sec, np.cumsum(tt_lens)[:-1])
-
-        # compute encoding of target coordinates used in prediction network
-        if torch.tensor(tt_lens).sum() > 0:
-            target_coords = get_target_coords_local_ffast(
-                self.hl_target,
-                target_coords,
-                target_geoinfos,
-                target_times,
-                self.hpy_verts_rots_target,
-                self.hpy_verts_local_target,
-                self.hpy_nctrs_target,
-            )
-            target_coords.requires_grad = False
-            target_coords = list(target_coords.split(tt_lens))
-
-        return (target_tokens, target_coords, target_coords_raw, target_times_raw)
-
-    def sample_tensors_uniform_vectorized(
-        self, tensor_list: list, lengths: list, max_total_points: int
+    def get_target_coords(
+        self,
+        stream_info: dict,
+        rdata: IOReaderData,
+        token_data,
+        time_win: tuple,
+        cell_mask,
     ):
-        """
-        This function randomly selects tensors up to a maximum number of total points
+        # create tokenization index
+        (idxs_cells, idxs_cells_lens) = token_data
 
-        tensor_list: List[torch.tensor] the list to select from
-        lengths: List[int] the length of each tensor in tensor_list
-        max_total_points: the maximum number of total points to sample from
-        """
-        if not tensor_list:
-            return [], 0
+        (mask_tokens, mask_channels) = self.cell_to_token_mask(
+            idxs_cells, idxs_cells_lens, cell_mask
+        )
 
-        # Create random permutation
-        perm = self.rng.permutation(len(tensor_list))
+        # TODO: split up
+        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+            stream_info["stream_id"],
+            self.hl_target,
+            idxs_cells,
+            idxs_cells_lens,
+            mask_tokens,
+            mask_channels,
+            rdata,
+            time_win,
+            self.hpy_verts_rots_target,
+            self.hpy_verts_local_target,
+            self.hpy_nctrs_target,
+            encode_times_target,
+        )
 
-        # Vectorized cumulative sum
-        cumsum = torch.cumsum(lengths[perm], dim=0)
+        return (coords_local, coords_per_cell)
 
-        # Find cutoff point
-        valid_mask = cumsum <= max_total_points
-        if not valid_mask.any():
-            return [], 0
+    def get_target_values(
+        self,
+        stream_info: dict,
+        rdata: IOReaderData,
+        token_data,
+        time_win: tuple,
+        cell_mask,
+    ):
+        # create tokenization index
+        (idxs_cells, idxs_cells_lens) = token_data
 
-        num_selected = valid_mask.sum().item()
-        perm = torch.tensor(perm)
-        selected_indices = perm[:num_selected]
-        selected_indices = torch.zeros_like(perm).scatter(0, selected_indices, 1)
+        (mask_tokens, mask_channels) = self.cell_to_token_mask(
+            idxs_cells, idxs_cells_lens, cell_mask
+        )
 
-        selected_tensors = [
-            t if mask.item() == 1 else t[:0]
-            for t, mask in zip(tensor_list, selected_indices, strict=False)
-        ]
+        data, datetimes, coords, _, _ = tokenize_apply_mask_target(
+            stream_info["stream_id"],
+            self.hl_target,
+            idxs_cells,
+            idxs_cells_lens,
+            mask_tokens,
+            mask_channels,
+            rdata,
+            time_win,
+            self.hpy_verts_rots_target,
+            self.hpy_verts_local_target,
+            self.hpy_nctrs_target,
+            encode_times_target,
+        )
 
-        return selected_tensors
+        idxs_ord_inv = None
+        if data.numel() > 0:
+            # flatten per-token indices into one flat list
+            idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
+            # compute indices for inversion
+            _, idxs_ord_inv = torch.sort(idxs_flat)
+
+        return (data, datetimes, coords, idxs_ord_inv)

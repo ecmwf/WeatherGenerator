@@ -1,32 +1,28 @@
-from collections.abc import Callable
-from dataclasses import dataclass
-
-from weathergen.common.config import Config
-
-
-@dataclass
-class ReaderEntry:
-    data_path: str | None
-    constructor: Callable
-
-
-def get_extra_reader(name: str, cf: Config) -> object | None:
-    """Get an extra reader by name."""
+def get_extra_reader(stream_type: str) -> object | None:
+    """Get an extra reader by stream_type name."""
     # Uses lazy imports to avoid circular dependencies and to not load all the readers at start.
     # There is no sanity check on them, so they may fail at runtime during imports
 
-    match name:
-        case "icon":
-            from weathergen.readers_extra.data_reader_icon import DataReaderIcon
+    match stream_type:
+        case "iconart":
+            from weathergen.readers_extra.data_reader_iconart import DataReaderIconArt
 
-            return ReaderEntry(cf.data_path_icon, DataReaderIcon)
-        case "eobs":
-            from weathergen.readers_extra.data_reader_eobs import DataReaderEObs
+            return DataReaderIconArt
+        case "grep":
+            from weathergen.readers_extra.data_reader_grep import DataReaderGREP
 
-            return ReaderEntry(cf.data_path_eobs, DataReaderEObs)
+            return DataReaderGREP
+        case "iconesm":
+            from weathergen.readers_extra.data_reader_icon_esm import DataReaderIconEsm
+
+            return DataReaderIconEsm
         case "cams":
             from weathergen.readers_extra.data_reader_cams import DataReaderCams
 
-            return ReaderEntry(cf.data_path_cams, DataReaderCams)
+            return DataReaderCams
+        case "mesh":
+            from weathergen.readers_extra.data_reader_mesh import DataReaderMesh
+
+            return DataReaderMesh
         case _:
             return None
