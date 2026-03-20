@@ -23,6 +23,7 @@ test_job:
 
     ./scripts/actions.sh sync
     ./scripts/actions.sh create-links
+    echo "integration-test${STAGE_TYPE:-}"
     ./scripts/actions.sh integration-test${STAGE_TYPE:-}
   variables:
     SLURM_JOB_NUM_NODES: 1
