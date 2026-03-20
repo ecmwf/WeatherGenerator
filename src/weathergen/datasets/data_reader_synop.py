@@ -105,7 +105,7 @@ class DataReaderSynop(DataReaderTimestep):
         self.geoinfo_idx = [self.channels_file.index(ch) for ch in self.geoinfo_channels]
         geoinfo_data_list = []
         for ch in self.geoinfo_channels:
-            geoinfo_data_list.append(np.array(ch, dtype=np32))
+            geoinfo_data_list.append(np.array(ds[ch], dtype=np32))
 
         if geoinfo_data_list:
             self.geoinfo_data = np.stack(geoinfo_data_list).transpose()
@@ -159,8 +159,8 @@ class DataReaderSynop(DataReaderTimestep):
                 )
                 return self._compute_mean_stdev()
 
-            _logger.info(f"Finished loading mean and stdev.")
-            
+            _logger.info("Finished loading mean and stdev.")
+
             return mean, stdev
 
         # Fall back to computing mean and stdev
@@ -244,7 +244,7 @@ class DataReaderSynop(DataReaderTimestep):
         # flatten (time, spatial) into a single leading dimension
         data = data.reshape(-1, len(sel_channels))
 
-        # set invalid values to NaN for MetNo nc files
+        # replace fill values with NaN
         if self.fillvalue is not None:
             mask = data == self.fillvalue
             data[mask] = np.nan
