@@ -90,18 +90,7 @@ class DataReaderSynop(DataReaderTimestep):
             self.ds = ds
             self.len = len(ds)
 
-        # handle MetNo SYNOP netCDF files
-        if "air_temperature" in ds.keys():
-            self.ds_type = "MetNo"
-        elif "TT_10" in ds.keys():
-            self.ds_type = "Germany"
-        else:
-            self.ds_type = "Unknown"
-            assert False, "Unknown dataset type"
-
-        if self.ds_type == "MetNo":
-            self.fillvalue = ds["air_temperature"][0, 0].values.item()
-
+        self.fillvalue = self.stream_info.get("fillvalue", None)
         self.channels_file = list(ds.keys())
 
         # Resolve coordinates
@@ -184,7 +173,7 @@ class DataReaderSynop(DataReaderTimestep):
 
         for ch in self.channels_file:
             data = np.array(self.ds[ch], np.float64)
-            if self.ds_type == "MetNo":
+            if self.fillvalue is not None:
                 mask = data == self.fillvalue
                 data[mask] = np.nan
             mean += [np.nanmean(data.flatten())]
