@@ -21,13 +21,15 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
     check_reader_data,
+    _clip_lat,
+    _clip_lon,
 )
 
 _logger = logging.getLogger(__name__)
 
 
 class DataReaderSynop(DataReaderTimestep):
-    "Wrapper for SYNOP datasets from MetNo in NetCDF"
+    "Wrapper for SYNOP datasets in NetCDF"
 
     def __init__(
         self,
@@ -36,7 +38,7 @@ class DataReaderSynop(DataReaderTimestep):
         stream_info: dict,
     ) -> None:
         """
-        Construct data reader for anemoi dataset
+        Construct data reader for synop dataset
 
         Parameters
         ----------
@@ -88,21 +90,27 @@ class DataReaderSynop(DataReaderTimestep):
             self.ds = ds
             self.len = len(ds)
 
-        self.offset_data_channels = 4
-        self.fillvalue = ds["air_temperature"][0, 0].values.item()
-        self.channels_file = [k for k in self.ds.keys()]
+        self.fillvalue = self.stream_info.get("fillvalue", None)
+        self.channels_file = list(ds.keys())
 
-        # caches lats and lons
+        # Resolve coordinates
         lat_name = stream_info.get("latitude_name", "latitude")
-        self.latitudes = _clip_lat(np.array(ds[lat_name], dtype=np32))
         lon_name = stream_info.get("longitude_name", "longitude")
+
+        self.latitudes = _clip_lat(np.array(ds[lat_name], dtype=np32))
         self.longitudes = _clip_lon(np.array(ds[lon_name], dtype=np32))
 
+        # Resolve geoinfos
         self.geoinfo_channels = stream_info.get("geoinfos", [])
         self.geoinfo_idx = [self.channels_file.index(ch) for ch in self.geoinfo_channels]
-        # cache geoinfos
-        self.geoinfo_data = np.stack([np.array(ds[ch], dtype=np32) for ch in self.geoinfo_channels])
-        self.geoinfo_data = self.geoinfo_data.transpose()
+        geoinfo_data_list = []
+        for ch in self.geoinfo_channels:
+            geoinfo_data_list.append(np.array(ds[ch], dtype=np32))
+
+        if geoinfo_data_list:
+            self.geoinfo_data = np.stack(geoinfo_data_list).transpose()
+        else:
+            self.geoinfo_data = np.zeros((len(self.latitudes), 0), dtype=np32)
 
         # select/filter requested source channels
         self.source_idx = self.select_channels(ds, "source")
@@ -121,10 +129,42 @@ class DataReaderSynop(DataReaderTimestep):
             "stream_id": 0,
         }
 
-        # TODO: this should be stored/cached
-        self.mean, self.stdev = self._compute_mean_stdev()
+        # Load mean and stdev from data file if specified in stream config, otherwise compute
+        self.mean, self.stdev = self._load_or_compute_mean_stdev()
         self.mean_geoinfo = self.mean[self.geoinfo_idx]
         self.stdev_geoinfo = self.stdev[self.geoinfo_idx]
+
+    def _load_or_compute_mean_stdev(self) -> (np.array, np.array):
+        """
+        Load mean and stdev from data file if specified in stream config, otherwise compute.
+
+        Returns: (np.array, np.array)
+            Mean and standard deviation arrays for all channels
+        """
+        mean_key = self.stream_info.get("mean_key")
+        stdev_key = self.stream_info.get("stdev_key")
+
+        if mean_key and mean_key in self.ds.keys() and stdev_key and stdev_key in self.ds.keys():
+            _logger.info(f"Loading mean from '{mean_key}' and stdev from '{stdev_key}'")
+            mean = np.array(self.ds[mean_key], dtype=np.float64)
+            stdev = np.array(self.ds[stdev_key], dtype=np.float64)
+            
+            # Validate that the loaded mean and stdev have the correct shape
+            expected_len = len(self.channels_file)
+            if len(mean) != expected_len or len(stdev) != expected_len:
+                _logger.warning(
+                    f"Pre-computed statistics have incorrect shape "
+                    f"(mean: {len(mean)}, stdev: {len(stdev)}, expected: {expected_len}). "
+                    f"Falling back to computation."
+                )
+                return self._compute_mean_stdev()
+
+            _logger.info("Finished loading mean and stdev.")
+
+            return mean, stdev
+
+        # Fall back to computing mean and stdev
+        return self._compute_mean_stdev()
 
     def _compute_mean_stdev(self) -> (np.array, np.array):
         _logger.info("Starting computation of mean and stdev.")
@@ -133,8 +173,9 @@ class DataReaderSynop(DataReaderTimestep):
 
         for ch in self.channels_file:
             data = np.array(self.ds[ch], np.float64)
-            mask = data == self.fillvalue
-            data[mask] = np.nan
+            if self.fillvalue is not None:
+                mask = data == self.fillvalue
+                data[mask] = np.nan
             mean += [np.nanmean(data.flatten())]
             stdev += [np.nanstd(data.flatten())]
 
@@ -182,7 +223,7 @@ class DataReaderSynop(DataReaderTimestep):
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
-                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx),
             )
 
         assert t_idxs[0] >= 0, "index must be non-negative"
@@ -191,16 +232,22 @@ class DataReaderSynop(DataReaderTimestep):
         didx_end = t_idxs[-1] + 1
 
         # extract number of time steps and collapse ensemble dimension
-        # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
-        # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
-        # sampling is required here
         sel_channels = [self.channels_file[i] for i in channels_idx]
-        data = self.ds[sel_channels].isel(time=slice(didx_start, didx_end)).to_array().values
-        # flatten along time dimension
-        data = data.transpose([1, 2, 0]).reshape((data.shape[1] * data.shape[2], data.shape[0]))
-        # set invalid values to NaN
-        mask = data == self.fillvalue
-        data[mask] = np.nan
+        data = self.ds[sel_channels].isel(time=slice(didx_start, didx_end)).to_array()
+
+        # filter the spatial dimension and reorder to (time * spatial, var)
+        dims = list(data.dims)
+        ax_var = dims.index("variable")
+        ax_time = dims.index("time")
+        ax_spatial = next(i for i in range(len(dims)) if i not in (ax_var, ax_time))
+        data = np.transpose(data.values, [ax_time, ax_spatial, ax_var])
+        # flatten (time, spatial) into a single leading dimension
+        data = data.reshape(-1, len(sel_channels))
+
+        # replace fill values with NaN
+        if self.fillvalue is not None:
+            mask = data == self.fillvalue
+            data[mask] = np.nan
 
         # construct lat/lon coords
         latlon = np.concatenate(
@@ -234,41 +281,23 @@ class DataReaderSynop(DataReaderTimestep):
 
         Parameters
         ----------
-        ds0 :
-            raw anemoi dataset with available channels
+        ds :
+            raw synop dataset with available channels
         ch_type :
             "source" or "target", i.e channel type to select
 
         Returns
         -------
-        ReaderData providing coords, geoinfos, data, datetimes
+        numpy array of indices of selected channels
 
         """
 
         channels = self.stream_info.get(ch_type)
         assert channels is not None, f"{ch_type} channels need to be specified"
-        # sanity check
-        is_empty = len(channels) == 0 if channels is not None else False
-        if is_empty:
+        if not channels:
             stream_name = self.stream_info["name"]
             _logger.warning(f"No channel for {stream_name} for {ch_type}.")
 
         chs_idx = np.sort([self.channels_file.index(ch) for ch in channels])
 
         return np.array(chs_idx)
-
-
-# TODO: move to base class
-def _clip_lat(lats: NDArray) -> NDArray[np.float32]:
-    """
-    Clip latitudes to the range [-90, 90] and ensure periodicity.
-    """
-    return (2 * np.clip(lats, -90.0, 90.0) - lats).astype(np.float32)
-
-
-# TODO: move to base class
-def _clip_lon(lons: NDArray) -> NDArray[np.float32]:
-    """
-    Clip longitudes to the range [-180, 180] and ensure periodicity.
-    """
-    return ((lons + 180.0) % 360.0 - 180.0).astype(np.float32)
