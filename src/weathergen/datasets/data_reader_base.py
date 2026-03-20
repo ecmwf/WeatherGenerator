@@ -185,7 +185,7 @@ class ReaderData:
     datetimes: NDArray[NPDT64]
 
     @staticmethod
-    def empty(num_data_fields: int, num_geo_fields: int, num_coord_fields: int = 2) -> "ReaderData":
+    def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
         """
         Create an empty ReaderData object
 
@@ -195,7 +195,7 @@ class ReaderData:
             Empty ReaderData object
         """
         return ReaderData(
-            coords=np.zeros((0, num_coord_fields), dtype=np.float32),
+            coords=np.zeros((0, 2), dtype=np.float32),
             geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
             data=np.zeros((0, num_data_fields), dtype=np.float32),
             datetimes=np.zeros((0,), dtype=np.datetime64),

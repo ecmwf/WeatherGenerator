@@ -104,31 +104,19 @@ class DataReaderSynop(DataReaderTimestep):
 
         self.channels_file = list(ds.keys())
 
-        # helper to get 1D station-static data for german stations
-        def _get_1d(var_name):
-            v = ds[var_name]
-            if self.ds_type == "Germany":
-                return v.isel(time=0)
-
-            return v
-
         # Resolve coordinates
         lat_name = stream_info.get("latitude_name", "latitude")
         lon_name = stream_info.get("longitude_name", "longitude")
-        # height for german stations and altitude for MetNo stations
-        height_name = stream_info.get("height_name", "height")
 
-        self.latitudes = _clip_lat(np.array(_get_1d(lat_name), dtype=np32))
-        self.longitudes = _clip_lon(np.array(_get_1d(lon_name), dtype=np32))
-        self.heights = np.array(_get_1d(height_name), dtype=np32)
+        self.latitudes = _clip_lat(np.array(lat_name, dtype=np32))
+        self.longitudes = _clip_lon(np.array(lon_name, dtype=np32))
 
         # Resolve geoinfos
         self.geoinfo_channels = stream_info.get("geoinfos", [])
         self.geoinfo_idx = [self.channels_file.index(ch) for ch in self.geoinfo_channels]
-        # cache geoinfos (use _get_1d for consistent 1D arrays)
         geoinfo_data_list = []
         for ch in self.geoinfo_channels:
-            geoinfo_data_list.append(np.array(_get_1d(ch), dtype=np32))
+            geoinfo_data_list.append(np.array(ch, dtype=np32))
 
         if geoinfo_data_list:
             self.geoinfo_data = np.stack(geoinfo_data_list).transpose()
@@ -278,12 +266,11 @@ class DataReaderSynop(DataReaderTimestep):
             mask = data == self.fillvalue
             data[mask] = np.nan
 
-        # construct lat/lon/height coords
+        # construct lat/lon coords
         latlon = np.concatenate(
             [
                 np.expand_dims(self.latitudes, 0),
                 np.expand_dims(self.longitudes, 0),
-                np.expand_dims(self.heights, 0),
             ],
             axis=0,
         ).transpose()
