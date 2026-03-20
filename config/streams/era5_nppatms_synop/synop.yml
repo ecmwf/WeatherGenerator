@@ -4,8 +4,8 @@
 # 2 : conventional observations
 
 SurfaceCombined :
-  type : obs
-  filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
+  type : station
+  filenames : []
   mean_key :       # key for stored mean in dataset
   stdev_key :      # key for stored stdev in dataset
   fillvalue :      # fill value for missing data

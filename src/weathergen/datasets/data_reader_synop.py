@@ -38,7 +38,7 @@ class DataReaderSynop(DataReaderTimestep):
         stream_info: dict,
     ) -> None:
         """
-        Construct data reader for anemoi dataset
+        Construct data reader for synop dataset
 
         Parameters
         ----------
@@ -97,8 +97,8 @@ class DataReaderSynop(DataReaderTimestep):
         lat_name = stream_info.get("latitude_name", "latitude")
         lon_name = stream_info.get("longitude_name", "longitude")
 
-        self.latitudes = _clip_lat(np.array(lat_name, dtype=np32))
-        self.longitudes = _clip_lon(np.array(lon_name, dtype=np32))
+        self.latitudes = _clip_lat(np.array(ds[lat_name], dtype=np32))
+        self.longitudes = _clip_lon(np.array(ds[lon_name], dtype=np32))
 
         # Resolve geoinfos
         self.geoinfo_channels = stream_info.get("geoinfos", [])
@@ -232,9 +232,6 @@ class DataReaderSynop(DataReaderTimestep):
         didx_end = t_idxs[-1] + 1
 
         # extract number of time steps and collapse ensemble dimension
-        # ds is a wrapper around zarr with get_coordinate_selection not being exposed since
-        # subsetting is pushed to the ctor via frequency argument; this also ensures that no sub-
-        # sampling is required here
         sel_channels = [self.channels_file[i] for i in channels_idx]
         data = self.ds[sel_channels].isel(time=slice(didx_start, didx_end)).to_array()
 
@@ -284,22 +281,20 @@ class DataReaderSynop(DataReaderTimestep):
 
         Parameters
         ----------
-        ds0 :
-            raw anemoi dataset with available channels
+        ds :
+            raw synop dataset with available channels
         ch_type :
             "source" or "target", i.e channel type to select
 
         Returns
         -------
-        ReaderData providing coords, geoinfos, data, datetimes
+        numpy array of indices of selected channels
 
         """
 
         channels = self.stream_info.get(ch_type)
         assert channels is not None, f"{ch_type} channels need to be specified"
-        # sanity check
-        is_empty = len(channels) == 0 if channels is not None else False
-        if is_empty:
+        if not channels:
             stream_name = self.stream_info["name"]
             _logger.warning(f"No channel for {stream_name} for {ch_type}.")
 
