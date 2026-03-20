@@ -56,11 +56,7 @@ class LossModuleBase:
         self.loss_fcts = []
 
     @abstractmethod
-    def compute_loss(
-        self,
-        preds: dict,
-        targets: dict,
-    ) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, view_metadata) -> LossValues:
         """
         Computes loss given predictions and targets and returns values of LossValues dataclass.
         """
