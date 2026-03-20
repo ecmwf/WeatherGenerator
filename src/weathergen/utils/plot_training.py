@@ -239,7 +239,7 @@ def plot_lr(
     rstr = "".join([f"{r}_" for r in runs_ids])
 
     if len(rstr) + 6 > MAX_FILENAME_LEN:
-        rstr = rstr[:MAX_FILENAME_LEN - 6] 
+        rstr = rstr[: MAX_FILENAME_LEN - 6]
 
     # save the plot
     plt_fname = plot_dir / f"{rstr}lr.png"
@@ -454,7 +454,7 @@ def plot_loss_per_stream(
                 channel,
             )
             if len(fname) + 4 > MAX_FILENAME_LEN:
-                fname = fname[:MAX_FILENAME_LEN - 4] + ".png"
+                fname = fname[: MAX_FILENAME_LEN - 4] + ".png"
 
             plt_fname = plot_dir / fname
 
@@ -580,7 +580,7 @@ def plot_loss_per_run(
     fname = "{}_{}{}.png".format(run_id, "".join([f"{m}_" for m in modes]), sstr)
 
     if len(fname) + 4 > MAX_FILENAME_LEN:
-        fname = fname[:MAX_FILENAME_LEN - 4] + ".png"  # keep extension
+        fname = fname[: MAX_FILENAME_LEN - 4] + ".png"  # keep extension
 
     plt_fname = plot_dir / fname
 

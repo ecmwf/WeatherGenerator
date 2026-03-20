@@ -14,3 +14,15 @@ clusters_color_map = {
     "jureca": "darkcyan",
 }
 unknown_color = "grey"
+
+# A uniform colormap for all the HPCs. It roughly tries to
+# group them by theme.
+# Names are from here: https://masamasace.github.io/plotly_color/
+stage_type_color_map = {
+    "init": "indianred",
+    "root": "indianred",
+    "pipeline": "indianred",
+    "inference": "lightcoral",
+    "train": "mediumaquamarine",
+    "eval": "darkcyan",
+}

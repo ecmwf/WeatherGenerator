@@ -6,8 +6,8 @@ import polars.selectors as ps
 import streamlit as st
 from polars import col as C
 
-from weathergen.dashboard.colors import clusters_color_map, unknown_color
-from weathergen.dashboard.metrics import all_runs, latest_runs, metric_counts, setup_mflow
+from weathergen.dashboard.colors import clusters_color_map, stage_type_color_map, unknown_color
+from weathergen.dashboard.metrics import all_runs, metric_counts, setup_mflow
 
 _logger = logging.getLogger("eng_overview")
 
@@ -26,12 +26,15 @@ st.markdown("""The number of runs by month and by HPC.""")
 # TODO: this is here just the number of root run ids.
 #  Does not count how many tries or how many validation experiments were run.
 all_runs_stats = (
-    all_runs_pdf.sort("start_time")
-    # Remove metrics and tags
+    all_runs_pdf
+    # Keep only well-formed
+    .filter(C("tags.project").is_not_null())
+    # Remove metrics and params
     .select(~ps.starts_with("metrics"))
     .select(~ps.starts_with("params"))
     # Just keep roots
     .filter(C("tags.mlflow.parentRunId").is_null())
+    .sort("start_time")
     # Put a month column
     .with_columns(pl.date(C("start_time").dt.year(), C("start_time").dt.month(), 1).alias("month"))
 )
@@ -79,6 +82,25 @@ st.plotly_chart(
         y="run_id",
         color="tags.hpc",
         color_discrete_map=clusters_color_map,
+        color_discrete_sequence=[unknown_color],
+    )
+)
+
+st.markdown(
+    """
+            
+**Training runs by stage type (unknown/train/val/eval/inference)**
+
+"""
+)
+
+st.plotly_chart(
+    px.bar(
+        (all_runs_stats.group_by("month", "tags.stage").agg(pl.count("run_id"))).to_pandas(),
+        x="month",
+        y="run_id",
+        color="tags.stage",
+        color_discrete_map=stage_type_color_map,
         color_discrete_sequence=[unknown_color],
     )
 )

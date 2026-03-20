@@ -6,9 +6,7 @@ import datetime
 import logging
 from collections.abc import Iterator
 
-import mlflow
 import polars as pl
-import polars.selectors as ps
 import streamlit as st
 from mlflow.client import MlflowClient
 
@@ -92,8 +90,14 @@ def _iter_run_batches(
             row: dict[str, object] = {
                 "run_id": run.info.run_id,
                 "status": run.info.status,
-                "start_time": datetime.datetime.fromtimestamp(run.info.start_time / 1000, tz=datetime.timezone.utc),
-                "end_time": datetime.datetime.fromtimestamp(run.info.end_time / 1000, tz=datetime.timezone.utc) if run.info.end_time else None,
+                "start_time": datetime.datetime.fromtimestamp(
+                    run.info.start_time / 1000, tz=datetime.UTC
+                ),
+                "end_time": datetime.datetime.fromtimestamp(
+                    run.info.end_time / 1000, tz=datetime.UTC
+                )
+                if run.info.end_time
+                else None,
             }
             # Tags: always keep
             for k, v in run.data.tags.items():
@@ -106,7 +110,9 @@ def _iter_run_batches(
             # Params: filter early
             for k, v in run.data.params.items():
                 col = f"params.{k}"
-                if keep_param_prefixes is None or any(col.startswith(p) for p in keep_param_prefixes):
+                if keep_param_prefixes is None or any(
+                    col.startswith(p) for p in keep_param_prefixes
+                ):
                     row[col] = v
             rows.append(row)
 
@@ -218,7 +224,9 @@ def metric_counts() -> pl.DataFrame:
                 acc[metric] = (row["example_run_id"], row["count"])
 
     if not acc:
-        return pl.DataFrame(schema={"metric": pl.String, "example_run_id": pl.String, "count": pl.Int64})
+        return pl.DataFrame(
+            schema={"metric": pl.String, "example_run_id": pl.String, "count": pl.Int64}
+        )
 
     result = pl.DataFrame(
         [{"metric": k, "example_run_id": v[0], "count": v[1]} for k, v in acc.items()]
