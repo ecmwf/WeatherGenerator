@@ -223,9 +223,7 @@ class DataReaderSynop(DataReaderTimestep):
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
             return ReaderData.empty(
-                num_data_fields=len(channels_idx),
-                num_geo_fields=len(self.geoinfo_idx),
-                num_coord_fields=3,
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx),
             )
 
         assert t_idxs[0] >= 0, "index must be non-negative"
@@ -240,16 +238,15 @@ class DataReaderSynop(DataReaderTimestep):
         sel_channels = [self.channels_file[i] for i in channels_idx]
         data = self.ds[sel_channels].isel(time=slice(didx_start, didx_end)).to_array()
 
-        # Ensure dimensions are (variables, time, spatial)
-        # German files are (variables, spatial, time)
-        # MetNo files are (variables, time, spatial)
-        spatial_dim = "location" if "location" in data.dims else "station_id"
-        if data.dims[1] == spatial_dim:
-            data = data.transpose("variable", "time", spatial_dim)
+        # filter the spatial dimension and reorder to (time * spatial, var)
+        dims = list(data.dims)
+        ax_var = dims.index("variable")
+        ax_time = dims.index("time")
+        ax_spatial = next(i for i in range(len(dims)) if i not in (ax_var, ax_time))
+        data = np.transpose(data.values, [ax_time, ax_spatial, ax_var])
+        # flatten (time, spatial) into a single leading dimension
+        data = data.reshape(-1, len(sel_channels))
 
-        data = data.values
-        # flatten along time dimension
-        data = data.transpose([1, 2, 0]).reshape((data.shape[1] * data.shape[2], data.shape[0]))
         # set invalid values to NaN for MetNo nc files
         if self.fillvalue is not None:
             mask = data == self.fillvalue
