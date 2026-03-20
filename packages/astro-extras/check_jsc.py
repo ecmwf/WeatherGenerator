@@ -16,6 +16,7 @@ Examples:
 """
 
 import argparse
+import logging
 import os
 import re
 import sys
@@ -23,6 +24,9 @@ import time
 
 import pyunicore.client as uc_client
 import pyunicore.credentials as uc_credentials
+from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 REGISTRY_URL = (
     "https://unicore.fz-juelich.de/FZJ/rest/registries/default_registry"
@@ -52,8 +56,15 @@ def discover_sites(credential):
                 sites[n.group(1)] = m.group(1)
     return sites
 
+@dataclass
+class SlurmJobInfo:
+    """
+    Holds information about a submitted UNICORE job that can be used to query its status or cancel it later.
+    """
+    slurm_job_id: str
 
-def run_command(client, command, project=None, poll_interval=2.0):
+
+def run_command(client: uc_client.Client, command: str, project: str, poll_interval: float = 2.0) -> str:
     """Submit a command via UNICORE and print its output."""
     job_desc = {
         "Executable": command,
@@ -62,36 +73,85 @@ def run_command(client, command, project=None, poll_interval=2.0):
     if project:
         job_desc["Project"] = project
 
-    print(f"Submitting: {command}")
+    log.info("Submitting: %s", command)
     job = client.new_job(job_description=job_desc)
-    print(f"Job URL:    {job.resource_url}")
-
-    while job.properties["status"] not in ("SUCCESSFUL", "FAILED", "DONE"):
-        time.sleep(poll_interval)
-
-    status = job.properties["status"]
-    print(f"Status:     {status}")
-
-    wd = job.working_dir
     try:
-        print(wd.stat("/stdout").raw().read().decode("utf-8", errors="replace"), end="")
-    except Exception:
-        pass
+        log.info("Job ID:     %s", job.job_id)
+        log.info("Job Status: %s", job.properties["status"])
+        # Fast until here, working dir is slow.
+        log.info("Working dir: %s", job.working_dir)
+        log.info("Job URL:    %s", job.resource_url)
 
-    try:
-        stderr_text = wd.stat("/stderr").raw().read().decode("utf-8", errors="replace")
-        if stderr_text.strip():
-            print(stderr_text, end="", file=sys.stderr)
-    except Exception:
-        pass
+        wd = job.working_dir
+        stdout_offset = 0
+        stdout_parts: list[str] = []
 
-    try:
-        job.delete()
-    except Exception:
-        pass
+        while job.properties["status"] not in ("SUCCESSFUL", "FAILED", "DONE"):
+            log.info("Status:     %s", job.properties["status"])
+            try:
+                content = wd.stat("/stdout").raw().read().decode("utf-8", errors="replace")
+                if len(content) > stdout_offset:
+                    new_content = content[stdout_offset:]
+                    stdout_parts.append(new_content)
+                    log.info(new_content)
+                    stdout_offset = len(content)
+            except Exception:
+                pass
+            time.sleep(poll_interval)
 
-    if status == "FAILED":
-        sys.exit(1)
+        status = job.properties["status"]
+        log.info("Status:     %s", status)
+
+        # Read any remaining stdout
+        try:
+            content = wd.stat("/stdout").raw().read().decode("utf-8", errors="replace")
+            if len(content) > stdout_offset:
+                new_content = content[stdout_offset:]
+                stdout_parts.append(new_content)
+                log.info(new_content)
+        except Exception:
+            pass
+
+        try:
+            stderr_text = wd.stat("/stderr").raw().read().decode("utf-8", errors="replace")
+            if stderr_text.strip():
+                log.warning(stderr_text)
+        except Exception:
+            pass
+
+        if status == "FAILED":
+            raise RuntimeError(f"Job failed: {job.resource_url}")
+
+        return "".join(stdout_parts)
+    finally:
+        try:
+            job.delete()
+        except Exception:
+            pass
+
+
+def launch_slurm(
+    client: uc_client.Client,
+    command: str,
+    project: str,
+    job_name: str | None = None,
+) -> SlurmJobInfo:
+    """Submit a command via sbatch and return the SLURM job info."""
+    sbatch_args = ""
+    if job_name:
+        sbatch_args += f" --job-name={job_name}"
+
+    sbatch_command = f"sbatch{sbatch_args} <<'SLURM_EOF'\n#!/bin/bash\n{command}\nSLURM_EOF"
+    stdout = run_command(client, sbatch_command, project=project)
+
+    # sbatch outputs "Submitted batch job <job_id>"
+    match = re.search(r"Submitted batch job (\d+)", stdout)
+    if not match:
+        raise RuntimeError(f"Failed to parse SLURM job ID from sbatch output: {stdout.strip()}")
+
+    slurm_job_id = match.group(1)
+    log.info("SLURM job submitted: %s", slurm_job_id)
+    return SlurmJobInfo(slurm_job_id=slurm_job_id)
 
 
 def main():
@@ -116,8 +176,13 @@ def main():
     )
     args = parser.parse_args()
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(message)s",
+    )
+
     if not os.path.exists(args.token):
-        print(f"Error: token file not found: {args.token}", file=sys.stderr)
+        log.error("Token file not found: %s", args.token)
         sys.exit(1)
 
     with open(args.token) as f:
@@ -127,7 +192,7 @@ def main():
     sites = discover_sites(credential)
 
     if args.site not in sites:
-        print(f"Error: site '{args.site}' not found. Available: {', '.join(sorted(sites))}", file=sys.stderr)
+        log.error("Site '%s' not found. Available: %s", args.site, ", ".join(sorted(sites)))
         sys.exit(1)
 
     client = uc_client.Client(credential, site_url=sites[args.site], check_authentication=False)
