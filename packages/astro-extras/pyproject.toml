@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "weathergen-common-core",
     "apache-airflow>=3.0.0,<3.1.0",
+    "pyunicore>=1.3.0",
 ]
 
 [tool.uv.sources]
