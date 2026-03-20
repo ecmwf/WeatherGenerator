@@ -103,7 +103,6 @@ def run_inference(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    logger.info(f"Running inference with config: {cf}")
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
 
