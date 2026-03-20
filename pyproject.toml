@@ -27,7 +27,8 @@ dependencies = [
  "anemoi-datasets",
  "weathergen-common",
  "weathergen-evaluate",
- "weathergen-readers-extra"
+ "weathergen-readers-extra",
+ "pyunicore>=1.3.6",
 ]
 
 
