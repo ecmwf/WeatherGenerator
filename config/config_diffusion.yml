@@ -55,7 +55,7 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 6
+fe_num_blocks: 4
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -158,7 +158,7 @@ training_config:
   shuffle: True
  
   start_date: 2012-06-01T00:00
-  end_date: 2012-06-01T18:00
+  end_date: 2012-09-01T18:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -188,7 +188,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        weight: 0.1,
+        weight: 0.0,
         loss_fcts: {
           "mse": {},
         },
@@ -196,7 +196,7 @@ training_config:
     },
     "latent_diff": {
         type: LossLatentDiffusion,
-        weight: 0.9,
+        weight: 1.0,
         target_and_aux_calc: DiffusionLatentTargetEncoder,
         loss_fcts: { "mse": { }, },
         }
@@ -224,13 +224,14 @@ validation_config:
   # Noise levels (eta values in standard normal space) at which to evaluate the
   # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
   # Each value produces a separate validation pass with independently logged metrics.
-  validation_noise_levels: [0.3, 0.5, 0.75, 1.0, 1.5]
+  # validation_noise_levels: [0.3, 0.5, 0.75, 1.0, 1.5]
+  validation_noise_levels: [0.3, 1.5]
 
-  samples_per_mini_epoch: 16
-  shuffle: False
+  samples_per_mini_epoch: 1
+  shuffle: True  # TODO: Set back to False
 
   start_date: 2012-06-01T00:00
-  end_date: 2012-06-01T18:00
+  end_date: 2012-07-01T18:00
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
