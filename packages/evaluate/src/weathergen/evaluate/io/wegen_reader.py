@@ -11,6 +11,7 @@
 import json
 import logging
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # Third-party
@@ -32,6 +33,50 @@ from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
+
+
+def _load_single_sample(
+    zio,
+    sample: int,
+    stream: str,
+    fstep: int,
+    ensemble: list[str],
+    is_gridded: bool,
+) -> tuple[int, xr.DataArray, xr.DataArray, list | None] | None:
+    """
+    Load and preprocess one (sample, fstep) from an open ZarrIO context.
+
+    Thread-safe for LocalStore backends. The zio object's data_root
+    (a zarr.Group) supports concurrent read-only path lookups.
+
+    Returns (sample_idx, target, prediction, valid_times) or None if empty/missing.
+    """
+    out = zio.get_data(sample, stream, fstep)
+
+    if out.target is None or out.prediction is None:
+        return None
+
+    target = out.target.as_xarray()
+    pred = out.prediction.as_xarray()
+
+    if len(target.ipoint) == 0:
+        return None
+
+    if ensemble == ["mean"]:
+        pred = pred.mean("ens", keepdims=True)
+    else:
+        pred = pred.sel(ens=ensemble)
+
+    pred = pred.squeeze()
+    target = target.squeeze()
+
+    valid_times = None
+    if is_gridded:
+        vt_list = np.unique(target.valid_time.values).tolist()
+        if len(vt_list) > 1:
+            valid_times = vt_list
+
+    return sample, target.persist(), pred.persist(), valid_times
 
 
 class WeatherGenReader(Reader):
@@ -358,6 +403,16 @@ class WeatherGenZarrReader(WeatherGenReader):
         )
         self.fname_zarr = fname_zarr
 
+        # Metadata caches — populated lazily on first access
+        self._cached_samples: set[int] | None = None
+        self._cached_fsteps: set[int] | None = None
+        self._cached_streams: set[str] | None = None
+        self._cached_ensemble: dict[str, list[str]] = {}
+        self._cached_is_gridded: dict[str, bool] = {}
+
+        # I/O threading config
+        self._num_io_threads: int = int(eval_cfg.get("num_io_threads", 8))
+
     def get_data(
         self,
         stream: str,
@@ -413,48 +468,63 @@ class WeatherGenZarrReader(WeatherGenReader):
         is_gridded_data = self.is_gridded_data(stream)
 
         with zarrio_reader(self.fname_zarr) as zio:
+            # Determine effective thread count for sample I/O
+            effective_threads = min(self._num_io_threads, len(samples))
+
+            # ZipStore safety: Python's zipfile is not thread-safe
+            if hasattr(zio, '_store') and hasattr(zio._store, '__class__') and \
+               'zip' in type(zio._store).__name__.lower():
+                effective_threads = 1
+                _logger.debug("ZipStore detected — falling back to sequential sample reads.")
+
             for fstep in fsteps:
                 _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
                 da_tars_fs, da_preds_fs, valid_times_fs = [], [], []
 
-                for sample in tqdm(samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"):
-                    out = zio.get_data(sample, stream, fstep)
+                if effective_threads > 1:
+                    # Threaded sample I/O — concurrent reads from independent Zarr paths
+                    with ThreadPoolExecutor(max_workers=effective_threads) as executor:
+                        futures = {
+                            executor.submit(
+                                _load_single_sample,
+                                zio, s, stream, fstep, ensemble, is_gridded_data,
+                            ): s
+                            for s in samples
+                        }
+                        results = {}
+                        for future in as_completed(futures):
+                            result = future.result()
+                            if result is not None:
+                                results[result[0]] = result
 
-                    if out.target is None or out.prediction is None:
-                        _logger.info(
-                            f"Skipping {stream} sample {sample} forecast step: {fstep}. "
-                            "No data found."
+                    # Collect in original sample order for deterministic output
+                    for s in samples:
+                        if s not in results:
+                            continue
+                        _, target, pred, vt = results[s]
+                        da_tars_fs.append(target)
+                        da_preds_fs.append(pred)
+                        if vt is not None:
+                            valid_times_fs.append(vt)
+                else:
+                    # Sequential fallback
+                    for sample in tqdm(
+                        samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"
+                    ):
+                        result = _load_single_sample(
+                            zio, sample, stream, fstep, ensemble, is_gridded_data,
                         )
-                        continue
-
-                    target, pred = out.target.as_xarray(), out.prediction.as_xarray()
-
-                    npoints = len(target.ipoint)
-
-                    if npoints == 0:
-                        _logger.info(
-                            f"Skipping {stream} sample {sample} forecast step: {fstep}. "
-                            "Dataset is empty."
-                        )
-                        continue
-
-                    if ensemble == ["mean"]:
-                        _logger.debug("Averaging over ensemble members.")
-                        pred = pred.mean("ens", keepdims=True)
-                    else:
-                        _logger.debug(f"Selecting ensemble members {ensemble}.")
-                        pred = pred.sel(ens=ensemble)
-
-                    pred = pred.squeeze()
-                    target = target.squeeze()
-
-                    if is_gridded_data:
-                        vt_list = np.unique(target.valid_time.values).tolist()
-                        if len(vt_list) > 1:
-                            valid_times_fs.append(vt_list)
-
-                    da_tars_fs.append(target.persist())
-                    da_preds_fs.append(pred.persist())
+                        if result is None:
+                            _logger.info(
+                                f"Skipping {stream} sample {sample} forecast step: {fstep}. "
+                                "No data or empty."
+                            )
+                            continue
+                        _, target, pred, vt = result
+                        da_tars_fs.append(target)
+                        da_preds_fs.append(pred)
+                        if vt is not None:
+                            valid_times_fs.append(vt)
 
                 if not da_tars_fs:
                     _logger.info(
@@ -532,22 +602,27 @@ class WeatherGenZarrReader(WeatherGenReader):
         -------
             The config dictionary associated to that stream
         """
-        stream_dict = {}
+        if self._cached_streams is None:
+            with zarrio_reader(self.fname_zarr) as zio:
+                self._cached_streams = set(zio.streams)
 
-        with zarrio_reader(self.fname_zarr) as zio:
-            if stream in zio.streams:
-                stream_dict = self.eval_cfg.streams.get(stream, {})
-        return stream_dict
+        if stream in self._cached_streams:
+            return self.eval_cfg.streams.get(stream, {})
+        return {}
 
     def get_samples(self) -> set[int]:
         """Get the set of sample indices from the Zarr file."""
-        with zarrio_reader(self.fname_zarr) as zio:
-            return set(int(s) for s in zio.samples)
+        if self._cached_samples is None:
+            with zarrio_reader(self.fname_zarr) as zio:
+                self._cached_samples = set(int(s) for s in zio.samples)
+        return self._cached_samples
 
     def get_forecast_steps(self) -> set[int]:
         """Get the set of forecast steps from the Zarr file."""
-        with zarrio_reader(self.fname_zarr) as zio:
-            return set(int(f) for f in zio.forecast_steps)
+        if self._cached_fsteps is None:
+            with zarrio_reader(self.fname_zarr) as zio:
+                self._cached_fsteps = set(int(f) for f in zio.forecast_steps)
+        return self._cached_fsteps
 
     def get_forecast_substep_valid_times(self, stream: str) -> set[str]:
         """Get the set of forecast times from the Zarr file."""
@@ -573,10 +648,14 @@ class WeatherGenZarrReader(WeatherGenReader):
         """
         _logger.debug(f"Getting ensembles for stream {stream}...")
 
-        # TODO: improve this to get ensemble from io class
-        with zarrio_reader(self.fname_zarr) as zio:
-            dummy = zio.get_data(0, stream, zio.forecast_steps[0])
-        return list(dummy.prediction.as_xarray().coords["ens"].values)
+        if stream not in self._cached_ensemble:
+            # TODO: improve this to get ensemble from io class
+            with zarrio_reader(self.fname_zarr) as zio:
+                dummy = zio.get_data(0, stream, zio.forecast_steps[0])
+            self._cached_ensemble[stream] = list(
+                dummy.prediction.as_xarray().coords["ens"].values
+            )
+        return self._cached_ensemble[stream]
 
     def is_gridded_data(self, stream: str) -> bool:
         """Check if the latitude and longitude coordinates are regularly spaced for a given stream.
@@ -589,6 +668,12 @@ class WeatherGenZarrReader(WeatherGenReader):
         -------
             True if the stream is regularly spaced. False otherwise.
         """
+        if stream not in self._cached_is_gridded:
+            self._cached_is_gridded[stream] = self._compute_is_gridded(stream)
+        return self._cached_is_gridded[stream]
+
+    def _compute_is_gridded(self, stream: str) -> bool:
+        """Original is_gridded_data logic, called once per stream and cached."""
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
         with zarrio_reader(self.fname_zarr) as zio:
