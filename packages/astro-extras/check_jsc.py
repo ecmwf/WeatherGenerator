@@ -29,8 +29,10 @@ from dataclasses import dataclass
 log = logging.getLogger(__name__)
 
 REGISTRY_URL = (
-    "https://unicore.fz-juelich.de/FZJ/rest/registries/default_registry"
+    # "https://unicore.fz-juelich.de/FZJ/rest/registries/default_registry"
+    "https://unicore.fz-juelich.de/JUPITER/rest/registries/default_registry"
 )
+
 DEFAULT_TOKEN_FILE = os.path.expanduser("~/.jsc_unicore_token")
 
 
@@ -191,7 +193,12 @@ def main():
         token = f.read().strip()
 
     credential = uc_credentials.BearerToken(token=token)
-    sites = discover_sites(credential)
+    # sites = discover_sites(credential)
+    sites = {
+        "JUPITER": "https://unicore.fz-juelich.de/JUPITER/rest/core",
+        "JURECA": "https://unicore.fz-juelich.de/JURECA/rest/core",
+        "JUWELS": "https://unicore.fz-juelich.de/JUWELS/rest/core",
+    }
 
     if args.site not in sites:
         log.error("Site '%s' not found. Available: %s", args.site, ", ".join(sorted(sites)))

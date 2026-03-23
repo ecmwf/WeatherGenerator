@@ -14,7 +14,11 @@ from pathlib import Path
 
 import pyunicore.client as uc_client
 import pyunicore.credentials as uc_credentials
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+
+import dacite
+
+from weathergen.prefect_dags.cineca import run_command_cineca
 
 log = logging.getLogger("weathergen.prefect.jsc_slurm_poller")
 print("logger:", log)
@@ -49,13 +53,25 @@ def discover_sites(credential) -> dict[str, str]:
                 sites[n.group(1)] = m.group(1)
     return sites
 
+_JSC_SITES = {
+        "JUPITER": "https://unicore.fz-juelich.de/JUPITER/rest/core",
+        "JURECA": "https://unicore.fz-juelich.de/JURECA/rest/core",
+        "JUWELS": "https://unicore.fz-juelich.de/JUWELS/rest/core",
+    }
+
+
 _VALID_HPCS: dict[HpcName, str] = {
     "jupiter": "JUPITER",
     "jureca": "JURECA",
     "juwels-booster": "JUWELS"
 }
 
-def run_command(token: Path|str, hpc: HpcName, project: str, command: str, logger: logging.Logger) -> str:
+def run_command_jsc(
+        token: Path|str,
+         hpc: HpcName,
+         project: str,
+        command: str,
+        logger: logging.Logger) -> str:
     """Submit a command via UNICORE and print its output."""
     if isinstance(token, Path):
         with open(token) as f:
@@ -70,15 +86,15 @@ def run_command(token: Path|str, hpc: HpcName, project: str, command: str, logge
     print("site:", site)
     if not site:
         raise ValueError(f"Invalid HPC '{hpc}'. Valid options are: {', '.join(_VALID_HPCS.keys())}")
-    sites = discover_sites(credential)
+    sites = _JSC_SITES #discover_sites(credential)
     print("discovered sites:", sites)
     logger.info(f"Discovered sites: {sites}")
     if site not in sites:
         raise ValueError(f"Site '{site}' not found in registry")
     client = uc_client.Client(credential, site_url=sites[site], check_authentication=False)
-    return _run_command(client, command, project=project)
+    return _run_command_jsc(client, command, project=project)
 
-def _run_command(client: uc_client.Client, command: str, project: str, poll_interval: float = 2.0, logger: logging.Logger | None = None) -> str:
+def _run_command_jsc(client: uc_client.Client, command: str, project: str, poll_interval: float = 2.0, logger: logging.Logger | None = None) -> str:
     """Submit a command via UNICORE and print its output."""
     log = logger or logging.getLogger(__name__)
     job_desc = {
@@ -167,40 +183,65 @@ def _get_status(s) -> str:
             return pattern
     return "UNKNOWN"
 
-@task(retries=0, retry_delay_seconds=10)
-async def jsc_slurm_poller(hpc:HpcName, jobs_prefix = "weathergen") -> list[SlurmJobs]:
+_JOB_PREFIX = "weathergen"
+
+def _get_queue_command(jobs_prefix: str|None) -> str:
+    job_prefix = jobs_prefix or _JOB_PREFIX
+#     return f"""
+# {{  
+# squeue -a -h -o "%.40j %i %T"  
+# }} | grep {job_prefix}
+# """
+    return f"""
+{{  
+squeue -a -h -o "%.40j %i %T"  
+sacct -S now-3days -E now -a --format=JobName%-40,JobID,State%20  
+}} | grep {job_prefix}
+"""
+
+def _parse_slurm_output(raw_data: str, hpc: HpcName, logger: logging.Logger) -> list[SlurmJobs]:
+    jobs = []
+    for line in raw_data.strip().splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            logger.warning("Unexpected line format (skipping): %s", line)
+            continue
+        job_name = parts[0]
+        job_id = parts[1]
+        job_status = _get_status(" ".join(parts[2:]))
+        sj = SlurmJobs(hpc=hpc, job_name=job_name, job_id=job_id, job_status=job_status)
+        logger.info("Parsed job: %s", sj)
+        jobs.append(sj)
+    return jobs
+
+# TODO: hardcoded to leonardo
+@task(retries=0, retry_delay_seconds=10, task_run_name="cineca_slurm_poller-leonardo")
+async def cineca_slurm_poller(logger: logging.Logger | None = None) -> list[SlurmJobs]:
+    log = logger or get_run_logger()
+    command = _get_queue_command(None)
+    raw_data = await run_blocking(run_command_cineca, 
+    command, logger=log, username="thunter0")
+    log.info("Raw data:\n%s", raw_data)
+    jobs = _parse_slurm_output(raw_data, "cineca", log)
+    return jobs
+
+
+@task(retries=0, retry_delay_seconds=10, task_run_name="jsc_slurm_poller-{hpc}")
+async def jsc_slurm_poller(hpc:HpcName, logger: logging.Logger | None = None) -> list[SlurmJobs]:
     # TODO I should not have to do that
-    log = get_run_logger()
+    log = logger or get_run_logger()
     saved_token = await Variable.aget("JSC_UNICORE_TOKEN", default=None)
     if not saved_token:
         token= DEFAULT_TOKEN_FILE
     else:
         token = saved_token
     log.info(f"Using token from {'variable' if saved_token else 'file'}: {token}")
-    command = f"""
-{{  
-squeue -a -h -o "%.40j %i %T"  
-sacct -S now-5days -E now -a --format=JobName%-40,JobID,State%20  
-}} | grep {jobs_prefix}
-"""
+    command = _get_queue_command(None)
     # Important to pass the logger here.
     # The code is runnin on another thread and prefect will not see the logs.
-    raw_data = await run_blocking(run_command, token, hpc, project="weatherai", command=command, logger=log)
+    raw_data = await run_blocking(run_command_jsc, token, hpc, project="weatherai", command=command, logger=log)
     log.info("Raw data:\n%s", raw_data)
-    # Parse the output into SlurmJobs
-    # Each line should have the format: JobName JobID State
-    jobs = []
-    for line in raw_data.strip().splitlines():
-        parts = line.split()
-        if len(parts) < 3:
-            log.warning("Unexpected line format (skipping): %s", line)
-            continue
-        job_name = parts[0]
-        job_id = parts[1]
-        job_status = _get_status(" ".join(parts[2:]))
-        sj = SlurmJobs(hpc=hpc, job_name=job_name, job_id=job_id, job_status=job_status)
-        log.info("Parsed job: %s", sj)
-        jobs.append(sj)
+    jobs = _parse_slurm_output(raw_data, hpc, log)
     return jobs
 
 @dataclass
@@ -209,37 +250,51 @@ class PrefectSlurmJobInfo:
     updated_at: str
 
 
-def _update_job_variables(statuses: list[SlurmJobs]):
+async def _update_job_variables(statuses: list[SlurmJobs]):
     now = datetime.now(timezone.utc).isoformat()
     
     for sj in statuses:
-        var_name = f"slurm_job_status_{sj.job_id}"
+        var_name = f"slurm_job_status_{sj.hpc}_{sj.job_id}"
         info = PrefectSlurmJobInfo(data=sj, updated_at=now)
+        serial = json.dumps(asdict(info))
         
-        Variable.set(var_name, json.dumps(info), overwrite=True)
+        await Variable.aset(var_name, serial, overwrite=True)
         
         # Tag management: move to "completed" tag when terminal
         if info.data.job_status in TERMINAL_STATES:
-            Variable.set(
+            await Variable.aset(
                 var_name,
-                json.dumps(info),
+                serial,
                 tags=["completed"],
                 overwrite=True,
             )
-            log.info(f"Job {sj.job_id} reached terminal state: {info.data.job_status}")
+            log.info(f"Job {sj.hpc}:{sj.job_id} reached terminal state: {info.data.job_status}")
         else:
             log.info(f"Job {sj.job_id} is in non-terminal state: {info.data.job_status}")
 
+def _flow_run_name(base:str) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    return f"{base}-{timestamp}"
 
-@flow(log_prints=True)
-async def jsc_slurm_queue_poller(jobs_prefix = "weathergen"):
+@flow(log_prints=True, flow_run_name=_flow_run_name("slurm_queue_poller_jsc"))
+async def slurm_queue_poller_jsc():
     # TODO I should not have to do that
     log = get_run_logger()
     for hpc in [
-        # "jupiter",
+        "jupiter",
           "juwels-booster"
           ]:
         log.info(f"Polling SLURM queue for HPC: {hpc}")
-        statuses = await jsc_slurm_poller(hpc, jobs_prefix)
-        _update_job_variables(statuses)
+        statuses = await jsc_slurm_poller(hpc, logger=log)
+        await _update_job_variables(statuses)
         log.info(f"Updated variables for {len(statuses)} jobs from {hpc}")
+
+@flow(log_prints=True, flow_run_name=_flow_run_name("slurm_queue_poller_cineca"))
+async def slurm_queue_poller_cineca():
+    # TODO I should not have to do that
+    log: logging.Logger = get_run_logger()
+    hpc = "leonardo"
+    log.info(f"Polling SLURM queue for HPC: {hpc}")
+    statuses = await cineca_slurm_poller(logger=log)
+    await _update_job_variables(statuses)
+    log.info(f"Updated variables for {len(statuses)} jobs from {hpc}")

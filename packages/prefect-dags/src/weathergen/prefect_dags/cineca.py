@@ -3,11 +3,19 @@
 
 from __future__ import annotations
 
+import io
+import logging
 import os
 import subprocess
 from pathlib import Path
 
 import paramiko
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    load_ssh_private_key,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -17,16 +25,18 @@ _DEFAULT_KEY_PATH = Path.home() / ".ssh" / "leonardo_key"
 _DEFAULT_HOST = "login.leonardo.cineca.it"
 _DEFAULT_PORT = 22
 
+logger = logging.getLogger(__name__)
 
-def run_on_leonardo(
+
+def run_command_cineca(
     command: str,
-    *,
     username: str | None = None,
     email: str | None = None,
     key_path: str | os.PathLike | None = None,
     hostname: str = _DEFAULT_HOST,
     port: int = _DEFAULT_PORT,
     timeout: float | None = None,
+    logger: logging.Logger | None = None,
 ) -> str:
     """SSH into Leonardo, execute *command*, block until it finishes, and
     return its combined stdout+stderr as a string.
@@ -70,7 +80,9 @@ def run_on_leonardo(
     username = username or os.environ.get("LEONARDO_USER")
     email = email or os.environ.get("LEONARDO_EMAIL")
     key_path = Path(key_path) if key_path else _DEFAULT_KEY_PATH
-    print(f"Using key path: {key_path}")
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    logger.info("Using key path: %s", key_path)
 
     if not username:
         raise ValueError(
@@ -88,10 +100,6 @@ def run_on_leonardo(
 
     # Paramiko 4.0 can't parse OpenSSH-format ECDSA keys directly.
     # Work around by re-serializing to traditional PEM via cryptography.
-    from cryptography.hazmat.primitives.serialization import (
-        load_ssh_private_key, Encoding, PrivateFormat, NoEncryption,
-    )
-    import io
     with open(key_path, "rb") as f:
         crypto_key = load_ssh_private_key(f.read(), password=None)
     pem_text = crypto_key.private_bytes(
@@ -109,6 +117,7 @@ def run_on_leonardo(
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     try:
+        logger.info("Connecting to %s@%s:%d with certificate auth...", username, hostname, port)
         client.connect(
             hostname=hostname,
             port=port,
@@ -121,12 +130,18 @@ def run_on_leonardo(
 
         stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
 
-        # Block until the command finishes
-        exit_status = stdout.channel.recv_exit_status()
+        logger.info("Executing command: %s", command)
 
+        # Read output BEFORE waiting for exit status to avoid deadlock:
+        # if the command fills the SSH buffer, recv_exit_status() will
+        # block forever waiting for a command that is itself blocked on
+        # writing to a full buffer.
         out = stdout.read().decode(errors="replace")
         err = stderr.read().decode(errors="replace")
         combined = (out + err).strip()
+
+        exit_status = stdout.channel.recv_exit_status()
+        logger.info("Command finished with exit status %d", exit_status)
 
         if exit_status != 0:
             raise RuntimeError(
@@ -136,6 +151,7 @@ def run_on_leonardo(
         return combined
 
     finally:
+        logger.info("Closing SSH connection")
         client.close()
 
 
@@ -144,7 +160,8 @@ def run_on_leonardo(
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import argparse
-    print(paramiko.__version__)
+    logging.basicConfig(level=logging.INFO)
+    logger.info("paramiko version: %s", paramiko.__version__)
 
     parser = argparse.ArgumentParser(
         description="Run a command on CINECA Leonardo via SSH certificate auth."
@@ -155,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--key", default=None, help="Path to step SSH private key")
     args = parser.parse_args()
 
-    output = run_on_leonardo(
+    output = run_command_cineca(
         args.command,
         username=args.user,
         email=args.email,

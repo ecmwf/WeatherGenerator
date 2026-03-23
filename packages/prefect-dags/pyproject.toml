@@ -7,6 +7,7 @@ dependencies = [
     "weathergen-common-core",
     "prefect>=3.0.0",
     "paramiko>=3.1",
+    "dacite",
 ]
 
 [tool.uv.sources]
