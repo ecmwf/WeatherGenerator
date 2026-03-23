@@ -139,6 +139,7 @@ def run_command_cineca(
         out = stdout.read().decode(errors="replace")
         err = stderr.read().decode(errors="replace")
         combined = (out + err).strip()
+        logger.info("Command output:\n%s", combined)
 
         exit_status = stdout.channel.recv_exit_status()
         logger.info("Command finished with exit status %d", exit_status)

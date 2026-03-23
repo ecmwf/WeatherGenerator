@@ -21,7 +21,6 @@ import dacite
 from weathergen.prefect_dags.cineca import run_command_cineca
 
 log = logging.getLogger("weathergen.prefect.jsc_slurm_poller")
-print("logger:", log)
 
 REGISTRY_URL = (
     "https://unicore.fz-juelich.de/FZJ/rest/registries/default_registry"
@@ -298,3 +297,40 @@ async def slurm_queue_poller_cineca():
     statuses = await cineca_slurm_poller(logger=log)
     await _update_job_variables(statuses)
     log.info(f"Updated variables for {len(statuses)} jobs from {hpc}")
+
+
+
+@dataclass
+class CinecaContext:
+    """
+    Context information for Cineca HPC.
+    The critical inforamtion that is required to execute commands
+    on a Cineca cluster.
+    """
+    username: str
+    ssh_key_path: str | os.PathLike
+
+@dataclass
+class JscContext:
+    """
+    Context information for JSC HPCs.
+    """
+    token: str | os.PathLike
+    project: str
+
+# Any context to run something.
+type HpcContext = CinecaContext | JscContext
+
+async def run_command_on_hpc(hpc: HpcName, context: HpcContext, command: str, logger: logging.Logger|None = None) -> str:
+    """
+    Runs a command on the specified HPC using the provided context.
+    """
+    logger = logger or logging.getLogger(__name__)
+    match context:
+        case CinecaContext(username=username, ssh_key_path=ssh_key_path):
+            return await run_blocking(run_command_cineca, command, username=username, key_path=ssh_key_path, logger=logger)
+        case JscContext(token=token, project=project):
+            return await run_blocking(run_command_jsc, token, hpc, project, command, logger=logger)
+        case _:
+            raise ValueError(f"Unsupported context type: {type(context)}")
+    
