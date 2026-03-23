@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -105,7 +106,7 @@ def load_encoder_from_checkpoint(
     Filters checkpoint to encoder.* and latent_pre_norm* keys only, then loads with
     strict=False. Moves the model to the given device afterwards.
     """
-    path_run = cf.get("model_path", get_path_model(run_id=teacher_run_id))
+    path_run = Path(cf.get("model_path", get_path_model(run_id=teacher_run_id))) / teacher_run_id
     mini_epoch_id = (
         f"chkpt{teacher_mini_epoch:05d}"
         if teacher_mini_epoch is not None and teacher_mini_epoch != -1
