@@ -74,7 +74,6 @@ class QuaverParser(CfParser):
         # Pre-compute per-variable metadata that is constant across all samples/fsteps.
         self._var_info = {}  # var -> (level, level_type, scale_factor, add_offset)
         for var in self.channels:
-
             _, level, level_type = self.extract_var_info(var)
             var_short = var.split("_")[0] if "_" in var else var
             var_config = self.mapping.get(var_short, {})
@@ -118,7 +117,7 @@ class QuaverParser(CfParser):
 
             # Extract the full numpy data and channel list once to avoid
             # repeated xarray .sel() overhead in the inner loop.
-            all_values = da_fs.values                    # (npoints, nchannels)
+            all_values = da_fs.values  # (npoints, nchannels)
             channel_list = list(da_fs.channel.values)
             channel_to_col = {ch: i for i, ch in enumerate(channel_list)}
 

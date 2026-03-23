@@ -47,8 +47,8 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     ds_group = _CACHED_ZIO.data_root.get(group_path)
 
     # Read raw arrays as numpy — no dask, no chunking overhead.
-    data_arr = np.asarray(ds_group["data"])       # (npoints, nchannels) or (npoints, nchannels, nens)
-    coords_arr = np.asarray(ds_group["coords"])   # (npoints, 2)
+    data_arr = np.asarray(ds_group["data"])  # (npoints, nchannels) or (npoints, nchannels, nens)
+    coords_arr = np.asarray(ds_group["coords"])  # (npoints, 2)
     times_arr = np.asarray(ds_group["times"]).astype("datetime64[ns]")  # (npoints,)
     channels = list(ds_group.attrs["channels"])
 
@@ -218,9 +218,7 @@ def get_ref_times(fname_zarr, stream, samples, fstep_hours, n_processes) -> list
             target_group = zio.data_root.get(group_path)
 
             if target_group is None:
-                raise FileNotFoundError(
-                    f"Zarr group '{group_path}' not found in {fname_zarr}"
-                )
+                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
 
             times_arr = np.array(target_group["times"]).astype("datetime64[ns]")
             valid_time = times_arr[0]
@@ -280,13 +278,13 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
     # Batch size in *samples*. Limits how many samples can be in-flight at once,
     # bounding peak memory while still allowing read/write overlap within each batch.
-    BATCH_SIZE = max(1, n_processes * 2)
-    n_batches = (len(samples) + BATCH_SIZE - 1) // BATCH_SIZE
+    batch_size = max(1, n_processes * 2)
+    n_batches = (len(samples) + batch_size - 1) // batch_size
 
     _logger.info(
         f"Exporting {len(samples)} samples × {n_fsteps} fsteps "
         f"({total_tasks} total tasks) in {n_batches} batch(es) of up to "
-        f"{BATCH_SIZE} samples, using {n_processes} workers. "
+        f"{batch_size} samples, using {n_processes} workers. "
         f"Reading and writing are interleaved within each batch."
     )
 
@@ -296,12 +294,11 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         initializer=_init_worker,
         initargs=(fname_zarr,),
     ) as pool:
-
         samples_written = 0
 
         for batch_idx in range(n_batches):
-            batch_start = batch_idx * BATCH_SIZE
-            batch_end = min(batch_start + BATCH_SIZE, len(samples))
+            batch_start = batch_idx * batch_size
+            batch_end = min(batch_start + batch_size, len(samples))
             batch_samples = samples[batch_start:batch_end]
             batch_ref_times = ref_times[batch_start:batch_end]
 
@@ -309,9 +306,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             sample_to_batch_idx = {s: i for i, s in enumerate(batch_samples)}
 
             batch_tasks = [
-                (sample, fstep, stream, data_type)
-                for sample in batch_samples
-                for fstep in fsteps
+                (sample, fstep, stream, data_type) for sample in batch_samples for fstep in fsteps
             ]
 
             _logger.info(
@@ -330,7 +325,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                 desc=f"  Batch {batch_idx + 1}/{n_batches}",
             )
 
-            for sample, fstep, data in pool.imap_unordered(
+            for sample, _fstep, data in pool.imap_unordered(
                 get_data_worker, batch_tasks, chunksize=max(1, n_fsteps)
             ):
                 sample_results[sample].append(data)

@@ -266,7 +266,6 @@ def export_from_args(args: list) -> None:
 
     if kwargs.get("expver") == "NEW":
         kwargs["expver"] = generate_new_expver()
-
     _logger.info(kwargs)
 
     # Ensure output directory exists
