@@ -263,11 +263,10 @@ def export_from_args(args: list) -> None:
 
     kwargs = vars(args).copy()
     kwargs = flatten_lists(kwargs)  # Flatten list of lists
-    
+
     if kwargs.get("expver") == "NEW":
         kwargs["expver"] = generate_new_expver()
-    kwargs["expver"] = "j3bi" 
-    print("I hacked the expver to be j3bi for testing, please use --expver NEW to generate a new expver on ATOS, or pass your own expver with --expver flag if you are not on ATOS.")
+
     _logger.info(kwargs)
 
     # Ensure output directory exists

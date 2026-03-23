@@ -364,7 +364,8 @@ class StreamData:
             True if target is empty for stream, else False
         """
 
-        return torch.isnan(torch.cat(self.target_tokens)).all()
+        is_nan = torch.isnan(torch.cat(self.target_tokens))
+        return is_nan.all() if len(is_nan) > 0 else False
 
     def source_nan(self) -> bool:
         """
@@ -380,13 +381,14 @@ class StreamData:
             True if source is all NaN for stream, else False
         """
 
-        return torch.tensor(
+        is_nan = torch.tensor(
             [
                 torch.isnan(s.coords).all() or torch.isnan(s.data).all()
                 for s in self.source_raw
                 if s is not None
             ]
-        ).all()
+        )
+        return is_nan.all() if len(is_nan) > 0 else False
 
     def empty(self):
         """
