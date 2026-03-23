@@ -410,6 +410,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         da_tars, da_preds = [], []
 
         fsteps_final = []
+        is_gridded_data = self.is_gridded_data(stream)
 
         with zarrio_reader(self.fname_zarr) as zio:
             for fstep in fsteps:
@@ -447,9 +448,10 @@ class WeatherGenZarrReader(WeatherGenReader):
                     pred = pred.squeeze()
                     target = target.squeeze()
 
-                    if self.is_gridded_data(stream):
+                    if is_gridded_data:
                         vt_list = np.unique(target.valid_time.values).tolist()
-                        valid_times_fs.append(vt_list)
+                        if len(vt_list) > 1:
+                            valid_times_fs.append(vt_list)
 
                     da_tars_fs.append(target.persist())
                     da_preds_fs.append(pred.persist())
@@ -468,13 +470,10 @@ class WeatherGenZarrReader(WeatherGenReader):
                 )
 
                 # faster processing
-                if self.is_gridded_data(stream):
+                if is_gridded_data:
                     # Efficient concatenation for regular grid
                     da_preds_fs = _split_by_valid_time(da_preds_fs)
                     da_tars_fs = _split_by_valid_time(da_tars_fs)
-
-                    da_tars_fs = _force_consistent_grids(da_tars_fs)
-                    da_preds_fs = _force_consistent_grids(da_preds_fs)
                 else:
                     # Irregular (scatter) case. concatenate over ipoint
                     da_tars_fs = xr.concat(
@@ -491,34 +490,31 @@ class WeatherGenZarrReader(WeatherGenReader):
             da_tars_dict, da_preds_dict = {}, {}
             i = 1
 
-            for _, (fstep, da_t, da_p) in enumerate(
-                zip(fsteps_final, da_tars, da_preds, strict=True)
-            ):
-                if isinstance(fstep, list):  # regular grid with lead times (1 or multiple)
-                    for t, p in zip(da_t, da_p, strict=True):
-                        t, p = _select_channels(t, p, stream, channels, stream_cfg)
+            for fstep, da_t, da_p in zip(fsteps_final, da_tars, da_preds, strict=True):
+                with_substeps = isinstance(da_t, list)
+                items = zip(da_t, da_p, strict=True) if with_substeps else [(da_t, da_p)]
 
-                        # But we also want to have a common forecast_step coordinate for all
-                        # substeps to be able to apply the same metrics.
-                        t = t.assign_coords(forecast_step=i)
-                        p = p.assign_coords(forecast_step=i)
+                for t, p in items:
+                    t, p = _select_channels(t, p, stream, channels, stream_cfg)
 
-                        # TODO: move somewhere else into another loop maybe. but 2 loops is slow?
+                    if is_gridded_data:
                         t = _add_lead_time_coord(t)
                         p = _add_lead_time_coord(p)
 
                         p = _scale_z_channels(p, stream)
                         t = _scale_z_channels(t, stream)
 
+                    if with_substeps:
+                        t = t.assign_coords(forecast_step=i)
+                        p = p.assign_coords(forecast_step=i)
                         da_tars_dict[i] = t
                         da_preds_dict[i] = p
                         i += 1
-                else:
-                    da_t, da_p = _select_channels(da_t, da_p, stream, channels, stream_cfg)
-                    da_tars_dict[int(fstep)] = da_t
-                    da_preds_dict[int(fstep)] = da_p
+                    else:
+                        da_tars_dict[int(fstep)] = t
+                        da_preds_dict[int(fstep)] = p
 
-            return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
+        return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
 
     ######## reader utils ########
 
@@ -672,6 +668,16 @@ def _select_channels(
 
         da_tar, da_pred, channels = dc.get_derived_channels(da_tar, da_pred)
 
+        # Verify that requested channels are available
+        all_channels = da_tar.channel.values.tolist()
+        missing_channels = set(channels) - set(all_channels)
+        if missing_channels:
+            _logger.warning(
+                f"Skipping channels {missing_channels} for stream {stream}. "
+                f"Not found in available channels."
+            )
+            channels = [ch for ch in channels if ch in all_channels]
+
         da_tar = da_tar.sel(channel=channels)
         da_pred = da_pred.sel(channel=channels)
 
@@ -727,11 +733,14 @@ def _split_by_valid_time(arrays: list[xr.DataArray]) -> list[xr.DataArray]:
     lead_time_groups = {}  # lead_time -> list of (arr_idx, ipoint_indices)
 
     unique_valid_times = [np.unique(da.valid_time.values) for da in arrays]
+
     if len(unique_valid_times) == len(arrays) and all(len(uvt) == 1 for uvt in unique_valid_times):
         _logger.debug(
             "All arrays have a single unique valid_time. Skipping splitting by valid_time."
         )
-        return arrays
+        arrays = _force_consistent_grids(arrays)
+
+        return [arrays]
 
     for arr_idx, da in tqdm(enumerate(arrays), total=len(arrays), desc="Splitting by valid time"):
         vt = da.valid_time.values
@@ -833,6 +842,7 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     vt = da["valid_time"].values
     sis = da["source_interval_start"].values
     # Compute lead_time: valid_time - source_interval_start
+
     if vt.ndim > 1:
         sis_expanded = sis[:, np.newaxis] if sis.ndim == 1 else sis
         lead_time_values = vt - sis_expanded
@@ -914,4 +924,4 @@ def _force_consistent_grids(ref: list[xr.DataArray]) -> xr.DataArray:
 
         aligned.append(a_sorted)
 
-    return aligned  # xr.concat(aligned, dim="sample")
+    return xr.concat(aligned, dim="sample", coords="different", compat="equals")
