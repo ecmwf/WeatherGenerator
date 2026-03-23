@@ -167,7 +167,7 @@ link-mode = "symlink"
 # by future releases of dependencies or sub-dependencies. 
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
-exclude-newer = "2026-02-27T00:00:00Z"
+exclude-newer = "2026-03-20T00:00:00Z"
 
 # The minimum version of uv required.
 # It is tightly controlled because the format of uv.lock has changed 
@@ -227,6 +227,7 @@ explicit = true
 [tool.uv.sources]
 weathergen-astro-dags = { workspace = true }
 weathergen-astro-extras = { workspace = true }
+weathergen-prefect-dags = { workspace = true }
 weathergen-common = { workspace = true }
 weathergen-common-core = { workspace = true }
 weathergen-evaluate = { workspace = true }
@@ -270,8 +271,9 @@ log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 
 [tool.uv.workspace]
 members = [
-   "packages/astro-dags",
-   "packages/astro-extras",
+#   "packages/astro-dags",
+   #"packages/astro-extras",
+   "packages/prefect-dags",
    "packages/common",
    "packages/common-core",
    "packages/evaluate",

@@ -47,6 +47,7 @@ def discover_sites(credential):
     )
     resp.raise_for_status()
     sites = {}
+    log.info("Registry response: %s", resp.text)
     for entry in resp.json().get("entries", []):
         href = entry.get("href", "")
         if entry.get("type", "") == "TargetSystemFactory":
@@ -54,6 +55,7 @@ def discover_sites(credential):
             n = re.match(r"https://\S+/(\S+)/rest/core", href)
             if m and n:
                 sites[n.group(1)] = m.group(1)
+    log.info("Discovered sites: %s", sites)
     return sites
 
 @dataclass
