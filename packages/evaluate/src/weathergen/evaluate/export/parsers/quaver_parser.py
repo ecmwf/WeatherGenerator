@@ -74,12 +74,16 @@ class QuaverParser(CfParser):
         # Pre-compute per-variable metadata that is constant across all samples/fsteps.
         self._var_info = {}  # var -> (level, level_type, scale_factor, add_offset)
         for var in self.channels:
+
             _, level, level_type = self.extract_var_info(var)
             var_short = var.split("_")[0] if "_" in var else var
             var_config = self.mapping.get(var_short, {})
             raw = var_config.get("scale_factor", "1.0")
-            parts = raw.split("/")
-            scale_factor = float(parts[0]) / float(parts[1]) if len(parts) == 2 else float(parts[0])
+            if isinstance(raw, str) and "/" in raw:
+                parts = raw.split("/")
+                scale_factor = float(parts[0]) / float(parts[1])
+            else:
+                scale_factor = float(raw)
             add_offset = float(var_config.get("add_offset", 0.0))
             self._var_info[var] = (level, level_type, scale_factor, add_offset)
 
