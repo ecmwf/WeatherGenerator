@@ -72,8 +72,10 @@ class NetcdfParser(CfParser):
             if result is None:
                 continue
 
-            result = result.as_xarray().squeeze()
-            if "channel" not in result.indexes: 
+            # result is already a materialized xarray DataArray (built in the worker).
+            if not isinstance(result, xr.DataArray):
+                result = result.as_xarray().squeeze()
+            if "channel" not in result.indexes:
                 result = result.expand_dims("channel")
             result = result.sel(channel=self.channels)
             result = self.reshape(result)
