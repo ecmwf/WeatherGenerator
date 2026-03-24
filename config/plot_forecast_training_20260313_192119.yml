@@ -1,0 +1,67 @@
+# Plot config for iBOT pretraining runs (auto-generated)
+train:
+  plot:
+    e0k2ezqx-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    x4kgvr8e-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    bjmilsyd-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    7ojd38lg-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    zn5atvds-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    crhlkreo-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    9mp6vivt-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    6fbqrd0z-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    oj2kwbch-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    cfwxdofp-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    p6oj5mix-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    vpzyyxqj-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    r9zrymfl-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    zvrsz3gj-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    wmr6wefp-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    b5oiek9n-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    jh2dnyej-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    vse3p8i4-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    u8794eia-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    jhrits2t-stage1:
+      slurm_id: 0
+      description: "Forecasting default"
+    epiys5z8:
+      slurm_id: 0
+      description: "Reference?"
+

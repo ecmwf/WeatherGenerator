@@ -1,0 +1,63 @@
+# Plot config for iBOT finetuning runs (auto-generated)
+train:
+  plot:
+    e0k2ezqx-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    x4kgvr8e-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    bjmilsyd-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    7ojd38lg-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    zn5atvds-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    crhlkreo-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    9mp6vivt-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    6fbqrd0z-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    oj2kwbch-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    cfwxdofp-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    p6oj5mix-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    vpzyyxqj-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    r9zrymfl-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    zvrsz3gj-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    wmr6wefp-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    b5oiek9n-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    jh2dnyej-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    vse3p8i4-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    u8794eia-stage2:
+      slurm_id: 0
+      description: "Forecasting default"
+    jhrits2t-stage2:
+      slurm_id: 0
+      description: "Forecasting default"

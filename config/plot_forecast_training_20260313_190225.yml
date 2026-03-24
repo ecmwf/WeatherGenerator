@@ -1,0 +1,63 @@
+# Plot config for iBOT pretraining runs (auto-generated)
+train:
+  plot:
+    e0k2ezqx-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=e0k2ezqx lr_scale_q=18.144 lr_scale_t=2.449 lr_scale_uvw=8.566 lr_scale_z=1.879"
+    x4kgvr8e-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=x4kgvr8e lr_scale_q=11.551 lr_scale_t=1.129 lr_scale_uvw=15.608 lr_scale_z=1.611"
+    bjmilsyd-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=bjmilsyd lr_scale_q=11.358 lr_scale_t=3.275 lr_scale_uvw=2.686 lr_scale_z=1.500"
+    7ojd38lg-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=7ojd38lg lr_scale_q=19.257 lr_scale_t=1.270 lr_scale_uvw=15.361 lr_scale_z=1.207"
+    zn5atvds-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=zn5atvds lr_scale_q=7.315 lr_scale_t=1.365 lr_scale_uvw=14.639 lr_scale_z=2.375"
+    crhlkreo-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=crhlkreo lr_scale_q=4.674 lr_scale_t=2.700 lr_scale_uvw=7.286 lr_scale_z=1.206"
+    9mp6vivt-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=9mp6vivt lr_scale_q=2.459 lr_scale_t=1.824 lr_scale_uvw=18.382 lr_scale_z=1.648"
+    6fbqrd0z-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=6fbqrd0z lr_scale_q=2.809 lr_scale_t=2.358 lr_scale_uvw=6.726 lr_scale_z=2.399"
+    oj2kwbch-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=oj2kwbch lr_scale_q=12.818 lr_scale_t=3.088 lr_scale_uvw=5.653 lr_scale_z=1.306"
+    cfwxdofp-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=cfwxdofp lr_scale_q=4.380 lr_scale_t=2.416 lr_scale_uvw=16.291 lr_scale_z=1.425"
+    p6oj5mix-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=p6oj5mix lr_scale_q=19.727 lr_scale_t=1.878 lr_scale_uvw=2.378 lr_scale_z=2.559"
+    vpzyyxqj-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=vpzyyxqj lr_scale_q=12.509 lr_scale_t=1.374 lr_scale_uvw=16.803 lr_scale_z=2.754"
+    r9zrymfl-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=r9zrymfl lr_scale_q=8.193 lr_scale_t=2.913 lr_scale_uvw=14.580 lr_scale_z=1.985"
+    zvrsz3gj-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=zvrsz3gj lr_scale_q=3.368 lr_scale_t=2.311 lr_scale_uvw=6.247 lr_scale_z=2.242"
+    wmr6wefp-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=wmr6wefp lr_scale_q=6.783 lr_scale_t=2.859 lr_scale_uvw=2.366 lr_scale_z=2.810"
+    b5oiek9n-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=b5oiek9n lr_scale_q=5.612 lr_scale_t=2.821 lr_scale_uvw=5.746 lr_scale_z=3.276"
+    jh2dnyej-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=jh2dnyej lr_scale_q=2.783 lr_scale_t=1.318 lr_scale_uvw=9.796 lr_scale_z=1.152"
+    vse3p8i4-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=vse3p8i4 lr_scale_q=8.655 lr_scale_t=1.681 lr_scale_uvw=3.806 lr_scale_z=3.267"
+    u8794eia-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=u8794eia lr_scale_q=4.858 lr_scale_t=1.205 lr_scale_uvw=7.987 lr_scale_z=1.835"
+    jhrits2t-stage1:
+      slurm_id: 0
+      description: "Forecasting default run_id=jhrits2t lr_scale_q=5.680 lr_scale_t=1.721 lr_scale_uvw=12.394 lr_scale_z=2.469"

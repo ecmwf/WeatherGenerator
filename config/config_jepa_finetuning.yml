@@ -157,6 +157,10 @@ training_config:
   }
   
   model_input: {
+    "spectral_source" : {
+      # masking strategy: "random", "forecast"
+      enabled: False,
+    },
     "random_easy" : {
       # masking strategy: "random", "forecast"
       enabled: False,
@@ -179,6 +183,9 @@ training_config:
   }
 
   target_input: {
+    "full_target" : {
+      enabled: False,
+    },
     "random_easy_target" : {
       enabled: False,
       masking_strategy: "healpix",
