@@ -124,8 +124,12 @@ def load_encoder_from_checkpoint(
     mkeys, ukeys = model.load_state_dict(encoder_params, strict=False)
     model.to(device)
 
-    if mkeys:
-        logger.info(f"Encoder checkpoint load - expected missing (non-encoder) keys: {len(mkeys)}")
+    logging.info(f"Teacher: Loaded encoder weights from checkpoint {filename}")
+    if mkeys is not None:
+        logger.info(f"Number of missing keys: {len(mkeys)}")
         logger.debug(f"Missing keys: {mkeys}")
-    if ukeys:
-        logger.warning(f"Unused keys when loading encoder checkpoint: {ukeys}")
+    if ukeys is not None:
+        logger.info(f"Number of unused keys: {len(ukeys)}")
+        logger.debug(f"Unused keys: {ukeys}")
+    if mkeys is None and ukeys is None:
+        logger.info("All keys in checkpoint matched successfully.")
