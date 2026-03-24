@@ -36,6 +36,15 @@ def _apply_rope(qs, ks, coords, rope_mode, rope_spherical_band, rope_healpix_lev
     raise ValueError(f"Unsupported rope_mode={rope_mode}")
 
 
+def _apply_post_rope_qk_lnorm(
+    qs, ks, rope_mode, rope_post_mod_qk_lnorm, lnorm_q, lnorm_k, out_dtype
+):
+    if rope_mode == "spherical" and rope_post_mod_qk_lnorm:
+        qs = lnorm_q(qs).to(out_dtype)
+        ks = lnorm_k(ks).to(out_dtype)
+    return qs, ks
+
+
 class MultiSelfAttentionHeadVarlen(torch.nn.Module):
     def __init__(
         self,
@@ -54,6 +63,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         rope_mode="none",
         rope_spherical_band=None,
         rope_healpix_level=0,
+        rope_post_mod_qk_lnorm=False,
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -65,6 +75,9 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.rope_mode = rope_mode
         self.rope_spherical_band = rope_spherical_band
         self.rope_healpix_level = rope_healpix_level
+        self.rope_post_mod_qk_lnorm = rope_post_mod_qk_lnorm
+        if self.rope_post_mod_qk_lnorm:
+            assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -89,6 +102,16 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         lnorm = norm if with_qk_lnorm else torch.nn.Identity
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
+        self.post_rope_lnorm_q = (
+            norm(self.dim_head_proj, eps=norm_eps)
+            if self.rope_post_mod_qk_lnorm
+            else torch.nn.Identity()
+        )
+        self.post_rope_lnorm_k = (
+            norm(self.dim_head_proj, eps=norm_eps)
+            if self.rope_post_mod_qk_lnorm
+            else torch.nn.Identity()
+        )
 
         self.dtype = attention_dtype
 
@@ -108,6 +131,15 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
 
         qs, ks = _apply_rope(
             qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 1
+        )
+        qs, ks = _apply_post_rope_qk_lnorm(
+            qs,
+            ks,
+            self.rope_mode,
+            self.rope_post_mod_qk_lnorm,
+            self.post_rope_lnorm_q,
+            self.post_rope_lnorm_k,
+            self.dtype,
         )
 
         # set dropout rate according to training/eval mode as required by flash_attn
@@ -230,6 +262,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         rope_mode="none",
         rope_spherical_band=None,
         rope_healpix_level=0,
+        rope_post_mod_qk_lnorm=False,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -240,6 +273,9 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.rope_mode = rope_mode
         self.rope_spherical_band = rope_spherical_band
         self.rope_healpix_level = rope_healpix_level
+        self.rope_post_mod_qk_lnorm = rope_post_mod_qk_lnorm
+        if self.rope_post_mod_qk_lnorm:
+            assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -264,6 +300,16 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         lnorm = norm if with_qk_lnorm else torch.nn.Identity
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
+        self.post_rope_lnorm_q = (
+            norm(self.dim_head_proj, eps=norm_eps)
+            if self.rope_post_mod_qk_lnorm
+            else torch.nn.Identity()
+        )
+        self.post_rope_lnorm_k = (
+            norm(self.dim_head_proj, eps=norm_eps)
+            if self.rope_post_mod_qk_lnorm
+            else torch.nn.Identity()
+        )
 
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported."
@@ -291,6 +337,15 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         qs, ks = _apply_rope(
             qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 1
+        )
+        qs, ks = _apply_post_rope_qk_lnorm(
+            qs,
+            ks,
+            self.rope_mode,
+            self.rope_post_mod_qk_lnorm,
+            self.post_rope_lnorm_q,
+            self.post_rope_lnorm_k,
+            self.dtype,
         )
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
@@ -530,6 +585,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         rope_mode="none",
         rope_spherical_band=None,
         rope_healpix_level=0,
+        rope_post_mod_qk_lnorm=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -541,6 +597,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.rope_mode = rope_mode
         self.rope_spherical_band = rope_spherical_band
         self.rope_healpix_level = rope_healpix_level
+        self.rope_post_mod_qk_lnorm = rope_post_mod_qk_lnorm
+        if self.rope_post_mod_qk_lnorm:
+            assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -565,6 +624,16 @@ class MultiSelfAttentionHead(torch.nn.Module):
         lnorm = norm if with_qk_lnorm else torch.nn.Identity
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
+        self.post_rope_lnorm_q = (
+            norm(self.dim_head_proj, eps=norm_eps)
+            if self.rope_post_mod_qk_lnorm
+            else torch.nn.Identity()
+        )
+        self.post_rope_lnorm_k = (
+            norm(self.dim_head_proj, eps=norm_eps)
+            if self.rope_post_mod_qk_lnorm
+            else torch.nn.Identity()
+        )
 
         self.dtype = attention_dtype
         if with_flash:
@@ -587,6 +656,15 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         qs, ks = _apply_rope(
             qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 2
+        )
+        qs, ks = _apply_post_rope_qk_lnorm(
+            qs,
+            ks,
+            self.rope_mode,
+            self.rope_post_mod_qk_lnorm,
+            self.post_rope_lnorm_q,
+            self.post_rope_lnorm_k,
+            self.dtype,
         )
 
         # set dropout rate according to training/eval mode as required by flash_attn

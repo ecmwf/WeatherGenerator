@@ -258,6 +258,7 @@ class QueryAggregationEngine(torch.nn.Module):
         rope_mode = get_rope_mode(self.cf)
         rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
+        rope_post_mod_qk_lnorm = self.cf.get("rope_post_mod_qk_lnorm", False)
 
         self.ae_aggregation_blocks = torch.nn.ModuleList()
 
@@ -280,6 +281,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         rope_mode=rope_mode,
                         rope_spherical_band=rope_spherical_band,
                         rope_healpix_level=rope_healpix_level,
+                        rope_post_mod_qk_lnorm=rope_post_mod_qk_lnorm,
                     )
                 )
             else:
@@ -337,6 +339,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
         rope_mode = get_rope_mode(self.cf)
         rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
+        rope_post_mod_qk_lnorm = self.cf.get("rope_post_mod_qk_lnorm", False)
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
@@ -359,6 +362,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         rope_mode=rope_mode,
                         rope_spherical_band=rope_spherical_band,
                         rope_healpix_level=rope_healpix_level,
+                        rope_post_mod_qk_lnorm=rope_post_mod_qk_lnorm,
                     )
                 )
             else:
@@ -377,6 +381,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         rope_mode=rope_mode,
                         rope_spherical_band=rope_spherical_band,
                         rope_healpix_level=rope_healpix_level,
+                        rope_post_mod_qk_lnorm=rope_post_mod_qk_lnorm,
                     )
                 )
             # MLP block
@@ -419,6 +424,7 @@ class ForecastingEngine(torch.nn.Module):
         rope_mode = get_rope_mode(self.cf)
         rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
+        rope_post_mod_qk_lnorm = self.cf.get("rope_post_mod_qk_lnorm", False)
         self.fe_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
@@ -440,6 +446,7 @@ class ForecastingEngine(torch.nn.Module):
                             rope_mode=rope_mode,
                             rope_spherical_band=rope_spherical_band,
                             rope_healpix_level=rope_healpix_level,
+                            rope_post_mod_qk_lnorm=rope_post_mod_qk_lnorm,
                         )
                     )
                 else:
@@ -459,6 +466,7 @@ class ForecastingEngine(torch.nn.Module):
                             rope_mode=rope_mode,
                             rope_spherical_band=rope_spherical_band,
                             rope_healpix_level=rope_healpix_level,
+                            rope_post_mod_qk_lnorm=rope_post_mod_qk_lnorm,
                         )
                     )
                 # Add MLP block
