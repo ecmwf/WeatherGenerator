@@ -37,9 +37,9 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.positional_encoding import (
-    get_rope_mode,
+    build_spherical_rope_coeff_tensors,
     get_rope_spherical_band,
-    spherical_harmonics_band_all_pixels,
+    resolve_rope_mode,
 )
 from weathergen.model.utils import get_num_parameters
 from weathergen.train.utils import get_batch_size_from_config
@@ -114,7 +114,7 @@ class ModelParams(torch.nn.Module):
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         ### ROPE COORDS ###
-        self.rope_mode = get_rope_mode(cf)
+        self.rope_mode = resolve_rope_mode(cf)
         if self.rope_mode != "none":
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
             total_tokens = (
@@ -233,30 +233,33 @@ class ModelParams(torch.nn.Module):
 
             if self.rope_mode == "spherical":
                 band = int(get_rope_spherical_band(cf))
-                coeff_real, coeff_imag = spherical_harmonics_band_all_pixels(
+                (
+                    (cell_real, cell_imag),
+                    (extra_real, extra_imag),
+                    (packed_extra_real, packed_extra_imag),
+                    (packed_real, packed_imag),
+                ) = build_spherical_rope_coeff_tensors(
                     nside=2**self.healpix_level,
                     band=band,
+                    num_local_queries=cf.ae_local_num_queries,
+                    num_extra_tokens=self.num_extra_tokens,
                     device=self.rope_spherical_coeffs.device,
                     dtype=self.rope_spherical_coeffs.dtype,
                 )
-                self.rope_spherical_cell_coeffs.data[..., 0].copy_(coeff_real)
-                self.rope_spherical_cell_coeffs.data[..., 1].copy_(coeff_imag)
+                self.rope_spherical_cell_coeffs.data[..., 0].copy_(cell_real)
+                self.rope_spherical_cell_coeffs.data[..., 1].copy_(cell_imag)
+                self.rope_spherical_extra_coeffs.data[..., 0].copy_(extra_real)
+                self.rope_spherical_extra_coeffs.data[..., 1].copy_(extra_imag)
 
-                self.rope_spherical_extra_coeffs.data.fill_(0.0)
-                self.rope_spherical_extra_coeffs.data[..., 0].fill_(1.0)
-
-                coeff_real = coeff_real.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
-                coeff_imag = coeff_imag.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
-                coeff_real = coeff_real.flatten(0, 1).unsqueeze(0)
-                coeff_imag = coeff_imag.flatten(0, 1).unsqueeze(0)
                 self.rope_spherical_coeffs.data.fill_(0.0)
-                self.rope_spherical_coeffs.data[:, :, :, 0].fill_(1.0)
+                self.rope_spherical_coeffs.data[:, :offset, :, 0].copy_(packed_extra_real)
+                self.rope_spherical_coeffs.data[:, :offset, :, 1].copy_(packed_extra_imag)
                 self.rope_spherical_coeffs.data[
-                    :, offset : offset + coeff_real.shape[1], :, 0
-                ].copy_(coeff_real)
+                    :, offset : offset + packed_real.shape[1], :, 0
+                ].copy_(packed_real)
                 self.rope_spherical_coeffs.data[
-                    :, offset : offset + coeff_imag.shape[1], :, 1
-                ].copy_(coeff_imag)
+                    :, offset : offset + packed_imag.shape[1], :, 1
+                ].copy_(packed_imag)
 
         # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
         # provides per-cell token identity which is critical for masked cells that have no

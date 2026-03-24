@@ -28,7 +28,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.positional_encoding import get_rope_mode, get_rope_spherical_band
+from weathergen.model.positional_encoding import get_rope_spherical_band, resolve_rope_mode
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -255,7 +255,7 @@ class QueryAggregationEngine(torch.nn.Module):
         super(QueryAggregationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        rope_mode = get_rope_mode(self.cf)
+        rope_mode = resolve_rope_mode(self.cf)
         rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
         rope_post_mod_qk_lnorm = self.cf.get("rope_post_mod_qk_lnorm", False)
@@ -336,7 +336,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
         super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        rope_mode = get_rope_mode(self.cf)
+        rope_mode = resolve_rope_mode(self.cf)
         rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
         rope_post_mod_qk_lnorm = self.cf.get("rope_post_mod_qk_lnorm", False)
@@ -421,7 +421,7 @@ class ForecastingEngine(torch.nn.Module):
         super(ForecastingEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        rope_mode = get_rope_mode(self.cf)
+        rope_mode = resolve_rope_mode(self.cf)
         rope_spherical_band = get_rope_spherical_band(self.cf)
         rope_healpix_level = self.cf.healpix_level
         rope_post_mod_qk_lnorm = self.cf.get("rope_post_mod_qk_lnorm", False)
