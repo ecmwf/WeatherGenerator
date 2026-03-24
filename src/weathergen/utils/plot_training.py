@@ -27,6 +27,7 @@ from weathergen.utils.train_logger import Metrics, TrainLogger
 _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
+MAX_FILENAME_LEN = 255
 
 
 ####################################################################################################
@@ -240,6 +241,11 @@ def plot_lr(
     plt.ylabel("lr")
     plt.xlabel(x_axis)
     plt.tight_layout()
+    rstr = "".join([f"{r}_" for r in runs_ids])
+
+    if len(rstr) + 6 > MAX_FILENAME_LEN:
+        rstr = rstr[: MAX_FILENAME_LEN - 6]
+
     # save the plot
     plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=["lr.png"])
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
@@ -349,16 +355,16 @@ def plot_loss_per_stream(
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "m", "y"]
 
-    for channel in channels:
-        for stream_name in stream_names:
-            _fig = plt.figure(figsize=(10, 7), dpi=300)
+    for err in errs:
+        for channel in channels:
+            for stream_name in stream_names:
+                _fig = plt.figure(figsize=(10, 7), dpi=300)
 
-            legend_strs = []
-            min_val = np.finfo(np.float32).max
-            max_val = 0.0
-            for mode in modes:
-                legend_strs += [[]]
-                for err in errs:
+                legend_strs = []
+                min_val = np.finfo(np.float32).max
+                max_val = 0.0
+                for mode in modes:
+                    legend_strs += [[]]
                     linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
                     linestyle = ":" if "stddev" in err else linestyle
                     alpha = 1.0
@@ -422,54 +428,62 @@ def plot_loss_per_stream(
                                 min_val = np.min([min_val, np.nanmin(y_data)])
                                 max_val = np.max([max_val, np.nanmax(y_data)])
 
-            # TODO: ensure that legend is plotted with full opacity
-            legend_str = legend_strs[0]
-            if len(legend_str) < 1:
-                plt.close()
-                _logger.warning(f"Could not find any data for stream: {stream_name}")
-                continue
+                # TODO: ensure that legend is plotted with full opacity
+                legend_str = legend_strs[0]
+                if len(legend_str) < 1:
+                    plt.close()
+                    _logger.warning(f"Could not find any data for stream: {stream_name}")
+                    continue
 
-            # no valid data found
-            if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
-                continue
+                # no valid data found
+                if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
+                    continue
 
-            if legend_outside:
-                legend = plt.legend(
-                    legend_str,
-                    bbox_to_anchor=(1.02, 1),
-                    loc="upper left",
-                    fontsize="small",
-                )
-            else:
                 legend = plt.legend(
                     legend_str, loc="upper right" if not x_scale_log else "lower left"
                 )
-            for line in legend.get_lines():
-                line.set(alpha=1.0)
-            plt.grid(True, which="both", ls="-")
+                for line in legend.get_lines():
+                    line.set(alpha=1.0)
+                plt.grid(True, which="both", ls="-")
 
-            if y_lim is not None:
-                plt.ylim(y_lim)
-            else:
-                plt.ylim([0.95 * min_val, 1.025 * max_val])
-            if x_lim is not None:
-                plt.xlim(x_lim)
+                if y_lim is not None:
+                    plt.ylim(y_lim)
+                else:
+                    plt.ylim([0.95 * min_val, 1.025 * max_val])
+                if x_lim is not None:
+                    plt.xlim(x_lim)
 
-            plt.yscale("log")
-            if x_scale_log:
-                plt.xscale("log")
-            plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
-            plt.ylabel("loss")
-            plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
-            plt.tight_layout()
-            # save the plot
-            plt_fname = plot_dir / create_filename(
-                middle=runs_ids.keys(),
-                suffix=list(modes) + [stream_name, f"{channel}.png"],
-            )
-            _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
-            plt.savefig(plt_fname, bbox_inches="tight")
-            plt.close()
+                plt.yscale("log")
+                if x_scale_log:
+                    plt.xscale("log")
+                plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
+                plt.ylabel(err)
+                plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
+                plt.tight_layout()
+
+                # construct file name
+
+                run_ids_str = "".join([f"{r}_" for r in runs_ids])
+                fname_tail = "{}fs_{}{}_{}_{}.png".format(
+                    "".join([f"{m}_" for m in modes]),
+                    "".join([f"{fs}_" for fs in forecast_steps]),
+                    err,
+                    stream_name,
+                    channel,
+                )
+                # ensure file name is not too long
+                if len(run_ids_str) + len(fname_tail) > MAX_FILENAME_LEN:
+                    # cut off run_ids_str so that the tail with err, channel etc is preserved
+                    # required to retain unique names
+                    run_ids_str = run_ids_str[: -(len(fname_tail) + 1)]
+                fname = run_ids_str + fname_tail
+
+                # save the plot
+                plt_fname = plot_dir / fname
+
+                _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
+                plt.savefig(plt_fname)
+                plt.close()
 
 
 ####################################################################################################
