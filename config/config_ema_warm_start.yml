@@ -1,16 +1,19 @@
- training_config:                                                                                                                                                                                                                                  
-    losses:                                                                                                                                                                                                                                         
-      "student-teacher":
-        target_and_aux_calc:
-          EMATeacher:
-            teacher_run_id: "yoqxf234"      # run ID of the pre-trained model
-            teacher_mini_epoch: -1            # -1 = latest checkpoint
-            ema_ramp_up_ratio: 0.09
-            ema_halflife_in_thousands: 1e-3
-            model_param_overrides:
-              training_config:
-                losses:
-                  student-teacher:
-                    loss_fcts:
-                      JEPA:
-                        head: identity
+
+training_config :
+
+  losses : {
+    "student-teacher": {
+        enabled: True,
+        type: LossLatentSSLStudentTeacher,
+        target_and_aux_calc: { "EMATeacher" :
+          { teacher_run_id: "jkmjiweq",
+            teacher_mini_epoch: -1,
+            ema_ramp_up_ratio : null,
+            ema_halflife_in_thousands: 1e-1,
+            model_param_overrides : {
+              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
+            },
+          }
+        }
+      }
+  }
