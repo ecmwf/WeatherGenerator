@@ -18,9 +18,11 @@ import astropy_healpix.healpy
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -35,6 +37,7 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
+from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
 
@@ -89,6 +92,7 @@ class ModelParams(torch.nn.Module):
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
+        self.batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
 
         ### POSITIONAL EMBEDDINGS ###
         len_token_seq = 1024
@@ -103,6 +107,34 @@ class ModelParams(torch.nn.Module):
             dtype=self.dtype,
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
+
+        ### ROPE COORDS ###
+        self.rope_2D = cf.get("rope_2D", False)
+        if self.rope_2D:
+            self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
+            total_tokens = (
+                self.num_healpix_cells + self.num_extra_tokens
+            ) * cf.ae_local_num_queries
+            self.register_buffer(
+                "rope_coords",
+                torch.zeros(
+                    1,
+                    total_tokens,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+            self.register_buffer(
+                "rope_cell_coords",
+                torch.zeros(
+                    self.num_healpix_cells,
+                    2,
+                    dtype=self.dtype,
+                ),
+            )
+        else:
+            self.rope_coords = None
+            self.rope_cell_coords = None
 
         ### HEALPIX NEIGHBOURS ###
         hlc = self.healpix_level
@@ -161,6 +193,24 @@ class ModelParams(torch.nn.Module):
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
 
         dim_embed = cf.ae_global_dim_embed
+
+        if self.rope_2D:
+            # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
+            # Shape: (num_healpix_cells, ae_local_num_queries, 2)
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            # Per-cell coords for QueryAggregationEngine (no query expansion)
+            self.rope_cell_coords.data.copy_(coords)
+            coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0)
+            offset = self.num_extra_tokens * cf.ae_local_num_queries
+            self.rope_coords.data.fill_(0.0)
+            self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
+
+        # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
+        # provides per-cell token identity which is critical for masked cells that have no
+        # content from local assimilation. Without it, masked cells are identical and the
+        # teacher representation (evaluated without dropout) collapses to low rank.
         self.pe_global.data.fill_(0.0)
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
         self.pe_global.data[..., 0::2] = 0.5 * torch.sin(
@@ -350,83 +400,144 @@ class Model(torch.nn.Module):
                 if is_stream_forcing(si):
                     continue
 
-                # extract and setup relevant parameters
-                etc = si["embed_target_coords"]
-                tr = si["target_readout"]
-                num_layers = tr["num_layers"]
-                tr_mlp_hidden_factor = tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
-                tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
-                softcap = tr["softcap"] if "softcap" in tr else 0.0
-
-                dims_embed = [si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)]
-
-                if is_root():
-                    logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
-
-                dim_coord_in = self.targets_coords_size[i_stream]
-
-                # embedding network for coordinates
-                if etc["net"] == "linear":
-                    self.embed_target_coords[stream_name] = NamedLinear(
-                        f"embed_target_coords_{stream_name}",
-                        in_features=dim_coord_in,
-                        out_features=dims_embed[0],
-                        bias=False,
+                # skip for the moment to ensure target embedding and tte exist (ordering of
+                # cf.streams is random)
+                if si.get("pred_spatial_shared") is None:
+                    # extract and setup relevant parameters
+                    etc = si["embed_target_coords"]
+                    tr = si["target_readout"]
+                    num_layers = tr["num_layers"]
+                    tr_mlp_hidden_factor = (
+                        tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
                     )
-                elif etc["net"] == "mlp":
-                    self.embed_target_coords[stream_name] = MLP(
-                        dim_coord_in,
-                        dims_embed[0],
-                        hidden_factor=8,
-                        with_residual=False,
-                        dropout_rate=dropout_rate,
-                        norm_eps=self.cf.mlp_norm_eps,
-                        stream_name=f"embed_target_coords_{stream_name}",
-                    )
-                else:
-                    assert False
+                    tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
+                    softcap = tr["softcap"] if "softcap" in tr else 0.0
 
-                if cf.decoder_type == "Linear":
-                    tte = BilinearDecoder(
-                        stream_name,
-                        dims_embed[0],
-                        cf.ae_global_dim_embed,
+                    dims_embed = [
+                        si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
+                    ]
+
+                    if is_root():
+                        logger.info("{} :: coord embed: :: {}".format(si["name"], dims_embed))
+
+                    dim_coord_in = self.targets_coords_size[i_stream]
+
+                    # embedding network for coordinates
+                    if etc["net"] == "linear":
+                        self.embed_target_coords[stream_name] = NamedLinear(
+                            f"embed_target_coords_{stream_name}",
+                            in_features=dim_coord_in,
+                            out_features=dims_embed[0],
+                            bias=False,
+                        )
+                    elif etc["net"] == "mlp":
+                        self.embed_target_coords[stream_name] = MLP(
+                            dim_coord_in,
+                            dims_embed[0],
+                            hidden_factor=8,
+                            with_residual=False,
+                            dropout_rate=dropout_rate,
+                            norm_eps=self.cf.mlp_norm_eps,
+                            name=f"embed_target_coords_{stream_name}",
+                        )
+                    else:
+                        assert False
+
+                    if cf.decoder_type == "Linear":
+                        tte = BilinearDecoder(
+                            stream_name,
+                            dims_embed[0],
+                            cf.ae_global_dim_embed,
+                            self.targets_num_channels[i_stream],
+                        )
+                    else:
+                        # target prediction engines
+                        tte_version = (
+                            TargetPredictionEngine
+                            if cf.decoder_type != "PerceiverIOCoordConditioning"
+                            else TargetPredictionEngineClassic
+                        )
+                        tte = tte_version(
+                            cf,
+                            dims_embed,
+                            dim_coord_in,
+                            tr_dim_head_proj,
+                            tr_mlp_hidden_factor,
+                            softcap,
+                            stream_config=si,
+                        )
+
+                    self.target_token_engines[stream_name] = tte
+
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of pred head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
                         self.targets_num_channels[i_stream],
-                    )
-                else:
-                    # target prediction engines
-                    tte_version = (
-                        TargetPredictionEngine
-                        if cf.decoder_type != "PerceiverIOCoordConditioning"
-                        else TargetPredictionEngineClassic
-                    )
-                    tte = tte_version(
-                        cf,
-                        dims_embed,
-                        dim_coord_in,
-                        tr_dim_head_proj,
-                        tr_mlp_hidden_factor,
-                        softcap,
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
                         stream_name=stream_name,
                     )
 
-                self.target_token_engines[stream_name] = tte
+            # iterate again to setup shared spatial pred heads if specified in config
+            for i_stream, si in enumerate(cf.streams):
+                stream_name = self.stream_names[i_stream]
 
-                # ensemble prediction heads to provide probabilistic prediction
-                final_activation = si["pred_head"].get("final_activation", "Identity")
-                if is_root():
+                # skip decoder if channels are empty
+                if is_stream_forcing(si):
+                    continue
+
+                pred_spatial_shared = si.get("pred_spatial_shared")
+                if pred_spatial_shared is not None:
+                    if pred_spatial_shared not in self.stream_names:
+                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
+                        msg += " but no stream with that name found."
+                        raise ValueError(msg)
+                    if pred_spatial_shared == stream_name:
+                        msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
+                        msg += "but cannot share with itself."
+                        raise ValueError(msg)
                     logger.debug(
-                        f"{final_activation} activation of predictionhead of {si['name']} stream"
+                        f"{stream_name} shares spatial prediction head with {pred_spatial_shared}."
                     )
-                self.pred_heads[stream_name] = EnsPredictionHead(
-                    dims_embed[-1],
-                    self.targets_num_channels[i_stream],
-                    si["pred_head"]["num_layers"],
-                    si["pred_head"]["ens_size"],
-                    norm_type=cf.norm_type,
-                    final_activation=final_activation,
-                    stream_name=stream_name,
-                )
+
+                    self.embed_target_coords[stream_name] = self.embed_target_coords[
+                        pred_spatial_shared
+                    ]
+                    self.target_token_engines[stream_name] = self.target_token_engines[
+                        pred_spatial_shared
+                    ]
+
+                    idx_shared_s = [
+                        i for i, so in enumerate(cf.streams) if so["name"] == pred_spatial_shared
+                    ]
+                    assert (len(idx_shared_s)) == 1
+                    si_other = cf.streams[idx_shared_s[0]]
+                    dims_embed = [
+                        si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
+                    ]
+
+                    # ensemble prediction heads to provide probabilistic prediction
+                    final_activation = si["pred_head"].get("final_activation", "Identity")
+                    if is_root():
+                        logger.debug(
+                            f"{final_activation} activation of pred head of {si['name']} stream"
+                        )
+                    self.pred_heads[stream_name] = EnsPredictionHead(
+                        dims_embed[-1],
+                        self.targets_num_channels[i_stream],
+                        si["pred_head"]["num_layers"],
+                        si["pred_head"]["ens_size"],
+                        norm_type=cf.norm_type,
+                        final_activation=final_activation,
+                        stream_name=stream_name,
+                    )
 
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
@@ -588,7 +699,7 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step)
+                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
@@ -677,7 +788,7 @@ class Model(torch.nn.Module):
 
             # embed token coords
             tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = tc_embed(t_coords)
+            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
 
             # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():

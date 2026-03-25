@@ -11,7 +11,6 @@
 
 import itertools
 import logging
-from pathlib import Path
 
 import omegaconf
 import torch
@@ -21,7 +20,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import distribute_tensor
 
-from weathergen.common.config import Config, merge_configs
+from weathergen.common.config import Config, get_path_model, merge_configs
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -152,7 +151,7 @@ def init_model_and_shard(
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
         model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
-    elif cf.get("load_chkpt", None).get("run_id", None):
+    elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
         mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
@@ -179,7 +178,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
     """
 
-    path_run = Path(cf.model_path) / run_id
+    path_run = get_path_model(run_id=run_id)
     mini_epoch_id = (
         f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
     )
