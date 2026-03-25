@@ -19,6 +19,8 @@ from omegaconf import OmegaConf
 
 # FSDP2
 from torch.distributed.tensor import DTensor
+from lightning.fabric.utilities.throughput import Throughput, measure_flops, get_available_flops
+
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
@@ -83,6 +85,9 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
+        self.throughput: Throughput | None = None
+        self.flops_per_batch: int | None = None
+        self._THROUGHPUT_WARMUP_STEPS: int = 2
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -157,6 +162,13 @@ class Trainer(TrainerBase):
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
+
+        available_flops = get_available_flops(self.devices[0], dtype=self.mixed_precision_dtype) # Assuming same device type!
+        self.throughput = Throughput(
+            available_flops=available_flops,
+            world_size=self.world_size_original,
+            window_size=20,
+        )
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -367,6 +379,9 @@ class Trainer(TrainerBase):
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
+        # measure FLOPs for throughput/MFU tracking
+        self._measure_flops()
+
         # run validation before training if requested
         self.validate_before_training()
 
@@ -410,6 +425,26 @@ class Trainer(TrainerBase):
             else:
                 assert False, "validate_before_training must be integer or boolean."
 
+    def _measure_flops(self):
+        """Measure FLOPs for one forward+backward pass on a single batch."""
+        try:
+            # TODO: need to watch out for different data streams?
+            sample_batch = next(iter(self.data_loader))
+            sample_batch.to_device(self.device)
+            source = sample_batch.get_source_samples()
+
+            self.flops_per_batch = measure_flops(
+                self.model,
+                lambda: self.model(self.model_params, source),
+                lambda output: output.sum() # not accurate
+            )
+            if is_root():
+                logger.info(f"Measured FLOPs per batch: {self.flops_per_batch:.2e}")
+        except Exception as e:
+            if is_root():
+                logger.warning(f"Failed to measure FLOPs: {e}. MFU will not be available.")
+            self.flops_per_batch = None
+
     def train(self, mini_epoch):
         """
         Perform training for one epoch
@@ -426,6 +461,9 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
+        t0_throughput = time.time()
+        total_batches = 0
+        total_samples = 0
         for bidx, batch in enumerate(dataset_iter):
             if cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
@@ -516,6 +554,25 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
+            if self.throughput is not None:
+                torch.cuda.synchronize()
+                if bidx < self._THROUGHPUT_WARMUP_STEPS:
+                    # Reset after last warmup step so compilation/warmup
+                    # time doesn't pollute metrics
+                    if bidx == self._THROUGHPUT_WARMUP_STEPS - 1:
+                        t0_throughput = time.time()
+                        total_batches = 0
+                        total_samples = 0
+                else:
+                    total_batches += 1
+                    total_samples += self.batch_size_per_gpu
+                    self.throughput.update(
+                        time=time.time() - t0_throughput,
+                        batches=total_batches,
+                        samples=total_samples,
+                        flops=self.flops_per_batch,
+                    )
+
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
                 self.collapse_monitor._compute_collapse_metrics(
@@ -529,6 +586,13 @@ class Trainer(TrainerBase):
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
+                # Log throughput metrics
+                if self.throughput is not None and is_root():
+                    throughput_metrics = self.throughput.compute()
+                    self.train_logger.log_metrics(TRAIN, {
+                        f"performance.throughput.{k}": v for k, v in throughput_metrics.items()
+                        if isinstance(v, (int, float))
+                    })
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
