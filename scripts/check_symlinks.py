@@ -50,7 +50,7 @@ except subprocess.CalledProcessError as e:
 
 # Read the YAML file
 try:
-    with open(config_file, 'r') as f:
+    with open(config_file) as f:
         data = yaml.safe_load(f)
     working_dir = data['path_shared_working_dir']
 except (FileNotFoundError, yaml.YAMLError) as e:
