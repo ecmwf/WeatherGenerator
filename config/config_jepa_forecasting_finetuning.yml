@@ -97,6 +97,15 @@ training_config:
   # training_mode: ["student_teacher"]
   training_mode: ["masking"]
 
+  context_loss:
+    enabled: false
+
+  # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
+  # When enabled, intermediate encoder representations are tapped and used as additional
+  # targets/predictions for the SSL loss. Disabled by default (empty tap_after).
+  deep_ssl:
+    enabled: false
+
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True

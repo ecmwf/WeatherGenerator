@@ -595,7 +595,7 @@ class Model(torch.nn.Module):
 
         # Deep SSL fusion and per-level projections (student only)
         deep_ssl_cfg = cf.training_config.get("deep_ssl", None)
-        if deep_ssl_cfg and deep_ssl_cfg.get("tap_after"):
+        if deep_ssl_cfg and deep_ssl_cfg.get("enabled", False) and deep_ssl_cfg.get("tap_after"):
             num_taps = len(deep_ssl_cfg.tap_after)
             num_levels = num_taps + 1  # taps + final output
             hidden_factor = deep_ssl_cfg.get("fusion_hidden_factor", 2)
