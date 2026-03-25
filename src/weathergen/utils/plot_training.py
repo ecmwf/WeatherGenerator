@@ -815,8 +815,9 @@ def plot_train(args=None):
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir, legend_outside=legend_outside)
 
     # plot average loss
-    plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=TRAIN,
-                  legend_outside=legend_outside)
+    plot_loss_avg(
+        out_dir, runs_ids, runs_data, runs_active, stage=TRAIN, legend_outside=legend_outside
+    )
 
     # compare different runs
     plot_loss_per_stream(
