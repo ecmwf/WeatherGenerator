@@ -645,7 +645,10 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
     else:
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
-        
+
+    if config is not None and config.get("path_model") is not None:
+        return Path(config.path_model) / run_id
+
     return _get_shared_wg_path() / "models" / run_id
 
 
@@ -656,6 +659,18 @@ def get_path_results(config: Config, mini_epoch: int) -> Path:
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 
     return base_path / fname
+
+def overwrite_path_model(config: Config, new_path: Path) -> Config:
+    """Overwrite the model path in the config with a new path."""
+    config = config.copy()
+    private_config = _load_private_conf()
+    shared_wg_path = Path(private_config.get("path_shared_working_dir"))
+    if not new_path.is_absolute():
+        new_path = shared_wg_path / new_path
+    with open_dict(config):
+        _logger.warning(f"Overwriting model path in config with new path: {new_path}")
+        config.path_model = str(new_path)
+    return config
 
 
 @functools.cache

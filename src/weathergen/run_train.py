@@ -78,6 +78,16 @@ def _fix_argl(argl):  # TODO remove this fix after grace period
     return argl
 
 
+def _apply_model_path_override(cf, cli_overwrite):
+    """Apply model path override from CLI options when provided."""
+    model_path_override = cli_overwrite.get("path_model") or cli_overwrite.get("model_path")
+    if model_path_override is not None:
+        logger.warning("Overwriting model path in config with new path...")
+        new_path = Path(model_path_override)
+        cf = config.overwrite_path_model(cf, new_path)
+    return cf
+
+
 def run_inference(args):
     """
     Inference function for WeatherGenerator model.
@@ -95,6 +105,7 @@ def run_inference(args):
         {},
         cli_overwrite,
     )
+    cf = _apply_model_path_override(cf, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     devices = Trainer.init_torch()
@@ -133,6 +144,7 @@ def run_continue(args):
         {},
         cli_overwrite,
     )
+    cf = _apply_model_path_override(cf, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
     mp_method = cf.general.get("multiprocessing_method", "fork")
@@ -167,6 +179,7 @@ def run_train(args):
     cf = config.load_merge_configs(
         args.private_config, None, None, args.base_config, *args.config, cli_overwrite
     )
+    cf = _apply_model_path_override(cf, cli_overwrite)
     cf = config.set_run_id(cf, args.run_id, False)
 
     cf.data_loading.rng_seed = int(time.time())
