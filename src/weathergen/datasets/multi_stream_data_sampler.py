@@ -132,9 +132,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.forecast_policy = None
             self.time_step = np.timedelta64(0, "ms")
 
+        # teacher_time_offset: number of time windows to shift the teacher's input
+        # relative to the student's. When > 0 the teacher sees a future time window.
+        self.teacher_time_offset = mode_cfg.get("teacher_time_offset", 0)
+
         fsm = self.list_num_forecast_steps[0]
         forecast_len = (self.time_step * (fsm + 1)) // self.step_timedelta
-        perms_len = perms_len - (forecast_len + self.output_offset)
+        perms_len = perms_len - (forecast_len + self.output_offset + self.teacher_time_offset)
 
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
@@ -664,10 +668,30 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx, num_forecast_steps, i_max, stream_ds
             )
 
+            # When teacher_time_offset > 0, load a separate set of data windows
+            # shifted forward in time for the teacher (target) samples.
+            if self.teacher_time_offset > 0:
+                (input_data_target, output_data_target) = self._get_data_windows(
+                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds
+                )
+            else:
+                input_data_target = input_data
+                output_data_target = output_data
+
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
             input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+            if self.teacher_time_offset > 0:
+                input_tokens_target = self.tokenizer.get_tokens_windows(
+                    stream_info, input_data_target, True
+                )
+                output_tokens_target = self.tokenizer.get_tokens_windows(
+                    stream_info, output_data_target, False
+                )
+            else:
+                input_tokens_target = input_tokens
+                output_tokens_target = output_tokens
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
@@ -692,19 +716,23 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
+                # Use time-offset data for teacher when teacher_time_offset > 0.
+                target_idx = idx + self.teacher_time_offset
                 sdata = self._build_stream_data(
                     target_select,
-                    idx,
+                    target_idx,
                     num_forecast_steps,
                     stream_info,
                     target_masks.metadata[tidx].params.get("num_steps_input", 1),
-                    input_data,
-                    output_data,
-                    input_tokens,
-                    output_tokens,
+                    input_data_target,
+                    output_data_target,
+                    input_tokens_target,
+                    output_tokens_target,
                     output_mask=target_mask,
                     input_mask=target_mask,
                 )
+
+
                 target_metadata = target_masks.metadata[tidx]
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
