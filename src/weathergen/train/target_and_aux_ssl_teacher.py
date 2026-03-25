@@ -106,3 +106,34 @@ def get_target_postprocessing(target_losses: list[str], training_cfg, **kwargs):
             # We skip losses that are not handled by the EMATeacher
             continue
     return return_dict
+
+
+class SelfTeacher(TargetAndAuxModuleBase):
+    """Target calculator that runs the same model on the target batch with gradients.
+
+    Unlike EMATeacher, this does not maintain a separate model copy. Both views
+    are processed by the same encoder, and gradients flow through both. This is
+    the setup required for LeJEPA (no EMA, no stop-gradient).
+    """
+
+    def __init__(self, model, training_cfg, **kwargs):
+        pass
+
+    def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
+        # Run the same model on the target batch WITH gradients
+        outputs = model(model_params, batch)
+        latent_dict = outputs.get_latent_prediction(0)
+
+        # Use raw encoder latent (patch_tokens) as the target representation.
+        # The student's MLP predictor head learns to predict this.
+        latent_state = latent_dict["latent_state"]
+        targets: dict[str, Any] = {"JEPA": latent_state.patch_tokens}
+
+        # Collect target meta-information for selected samples
+        aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
+
+        targets_out = TargetAuxOutput(batch.get_output_len(), batch.get_output_idxs())
+        targets_out.latent = targets
+        targets_out.aux_outputs = aux_outputs
+
+        return targets_out

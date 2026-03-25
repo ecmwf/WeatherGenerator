@@ -545,10 +545,11 @@ class Model(torch.nn.Module):
         self.latent_heads = nn.ModuleDict()
         self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
 
+        ssl_loss_types = ("LossLatentSSLStudentTeacher", "LossLeJEPA")
         ssl_losses_cfgs = [
             v
             for _, v in cf.training_config.losses.items()
-            if v.type == "LossLatentSSLStudentTeacher" and v.get("enabled", True)
+            if v.type in ssl_loss_types and v.get("enabled", True)
         ]
 
         # TODO: support multiple LossLatentSSLStudentTeacher terms

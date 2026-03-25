@@ -302,3 +302,123 @@ def get_loss_function_ssl(name):
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
         )
+
+
+class LossLeJEPA(LossModuleBase):
+    """LeJEPA loss: invariance (MSE) + SIGReg regularization.
+
+    The invariance term is the MSE between the student's MLP prediction
+    and the target view's raw encoder latent. SIGReg prevents representation
+    collapse by penalizing deviation from a standard Gaussian distribution
+    via the empirical characteristic function.
+    """
+
+    def __init__(self, cf: DictConfig, mode_cfg: DictConfig, stage: Stage, device: str, **losses):
+        LossModuleBase.__init__(self)
+        self.cf = cf
+        self.device = device
+        self.name = "LossLeJEPA"
+
+        jepa_conf = losses["JEPA"]
+        self.temporal = jepa_conf.get("loss_extra_args", {}).get("temporal", False)
+        self.sigreg_weight = jepa_conf.get("sigreg_weight", 0.02)
+        self.sigreg_num_projections = jepa_conf.get("sigreg_num_projections", 256)
+
+    def compute_loss(self, preds, targets, metadata) -> LossValues:
+        _source2target, output_info, _target2source, _ = metadata
+
+        # Student MLP prediction and raw encoder latent
+        student_pred = preds.latent[0]["JEPA"]
+        student_raw = preds.latent[0]["latent_state"].patch_tokens
+
+        # Target raw encoder latent (from SelfTeacher, carries gradients)
+        target_raw = targets.latent["JEPA"]
+
+        # Masks
+        student_masks = torch.stack(
+            [info.mask for info in output_info if "JEPA" in info.global_params["loss"]],
+            dim=0,
+        )
+        teacher_masks = torch.stack(
+            [info.mask for info in targets.aux_outputs if "JEPA" in info.global_params["loss"]],
+            dim=0,
+        )
+
+        if self.temporal:
+            mask = teacher_masks
+        else:
+            mask = teacher_masks & ~student_masks
+
+        # Invariance loss: MSE between student prediction and target latent
+        target_expanded = target_raw.expand(student_pred.shape[0], -1, -1)
+        if mask.sum() > 0:
+            invariance = F.mse_loss(
+                student_pred[mask].to(target_expanded.dtype), target_expanded[mask]
+            )
+        else:
+            logger.warning("LeJEPA mask is all zeros — no cells for invariance loss.")
+            invariance = student_pred.sum() * 0.0
+
+        # SIGReg on both views' raw latents (over cells as sample dimension)
+        sigreg_s = sigreg_loss(
+            student_raw.reshape(-1, student_raw.shape[-1]), self.sigreg_num_projections
+        )
+        sigreg_t = sigreg_loss(
+            target_raw.reshape(-1, target_raw.shape[-1]), self.sigreg_num_projections
+        )
+        sigreg = (sigreg_s + sigreg_t) / 2
+
+        loss = invariance + self.sigreg_weight * sigreg
+
+        return LossValues(
+            loss=loss,
+            losses_all={"invariance": invariance.item(), "sigreg": sigreg.item()},
+            stddev_all={},
+        )
+
+
+def sigreg_loss(
+    z: torch.Tensor, num_projections: int = 256, knots: int = 17
+) -> torch.Tensor:
+    """SIGReg regularization (Balestriero & LeCun, 2025).
+
+    Penalizes deviation of the representation distribution from a standard
+    Gaussian by comparing the empirical characteristic function (ECF) against
+    the Gaussian CF along random 1D projections at multiple frequencies.
+
+    Args:
+        z: [N, D] tensor of representations (N samples, D dimensions).
+        num_projections: Number of random unit-vector projection directions.
+        knots: Number of frequency evaluation points in [0, 3].
+
+    Returns:
+        Scalar loss.
+    """
+    z = z.float()  # float32 for cos/sin precision
+    n, d = z.shape
+
+    # Trapezoidal quadrature weights with Gaussian window on [0, 3]
+    t = torch.linspace(0, 3, knots, device=z.device)
+    dt = 3.0 / (knots - 1)
+    weights = torch.full((knots,), 2 * dt, device=z.device)
+    weights[0] = dt
+    weights[-1] = dt
+    phi = torch.exp(-t.square() / 2.0)  # Gaussian CF at frequencies t
+    weights = weights * phi
+
+    # Random unit projection directions: [D, num_projections]
+    a = torch.randn(d, num_projections, device=z.device)
+    a = a / a.norm(p=2, dim=0, keepdim=True)
+
+    # 1D projections at multiple frequencies
+    proj_1d = z @ a  # [N, num_projections]
+    x_t = proj_1d.unsqueeze(-1) * t  # [N, num_projections, knots]
+
+    # ECF vs Gaussian CF
+    ecf_cos = x_t.cos().mean(0)  # [num_projections, knots]
+    ecf_sin = x_t.sin().mean(0)  # [num_projections, knots]
+    err = (ecf_cos - phi).square() + ecf_sin.square()
+
+    # Weighted quadrature, scaled by sample count
+    statistic = (err @ weights) * n
+    return statistic.mean()

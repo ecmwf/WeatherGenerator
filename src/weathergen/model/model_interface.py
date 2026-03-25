@@ -33,7 +33,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
-from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher, SelfTeacher
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
@@ -325,6 +325,9 @@ def get_target_aux_calculator(
 
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
         target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
+
+    elif target_and_aux_calc == "SelfTeacher":
+        target_aux = SelfTeacher(model, cf.training_config)
 
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
