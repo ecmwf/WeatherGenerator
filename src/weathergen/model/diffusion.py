@@ -97,6 +97,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         self.cur_token = tokens
 
+        # print("input tokens statistics")
+        # print("mean", tokens.mean(), "std", tokens.std(), "max", tokens.max(), "min", tokens.min())
+
+        # return self.inference(fstep=fstep, num_steps=100)
+
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
 
@@ -130,6 +135,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Embed noise level
         noise_emb = self.noise_embedder(c_noise)
 
+        # print("sigma", sigma)
+
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)
 
@@ -146,7 +153,10 @@ class DiffusionForecastEngine(torch.nn.Module):
         # https://github.com/NVlabs/edm/blob/main/generate.py
 
         # Sample noise (assuming single batch element for now)
-        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda") * 0.1
+        # x = self.cur_token + x
+        print("initial noise statistics")
+        print("mean", x.mean(), "std", x.std(), "max", x.max(), "min", x.min())
 
         # Time step discretization.
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -156,15 +166,16 @@ class DiffusionForecastEngine(torch.nn.Module):
             / (num_steps - 1)
             * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
         ) ** self.rho
-        t_steps = torch.cat(
-            [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
-        )  # t_N = 0
+        t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
 
         # Main sampling loop.
         x_next = x * t_steps[0]
         for i, (t_cur, t_next) in enumerate(
             zip(t_steps[:-1], t_steps[1:], strict=False)
         ):  # 0, ..., N-1
+            t_cur = torch.tensor([t_cur], device="cuda").float()
+            t_next = torch.tensor([t_next], device="cuda").float()
+
             x_cur = x_next
 
             # Increase noise temporarily. (Stochastic sampling; not used for now)
