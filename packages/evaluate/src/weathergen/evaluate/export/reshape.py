@@ -68,18 +68,18 @@ def find_pl(vars: list) -> tuple[dict[str, list[str]], list[int]]:
             List of unique pressure levels found in the variable names.
     """
     var_dict = {}
-    pl = []
     for var in vars:
         match = re.search(r"^([a-zA-Z0-9_]+)_(\d+)$", var)
         if match:
             var_name = match.group(1)
             pressure_level = int(match.group(2))
-            pl.append(pressure_level)
-            var_dict.setdefault(var_name, []).append(var)
+            if pressure_level == 0:
+                var_dict.setdefault(var, []).append(None)
+                return var_dict
+            var_dict.setdefault(var_name, []).append(pressure_level)
         else:
-            var_dict.setdefault(var, []).append(var)
-    pl = sorted(set(pl))
-    return var_dict, pl
+            var_dict.setdefault(var, []).append(None)
+    return var_dict
 
 
 class Regridder:
@@ -110,9 +110,7 @@ class Regridder:
         ds = self.dataset
         x = ds["longitude"].values[:, 0]
         y = ds["latitude"].values[:, 0]
-        tuples = list(zip(x, y, strict=False))
-        ordered_tuples = sorted(tuples, key=lambda t: (-t[1], t[0]))
-        indices = [tuples.index(t) for t in ordered_tuples]
+        indices = np.lexsort((x, -y))
         return indices
 
     def detect_input_grid_type(self) -> str:

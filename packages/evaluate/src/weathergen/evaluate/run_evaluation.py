@@ -24,13 +24,13 @@ from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 # Local application / package
-from weathergen.common.config import _REPO_ROOT
 from weathergen.common.logger import init_loggers
+from weathergen.common.paths import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
 from weathergen.evaluate.io.csv_reader import CsvReader
+from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
-    WeatherGenJSONReader,
-    WeatherGenMergeReader,
+    WeatherGenJsonReader,
     WeatherGenReader,
     WeatherGenZarrReader,
 )
@@ -154,8 +154,6 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
         _logger.info(f"MLFlow client set up: {mlflow_client}")
 
     cf = OmegaConf.load(config)
-    with open_dict(cf):
-        cf.evaluation.metrics = parse_metric_params(cf.evaluation.metrics)
     assert isinstance(cf, DictConfig)
     evaluate_from_config(cf, mlflow_client, log_queue)
 
@@ -173,7 +171,7 @@ def get_reader(
     elif reader_type == "csv":
         reader = CsvReader(run, run_id, private_paths)
     elif reader_type == "json":
-        reader = WeatherGenJSONReader(run, run_id, private_paths, region, metric)
+        reader = WeatherGenJsonReader(run, run_id, private_paths, region, metric)
     elif reader_type == "merge":
         reader = WeatherGenMergeReader(run, run_id, private_paths)
     elif reader_type == "jsonmerge":
@@ -224,12 +222,12 @@ def _process_stream(
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
     """
-
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
+        _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
         return run_id, stream, {}
 
     # Parallel plotting
@@ -242,20 +240,22 @@ def _process_stream(
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
+    if recomputable_metrics:
+        metrics_to_compute = recomputable_metrics
+        regions_to_compute = list(set(recomputable_metrics.keys()))
+    elif plot_score_maps and type_ == "zarr":
+        metrics_to_compute = {r: metrics for r in regions}
+        regions_to_compute = regions
+    else:
+        return run_id, stream, scores_dict
 
-    if recomputable_metrics or (plot_score_maps and type_ == "zarr"):
-        regions_to_compute = (
-            list(set(recomputable_metrics.keys())) if recomputable_metrics else regions
-        )
-        metrics_to_compute = recomputable_metrics if recomputable_metrics else metrics
-
-        stream_computed_scores = calc_scores_per_stream(
-            reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
-        )
-        metric_list_to_json(reader, stream, stream_computed_scores, regions)
-        scores_dict = merge(stream_loaded_scores, stream_computed_scores)
-
-    return run_id, stream, scores_dict
+    stream_computed_scores = calc_scores_per_stream(
+        reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
+    )
+    metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
+    scores_dict = merge(stream_loaded_scores, stream_computed_scores)
+    return run_id, stream, scores_dict 
+    
 
 
 # except Exception as e:
@@ -274,6 +274,8 @@ def evaluate_from_config(
     cfg:
         Configuration input stored as dictionary.
     """
+    with open_dict(cfg):
+        cfg.evaluation.metrics = parse_metric_params(cfg.evaluation.metrics)
     runs = cfg.run_ids
     _logger.info(f"Detected {len(runs)} runs")
     private_paths = cfg.get("private_paths")
