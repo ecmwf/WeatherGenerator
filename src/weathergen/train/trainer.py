@@ -428,18 +428,19 @@ class Trainer(TrainerBase):
     def _measure_flops(self):
         """Measure FLOPs for one forward+backward pass on a single batch."""
         try:
-            # TODO: need to watch out for different data streams?
-            sample_batch = next(iter(self.data_loader))
-            sample_batch.to_device(self.device)
-            source = sample_batch.get_source_samples()
+            with torch.device("meta"):
+                # TODO: need to watch out for different data streams?
+                sample_batch = next(iter(self.data_loader))
+                sample_batch.to_device(self.device)
+                source = sample_batch.get_source_samples()
 
-            self.flops_per_batch = measure_flops(
-                self.model,
-                lambda: self.model(self.model_params, source),
-                lambda output: output.sum() # not accurate
-            )
-            if is_root():
-                logger.info(f"Measured FLOPs per batch: {self.flops_per_batch:.2e}")
+                self.flops_per_batch = measure_flops(
+                    self.model,
+                    lambda: self.model(self.model_params, source),
+                    lambda output: output.sum() # not accurate
+                )
+                if is_root():
+                    logger.info(f"Measured FLOPs per batch: {self.flops_per_batch:.2e}")
         except Exception as e:
             if is_root():
                 logger.warning(f"Failed to measure FLOPs: {e}. MFU will not be available.")
