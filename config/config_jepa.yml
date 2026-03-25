@@ -169,34 +169,23 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
 
-  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
-  # Detects representation collapse via various metrics
-  # For forecasting, supports sequences of latents with per-step and aggregate metrics
-  collapse_monitoring:
+  # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
+  # When enabled, intermediate encoder representations are tapped and used as additional
+  # targets/predictions for the SSL loss. Disabled by default (empty tap_after).
+  deep_ssl:
+    tap_after:                     # named tap points (final output always included implicitly)
+      - local2global               # after local-to-global adapter, before global attention
+      - "global:0"                 # after 1st global layer (0-indexed)
+      - "global:1"                 # after 2nd global layer
+    fusion_hidden_factor: 2        # MLP hidden dim = factor * dim_embed
+    level_weights: [0.25, 0.25, 0.25, 0.25]  # per-level loss weights (len = num taps + 1)
+
+  # Context loss (V-JEPA 2.1): L1 on context (visible) tokens between student and teacher.
+  # Complements the JEPA loss which targets masked tokens.
+  context_loss:
     enabled: true
-    compute_frequency: 100  # batches between metric computations
-    log_frequency: 100      # batches between metric logging
-    metrics:
-      effective_rank:
-        enabled: true
-        tensor_source: "both"  # "student", "teacher", or "both"
-        sample_size: 2048      # max samples for SVD (0 = no sampling)
-        # For forecasting sequences: "all" (per-step + aggregates),
-        # "aggregate_only" (mean/min/max/degradation), "per_step_only"
-        forecast_aggregation: "all"
-      singular_values:
-        enabled: true
-        tensor_source: "both"
-        sample_size: 2048
-        forecast_aggregation: "all"
-      dimension_variance:
-        enabled: true
-        tensor_source: "both"  # cheap to compute, good early indicator
-        forecast_aggregation: "all"
-      prototype_entropy:
-        enabled: true  # only applies to DINO
-      ema_beta:
-        enabled: true
+    weight: 0.2
+    warmup_steps: 10000             # linear warmup from 0 to weight over this many steps
 
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
@@ -246,7 +235,7 @@ training_config:
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 1e-1,
+            ema_halflife_in_thousands: 900000,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
