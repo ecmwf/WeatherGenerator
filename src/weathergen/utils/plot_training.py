@@ -27,6 +27,7 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 MAX_FILENAME_LEN = 255
+DEFAULT_SHARED_PATH = config._get_shared_wg_path()
 
 
 ####################################################################################################

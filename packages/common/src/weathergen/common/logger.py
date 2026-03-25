@@ -14,7 +14,7 @@ import os
 import pathlib
 from functools import cache
 
-from weathergen.common.config import _load_private_conf, get_path_output
+from weathergen.common.config import _load_private_conf
 
 LOGGING_CONFIG = """
 {
