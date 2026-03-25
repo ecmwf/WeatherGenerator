@@ -173,6 +173,7 @@ training_config:
   # When enabled, intermediate encoder representations are tapped and used as additional
   # targets/predictions for the SSL loss. Disabled by default (empty tap_after).
   deep_ssl:
+    enabled: true
     tap_after:                     # named tap points (final output always included implicitly)
       - local2global               # after local-to-global adapter, before global attention
       - "global:0"                 # after 1st global layer (0-indexed)
