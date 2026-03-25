@@ -6,12 +6,13 @@
 # exclude-newer = "2025-01-01T00:00:00Z"
 # ///
 
+import argparse
+import logging
 import os
 import subprocess
 import sys
-import logging
+
 import yaml
-import argparse
 
 # parse command-line options
 parser = argparse.ArgumentParser(description="Create symlinks to shared directories")
@@ -41,7 +42,7 @@ try:
         ["../WeatherGenerator-private/hpc/platform-env.py", "hpc-config"],
         capture_output=True,
         text=True,
-        check=True
+        check=True,
     )
     config_file = result.stdout.strip()
 except subprocess.CalledProcessError as e:
@@ -52,13 +53,13 @@ except subprocess.CalledProcessError as e:
 try:
     with open(config_file) as f:
         data = yaml.safe_load(f)
-    working_dir = data['path_shared_working_dir']
+    working_dir = data["path_shared_working_dir"]
 except (FileNotFoundError, yaml.YAMLError) as e:
     logger.error(f"Error reading config file {config_file}: {e}")
     sys.exit(1)
 
 # Remove quotes
-working_dir = working_dir.strip('"\'').strip()
+working_dir = working_dir.strip("\"'").strip()
 
 # If the working directory does not exist, exit with an error
 if not os.path.isdir(working_dir):
@@ -66,8 +67,8 @@ if not os.path.isdir(working_dir):
     sys.exit(1)
 
 # Ensure the working directory ends with a slash
-if not working_dir.endswith('/'):
-    working_dir += '/'
+if not working_dir.endswith("/"):
+    working_dir += "/"
 
 logger.info(f"Working directory: {working_dir}")
 
@@ -91,10 +92,11 @@ for d in ["logs", "models", "output", "plots", "results"]:
                 continue
     elif os.path.exists(d):
         # It exists but is not a symlink (regular file or directory)
-        logger.warning(f"'{d}' exists as a file/directory (not a symlink), PLEASE REMOVE IT MANUALLY.")
+        logger.warning(
+            f"'{d}' exists as a file/directory (not a symlink), PLEASE REMOVE IT MANUALLY."
+        )
         continue
 
     # create link if we didn't continue above
     logger.info(f"{d} -> {target}")
     os.symlink(target, d)
-
