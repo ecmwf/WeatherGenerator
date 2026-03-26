@@ -454,6 +454,20 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 )
                 stream_data.add_target_values(timestep_idx, tt_cells, tt_c, tt_t, idxs_inv)
 
+            if "condition_forecast_engine" in mode:
+                # convert numpy.datetime64 to python datetimes
+                py_start = time_win.start.tolist()
+                py_end = time_win.end.tolist()
+
+                # extract start/end hour and day
+                start_hour = int(py_start.hour)
+                start_day = int(py_start.day)
+                end_hour = int(py_end.hour)
+                end_day = int(py_end.day)
+
+                # Option A — pass as separate args (adjust to the real method signature)
+                stream_data.add_forecast_condtions(start_hour, start_day, end_hour, end_day)
+
         return stream_data
 
     def _build_stream_data(
@@ -630,6 +644,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
+        if  mode.get("forecast", False).get("condtion",False) :
+            target_select += ["condition_forecasting_engine"]
         # remove duplicates
         source_select, target_select = list(set(source_select)), list(set(target_select))
         if len(source_select) == 0 or len(target_select) == 0:

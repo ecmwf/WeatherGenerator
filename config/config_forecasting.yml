@@ -187,6 +187,7 @@ training_config:
       offset: 1
       num_steps: 3
       policy: "fixed"
+      condition: True
 
 
 # validation config; full validation config is merge of training and validation config

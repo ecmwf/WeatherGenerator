@@ -697,6 +697,8 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
+        break
+
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
