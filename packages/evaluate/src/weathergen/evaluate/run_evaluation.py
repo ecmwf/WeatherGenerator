@@ -240,20 +240,22 @@ def _process_stream(
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
+    if recomputable_metrics:
+        metrics_to_compute = recomputable_metrics
+        regions_to_compute = list(set(recomputable_metrics.keys()))
+    elif plot_score_maps and type_ == "zarr":
+        metrics_to_compute = {r: metrics for r in regions}
+        regions_to_compute = regions
+    else:
+        return run_id, stream, scores_dict
 
-    if recomputable_metrics or (plot_score_maps and type_ == "zarr"):
-        regions_to_compute = (
-            list(set(recomputable_metrics.keys())) if recomputable_metrics else regions
-        )
-        metrics_to_compute = recomputable_metrics if recomputable_metrics else metrics
-
-        stream_computed_scores = calc_scores_per_stream(
-            reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
-        )
-        metric_list_to_json(reader, stream, stream_computed_scores, regions)
-        scores_dict = merge(stream_loaded_scores, stream_computed_scores)
-
-    return run_id, stream, scores_dict
+    stream_computed_scores = calc_scores_per_stream(
+        reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
+    )
+    metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
+    scores_dict = merge(stream_loaded_scores, stream_computed_scores)
+    return run_id, stream, scores_dict 
+    
 
 
 # except Exception as e:
