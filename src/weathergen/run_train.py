@@ -19,6 +19,8 @@ import time
 import traceback
 from pathlib import Path
 
+import torch.distributed as dist
+
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
@@ -114,6 +116,9 @@ def run_inference(args):
         traceback.print_exc()
         if cf.world_size == 1:
             pdb.post_mortem(tb)
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 def run_continue(args):
@@ -153,6 +158,9 @@ def run_continue(args):
         traceback.print_exc()
         if cf.world_size == 1:
             pdb.post_mortem(tb)
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 def run_train(args):
@@ -194,6 +202,9 @@ def run_train(args):
         traceback.print_exc()
         if cf.world_size == 1:
             pdb.post_mortem(tb)
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":
