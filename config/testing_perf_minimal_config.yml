@@ -270,7 +270,7 @@ wgtags:
   # The name of the organization of the person running the experiment.
   # This may be autofilled in the future. Expected values are lowercase strings 
   # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
-  org: null
+  org: jsc
   # The Github issue corresponding to this run (number such as 1234)
   # Github issues are the central point when running experiment and contain 
   # links to hedgedocs, code branches, pull requests etc.
@@ -281,7 +281,7 @@ wgtags:
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: null
+  exp: 2091
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
