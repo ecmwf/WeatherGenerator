@@ -8,13 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 """
-Collapse monitoring metrics for SSL training (JEPA/DINO).
+Collapse monitoring metrics for SSL training (JEPA/iBOT).
 
 This module implements metrics to detect representation collapse during self-supervised learning:
 - Effective Rank (RankMe): Entropy of normalized singular values
 - Singular Value Spectrum: Top-k singular values and concentration ratio
 - Per-Dimension Variance: Min/mean/max variance across embedding dimensions
-- Prototype Entropy: Normalized entropy of DINO prototype assignments
 - EMA Beta: Current teacher momentum value
 
 For forecasting, the monitor supports sequences of latents (one per time step) and computes:
@@ -279,9 +278,8 @@ class CollapseMonitor:
                 Single tensor [B, N, D] or [B, D], or list of tensors for forecasting.
             teacher_latent: Teacher model latent representations.
                 Single tensor [B, N, D] or [B, D], or list of tensors for forecasting.
-            prototype_probs: Post-softmax prototype assignment probabilities [B, K] (DINO only).
             ema_beta: Current EMA momentum value.
-            loss_type: Type of SSL loss ("JEPA" or "DINO").
+            loss_type: Type of SSL loss (e.g. "JEPA").
 
         Returns:
             Dictionary of computed metrics.
@@ -365,15 +363,6 @@ class CollapseMonitor:
                     var_metrics = self._compute_dimension_variance(tensor)
                     for key, value in var_metrics.items():
                         metrics[f"collapse.{name}.{key}"] = value
-
-        # Compute prototype entropy (DINO only)
-        if (
-            self.prototype_entropy_config.get("enabled", True)
-            and prototype_probs is not None
-            and loss_type == "DINO"
-        ):
-            entropy = self._compute_prototype_entropy(prototype_probs)
-            metrics["collapse.dino.prototype_entropy"] = entropy
 
         # Log EMA beta
         if self.ema_beta_config.get("enabled", True) and ema_beta is not None:
@@ -577,35 +566,6 @@ class CollapseMonitor:
             "var_max": var_per_dim.max().item(),
         }
 
-    def _compute_prototype_entropy(self, probs: torch.Tensor) -> float:
-        """
-        Compute normalized entropy of DINO prototype assignments.
-
-        Low entropy indicates collapse to few prototypes. Entropy is normalized
-        to [0, 1] range where 1 means uniform distribution.
-
-        Args:
-            probs: Post-softmax prototype assignment probabilities [B, K].
-
-        Returns:
-            Normalized entropy in [0, 1].
-        """
-        probs = probs.detach()
-
-        # Average across batch to get prototype usage distribution
-        avg_probs = probs.mean(dim=0)
-
-        # Compute entropy
-        entropy = -torch.sum(avg_probs * torch.log(avg_probs + 1e-8))
-
-        # Normalize by maximum possible entropy (uniform distribution)
-        num_prototypes = probs.shape[1]
-        max_entropy = torch.log(torch.tensor(float(num_prototypes), device=probs.device))
-
-        normalized_entropy = entropy / (max_entropy + 1e-8)
-
-        return normalized_entropy.item()
-
     def _compute_collapse_metrics(
         self, cf, batch_size, target_and_aux_calculators, preds, targets_and_auxs
     ) -> None:
@@ -615,7 +575,7 @@ class CollapseMonitor:
         This method extracts the student and teacher latent representations from the
         model outputs. It supports two modes:
 
-        1. SSL training (JEPA/DINO/iBOT): Extracts latents from SSL-specific keys
+        1. SSL training (JEPA/iBOT): Extracts latents from SSL-specific keys
         2. Forecasting: Extracts latents from 'latent_state' at each forecast step
 
         For forecasting, a list of latent tensors is passed to enable per-step metrics.
@@ -666,7 +626,7 @@ class CollapseMonitor:
                 target_latent_dict = target_aux.latent
 
             # Try SSL-specific keys first
-            for ssl_type in ["JEPA", "DINO", "iBOT"]:
+            for ssl_type in ["JEPA", "iBOT"]:
                 if ssl_type in target_latent_dict:
                     loss_type = ssl_type
                     teacher_latent = extract_latent_tensor(target_latent_dict[ssl_type])
@@ -674,9 +634,9 @@ class CollapseMonitor:
 
         # Extract student latents from predictions
         if preds.latent and len(preds.latent) > 0:
-            # First, try SSL-specific keys (JEPA/DINO/iBOT) from first step
+            # First, try SSL-specific keys (JEPA/iBOT) from first step
             pred_latent_dict = preds.latent[0]
-            for ssl_type in ["JEPA", "DINO", "iBOT"]:
+            for ssl_type in ["JEPA", "iBOT"]:
                 if ssl_type in pred_latent_dict:
                     student_latent = extract_latent_tensor(pred_latent_dict[ssl_type])
                     loss_type = ssl_type
