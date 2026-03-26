@@ -443,12 +443,33 @@ class Trainer(TrainerBase):
         """Measure FLOPs for one forward+backward pass on a single batch."""
         try:
             source = sample_batch.get_source_samples()
-            # TODO: need to watch out for different data streams?
+
+            targets_and_auxs = {}
+            for loss_name, target_aux in self.target_and_aux_calculators.items():
+                target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                targets_and_auxs[loss_name] = target_aux.compute(
+                    self.cf.general.istep,
+                    sample_batch.get_target_samples(target_idxs),
+                    self.model_params,
+                    self.model,
+                )
+            metadata = extract_batch_metadata(sample_batch)
+
             self.flops_per_batch = measure_flops(
                 self.model,
                 lambda: self.model(self.model_params, source),
-                lambda output: output.sum(),  # TODO: not accurate
+                lambda output: self.loss_calculator.compute_loss(
+                    preds=output,
+                    targets_and_aux=targets_and_auxs,
+                    metadata=metadata,
+                ),
             )
+
+            # pop the history entries added during FLOPs measurement
+            self.loss_calculator.loss_hist.pop()
+            self.loss_calculator.losses_unweighted_hist.pop()
+            self.loss_calculator.stddev_unweighted_hist.pop()
+
             if is_root():
                 logger.info(f"Measured FLOPs per batch: {self.flops_per_batch:.2e}")
         except Exception as e:
