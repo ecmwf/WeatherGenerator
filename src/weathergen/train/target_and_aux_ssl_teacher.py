@@ -14,7 +14,6 @@ from typing import Any
 import torch
 
 from weathergen.model.ssl_target_processing import (
-    DINOTargetProcessing,
     JEPATargetProcessing,
     iBOTPatchTargetProcessing,
 )
@@ -91,13 +90,6 @@ def get_target_postprocessing(target_losses: list[str], training_cfg, **kwargs):
                 center_momentum=conf["center_momentum"],
                 student_temp=conf["loss_extra_args"]["student_temp"],
                 teacher_temp=conf["teacher_temp"],
-                teacher_style=conf["teacher_style"],
-            )
-        elif loss_name == "DINO":
-            return_dict[loss_name] = DINOTargetProcessing(
-                out_dim=conf["out_dim"],
-                center_momentum=conf["center_momentum"],
-                student_temp=conf["loss_extra_args"]["student_temp"],
                 teacher_style=conf["teacher_style"],
             )
         elif loss_name == "JEPA":
