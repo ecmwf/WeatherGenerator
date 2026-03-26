@@ -134,7 +134,7 @@ data_loading :
   repeat_data_in_mini_epoch : False
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
-  # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
+  # FSDP2 can cause the job to hang and trigger a PyTorch timeout error.
   # If this happens, you can disable the flag, but performance will drop on GH200.
   memory_pinning: True
 
@@ -146,7 +146,7 @@ training_config:
   training_mode: ["masking"]
 
   # Collapse monitoring for detecting representation collapse
-  # Works with SSL training (JEPA/DINO) and forecasting modes
+  # Works with SSL training (JEPA) and forecasting modes
   # For forecasting, monitors latent_state.patch_tokens at each forecast step
   collapse_monitoring:
     enabled: true
@@ -170,7 +170,7 @@ training_config:
         tensor_source: "student"
         forecast_aggregation: "all"
       prototype_entropy:
-        enabled: false  # only relevant for DINO
+        enabled: false
       ema_beta:
         enabled: false  # only relevant for SSL with EMA teacher
 
