@@ -311,7 +311,6 @@ def _apply_fixes(config: Config) -> Config:
     "outdatet" run configurations. The fixes in this function should be
     eventually removed.
     """
-    config = _check_logging(config)
     config = _check_datasets(config)
     return config
 
@@ -331,19 +330,6 @@ def _check_datasets(config: Config) -> Config:
         ]
         paths = [config.get(key) for key in legacy_keys]
         config.data_paths = [path for path in paths if path is not None]
-
-    return config
-
-
-def _check_logging(config: Config) -> Config:
-    """
-    Apply fixes to log frequency config.
-    """
-    config = config.copy()
-    if config.get("train_logging") is None:  # TODO remove this for next version
-        config.train_logging = OmegaConf.create(
-            {"checkpoint": 250, "terminal": 10, "metrics": config.train_logging.log_interval}
-        )
 
     return config
 
