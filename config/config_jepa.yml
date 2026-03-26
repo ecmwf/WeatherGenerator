@@ -126,7 +126,7 @@ train_logging:
   checkpoint: 250
   log_grad_norms: False
 
-  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
+  # Collapse monitoring for SSL training (JEPA/iBOT)
   # Detects representation collapse via various metrics
   # For forecasting, supports sequences of latents with per-step and aggregate metrics
   collapse_monitoring:
@@ -151,7 +151,7 @@ train_logging:
         tensor_source: "both"  # cheap to compute, good early indicator
         forecast_aggregation: "all"
       prototype_entropy:
-        enabled: true  # only applies to DINO
+        enabled: false
       ema_beta:
         enabled: true
 
@@ -168,7 +168,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
 
-  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
+  # Collapse monitoring for SSL training (JEPA/iBOT)
   # Detects representation collapse via various metrics
   # For forecasting, supports sequences of latents with per-step and aggregate metrics
   collapse_monitoring:
@@ -193,7 +193,7 @@ training_config:
         tensor_source: "both"  # cheap to compute, good early indicator
         forecast_aggregation: "all"
       prototype_entropy:
-        enabled: true  # only applies to DINO
+        enabled: false
       ema_beta:
         enabled: true
 
