@@ -25,13 +25,13 @@ logger = logging.getLogger(__name__)
 class LossLatentSSLStudentTeacher(LossModuleBase):
     """
     Manages and computes the overall loss for a WeatherGenerator model pretraining using
-    DINO/iBOT/JEPA/BYOL style losses.
+    iBOT/JEPA/BYOL style losses.
 
     This class handles the initialization and application of various loss functions,
     It provides both the main loss for backpropagation and detailed loss metrics for logging.
     """
 
-    valid_loss_names = set(["DINO", "iBOT", "JEPA"])
+    valid_loss_names = set(["iBOT", "JEPA"])
 
     def __init__(self, cf: DictConfig, mode_cfg: DictConfig, stage: Stage, device: str, **losses):
         LossModuleBase.__init__(self)
@@ -124,32 +124,6 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                     dim=0,
                 ),
             }
-        elif name == "DINO":
-            local2global_dino_student = []
-            for student_indices in target2source_matching_idxs:
-                local_preds = [
-                    preds[sidx]
-                    for sidx in student_indices
-                    if "DINO" in metadata[sidx].global_params["loss"]
-                    and metadata[sidx].global_params["relationship"] != "identity"
-                ]
-                local2global_dino_student.append(local_preds)
-            local2global_dino_student = [
-                torch.stack(latents, dim=0)
-                for latents in zip(*local2global_dino_student, strict=False)
-            ]
-            return {
-                "local2global_dino_student": local2global_dino_student,
-                "global2global_dino_student": torch.stack(
-                    [
-                        p
-                        for p, info in zip(preds, metadata, strict=False)
-                        if "DINO" in info.global_params["loss"]
-                        and info.global_params["relationship"] == "identity"
-                    ],
-                    dim=0,
-                ),
-            }
         else:
             raise NotImplementedError(
                 f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
@@ -199,17 +173,6 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
                         p[: self.num_class_tokens]
                         for p, info in zip(targets, metadata, strict=False)
                     ],
-                    dim=0,
-                ),
-            }
-        elif name == "DINO":
-            return {
-                "local2global_dino_teacher": torch.stack(
-                    [p for p, info in zip(targets, metadata, strict=False)],
-                    dim=0,
-                ),
-                "global2global_dino_teacher": torch.stack(
-                    list(reversed([p for p, info in zip(targets, metadata, strict=False)])),
                     dim=0,
                 ),
             }
@@ -266,26 +229,9 @@ def ibot_loss(
     return loss / 2
 
 
-def dino_loss(
-    local2global_dino_student,
-    local2global_dino_teacher,
-    global2global_dino_student,
-    global2global_dino_teacher,
-    student_temp,
-):
-    loss = loss_fns.student_teacher_global_softmax(
-        local2global_dino_student, local2global_dino_teacher, student_temp
-    ) + loss_fns.student_teacher_softmax(
-        global2global_dino_student, global2global_dino_teacher, student_temp
-    )
-    return loss / 2
-
-
 def get_loss_function_ssl(name):
     if name == "iBOT":
         return ibot_loss
-    elif name == "DINO":
-        return dino_loss
     elif name == "JEPA":
         return jepa_loss
     else:
