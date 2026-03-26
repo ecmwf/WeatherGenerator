@@ -631,7 +631,7 @@ class Trainer(TrainerBase):
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log throughput metrics
-                if self.throughput is not None and is_root():
+                if self.throughput is not None and is_root() and total_batches > 0:
                     throughput_metrics = self.throughput.compute()
                     elapsed = time.time() - t0_throughput
                     self.train_logger.log_metrics(TRAIN, {
