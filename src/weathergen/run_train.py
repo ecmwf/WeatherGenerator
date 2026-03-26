@@ -19,6 +19,7 @@ import time
 import traceback
 from pathlib import Path
 
+from weathergen.common.mutable_config import MutableConfig
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
@@ -97,8 +98,9 @@ def run_inference(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
+    mcf = MutableConfig()
     devices = Trainer.init_torch()
-    cf = Trainer.init_ddp(cf)
+    cf, mcf = Trainer.init_ddp(cf, mcf)
 
     init_loggers(cf.general.run_id)
 
@@ -134,10 +136,13 @@ def run_continue(args):
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
+    
 
+
+    mcf = MutableConfig()
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
-    cf = Trainer.init_ddp(cf)
+    cf, mcf = Trainer.init_ddp(cf, mcf)
 
     init_loggers(cf.general.run_id)
 
@@ -169,10 +174,11 @@ def run_train(args):
     )
     cf = config.set_run_id(cf, args.run_id, False)
 
+    mcf = MutableConfig()
     cf.data_loading.rng_seed = int(time.time())
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
-    cf = Trainer.init_ddp(cf)
+    cf, mcf = Trainer.init_ddp(cf, mcf)
 
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case

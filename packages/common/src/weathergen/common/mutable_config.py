@@ -9,15 +9,21 @@
 
 from omegaconf import DictConfig
 
-class mutableConfig(DictConfig)
+import logging
+
+_logger = logging.getLogger(__name__)
+
+class MutableConfig():
     """
     lalala
     """
 
-    def __init__(self)
+    def __init__(self):
 
         self.world_size = None
         self.world_size_original = None
         self.rank = None
         self.local_rank = None
         self.with_ddp = None
+
+        print("Trolololo 1")
