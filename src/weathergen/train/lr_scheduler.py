@@ -217,7 +217,7 @@ class LearningRateScheduler:
             if cur_lr < self.lr:
                 for g in self.optimizer.param_groups:
                     g["lr"] = self.lr
-        else:
+        elif self.cur_scheduler is not None:
             self.cur_scheduler.step()
             self.lr = self.cur_scheduler.get_last_lr()[0]
 
