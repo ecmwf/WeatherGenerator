@@ -94,6 +94,7 @@ latent_noise_deterministic_latents: True
 freeze_modules: ""
 
 norm_type: "LayerNorm"
+qk_norm_type: "RMSNorm"
 # type of zarr_store
 zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
