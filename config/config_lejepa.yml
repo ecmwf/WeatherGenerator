@@ -65,7 +65,7 @@ forecast_att_dense_rate: 1.0
 with_step_conditioning: True
 
 healpix_level: 5
-rope_2D: False
+rope_2D: True
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -86,6 +86,7 @@ latent_noise_deterministic_latents: True
 freeze_modules: ""
 
 norm_type: "LayerNorm"
+qk_norm_type: "RMSNorm"
 zarr_store: "zip"
 
 #####################################
@@ -138,6 +139,26 @@ data_loading:
 
 training_config:
   training_mode: ["student_teacher"]
+
+  # # Don't currently want these enabled for LeJEPA, but leaving for future.
+  # # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
+  # # When enabled, intermediate encoder representations are tapped and used as additional
+  # # targets/predictions for the SSL loss. Disabled by default (empty tap_after).
+  # deep_ssl:
+  #   enabled: tfalsee
+  #   tap_after:                     # named tap points (final output always included implicitly)
+  #     - local2global               # after local-to-global adapter, before global attention
+  #     - "global:0"                 # after 1st global layer (0-indexed)
+  #     - "global:1"                 # after 2nd global layer
+  #   fusion_hidden_factor: 2        # MLP hidden dim = factor * dim_embed
+  #   level_weights: [0.25, 0.25, 0.25, 0.25]  # per-level loss weights (len = num taps + 1)
+
+  # # Context loss (V-JEPA 2.1): L1 on context (visible) tokens between student and teacher.
+  # # Complements the JEPA loss which targets masked tokens.
+  # context_loss:
+  #   enabled: true
+  #   weight: 0.2
+  #   warmup_steps: 10000             # linear warmup from 0 to weight over this many steps
 
   collapse_monitoring:
     enabled: true
