@@ -35,27 +35,18 @@ _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
 
-def _load_single_sample(
-    zio,
+def _process_sample_result(
+    out,
     sample: int,
-    stream: str,
     fstep: int,
     ensemble: list[str],
     is_gridded: bool,
 ) -> tuple[int, int, xr.DataArray, xr.DataArray, list | None] | None:
+    """Post-process a single ZarrIO.get_data() result.
+
+    Shared logic used by both _load_single_sample (shared context) and
+    _load_single_sample_own_context (per-thread context).
     """
-    Load and preprocess one (sample, fstep) from an open ZarrIO context.
-
-    Thread-safe for LocalStore backends. The zio object's data_root
-    (a zarr.Group) supports concurrent read-only path lookups.
-
-    Returns (fstep, sample_idx, target, prediction, valid_times) or None
-    if empty/missing.  Uses .load() (= .compute()) to force data into
-    numpy *inside this thread* so the GIL is released during the actual
-    filesystem I/O and decompression.
-    """
-    out = zio.get_data(sample, stream, fstep)
-
     if out.target is None or out.prediction is None:
         return None
 
@@ -87,6 +78,53 @@ def _load_single_sample(
             valid_times = vt_list
 
     return fstep, sample, target, pred, valid_times
+
+
+def _load_single_sample(
+    zio,
+    sample: int,
+    stream: str,
+    fstep: int,
+    ensemble: list[str],
+    is_gridded: bool,
+) -> tuple[int, int, xr.DataArray, xr.DataArray, list | None] | None:
+    """
+    Load and preprocess one (sample, fstep) from a *shared* ZarrIO context.
+
+    Thread-safe for LocalStore backends. The zio object's data_root
+    (a zarr.Group) supports concurrent read-only path lookups.
+    NOT safe for ZipStore — use _load_single_sample_own_context instead.
+
+    Returns (fstep, sample_idx, target, prediction, valid_times) or None
+    if empty/missing.
+    """
+    out = zio.get_data(sample, stream, fstep)
+    return _process_sample_result(out, sample, fstep, ensemble, is_gridded)
+
+
+def _load_single_sample_own_context(
+    fname_zarr: Path,
+    sample: int,
+    stream: str,
+    fstep: int,
+    ensemble: list[str],
+    is_gridded: bool,
+) -> tuple[int, int, xr.DataArray, xr.DataArray, list | None] | None:
+    """
+    Load and preprocess one (sample, fstep) by opening a *private* ZarrIO context.
+
+    Each call opens and closes its own zarrio_reader, making this safe for
+    ZipStore backends where the underlying Python zipfile.ZipFile is NOT
+    thread-safe when shared.  The overhead of opening the zip central
+    directory (~5-20 ms) is negligible compared to the I/O saved by
+    parallelism across 100+ samples.
+
+    Returns (fstep, sample_idx, target, prediction, valid_times) or None
+    if empty/missing.
+    """
+    with zarrio_reader(fname_zarr) as zio:
+        out = zio.get_data(sample, stream, fstep)
+    return _process_sample_result(out, sample, fstep, ensemble, is_gridded)
 
 
 class WeatherGenReader(Reader):
@@ -481,28 +519,40 @@ class WeatherGenZarrReader(WeatherGenReader):
             n_total = len(samples) * len(fsteps)
             effective_threads = min(self._num_io_threads, n_total)
 
-            # ZipStore safety: Python's zipfile is not thread-safe
-            if hasattr(zio, '_store') and hasattr(zio._store, '__class__') and \
-               'zip' in type(zio._store).__name__.lower():
-                effective_threads = 1
-                _logger.debug("ZipStore detected — falling back to sequential sample reads.")
+            # ZipStore detection: Python's zipfile.ZipFile is NOT thread-safe
+            # when shared, but each thread can safely open its own handle.
+            is_zip_store = (
+                hasattr(zio, '_store')
+                and 'zip' in type(zio._store).__name__.lower()
+            )
 
             _logger.info(
                 f"RUN {self.run_id} - {stream}: Loading {len(samples)} samples × "
                 f"{len(fsteps)} fsteps = {n_total} items "
-                f"(threads={effective_threads})..."
+                f"(threads={effective_threads}, zip={is_zip_store})..."
             )
 
             # results_by_fstep[fstep] = list of (sample, target, pred, valid_times)
             results_by_fstep: dict[int, list] = {f: [] for f in fsteps}
 
             if effective_threads > 1:
+                # Choose the right loader:
+                # - LocalStore: share one zio across threads (thread-safe)
+                # - ZipStore:   each thread opens its own context (safe)
+                if is_zip_store:
+                    submit_fn = lambda executor, s, f: executor.submit(
+                        _load_single_sample_own_context,
+                        self.fname_zarr, s, stream, f, ensemble, is_gridded_data,
+                    )
+                else:
+                    submit_fn = lambda executor, s, f: executor.submit(
+                        _load_single_sample,
+                        zio, s, stream, f, ensemble, is_gridded_data,
+                    )
+
                 with ThreadPoolExecutor(max_workers=effective_threads) as executor:
                     futures = {
-                        executor.submit(
-                            _load_single_sample,
-                            zio, s, stream, f, ensemble, is_gridded_data,
-                        ): (f, s)
+                        submit_fn(executor, s, f): (f, s)
                         for f in fsteps
                         for s in samples
                     }
