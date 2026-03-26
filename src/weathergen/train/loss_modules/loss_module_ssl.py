@@ -415,8 +415,9 @@ class LossLeJEPA(LossModuleBase):
         self.temporal = jepa_conf.get("loss_extra_args", {}).get("temporal", False)
         self.sigreg_weight = jepa_conf.get("sigreg_weight", 0.02)
         self.sigreg_num_projections = jepa_conf.get("sigreg_num_projections", 256)
+        self._step = 0
 
-    def compute_loss(self, preds, targets, metadata) -> LossValues:
+    def compute_loss(self, preds, targets, metadata, **kwargs) -> LossValues:
         _source2target, output_info, _target2source, _ = metadata
 
         # Student MLP prediction and raw encoder latent
@@ -461,6 +462,16 @@ class LossLeJEPA(LossModuleBase):
         sigreg = (sigreg_s + sigreg_t) / 2
 
         loss = invariance + self.sigreg_weight * sigreg
+
+        # TODO: remove — quick gaussianity sanity check
+        self._step += 1
+        if self._step % 10 == 0:
+            with torch.no_grad():
+                z = student_raw.reshape(-1, student_raw.shape[-1]).float()
+                std = z.std(0).mean().item()
+                mean_abs = z.mean(0).abs().mean().item()
+                kurt = ((z - z.mean(0)).pow(4).mean(0) / z.std(0).pow(4).clamp(min=1e-8) - 3).mean().item()
+                print(f"[LeJEPA] step={self._step}  |mean|={mean_abs:.3f}  std={std:.3f}  excess_kurt={kurt:.3f}")
 
         return LossValues(
             loss=loss,
