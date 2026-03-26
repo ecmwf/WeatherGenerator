@@ -89,6 +89,11 @@ class Trainer(TrainerBase):
         self.flops_per_batch: int | None = None
         self._source_bytes_per_batch: int = 0
         self._THROUGHPUT_WARMUP_STEPS: int = 2
+        self._t0_throughput: float | None = None
+        self._throughput_warmup_done: bool = False
+        self._total_batches: int = 0
+        self._total_samples: int = 0
+        self._total_mb: float = 0.0
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -165,6 +170,11 @@ class Trainer(TrainerBase):
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
         self._available_flops = get_available_flops(torch.device(self.devices[0]), dtype=self.mixed_precision_dtype)  # Assuming same device type!
+        if is_root():
+            if self._available_flops:
+                logger.info(f"GPU peak FLOPS: {self._available_flops:.2e}")
+            else:
+                logger.warning("GPU peak FLOPS not recognized by Lightning — MFU will not be available.")
         self.throughput = Throughput(
             available_flops=self._available_flops,
             world_size=self.world_size_original,
@@ -385,6 +395,8 @@ class Trainer(TrainerBase):
         sample_batch.to_device(self.device)
         self.precompute_flops(sample_batch)
         self.precompute_source_bytes(sample_batch)
+        if is_root() and self.flops_per_batch is None:
+            logger.warning("flops_per_batch is None — MFU will not be available.")
 
         # run validation before training if requested
         self.validate_before_training()
@@ -502,17 +514,6 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
-        # Reinitialize throughput tracker so its internal time window is fresh for this mini-epoch
-        if self.throughput is not None:
-            self.throughput = Throughput(
-                available_flops=self._available_flops,
-                world_size=self.world_size_original,
-                window_size=20,
-            )
-        t0_throughput = time.time()
-        total_batches = 0
-        total_samples = 0
-        total_mb = 0.0
         for bidx, batch in enumerate(dataset_iter):
             if cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
@@ -605,22 +606,19 @@ class Trainer(TrainerBase):
 
             if self.throughput is not None:
                 torch.cuda.synchronize()
-                if bidx < self._THROUGHPUT_WARMUP_STEPS:
-                    # Reset after last warmup step so compilation/warmup
-                    # time doesn't pollute metrics
-                    if bidx == self._THROUGHPUT_WARMUP_STEPS - 1:
-                        t0_throughput = time.time()
-                        total_batches = 0
-                        total_samples = 0
-                        total_mb = 0.0
+                if not self._throughput_warmup_done:
+                    # One-time warmup: skip first N batches to exclude compilation overhead
+                    if self.cf.general.istep == self._THROUGHPUT_WARMUP_STEPS - 1:
+                        self._t0_throughput = time.time()
+                        self._throughput_warmup_done = True
                 else:
-                    total_batches += 1
-                    total_samples += self.batch_size_per_gpu
-                    total_mb += self._source_bytes_per_batch / 1e6
+                    self._total_batches += 1
+                    self._total_samples += self.batch_size_per_gpu
+                    self._total_mb += self._source_bytes_per_batch / 1e6
                     self.throughput.update(
-                        time=time.time() - t0_throughput,
-                        batches=total_batches,
-                        samples=total_samples,
+                        time=time.time() - self._t0_throughput,
+                        batches=self._total_batches,
+                        samples=self._total_samples,
                         flops=self.flops_per_batch,
                     )
 
@@ -638,13 +636,13 @@ class Trainer(TrainerBase):
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log throughput metrics
-                if self.throughput is not None and is_root() and total_batches > 0:
+                if self.throughput is not None and is_root() and self._total_batches > 0:
                     throughput_metrics = self.throughput.compute()
-                    elapsed = time.time() - t0_throughput
+                    elapsed = time.time() - self._t0_throughput
                     self.train_logger.log_metrics(TRAIN, {
                         f"performance.throughput.{k}": v for k, v in throughput_metrics.items()
                         if isinstance(v, (int, float))
-                    } | {"performance.throughput.mb_per_sec": total_mb / elapsed if elapsed > 0 else 0.0})
+                    } | {"performance.throughput.mb_per_sec": self._total_mb / elapsed if elapsed > 0 else 0.0})
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
