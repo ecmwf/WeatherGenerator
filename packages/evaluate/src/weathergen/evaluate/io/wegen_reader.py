@@ -10,6 +10,7 @@
 # Standard library
 import json
 import logging
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -111,20 +112,44 @@ def _load_single_sample_own_context(
     is_gridded: bool,
 ) -> tuple[int, int, xr.DataArray, xr.DataArray, list | None] | None:
     """
-    Load and preprocess one (sample, fstep) by opening a *private* ZarrIO context.
+    Load and preprocess one (sample, fstep) using a **thread-local** ZarrIO context.
 
-    Each call opens and closes its own zarrio_reader, making this safe for
-    ZipStore backends where the underlying Python zipfile.ZipFile is NOT
-    thread-safe when shared.  The overhead of opening the zip central
-    directory (~5-20 ms) is negligible compared to the I/O saved by
-    parallelism across 100+ samples.
+    Each worker thread in the ThreadPoolExecutor opens ONE zarrio_reader on
+    first use (stored in ``threading.local()``) and reuses it for every
+    subsequent item dispatched to that thread.  This avoids the cost of
+    re-parsing the zip central directory for every item while remaining
+    safe for ZipStore (each thread has its own ``zipfile.ZipFile`` handle).
+
+    The contexts are cleaned up by ``_close_thread_local_zio()`` after the
+    executor finishes.
 
     Returns (fstep, sample_idx, target, prediction, valid_times) or None
     if empty/missing.
     """
-    with zarrio_reader(fname_zarr) as zio:
-        out = zio.get_data(sample, stream, fstep)
+    tls = _thread_local_store
+    if not hasattr(tls, "zio") or tls.zio is None:
+        tls.zio = zarrio_reader(fname_zarr).__enter__()
+    out = tls.zio.get_data(sample, stream, fstep)
     return _process_sample_result(out, sample, fstep, ensemble, is_gridded)
+
+
+# Thread-local storage for per-worker ZarrIO contexts (ZipStore strategy)
+_thread_local_store = threading.local()
+
+
+def _close_thread_local_zio():
+    """Close and remove the thread-local ZarrIO context, if any.
+
+    Called once per worker thread after all items have been processed,
+    to ensure the underlying zipfile.ZipFile handle is properly closed.
+    """
+    tls = _thread_local_store
+    if hasattr(tls, "zio") and tls.zio is not None:
+        try:
+            tls.zio.__exit__(None, None, None)
+        except Exception:
+            pass
+        tls.zio = None
 
 
 class WeatherGenReader(Reader):
@@ -538,7 +563,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             if effective_threads > 1:
                 # Choose the right loader:
                 # - LocalStore: share one zio across threads (thread-safe)
-                # - ZipStore:   each thread opens its own context (safe)
+                # - ZipStore:   each thread opens its own persistent context
                 if is_zip_store:
                     submit_fn = lambda executor, s, f: executor.submit(
                         _load_single_sample_own_context,
@@ -566,6 +591,15 @@ class WeatherGenZarrReader(WeatherGenReader):
                             results_by_fstep[fstep_r].append(
                                 (sample_r, target, pred, vt)
                             )
+
+                    # Clean up thread-local ZipStore contexts
+                    if is_zip_store:
+                        cleanup_futures = [
+                            executor.submit(_close_thread_local_zio)
+                            for _ in range(effective_threads)
+                        ]
+                        for cf in as_completed(cleanup_futures):
+                            cf.result()
             else:
                 for f in fsteps:
                     for s in tqdm(
