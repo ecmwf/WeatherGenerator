@@ -87,6 +87,7 @@ class Trainer(TrainerBase):
         self.collapse_monitor: CollapseMonitor | None = None
         self.throughput: Throughput | None = None
         self.flops_per_batch: int | None = None
+        self._source_bytes_per_batch: int = 0
         self._THROUGHPUT_WARMUP_STEPS: int = 2
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
@@ -381,8 +382,11 @@ class Trainer(TrainerBase):
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
-        # measure FLOPs for throughput/MFU tracking
-        self._measure_flops()
+        # precompute batch statistics for throughput/MFU tracking
+        sample_batch = next(iter(self.data_loader))
+        sample_batch.to_device(self.device)
+        self.precompute_flops(sample_batch)
+        self.precompute_source_bytes(sample_batch)
 
         # run validation before training if requested
         self.validate_before_training()
@@ -427,26 +431,41 @@ class Trainer(TrainerBase):
             else:
                 assert False, "validate_before_training must be integer or boolean."
 
-    def _measure_flops(self):
+    @staticmethod
+    def _batch_bytes(batch_samples) -> int:
+        """Total bytes of source token tensors in a BatchSamples object."""
+        total = 0
+        for sample in batch_samples.samples:
+            for stream_data in sample.streams_data.values():
+                for t in stream_data.source_tokens_cells:
+                    total += t.nbytes
+        return total
+
+    def precompute_flops(self, sample_batch) -> None:
         """Measure FLOPs for one forward+backward pass on a single batch."""
         try:
-            with torch.device("meta"):
-                # TODO: need to watch out for different data streams?
-                sample_batch = next(iter(self.data_loader))
-                sample_batch.to_device(self.device)
-                source = sample_batch.get_source_samples()
-
-                self.flops_per_batch = measure_flops(
-                    self.model,
-                    lambda: self.model(self.model_params, source),
-                    lambda output: output.sum() # not accurate
-                )
-                if is_root():
-                    logger.info(f"Measured FLOPs per batch: {self.flops_per_batch:.2e}")
+            source = sample_batch.get_source_samples()
+            # TODO: need to watch out for different data streams?
+            self.flops_per_batch = measure_flops(
+                self.model,
+                lambda: self.model(self.model_params, source),
+                lambda output: output.sum(),  # TODO: not accurate
+            )
+            if is_root():
+                logger.info(f"Measured FLOPs per batch: {self.flops_per_batch:.2e}")
         except Exception as e:
             if is_root():
                 logger.warning(f"Failed to measure FLOPs: {e}. MFU will not be available.")
             self.flops_per_batch = None
+
+    def precompute_source_bytes(self, sample_batch) -> None:
+        """Precompute source tensor bytes per batch for MB/s tracking."""
+        try:
+            self._source_bytes_per_batch = self._batch_bytes(sample_batch.get_source_samples())
+            if is_root():
+                logger.info(f"Source bytes per batch: {self._source_bytes_per_batch / 1e6:.1f} MB")
+        except Exception:
+            self._source_bytes_per_batch = 0
 
     def train(self, mini_epoch):
         """
@@ -467,6 +486,7 @@ class Trainer(TrainerBase):
         t0_throughput = time.time()
         total_batches = 0
         total_samples = 0
+        total_mb = 0.0
         for bidx, batch in enumerate(dataset_iter):
             if cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
@@ -566,9 +586,11 @@ class Trainer(TrainerBase):
                         t0_throughput = time.time()
                         total_batches = 0
                         total_samples = 0
+                        total_mb = 0.0
                 else:
                     total_batches += 1
                     total_samples += self.batch_size_per_gpu
+                    total_mb += self._source_bytes_per_batch / 1e6
                     self.throughput.update(
                         time=time.time() - t0_throughput,
                         batches=total_batches,
@@ -592,10 +614,11 @@ class Trainer(TrainerBase):
                 # Log throughput metrics
                 if self.throughput is not None and is_root():
                     throughput_metrics = self.throughput.compute()
+                    elapsed = time.time() - t0_throughput
                     self.train_logger.log_metrics(TRAIN, {
                         f"performance.throughput.{k}": v for k, v in throughput_metrics.items()
                         if isinstance(v, (int, float))
-                    })
+                    } | {"performance.throughput.mb_per_sec": total_mb / elapsed if elapsed > 0 else 0.0})
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
