@@ -36,6 +36,7 @@ class DataReaderMesh(DataReaderTimestep):
     - Robust Multi-Node/Worker support (Fork-safe, Dask-safe).
     - Dynamic Patching (local) OR Global Sparse Sampling.
     """
+
     def __init__(
         self,
         tw_handler: TimeWindowHandler,
@@ -123,7 +124,10 @@ class DataReaderMesh(DataReaderTimestep):
             self.roi_min_lon, self.roi_min_lat, self.roi_max_lon, self.roi_max_lat = self.roi
         else:
             self.roi_min_lon, self.roi_min_lat, self.roi_max_lon, self.roi_max_lat = (
-                -180.0, -90.0, 180.0, 90.0
+                -180.0,
+                -90.0,
+                180.0,
+                90.0,
             )
 
         self.available_channels = list(self.col_map.keys())
@@ -133,7 +137,7 @@ class DataReaderMesh(DataReaderTimestep):
         self.source_idx = self._select_channels("source")
         self.target_idx = self._select_channels("target")
         self.geoinfo_idx = []
-        self.geoinfo_channels =[]
+        self.geoinfo_channels = []
 
         self.source_channels = [self.available_channels[i] for i in self.source_idx]
         self.target_channels = [self.available_channels[i] for i in self.target_idx]
@@ -146,7 +150,7 @@ class DataReaderMesh(DataReaderTimestep):
             with xr.open_dataset(mapper, engine="zarr", chunks={}, consolidated=False) as ds:
                 if "time" not in ds.coords:
                     all_vars = list(ds.coords) + list(ds.data_vars)
-                    time_candidates =[v for v in all_vars if "time" in v.lower()]
+                    time_candidates = [v for v in all_vars if "time" in v.lower()]
                     if time_candidates:
                         target = time_candidates[0]
                         if target in ds.data_vars:
@@ -208,35 +212,25 @@ class DataReaderMesh(DataReaderTimestep):
         if self._initialized:
             return
 
-        self.mapper_src = fsspec.get_mapper("reference://", 
-                                            fo=str(self.filename_source), 
-                                            remote_protocol="file"
-                                            )
+        self.mapper_src = fsspec.get_mapper(
+            "reference://", fo=str(self.filename_source), remote_protocol="file"
+        )
         import warnings
+
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*separate the stored chunks.*")
             self.ds_source = xr.open_dataset(
-                self.mapper_src, 
-                engine="zarr", 
-                chunks={}, 
-                decode_times=True, 
-                consolidated=False
+                self.mapper_src, engine="zarr", chunks={}, decode_times=True, consolidated=False
             )
 
         if self.filename_target != self.filename_source:
             self.mapper_trg = fsspec.get_mapper(
-                "reference://", 
-                fo=str(self.filename_target), 
-                remote_protocol="file"
+                "reference://", fo=str(self.filename_target), remote_protocol="file"
             )
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=".*separate the stored chunks.*")
                 self.ds_target = xr.open_dataset(
-                    self.mapper_trg, 
-                    engine="zarr", 
-                    chunks={}, 
-                    decode_times=True, 
-                    consolidated=False
+                    self.mapper_trg, engine="zarr", chunks={}, decode_times=True, consolidated=False
                 )
         else:
             self.ds_target = self.ds_source
@@ -284,10 +278,10 @@ class DataReaderMesh(DataReaderTimestep):
         if len(t_idxs) == 0 or not channels:
             return ReaderData.empty(len(channels), 0)
 
-        channel_indices =[self.available_channels.index(c) for c in channels]
+        channel_indices = [self.available_channels.index(c) for c in channels]
         start_t, end_t = t_idxs[0], t_idxs[-1] + 1
         n_steps = len(t_idxs)
-        
+
         lats_ref = self.lats_src if is_source else self.lats_trg
         spatial_indices_ref = self.spatial_indices_src if is_source else self.spatial_indices_trg
         coords_ref = self.coords_src if is_source else self.coords_trg
@@ -322,12 +316,16 @@ class DataReaderMesh(DataReaderTimestep):
                 lon_0 = lon_0_candidates[attempts]
 
                 mask_src = (
-                    (self.lats_src >= lat_0) & (self.lats_src < lat_0 + self.patch_size_deg) &
-                    (self.lons_src >= lon_0) & (self.lons_src < lon_0 + self.patch_size_deg)
+                    (self.lats_src >= lat_0)
+                    & (self.lats_src < lat_0 + self.patch_size_deg)
+                    & (self.lons_src >= lon_0)
+                    & (self.lons_src < lon_0 + self.patch_size_deg)
                 )
                 mask_trg = (
-                    (self.lats_trg >= lat_0) & (self.lats_trg < lat_0 + self.patch_size_deg) &
-                    (self.lons_trg >= lon_0) & (self.lons_trg < lon_0 + self.patch_size_deg)
+                    (self.lats_trg >= lat_0)
+                    & (self.lats_trg < lat_0 + self.patch_size_deg)
+                    & (self.lons_trg >= lon_0)
+                    & (self.lons_trg < lon_0 + self.patch_size_deg)
                 )
 
                 pts_src = np.count_nonzero(mask_src)
@@ -344,11 +342,15 @@ class DataReaderMesh(DataReaderTimestep):
                     len(lats_ref), size=req_points, replace=False
                 )
 
-            patch_coords_base = self.coords_src[patch_indices_local] if is_source else (
-                self.coords_trg[patch_indices_local]
+            patch_coords_base = (
+                self.coords_src[patch_indices_local]
+                if is_source
+                else (self.coords_trg[patch_indices_local])
             )
-            final_disk_indices = self.spatial_indices_src[patch_indices_local] if is_source else (
-                self.spatial_indices_trg[patch_indices_local]
+            final_disk_indices = (
+                self.spatial_indices_src[patch_indices_local]
+                if is_source
+                else (self.spatial_indices_trg[patch_indices_local])
             )
             use_contiguous_read = True
 
@@ -361,24 +363,25 @@ class DataReaderMesh(DataReaderTimestep):
             disk_start, disk_stop = np.min(final_disk_indices), np.max(final_disk_indices) + 1
             rel_indices = final_disk_indices - disk_start
             data_block = self._load_block_from_ds(
-                ds_ref, 
-                arr_cache, 
-                channel_indices, 
-                start_t, 
-                end_t, 
-                n_steps, 
-                slice(disk_start, disk_stop), 
-                rel_indices
+                ds_ref,
+                arr_cache,
+                channel_indices,
+                start_t,
+                end_t,
+                n_steps,
+                slice(disk_start, disk_stop),
+                rel_indices,
             )
         else:
             data_block = self._load_block_from_ds(
-                ds_ref, 
-                arr_cache, 
-                channel_indices, 
-                start_t, end_t, 
-                n_steps, 
-                final_disk_indices, 
-                None
+                ds_ref,
+                arr_cache,
+                channel_indices,
+                start_t,
+                end_t,
+                n_steps,
+                final_disk_indices,
+                None,
             )
 
         if data_block.size > 0:
@@ -399,16 +402,8 @@ class DataReaderMesh(DataReaderTimestep):
         return rdata
 
     def _load_block_from_ds(
-            self, 
-            ds, 
-            arr_cache, 
-            indices, 
-            start_t, 
-            end_t, 
-            n_steps, 
-            disk_indices, 
-            rel_indices
-        ) -> np.typing.NDArray:
+        self, ds, arr_cache, indices, start_t, end_t, n_steps, disk_indices, rel_indices
+    ) -> np.typing.NDArray:
         if rel_indices is not None:
             num_points = len(rel_indices)
         else:
@@ -462,7 +457,7 @@ class DataReaderMesh(DataReaderTimestep):
                     if "time" in dims:
                         # Contiguous read: Apply raw disk bounds, then rel_indices
                         chunk = chunk[:, disk_indices]
-                        
+
                         # Safety check: if chunk is completely empty, fill with NaNs
                         if chunk.shape[1] == 0:
                             assert False, "Empty chunk after disk indexing with time dimension"
@@ -510,8 +505,8 @@ class DataReaderMesh(DataReaderTimestep):
 
     def _select_channels(self, type_key: str) -> list[int]:
         select = self._stream_info.get(type_key)
-        exclude = self._stream_info.get(f"{type_key}_exclude",[])
-        return[
+        exclude = self._stream_info.get(f"{type_key}_exclude", [])
+        return [
             i
             for i, ch in enumerate(self.available_channels)
             if (not select or any(s in ch for s in select)) and not any(e in ch for e in exclude)
@@ -546,21 +541,17 @@ class DataReaderMesh(DataReaderTimestep):
     def denormalize_source_channels(self, source):
         if isinstance(source, torch.Tensor):
             stdev = torch.tensor(
-                self.stdev[self.source_idx], 
-                dtype=source.dtype, 
-                device=source.device
+                self.stdev[self.source_idx], dtype=source.dtype, device=source.device
             )
             mean = torch.tensor(
-                self.mean[self.source_idx], 
-                dtype=source.dtype, 
-                device=source.device
+                self.mean[self.source_idx], dtype=source.dtype, device=source.device
             )
-            land_mask = (source == 0.0)
+            land_mask = source == 0.0
             denorm = (source * stdev) + mean
             denorm[land_mask] = torch.nan
             return denorm
-            
-        land_mask = (source == 0.0)
+
+        land_mask = source == 0.0
         denorm = (source * self.stdev[self.source_idx]) + self.mean[self.source_idx]
         denorm[land_mask] = np.nan
         return denorm

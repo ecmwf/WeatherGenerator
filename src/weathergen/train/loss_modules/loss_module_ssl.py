@@ -47,31 +47,108 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             for name, local_conf in losses.items()
         }
 
-    def compute_loss(self, preds, targets, metadata) -> LossValues:
+        # Deep SSL level weights
+        deep_ssl_cfg = mode_cfg.get("deep_ssl", None)
+        if deep_ssl_cfg and deep_ssl_cfg.get("tap_after"):
+            self.level_weights = list(deep_ssl_cfg.get("level_weights", []))
+            num_levels = len(deep_ssl_cfg.tap_after) + 1
+            if not self.level_weights:
+                self.level_weights = [1.0 / num_levels] * num_levels
+            assert len(self.level_weights) == num_levels, (
+                f"level_weights length ({len(self.level_weights)}) must match "
+                f"number of levels ({num_levels})"
+            )
+        else:
+            self.level_weights = None
+
+        # Context loss (V-JEPA 2.1): L1 on context (visible) tokens with linear warmup
+        context_cfg = mode_cfg.get("context_loss", None)
+        if context_cfg and context_cfg.get("enabled", True):
+            self.context_loss_weight = context_cfg.get("weight", 1.0)
+            self.context_loss_warmup_steps = context_cfg.get("warmup_steps", 0)
+        else:
+            self.context_loss_weight = 0.0
+            self.context_loss_warmup_steps = 0
+
+    def compute_loss(self, preds, targets, metadata, istep=0, **kwargs) -> LossValues:
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
 
         # initialize dictionaries for detailed loss tracking and standard deviation statistics
         # create tensor for each stream
-        losses_all: dict[str, float] = {loss: 0.0 for loss in self.losses}
+        losses_all: dict[str, float] = {loss_name: 0.0 for loss_name in self.losses}
 
         source2target_matching_idxs, output_info, target2source_matching_idxs, _ = metadata
 
-        preds = preds.latent[0]  # [0] because we always want the first fstep
+        deep_preds = preds.latent_deep
+        deep_targets = targets.latent_deep
+        preds_latent = preds.latent[0]  # [0] because we always want the first fstep
         target_info = targets.aux_outputs
-        targets = targets.latent
+        targets_latent = targets.latent
 
-        for name, (weight, loss_fn, extra_args) in self.losses.items():
-            preds_for_loss = self.gather_preds_for_loss(
-                name, preds[name], output_info, target2source_matching_idxs
-            )
-            targets_for_loss = self.gather_targets_for_loss(
-                name, targets[name], target_info, target2source_matching_idxs
-            )
+        has_deep_ssl = (
+            self.level_weights is not None and deep_preds is not None and deep_targets is not None
+        )
 
-            loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
-            loss = loss + (weight * loss_value)
-            losses_all[name] = loss_value.item()
+        if not has_deep_ssl:
+            # Standard single-level SSL loss
+            for name, (weight, loss_fn, extra_args) in self.losses.items():
+                preds_for_loss = self.gather_preds_for_loss(
+                    name, preds_latent[name], output_info, target2source_matching_idxs
+                )
+                targets_for_loss = self.gather_targets_for_loss(
+                    name, targets_latent[name], target_info, target2source_matching_idxs
+                )
+
+                loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
+                loss = loss + (weight * loss_value)
+                losses_all[name] = loss_value.item()
+        else:
+            # Deep SSL: per-level loss replaces the single-level loss
+            deep_preds_fstep0 = deep_preds[0]  # fstep 0
+            for name, (weight, loss_fn, extra_args) in self.losses.items():
+                if name not in deep_preds_fstep0 or name not in deep_targets:
+                    continue
+                student_levels = deep_preds_fstep0[name]
+                teacher_levels = deep_targets[name]
+                for level_idx, (s_level, t_level) in enumerate(
+                    zip(student_levels, teacher_levels, strict=True)
+                ):
+                    preds_for_loss = self.gather_preds_for_loss(
+                        name, s_level, output_info, target2source_matching_idxs
+                    )
+                    targets_for_loss = self.gather_targets_for_loss(
+                        name, t_level, target_info, target2source_matching_idxs
+                    )
+                    level_loss = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
+                    level_w = self.level_weights[level_idx]
+                    loss = loss + level_w * weight * level_loss
+                    losses_all[f"{name}_L{level_idx}"] = level_loss.item()
+
+        # Context loss (V-JEPA 2.1): L1 on context (visible) tokens
+        if self.context_loss_weight > 0.0 and "JEPA" in self.losses:
+            warmup_factor = (
+                min(1.0, istep / self.context_loss_warmup_steps)
+                if self.context_loss_warmup_steps > 0
+                else 1.0
+            )
+            ctx_weight = self.context_loss_weight * warmup_factor
+
+            preds_for_ctx = self.gather_preds_for_loss(
+                "JEPA", preds_latent["JEPA"], output_info, target2source_matching_idxs
+            )
+            targets_for_ctx = self.gather_targets_for_loss(
+                "JEPA", targets_latent["JEPA"], target_info, target2source_matching_idxs
+            )
+            ctx_loss_value = context_loss(
+                student_patches=preds_for_ctx["student_patches_masked"],
+                student_masks=preds_for_ctx["student_masks"],
+                teacher_patches=targets_for_ctx["teacher_patches_masked"],
+                teacher_masks=targets_for_ctx["teacher_masks"],
+            ).mean()
+            loss = loss + ctx_weight * ctx_loss_value
+            losses_all["context"] = ctx_loss_value.item()
+            losses_all["context_warmup"] = warmup_factor
 
         return LossValues(loss=loss, losses_all=losses_all, stddev_all={})
 
@@ -254,6 +331,21 @@ def jepa_loss(
     loss = loss * masks_weight[mask]
 
     return loss.sum()  # / student_masks.shape[0]
+
+
+def context_loss(student_patches, student_masks, teacher_patches, teacher_masks):
+    """V-JEPA 2.1 context loss: L1 on context (student-visible) tokens."""
+    student_masks = student_masks.squeeze(dim=1)
+    teacher_masks = teacher_masks.squeeze(dim=1)
+
+    # Context = positions visible to the student (AND visible to teacher)
+    mask = torch.logical_and(student_masks, teacher_masks)
+    if mask.sum() == 0:
+        return torch.tensor(0.0, device=student_patches.device, requires_grad=True)
+
+    teacher_patches = teacher_patches.expand((mask.shape[0], -1, -1))
+    loss = F.l1_loss(student_patches[mask], teacher_patches[mask], reduction="mean")
+    return loss
 
 
 def ibot_loss(
