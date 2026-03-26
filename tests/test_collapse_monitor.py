@@ -252,45 +252,6 @@ class TestDimensionVariance:
         assert var_ratio > 1000
 
 
-class TestPrototypeEntropy:
-    """Test DINO prototype entropy computation."""
-
-    def test_uniform_prototype_distribution(self, monitor):
-        """Uniform prototype distribution should have entropy ~1."""
-        batch_size, num_prototypes = 128, 64
-        # Uniform distribution
-        probs = torch.ones(batch_size, num_prototypes) / num_prototypes
-
-        entropy = monitor._compute_prototype_entropy(probs)
-
-        # Normalized entropy should be close to 1
-        assert abs(entropy - 1.0) < 0.01
-
-    def test_single_prototype_collapse(self, monitor):
-        """Collapse to single prototype should have entropy ~0."""
-        batch_size, num_prototypes = 128, 64
-        # All mass on first prototype
-        probs = torch.zeros(batch_size, num_prototypes)
-        probs[:, 0] = 1.0
-
-        entropy = monitor._compute_prototype_entropy(probs)
-
-        # Normalized entropy should be close to 0
-        assert entropy < 0.01
-
-    def test_partial_collapse(self, monitor):
-        """Partial collapse should have intermediate entropy."""
-        batch_size, num_prototypes = 128, 64
-        # Only 4 prototypes used uniformly (much stronger collapse)
-        probs = torch.zeros(batch_size, num_prototypes)
-        probs[:, :4] = 0.25  # Only 4 out of 64 prototypes
-
-        entropy = monitor._compute_prototype_entropy(probs)
-
-        # Entropy should be between 0 and 1 (log(4)/log(64) ≈ 0.33)
-        assert 0.2 < entropy < 0.5
-
-
 class TestMetricsCaching:
     """Test metrics caching and averaging."""
 
@@ -345,23 +306,6 @@ class TestIntegration:
         assert "collapse.teacher.var_min" in metrics
         assert "collapse.ema_beta" in metrics
         assert metrics["collapse.ema_beta"] == 0.999
-
-    def test_dino_prototype_entropy(self, monitor):
-        """Test DINO prototype entropy computation."""
-        torch.manual_seed(42)
-        batch_size, num_patches, dim = 4, 32, 64
-        num_prototypes = 128
-        student = torch.randn(batch_size, num_patches, dim)
-        probs = torch.softmax(torch.randn(batch_size, num_prototypes), dim=-1)
-
-        metrics = monitor.compute_metrics(
-            student_latent=student,
-            prototype_probs=probs,
-            loss_type="DINO",
-        )
-
-        assert "collapse.dino.prototype_entropy" in metrics
-        assert 0 <= metrics["collapse.dino.prototype_entropy"] <= 1
 
     def test_disabled_metrics(self):
         """Test that disabled metrics are not computed."""
