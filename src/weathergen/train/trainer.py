@@ -467,15 +467,21 @@ class Trainer(TrainerBase):
                 )
             metadata = extract_batch_metadata(sample_batch)
 
-            self.flops_per_batch = measure_flops(
-                self.model,
-                lambda: self.model(self.model_params, source),
-                lambda output: self.loss_calculator.compute_loss(
-                    preds=output,
-                    targets_and_aux=targets_and_auxs,
-                    metadata=metadata,
-                ),
-            )
+            cf = self.cf
+            with torch.autocast(
+                device_type=f"cuda:{cf.local_rank}",
+                dtype=self.mixed_precision_dtype,
+                enabled=cf.with_mixed_precision,
+            ):
+                self.flops_per_batch = measure_flops(
+                    self.model,
+                    lambda: self.model(self.model_params, source),
+                    lambda output: self.loss_calculator.compute_loss(
+                        preds=output,
+                        targets_and_aux=targets_and_auxs,
+                        metadata=metadata,
+                    ),
+                )
 
             # pop the history entries added during FLOPs measurement
             self.loss_calculator.loss_hist.pop()
