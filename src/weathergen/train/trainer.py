@@ -164,9 +164,7 @@ class Trainer(TrainerBase):
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
-        device = self.devices[0]
-        device.type = device
-        available_flops = get_available_flops(device, dtype=self.mixed_precision_dtype) # Assuming same device type!
+        available_flops = get_available_flops(torch.device(self.devices[0]), dtype=self.mixed_precision_dtype)  # Assuming same device type!
         self.throughput = Throughput(
             available_flops=available_flops,
             world_size=self.world_size_original,
