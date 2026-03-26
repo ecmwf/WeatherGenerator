@@ -240,21 +240,30 @@ def _write_latent_data_to_zarr(
                 )
             
             npoints = _infer_latent_points_for_metadata(latents_for_sample)
-            coords_array, geoinfo_array, times_array, coords_len, num_extra_tokens = (
-                _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints)
-            )
+            (
+                coords_array,
+                geoinfo_array,
+                times_array,
+                coords_len,
+                num_register_tokens,
+                num_class_tokens,
+            ) = _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints)
 
             extra_written = False
             for latent_name, latent_data in latents_for_sample.items():
                 latent_array = np.asarray(latent_data)
-                extra_features, latent_array = _split_extra_tokens(
-                    latent_array, coords_len, num_extra_tokens
+                extra_components, latent_array = _split_extra_tokens(
+                    latent_array,
+                    coords_len,
+                    num_register_tokens,
+                    num_class_tokens,
                 )
-                if extra_features is not None and not extra_written:
-                    _write_array(group, "extra_features", extra_features)
-                    _logger.debug(
-                        f"Wrote extra_features shape {extra_features.shape} for sample {global_sample_idx}"
-                    )
+                if extra_components is not None and not extra_written:
+                    for extra_name, extra_array in extra_components.items():
+                        _write_array(group, extra_name, extra_array)
+                        _logger.debug(
+                            f"Wrote {extra_name} shape {extra_array.shape} for sample {global_sample_idx}"
+                        )
                     extra_written = True
 
                 try:
@@ -279,7 +288,9 @@ def _write_latent_data_to_zarr(
                 _write_array(group, "times", times_array)
                 _logger.debug(f"Wrote times shape {times_array.shape} for sample {global_sample_idx}")
 
-                group.attrs["num_extra_tokens"] = int(num_extra_tokens)
+                group.attrs["num_extra_tokens"] = int(num_register_tokens + num_class_tokens)
+                group.attrs["num_register_tokens"] = int(num_register_tokens)
+                group.attrs["num_class_tokens"] = int(num_class_tokens)
                 group.attrs["spatial_points"] = int(coords_array.shape[0])
                 if npoints is not None:
                     group.attrs["total_points"] = int(npoints)
@@ -311,15 +322,28 @@ def _write_array(group, name: str, data: np.ndarray) -> None:
     group.create_array(name, data=data)
 
 def _split_extra_tokens(
-    latent_array: np.ndarray, coords_len: int | None, num_extra_tokens: int
-) -> tuple[np.ndarray | None, np.ndarray]:
+    latent_array: np.ndarray,
+    coords_len: int | None,
+    num_register_tokens: int,
+    num_class_tokens: int,
+) -> tuple[dict[str, np.ndarray] | None, np.ndarray]:
+    num_extra_tokens = num_register_tokens + num_class_tokens
     if (
         coords_len is not None
         and num_extra_tokens > 0
         and latent_array.ndim >= 1
         and latent_array.shape[0] == coords_len + num_extra_tokens
     ):
-        return latent_array[:num_extra_tokens], latent_array[num_extra_tokens:]
+        extra_components: dict[str, np.ndarray] = {}
+        offset = 0
+        if num_register_tokens > 0:
+            extra_components["extra_register_tokens"] = latent_array[offset:num_register_tokens]
+            offset += num_register_tokens
+        if num_class_tokens > 0:
+            extra_components["extra_class_token"] = latent_array[
+                offset : offset + num_class_tokens
+            ]
+        return extra_components, latent_array[num_extra_tokens:]
     return None, latent_array
 
 _HEALPIX_COORDS_CACHE: dict[int, tuple[np.ndarray, np.ndarray]] = {}
@@ -342,13 +366,13 @@ def _get_healpix_coords(cf) -> tuple[np.ndarray, np.ndarray] | None:
 
 
 def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
-    num_extra_tokens = int(getattr(cf, "num_register_tokens", 0)) + int(
-        getattr(cf, "num_class_tokens", 0)
-    )
+    num_register_tokens = int(getattr(cf, "num_register_tokens", 0))
+    num_class_tokens = int(getattr(cf, "num_class_tokens", 0))
+    num_extra_tokens = num_register_tokens + num_class_tokens
 
     healpix_coords = _get_healpix_coords(cf)
     if healpix_coords is None or len(healpix_coords) != 2:
-        return None, None, None, None, num_extra_tokens
+        return None, None, None, None, num_register_tokens, num_class_tokens
 
     lon, lat = healpix_coords
     coords_base = np.stack([lat, lon], axis=1)
@@ -367,12 +391,19 @@ def _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints):
 
     coords_len = coords_base.shape[0]
     if npoints is not None and npoints not in (coords_len, coords_len + num_extra_tokens):
-        return None, None, None, coords_len, num_extra_tokens
+        return None, None, None, coords_len, num_register_tokens, num_class_tokens
 
     coords_array = coords_base.astype(np.float32)
     geoinfo_array = np.zeros((coords_len, 0), dtype=np.float32)
     times_array = np.full((coords_len,), np.datetime64("NaT"), dtype="datetime64[ns]")
-    return coords_array, geoinfo_array, times_array, coords_len, num_extra_tokens
+    return (
+        coords_array,
+        geoinfo_array,
+        times_array,
+        coords_len,
+        num_register_tokens,
+        num_class_tokens,
+    )
 
 def get_latent_output(batch, model_output):
     """
@@ -400,14 +431,15 @@ def get_latent_output(batch, model_output):
 
                 if isinstance(lval, LatentState):
                     fields = {
-                        "z_pre_norm": lval.z_pre_norm,
+                        "": lval.z_pre_norm,
                         "patch_tokens": lval.patch_tokens,
                         "register_tokens": lval.register_tokens,
                         "class_token": lval.class_token,
                     }
                     for field_name, tensor in fields.items():
                         if tensor is not None:
-                            per_sample[f"{lname}_{field_name}"] = (
+                            output_name = lname if field_name == "" else f"{lname}_{field_name}"
+                            per_sample[output_name] = (
                                 tensor[i_sample].detach().to(fp32).cpu().numpy()
                             )
                 else:
