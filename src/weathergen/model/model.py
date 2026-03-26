@@ -572,14 +572,6 @@ class Model(torch.nn.Module):
                         use_class_token=False,
                         use_patch_token=True,
                     )
-                elif loss == "DINO":
-                    self.latent_heads[loss] = self._create_latent_pred_head(
-                        cf,
-                        f"{loss}-head",
-                        loss_conf,
-                        use_class_token=True,
-                        use_patch_token=False,
-                    )
 
         return self
 
