@@ -33,7 +33,8 @@ from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
-from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher, FrozenTeacher
+from weathergen.train.teacher_utils import load_encoder_from_checkpoint, prepare_encoder_teacher
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
@@ -315,6 +316,15 @@ def get_target_aux_calculator(
             with_fsdp=False,
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
+
+        # Strip to encoder + create fresh heads
+        cf_overridden = merge_configs(
+            cf, target_and_aux_calc_params.get("model_param_overrides", {})
+        )
+        prepare_encoder_teacher(
+            meta_ema_model, cf.training_config, cf_overridden.ae_global_dim_embed
+        )
+
         ema_model = EMAModel(
             model,
             meta_ema_model,
@@ -325,6 +335,17 @@ def get_target_aux_calculator(
 
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
         target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
+
+        # Optional: warm start encoder from checkpoint
+        teacher_run_id = target_and_aux_calc_params.get("teacher_run_id")
+        if teacher_run_id is not None:
+            teacher_mini_epoch = target_and_aux_calc_params.get("teacher_mini_epoch", -1)
+            load_encoder_from_checkpoint(
+                ema_model.ema_model, cf, teacher_run_id, teacher_mini_epoch, device
+            )
+
+    elif target_and_aux_calc == "FrozenTeacher":
+        target_aux = FrozenTeacher.from_pretrained(cf, dataset, device, target_and_aux_calc_params)
 
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")

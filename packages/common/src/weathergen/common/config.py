@@ -312,6 +312,7 @@ def _apply_fixes(config: Config) -> Config:
     eventually removed.
     """
     config = _check_datasets(config)
+    config = _check_qk_norm_type(config)
     return config
 
 
@@ -331,6 +332,29 @@ def _check_datasets(config: Config) -> Config:
         paths = [config.get(key) for key in legacy_keys]
         config.data_paths = [path for path in paths if path is not None]
 
+    return config
+
+
+def _check_logging(config: Config) -> Config:
+    """
+    Apply fixes to log frequency config.
+    """
+    config = config.copy()
+    if config.get("train_logging") is None:  # TODO remove this for next version
+        config.train_logging = OmegaConf.create(
+            {"checkpoint": 250, "terminal": 10, "metrics": config.train_logging.log_interval}
+        )
+
+    return config
+
+
+def _check_qk_norm_type(config: Config) -> Config:
+    """
+    Backfill qk_norm_type for configs saved before qk_norm_type was introduced.
+    """
+    config = config.copy()
+    if "qk_norm_type" not in config:
+        config.qk_norm_type = config.get("norm_type", "LayerNorm")
     return config
 
 

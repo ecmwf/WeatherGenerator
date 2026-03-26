@@ -1,0 +1,33 @@
+# Plot config for iBOT pretraining runs (auto-generated)
+train:
+  plot:
+    j7f1rjcn-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=1.45e-06 mask=0.33"
+    jk4mf54d-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=7.96e-06 mask=0.43"
+    jqming3u-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=2.09e-06 mask=0.57"
+    j4h9z4c1-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=2.05e-06 mask=0.60"
+    jwr5gd7o-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=2.58e-06 mask=0.30"
+    jcncxb27-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=3.74e-06 mask=0.60"
+    j01178qm-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=3.01e-05 mask=0.77"
+    jp9jge5e-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=7.39e-06 mask=0.50"
+    jxtj867k-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=3.55e-06 mask=0.73"
+    j9ellbvw-stage1:
+      slurm_id: 0
+      description: "iBOT frozen MTM lr=6.03e-05 mask=0.50"

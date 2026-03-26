@@ -1,0 +1,33 @@
+# Plot config for JEPA pretraining runs (auto-generated)
+train:
+  plot:
+    j6a2id2f-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=3.46e-06 mask=0.55"
+    jw57n3e5-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=2.84e-06 mask=0.72"
+    j04habwa-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=1.53e-06 mask=0.66"
+    j0m4m8ly-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=9.66e-06 mask=0.66"
+    jryc5f8f-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=3.12e-05 mask=0.38"
+    jjsrf10z-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=2.22e-06 mask=0.61"
+    jofoyoia-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=4.14e-06 mask=0.39"
+    j1xjnsw7-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=4.76e-05 mask=0.68"
+    j5b1ue12-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=3.59e-05 mask=0.36"
+    jqzjkc19-stage1:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr=7.96e-05 mask=0.53"
