@@ -152,6 +152,11 @@ class BatchSamples:
         self.output_steps = output_steps
         self.output_idxs = output_idxs
         self.device = None
+        # Forecast conditions are global to the batch (independent of streams)
+        # and will be populated by the data sampler when applicable. The
+        # structure is a list of per-output-step entries, each an iterable of
+        # [start_hour, start_day, end_hour, end_day].
+        self.forecast_conditions = [[] for _ in range(output_steps)]
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -287,7 +292,7 @@ class ModelBatch:
         self.output_offset = output_offset
         self.output_steps = output_steps
         self.output_idxs = list(range(output_offset, output_steps))
-
+        
         self.source_samples = BatchSamples(
             streams, num_source_samples, output_steps, self.output_idxs
         )

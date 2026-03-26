@@ -475,7 +475,7 @@ class ForecastingEngine(torch.nn.Module):
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-        aux_info = None
+        aux_info = torch.Tensor(fstep).to(tokens.device)
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = checkpoint(block, tokens, use_reentrant=False)

@@ -97,7 +97,6 @@ class StreamData:
             torch.tensor([0 for _ in range(self.healpix_cells)]) for _ in range(output_steps)
         ]
         self.target_tokens = [torch.tensor([]) for _ in range(output_steps)]
-        self.forecast_conditions = [torch.tensor([]) for _ in range(output_steps)]
         self.idxs_inv = [torch.tensor([], dtype=torch.int64) for _ in range(output_steps)]
 
         # source tokens per cell
@@ -314,8 +313,8 @@ class StreamData:
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
     
-    def add_forecast_conditions(self, fstep, start_hour, start_day, end_hour, end_day):
-        self.forecast_conditions[fstep] = [start_hour, start_day, end_hour, end_day]
+    # Forecast conditions have been moved to batch-level and are no longer
+    # stored per-stream in StreamData. This method was intentionally removed.
     
 
     def target_empty(self) -> bool:

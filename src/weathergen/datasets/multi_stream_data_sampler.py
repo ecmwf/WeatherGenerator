@@ -11,6 +11,7 @@ import logging
 import pathlib
 
 import numpy as np
+import pandas as pd
 import torch
 
 from weathergen.common.config import Config
@@ -454,20 +455,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 )
                 stream_data.add_target_values(timestep_idx, tt_cells, tt_c, tt_t, idxs_inv)
 
-            if "condition_forecast_engine" in mode:
-                # convert numpy.datetime64 to python datetimes
-                py_start = time_win.start.tolist()
-                py_end = time_win.end.tolist()
-
-                # extract start/end hour and day
-                start_hour = int(py_start.hour)
-                start_day = int(py_start.day)
-                end_hour = int(py_end.hour)
-                end_day = int(py_end.day)
-
-                # Option A — pass as separate args (adjust to the real method signature)
-                stream_data.add_forecast_condtions(start_hour, start_day, end_hour, end_day)
-
         return stream_data
 
     def _build_stream_data(
@@ -622,7 +609,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         batch.target_samples.tokens_lens = get_tokens_lens(
             self.streams, batch.target_samples, target_input_steps
         )
-
         return batch
 
     def _get_batch(self, idx: int, num_forecast_steps: int):
@@ -644,7 +630,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
-        if  mode.get("forecast", False).get("condtion",False) :
+        if  self.mode_cfg.get("forecast", False).get("condition",False) :
+            source_select += ["condition_forecasting_engine"]
             target_select += ["condition_forecasting_engine"]
         # remove duplicates
         source_select, target_select = list(set(source_select)), list(set(target_select))
@@ -659,6 +646,24 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.output_offset,
             num_output_steps,
         )
+
+        # Compute forecast conditions for the whole batch (independent of streams)
+        # and attach them to the batch. Each entry corresponds to one output
+        # step and contains [start_hour, start_day, end_hour, end_day].
+        for timestep_idx in range(self.output_offset, num_output_steps):
+            step_forecast_dt = idx + (self.time_step * timestep_idx) // self.step_timedelta
+            time_win_target = self.time_window_handler.window(step_forecast_dt)
+
+            py_start = pd.to_datetime(time_win_target.start).to_pydatetime()
+            py_end = pd.to_datetime(time_win_target.end).to_pydatetime()
+
+            start_hour = int(py_start.hour)
+            start_day = int(py_start.day)
+            end_hour = int(py_end.hour)
+            end_day = int(py_end.day)
+
+            forecast_conditions = [start_hour, start_day, end_hour, end_day]
+            batch.get_source_samples().forecast_conditions[timestep_idx] += forecast_conditions
 
         # for all streams
         for stream_info, (stream_name, stream_ds) in zip(
@@ -734,7 +739,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
-
         return batch
 
     def __iter__(self) -> ModelBatch:
@@ -766,7 +770,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx_raw += 1
 
                 batch = self._get_batch(idx, num_forecast_steps)
-
+                
                 # ensure the batch is valid, i.e. not completely empty and no NaN values
                 # student teacher has no classical targets
                 mode = self.mode_cfg.get("training_mode")
@@ -778,7 +782,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     logger.warning(f"Skipping empty batch with idx={idx}.")
                 else:
                     break
-
             yield batch
 
     def __len__(self):
