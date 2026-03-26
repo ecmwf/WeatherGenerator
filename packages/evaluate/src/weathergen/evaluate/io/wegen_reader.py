@@ -42,14 +42,17 @@ def _load_single_sample(
     fstep: int,
     ensemble: list[str],
     is_gridded: bool,
-) -> tuple[int, xr.DataArray, xr.DataArray, list | None] | None:
+) -> tuple[int, int, xr.DataArray, xr.DataArray, list | None] | None:
     """
     Load and preprocess one (sample, fstep) from an open ZarrIO context.
 
     Thread-safe for LocalStore backends. The zio object's data_root
     (a zarr.Group) supports concurrent read-only path lookups.
 
-    Returns (sample_idx, target, prediction, valid_times) or None if empty/missing.
+    Returns (fstep, sample_idx, target, prediction, valid_times) or None
+    if empty/missing.  Uses .load() (= .compute()) to force data into
+    numpy *inside this thread* so the GIL is released during the actual
+    filesystem I/O and decompression.
     """
     out = zio.get_data(sample, stream, fstep)
 
@@ -70,13 +73,20 @@ def _load_single_sample(
     pred = pred.squeeze()
     target = target.squeeze()
 
+    # Force materialisation inside this thread — .load() converts dask→numpy
+    # while keeping xarray metadata (dims, coords, attrs).  This is the key
+    # difference vs .persist() which only schedules the compute and can end
+    # up serialising I/O on the main-thread dask scheduler.
+    target = target.load()
+    pred = pred.load()
+
     valid_times = None
     if is_gridded:
         vt_list = np.unique(target.valid_time.values).tolist()
         if len(vt_list) > 1:
             valid_times = vt_list
 
-    return sample, target.persist(), pred.persist(), valid_times
+    return fstep, sample, target, pred, valid_times
 
 
 class WeatherGenReader(Reader):
@@ -462,14 +472,14 @@ class WeatherGenZarrReader(WeatherGenReader):
         ensemble = ensemble or self.get_ensemble(stream)
         ensemble = to_list(ensemble)
 
-        da_tars, da_preds = [], []
-
-        fsteps_final = []
         is_gridded_data = self.is_gridded_data(stream)
 
         with zarrio_reader(self.fname_zarr) as zio:
-            # Determine effective thread count for sample I/O
-            effective_threads = min(self._num_io_threads, len(samples))
+            # ----------------------------------------------------------
+            # Phase 1: Dispatch ALL (sample, fstep) reads at once
+            # ----------------------------------------------------------
+            n_total = len(samples) * len(fsteps)
+            effective_threads = min(self._num_io_threads, n_total)
 
             # ZipStore safety: Python's zipfile is not thread-safe
             if hasattr(zio, '_store') and hasattr(zio._store, '__class__') and \
@@ -477,112 +487,121 @@ class WeatherGenZarrReader(WeatherGenReader):
                 effective_threads = 1
                 _logger.debug("ZipStore detected — falling back to sequential sample reads.")
 
-            for fstep in fsteps:
-                _logger.info(f"RUN {self.run_id} - {stream}: Processing fstep {fstep}...")
-                da_tars_fs, da_preds_fs, valid_times_fs = [], [], []
+            _logger.info(
+                f"RUN {self.run_id} - {stream}: Loading {len(samples)} samples × "
+                f"{len(fsteps)} fsteps = {n_total} items "
+                f"(threads={effective_threads})..."
+            )
 
-                if effective_threads > 1:
-                    # Threaded sample I/O — concurrent reads from independent Zarr paths
-                    with ThreadPoolExecutor(max_workers=effective_threads) as executor:
-                        futures = {
-                            executor.submit(
-                                _load_single_sample,
-                                zio, s, stream, fstep, ensemble, is_gridded_data,
-                            ): s
-                            for s in samples
-                        }
-                        results = {}
-                        for future in as_completed(futures):
-                            result = future.result()
-                            if result is not None:
-                                results[result[0]] = result
+            # results_by_fstep[fstep] = list of (sample, target, pred, valid_times)
+            results_by_fstep: dict[int, list] = {f: [] for f in fsteps}
 
-                    # Collect in original sample order for deterministic output
-                    for s in samples:
-                        if s not in results:
-                            continue
-                        _, target, pred, vt = results[s]
-                        da_tars_fs.append(target)
-                        da_preds_fs.append(pred)
-                        if vt is not None:
-                            valid_times_fs.append(vt)
-                else:
-                    # Sequential fallback
-                    for sample in tqdm(
-                        samples, desc=f"Processing {self.run_id} - {stream} - {fstep}"
+            if effective_threads > 1:
+                with ThreadPoolExecutor(max_workers=effective_threads) as executor:
+                    futures = {
+                        executor.submit(
+                            _load_single_sample,
+                            zio, s, stream, f, ensemble, is_gridded_data,
+                        ): (f, s)
+                        for f in fsteps
+                        for s in samples
+                    }
+                    for future in tqdm(
+                        as_completed(futures), total=n_total,
+                        desc=f"Loading {self.run_id} - {stream}",
+                    ):
+                        result = future.result()
+                        if result is not None:
+                            fstep_r, sample_r, target, pred, vt = result
+                            results_by_fstep[fstep_r].append(
+                                (sample_r, target, pred, vt)
+                            )
+            else:
+                for f in fsteps:
+                    for s in tqdm(
+                        samples, desc=f"Loading {self.run_id} - {stream} - fstep {f}"
                     ):
                         result = _load_single_sample(
-                            zio, sample, stream, fstep, ensemble, is_gridded_data,
+                            zio, s, stream, f, ensemble, is_gridded_data,
                         )
                         if result is None:
-                            _logger.info(
-                                f"Skipping {stream} sample {sample} forecast step: {fstep}. "
-                                "No data or empty."
-                            )
                             continue
-                        _, target, pred, vt = result
-                        da_tars_fs.append(target)
-                        da_preds_fs.append(pred)
-                        if vt is not None:
-                            valid_times_fs.append(vt)
+                        _, sample_r, target, pred, vt = result
+                        results_by_fstep[f].append(
+                            (sample_r, target, pred, vt)
+                        )
 
-                if not da_tars_fs:
-                    _logger.info(
-                        f"[{self.run_id} - {stream}] No valid data found for fstep {fstep}."
-                    )
-                    continue
+        # ----------------------------------------------------------
+        # Phase 2: Reassemble per-fstep (outside the zarr context)
+        # ----------------------------------------------------------
+        da_tars, da_preds = [], []
+        fsteps_final = []
 
-                fsteps_final.append(valid_times_fs if valid_times_fs else fstep)
+        for fstep in fsteps:
+            per_fstep = results_by_fstep[fstep]
+            if not per_fstep:
+                _logger.info(
+                    f"[{self.run_id} - {stream}] No valid data for fstep {fstep}."
+                )
+                continue
 
-                _logger.debug(
-                    f"Concatenating targets and predictions for stream {stream}, "
-                    f"forecast_step {fstep}..."
+            # Sort by sample index for deterministic output
+            per_fstep.sort(key=lambda x: x[0])
+
+            da_tars_fs = [r[1] for r in per_fstep]
+            da_preds_fs = [r[2] for r in per_fstep]
+            valid_times_fs = [r[3] for r in per_fstep if r[3] is not None]
+
+            fsteps_final.append(valid_times_fs if valid_times_fs else fstep)
+
+            _logger.debug(
+                f"Concatenating targets and predictions for stream {stream}, "
+                f"forecast_step {fstep}..."
+            )
+
+            if is_gridded_data:
+                da_preds_fs = _split_by_valid_time(da_preds_fs)
+                da_tars_fs = _split_by_valid_time(da_tars_fs)
+            else:
+                da_tars_fs = xr.concat(
+                    da_tars_fs, dim="ipoint", coords="different", compat="equals"
+                )
+                da_preds_fs = xr.concat(
+                    da_preds_fs, dim="ipoint", coords="different", compat="equals"
                 )
 
-                # faster processing
+            da_tars.append(da_tars_fs)
+            da_preds.append(da_preds_fs)
+
+        # ----------------------------------------------------------
+        # Phase 3: Channel selection and coordinate assignment
+        # ----------------------------------------------------------
+        da_tars_dict, da_preds_dict = {}, {}
+        i = 1
+
+        for fstep, da_t, da_p in zip(fsteps_final, da_tars, da_preds, strict=True):
+            with_substeps = isinstance(da_t, list)
+            items = zip(da_t, da_p, strict=True) if with_substeps else [(da_t, da_p)]
+
+            for t, p in items:
+                t, p = _select_channels(t, p, stream, channels, stream_cfg)
+
                 if is_gridded_data:
-                    # Efficient concatenation for regular grid
-                    da_preds_fs = _split_by_valid_time(da_preds_fs)
-                    da_tars_fs = _split_by_valid_time(da_tars_fs)
+                    t = _add_lead_time_coord(t)
+                    p = _add_lead_time_coord(p)
+
+                    p = _scale_z_channels(p, stream)
+                    t = _scale_z_channels(t, stream)
+
+                if with_substeps:
+                    t = t.assign_coords(forecast_step=i)
+                    p = p.assign_coords(forecast_step=i)
+                    da_tars_dict[i] = t
+                    da_preds_dict[i] = p
+                    i += 1
                 else:
-                    # Irregular (scatter) case. concatenate over ipoint
-                    da_tars_fs = xr.concat(
-                        da_tars_fs, dim="ipoint", coords="different", compat="equals"
-                    )
-                    da_preds_fs = xr.concat(
-                        da_preds_fs, dim="ipoint", coords="different", compat="equals"
-                    )
-
-                da_tars.append(da_tars_fs)
-                da_preds.append(da_preds_fs)
-
-            # Safer than a list
-            da_tars_dict, da_preds_dict = {}, {}
-            i = 1
-
-            for fstep, da_t, da_p in zip(fsteps_final, da_tars, da_preds, strict=True):
-                with_substeps = isinstance(da_t, list)
-                items = zip(da_t, da_p, strict=True) if with_substeps else [(da_t, da_p)]
-
-                for t, p in items:
-                    t, p = _select_channels(t, p, stream, channels, stream_cfg)
-
-                    if is_gridded_data:
-                        t = _add_lead_time_coord(t)
-                        p = _add_lead_time_coord(p)
-
-                        p = _scale_z_channels(p, stream)
-                        t = _scale_z_channels(t, stream)
-
-                    if with_substeps:
-                        t = t.assign_coords(forecast_step=i)
-                        p = p.assign_coords(forecast_step=i)
-                        da_tars_dict[i] = t
-                        da_preds_dict[i] = p
-                        i += 1
-                    else:
-                        da_tars_dict[int(fstep)] = t
-                        da_preds_dict[int(fstep)] = p
+                    da_tars_dict[int(fstep)] = t
+                    da_preds_dict[int(fstep)] = p
 
         return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
 

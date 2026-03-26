@@ -21,7 +21,7 @@ import xarray as xr
 from tqdm import tqdm
 
 # Local application / package
-from weathergen.evaluate.io.io_reader import Reader
+from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     heat_maps_metric_region,
@@ -156,6 +156,7 @@ def calc_scores_per_stream(
     regions: list[str],
     metrics_dict: dict,
     plot_score_maps: bool = False,
+    output_data: "ReaderOutput | None" = None,
 ):
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -166,8 +167,6 @@ def calc_scores_per_stream(
         Reader object containing all info about a particular run.
     stream :
         Stream name to calculate scores for.
-    scores_dict:
-        Dictionary for scores with structure scores_dict[metric][region][stream][run_id]
     regions :
         List of regions to calculate scores on.
     metrics_dict :
@@ -178,6 +177,9 @@ def calc_scores_per_stream(
         NOTE: the scores are averaged over the "sample" dimension and for most
         of the metrics this does not give the same results as averaging over
         the "ipoint" dimension.
+    output_data : ReaderOutput | None
+        Pre-loaded data.  When provided, reader.get_data() is skipped — this
+        avoids the double-load when data is already loaded for plotting.
     Returns
     -------
     Dictionary containing scores for each metric and stream.
@@ -199,13 +201,14 @@ def calc_scores_per_stream(
     is_gridded_data = reader.is_gridded_data(stream)
     group_by_coord = None if is_gridded_data else "sample"
 
-    output_data = reader.get_data(
-        stream,
-        fsteps=fsteps,
-        samples=samples,
-        channels=channels,
-        ensemble=ensemble,
-    )
+    if output_data is None:
+        output_data = reader.get_data(
+            stream,
+            fsteps=fsteps,
+            samples=samples,
+            channels=channels,
+            ensemble=ensemble,
+        )
 
     da_preds = output_data.prediction
     da_tars = output_data.target
@@ -458,7 +461,12 @@ def _plot_score_maps_per_stream(
                 plotter.scatter_plot(data, map_dir, channel, region, tag=tag, title=title)
 
 
-def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
+def plot_data(
+    reader: Reader,
+    stream: str,
+    global_plotting_opts: dict,
+    output_data: ReaderOutput | None = None,
+) -> None:
     """
     Plot the data for a given run and stream.
 
@@ -470,6 +478,8 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         Stream name to plot data for.
     global_plotting_opts: dict
         Dictionary containing all plotting options that apply globally to all run_ids
+    output_data : ReaderOutput | None
+        Pre-loaded data.  When provided, reader.get_data() is skipped.
     """
     run_id = reader.run_id
 
@@ -525,13 +535,16 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
     if not isinstance(plot_animations, bool):
         raise TypeError("plot_animations must be a boolean.")
 
-    model_output = reader.get_data(
-        stream,
-        samples=available_data.samples,
-        fsteps=available_data.fsteps,
-        channels=available_data.channels,
-        ensemble=available_data.ensemble,
-    )
+    if output_data is None:
+        model_output = reader.get_data(
+            stream,
+            samples=available_data.samples,
+            fsteps=available_data.fsteps,
+            channels=available_data.channels,
+            ensemble=available_data.ensemble,
+        )
+    else:
+        model_output = output_data
 
     da_tars = model_output.target
     da_preds = model_output.prediction

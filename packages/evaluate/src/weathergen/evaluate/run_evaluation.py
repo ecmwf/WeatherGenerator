@@ -230,12 +230,33 @@ def _process_stream(
         _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
         return run_id, stream, {}
 
-    # Parallel plotting
-    if stream_dict.get("plotting") and type_ == "zarr":
-        plot_data(reader, stream, global_plotting_opts)
+    # -----------------------------------------------------------------
+    # Load data ONCE and share between plotting and scoring (B3 fix)
+    # -----------------------------------------------------------------
+    needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
+    needs_scoring = stream_dict.get("evaluation", False)
+
+    output_data = None
+    if (needs_plotting or needs_scoring) and type_ == "zarr":
+        available_data = reader.check_availability(stream, mode="evaluation")
+        output_data = reader.get_data(
+            stream,
+            fsteps=available_data.fsteps,
+            samples=available_data.samples,
+            channels=available_data.channels,
+            ensemble=available_data.ensemble,
+        )
+        _logger.info(
+            f"RUN {run_id} - {stream}: Data loaded once — "
+            f"sharing between plotting and scoring."
+        )
+
+    # Plotting (pass pre-loaded data)
+    if needs_plotting:
+        plot_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
-    if not stream_dict.get("evaluation"):
+    if not needs_scoring:
         return run_id, stream, {}
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
@@ -250,17 +271,12 @@ def _process_stream(
         return run_id, stream, scores_dict
 
     stream_computed_scores = calc_scores_per_stream(
-        reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
+        reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps,
+        output_data=output_data,
     )
     metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
     scores_dict = merge(stream_loaded_scores, stream_computed_scores)
-    return run_id, stream, scores_dict 
-    
-
-
-# except Exception as e:
-#     _logger.error(f"Error processing {run_id} - {stream}: {e}")
-#     return run_id, stream, {}
+    return run_id, stream, scores_dict
 
 
 # Weird typing error from python: mp.Queue is seen as a method with a "|" operator => this fai
