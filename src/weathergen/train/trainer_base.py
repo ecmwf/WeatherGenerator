@@ -140,8 +140,6 @@ class TrainerBase:
 
         cf.world_size = world_size
         cf.rank = rank
-        cf.local_rank = local_rank
-        cf.with_ddp = world_size > 1
 
         mcf.world_size = world_size
         mcf.rank = rank

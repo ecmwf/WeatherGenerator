@@ -104,13 +104,13 @@ def run_inference(args):
 
     init_loggers(cf.general.run_id)
 
-    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
+    logger.info(f"DDP initialization: rank={mcf.rank}, world_size={mcf.world_size}")
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
     trainer = Trainer(cf.train_logging)
     try:
-        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+        trainer.inference(cf, mcf, devices, args.from_run_id, args.mini_epoch)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -152,7 +152,7 @@ def run_continue(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+        trainer.run(cf, mcf, devices, args.from_run_id, args.mini_epoch)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -184,7 +184,7 @@ def run_train(args):
     # of duplication due to multiple process in the multiGPU case
     init_loggers(cf.general.run_id)
 
-    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
+    logger.info(f"DDP initialization: rank={mcf.rank}, world_size={mcf.world_size}")
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
 
@@ -194,7 +194,7 @@ def run_train(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices)
+        trainer.run(cf, mcf, devices)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

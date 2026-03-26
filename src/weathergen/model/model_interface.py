@@ -46,16 +46,16 @@ type TrainingMode = str
 
 def init_model_and_shard(
     cf,
+    mcf,
     dataset,
     run_id_contd,
     mini_epoch_contd,
     training_mode,
     device,
-    with_ddp,
     with_fsdp,
     overrides={},
 ):
-    model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
+    model_creation_device = "meta" if mcf.with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
@@ -66,7 +66,7 @@ def init_model_and_shard(
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
 
-    if with_ddp and not with_fsdp:
+    if mcf.with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
         model = torch.nn.parallel.DistributedDataParallel(
             model,
@@ -76,7 +76,7 @@ def init_model_and_shard(
             bucket_cap_mb=512,
         )
 
-    elif with_ddp and with_fsdp:
+    elif mcf.with_ddp and with_fsdp:
         # with DDP *and() FSDP
         fsdp_kwargs = {
             "mp_policy": (
@@ -132,7 +132,7 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
-    if with_ddp and with_fsdp:
+    if mcf.with_ddp and with_fsdp:
         fully_shard(model)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
@@ -150,15 +150,15 @@ def init_model_and_shard(
     if run_id_contd is not None:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
-        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
+        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd, mcf.with_ddp)
     elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
         mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
             logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
-        model = load_model(cf, model, device, run_id, mini_epoch)
+        model = load_model(cf, model, device, run_id, mini_epoch, mcf.with_ddp)
     else:
-        if with_ddp and with_fsdp:
+        if mcf.with_ddp and with_fsdp:
             model.to_empty(device="cuda")
             if with_fsdp:
                 model.reset_parameters()
@@ -166,12 +166,12 @@ def init_model_and_shard(
     # model params
     model_params = ModelParams(cf).create(cf)
     model_params.reset_parameters(cf)
-    model_params = model_params.to(f"cuda:{cf.local_rank}")
+    model_params = model_params.to(f"cuda:{mcf.local_rank}")
 
     return model, model_params
 
 
-def load_model(cf, model, device, run_id: str, mini_epoch=-1):
+def load_model(cf, model, device, run_id: str, with_ddp: bool, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
         run_id : model_id of the trained model
@@ -188,7 +188,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
 
-    is_model_sharded = cf.with_ddp and cf.with_fsdp
+    is_model_sharded = with_ddp and cf.with_fsdp
     if is_model_sharded:
         meta_sharded_sd = model.state_dict()
         maybe_sharded_sd = {}
@@ -276,7 +276,13 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
 
 
 def get_target_aux_calculator(
-    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, batch_size_per_gpu, **kwargs
+    cf: Config,
+    loss_cfg: omegaconf.OmegaConf,
+    dataset,
+    model,
+    device,
+    with_ddp: bool,
+    batch_size_per_gpu, **kwargs
 ):
     """
     Create target aux calculator
@@ -320,7 +326,7 @@ def get_target_aux_calculator(
             meta_ema_model,
             halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
             rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
-            is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+            is_model_sharded=(with_ddp and cf.with_fsdp),
         )
 
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu

@@ -171,18 +171,19 @@ class Trainer(TrainerBase):
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
-                self.cf, loss_cfg, self.dataset, self.model, self.device, batch_size
+                self.cf, loss_cfg, self.dataset, self.model, self.device, self.mcf.with_ddp, batch_size
             ).to_device(self.device)
 
         return target_and_aux_calculators
 
-    def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
+    def inference(self, cf, mcf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
         self.init(cf, devices)
+        self.mcf = mcf
 
         cf = self.cf
         device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{cf.local_rank}")
+        self.device = torch.device(f"{device_type}:{self.mcf.local_rank}")
         self.ema_model = None
 
         # create data loader
@@ -208,12 +209,12 @@ class Trainer(TrainerBase):
 
         self.model, self.model_params = init_model_and_shard(
             cf,
+            self.mcf,
             self.dataset,
             run_id_contd,
             mini_epoch_contd,
             self.test_cfg.training_mode,
             devices[0],
-            cf.with_ddp,
             cf.with_fsdp,
         )
 
@@ -231,13 +232,14 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
+    def run(self, cf, mcf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
         self.init(cf, devices)
+        self.mcf = mcf
         cf = self.cf
 
         device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{cf.local_rank}")
+        self.device = torch.device(f"{device_type}:{self.mcf.local_rank}")
 
         # Update collapse monitor device
         self.collapse_monitor.device = self.device
@@ -259,12 +261,12 @@ class Trainer(TrainerBase):
 
         self.model, self.model_params = init_model_and_shard(
             cf,
+            self.mcf,
             self.dataset,
             run_id_contd,
             mini_epoch_contd,
             self.training_cfg.training_mode,
             devices[0],
-            cf.with_ddp,
             cf.with_fsdp,
         )
 
@@ -278,12 +280,12 @@ class Trainer(TrainerBase):
         if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
                 cf,
+                self.mcf,
                 self.dataset,
                 run_id_contd,
                 mini_epoch_contd,
                 cf.training_config.training_mode,
                 devices[0],
-                cf.with_ddp,
                 cf.with_fsdp,
             )
             self.ema_model = EMAModel(
@@ -291,7 +293,7 @@ class Trainer(TrainerBase):
                 meta_ema_model,
                 halflife_steps=validate_with_ema_cfg.get("ema_halflife_in_thousands", 1e-3),
                 rampup_ratio=validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
-                is_model_sharded=(cf.with_ddp and cf.with_fsdp),
+                is_model_sharded=(self.mcf.with_ddp and cf.with_fsdp),
             )
 
         # get target_aux calculators for different loss terms
@@ -301,7 +303,7 @@ class Trainer(TrainerBase):
         # if with_fsdp then parameter count is unreliable
         if is_root():
             # ddp-wrapped model does not expose this function
-            if not cf.with_ddp:
+            if not self.mcf.with_ddp:
                 self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
@@ -434,7 +436,7 @@ class Trainer(TrainerBase):
             batch.to_device(self.device)
 
             with torch.autocast(
-                device_type=f"cuda:{cf.local_rank}",
+                device_type=f"cuda:{self.mcf.local_rank}",
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
@@ -556,7 +558,7 @@ class Trainer(TrainerBase):
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
+                total=len(self.data_loader_validation), disable=self.mcf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
@@ -567,7 +569,7 @@ class Trainer(TrainerBase):
 
                     # evaluate model
                     with torch.autocast(
-                        device_type=f"cuda:{cf.local_rank}",
+                        device_type=f"cuda:{self.mcf.local_rank}",
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
@@ -634,7 +636,7 @@ class Trainer(TrainerBase):
         maybe_sharded_sd = (
             self.model.state_dict() if self.ema_model is None else self.ema_model.state_dict()
         )
-        if self.cf.with_ddp and self.cf.with_fsdp:
+        if self.mcf.with_ddp and self.cf.with_fsdp:
             cpu_state_dict = {}
             for param_name, sharded_param in maybe_sharded_sd.items():
                 full_param = sharded_param.full_tensor()
