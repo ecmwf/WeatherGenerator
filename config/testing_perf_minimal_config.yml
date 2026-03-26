@@ -11,38 +11,37 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 256 # reduced for smoke test
+ae_local_dim_embed: 2
 ae_local_num_blocks: 1
-ae_local_num_heads: 8
+ae_local_num_heads: 2
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
-ae_adapter_num_heads: 4
-ae_adapter_embed: 64
+ae_adapter_num_heads: 2
+ae_adapter_embed: 2
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 256 # reduced for smoke test
-ae_global_num_blocks: 1
-ae_global_num_heads: 8
+ae_global_dim_embed: 2
+ae_global_num_heads: 2
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 # TODO: switching to < 1 triggers triton-related issues.
 # See https://github.com/ecmwf/WeatherGenerator/issues/1050
 ae_global_att_dense_rate: 1.0
-ae_global_block_factor: 64
+ae_global_block_factor: 2
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
 ae_aggregation_num_blocks: 1
-ae_aggregation_num_heads: 8
+ae_aggregation_num_heads: 2
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
 ae_aggregation_att_dense_rate: 1.0
-ae_aggregation_block_factor: 64
+ae_aggregation_block_factor: 2
 ae_aggregation_mlp_hidden_factor: 2
 
 decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
@@ -56,7 +55,7 @@ num_register_tokens: 7
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
 fe_num_blocks: 1
-fe_num_heads: 8
+fe_num_heads: 2
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
@@ -175,7 +174,7 @@ training_config:
         enabled: false  # only relevant for SSL with EMA teacher
 
   num_mini_epochs: 2
-  samples_per_mini_epoch: 16
+  samples_per_mini_epoch: 2
   shuffle: True
 
   start_date: 1979-01-01T00:00
@@ -230,7 +229,7 @@ training_config:
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 8
+  samples_per_mini_epoch: 2
   shuffle: False
 
   start_date: 2023-10-01T00:00
