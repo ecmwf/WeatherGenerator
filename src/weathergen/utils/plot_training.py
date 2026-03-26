@@ -27,6 +27,7 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 MAX_FILENAME_LEN = 255
+LEGEND_FONT_SIZE = "x-small"
 
 
 ####################################################################################################
@@ -201,7 +202,7 @@ def plot_lr(
     """
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
-    _fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(16, 7), dpi=300)
 
     linestyle = "-"
 
@@ -229,7 +230,7 @@ def plot_lr(
         )
         return
 
-    plt.legend(legend_str)
+    plt.legend(legend_str, fontsize=LEGEND_FONT_SIZE, loc='center left', bbox_to_anchor=(1, 0.5), borderaxespad=0)
     plt.grid(True, which="both", ls="-")
     plt.yscale("log")
     plt.title("learning rate")
@@ -243,6 +244,14 @@ def plot_lr(
 
     # save the plot
     plt_fname = plot_dir / f"{rstr}lr.png"
+    # if too long, shorten filename by cutting out the MIDDLE of the filename (while ensuring the file extension is preserved)
+    if len(plt_fname.name) > 200:
+        _logger.warning(
+            f"Filename '{plt_fname.name}' is too long ({len(plt_fname.name)} characters). "
+            f"Shortening it to 200 characters by cutting out the middle."
+        )
+        half_len = (200 - len(plt_fname.suffix)) // 2
+        plt_fname = plt_fname.parent / (plt_fname.name[:half_len] + "..." + plt_fname.name[-half_len - len(plt_fname.suffix):])
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -252,7 +261,7 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
-    _fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(16, 7), dpi=300)
 
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
@@ -272,7 +281,7 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
             ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
         ]
 
-    plt.legend(legend_str)
+    plt.legend(legend_str, fontsize=LEGEND_FONT_SIZE, loc='center left', bbox_to_anchor=(1, 0.5), borderaxespad=0)
     plt.grid(True, which="both", ls="-")
     plt.yscale("log")
     # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
@@ -286,6 +295,14 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
     rstr = "".join([f"{r}_" for r in runs_ids])
 
     plt_fname = plot_dir / f"{rstr}{str(stage)}_avg.png"
+    # if too long, shorten filename by cutting out the MIDDLE of the filename (while ensuring the file extension is preserved)
+    if len(plt_fname.name) > 200:
+        _logger.warning(
+            f"Filename '{plt_fname.name}' is too long ({len(plt_fname.name)} characters). "
+            f"Shortening it to 200 characters by cutting out the middle."
+        )
+        half_len = (200 - len(plt_fname.suffix)) // 2
+        plt_fname = plt_fname.parent / (plt_fname.name[:half_len] + "..." + plt_fname.name[-half_len - len(plt_fname.suffix):])
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -340,10 +357,9 @@ def plot_loss_per_stream(
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "m", "y"]
 
-    for err in errs:
-        for channel in channels:
-            for stream_name in stream_names:
-                _fig = plt.figure(figsize=(10, 7), dpi=300)
+    for channel in channels:
+        for stream_name in stream_names:
+            _fig = plt.figure(figsize=(16, 7), dpi=300)
 
                 legend_strs = []
                 min_val = np.finfo(np.float32).max
@@ -469,6 +485,59 @@ def plot_loss_per_stream(
                 _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
                 plt.savefig(plt_fname)
                 plt.close()
+                _logger.warning(f"Could not find any data for stream: {stream_name}")
+                continue
+
+            # no valid data found
+            if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
+                continue
+
+            legend = plt.legend(
+                legend_str,
+                loc='center left',
+                bbox_to_anchor=(1, 0.5),
+                borderaxespad=0,
+                fontsize=LEGEND_FONT_SIZE,
+            )
+            for line in legend.get_lines():
+                line.set(alpha=1.0)
+            plt.grid(True, which="both", ls="-")
+
+            if y_lim is not None:
+                plt.ylim(y_lim)
+            else:
+                plt.ylim([0.95 * min_val, 1.025 * max_val])
+            if x_lim is not None:
+                plt.xlim(x_lim)
+
+            plt.yscale("log")
+            if x_scale_log:
+                plt.xscale("log")
+            plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
+            plt.ylabel("loss")
+            plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
+            plt.tight_layout()
+            rstr = "".join([f"{r}_" for r in runs_ids])
+
+            # save the plot
+            plt_fname = plot_dir / "{}{}fs_{}{}_{}.png".format(
+                rstr,
+                "".join([f"{m}_" for m in modes]),
+                "".join([f"{fs}_" for fs in forecast_steps]),
+                stream_name,
+                channel,
+            )
+            # if too long, shorten filename by cutting out the MIDDLE of the filename (while ensuring the file extension is preserved)
+            if len(plt_fname.name) > 200:
+                _logger.warning(
+                    f"Filename '{plt_fname.name}' is too long ({len(plt_fname.name)} characters). "
+                    f"Shortening it to 200 characters by cutting out the middle."
+                )
+                half_len = (200 - len(plt_fname.suffix)) // 2
+                plt_fname = plt_fname.parent / (plt_fname.name[:half_len] + "..." + plt_fname.name[-half_len - len(plt_fname.suffix):])
+            _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
+            plt.savefig(plt_fname)
+            plt.close()
 
 
 ####################################################################################################
@@ -518,7 +587,7 @@ def plot_loss_per_run(
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
-    _fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(16, 7), dpi=300)
 
     legend_strs = []
     for mode in modes:
@@ -570,7 +639,7 @@ def plot_loss_per_run(
         return
 
     plt.title(run_id + " : " + run_desc[1])
-    legend = plt.legend(legend_str, loc="lower left")
+    legend = plt.legend(legend_str, loc='center left', bbox_to_anchor=(1, 0.5), borderaxespad=0, fontsize=LEGEND_FONT_SIZE)
     for line in legend.get_lines():
         line.set(alpha=1.0)
     plt.yscale("log")
