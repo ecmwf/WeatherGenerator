@@ -178,7 +178,7 @@ class Trainer(TrainerBase):
         self.throughput = Throughput(
             available_flops=self._available_flops,
             world_size=self.world_size_original,
-            window_size=cf.train_logging.get("throughput_window_size", 1), # TODO: 
+            window_size=cf.train_logging.get("throughput_window_size", 2), # TODO: choose reasonable size after debugging.
         )
 
     def get_target_aux_calculators(self, mode_cfg):
