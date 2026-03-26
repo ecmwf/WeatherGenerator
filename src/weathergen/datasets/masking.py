@@ -103,7 +103,7 @@ class Masker:
                     e.g. level 1 very large cells masked
         "cropping_healpix" - spatial cropping that keeps spatially contiguous regions
                     and masks everything else. Uses neighbor relationships or geodesic
-                    distance to ensure spatial contiguity. For DINO/JEPA/IBOT.
+                    distance to ensure spatial contiguity. For JEPA/IBOT.
                     e.g. masking_strategy_config = {"hl_mask": 0, "method": "geodesic_disk"}
                     method: "disk" (neighbor growth), "random_walk", or "geodesic_disk" (circular)
         masking_rate_sampling (bool): Whether to sample the masking rate from a distribution.
