@@ -42,6 +42,7 @@ class iBOTPatchTargetProcessing(nn.Module):
         teacher_temp=0.1,
         center_momentum=0.9,
         teacher_style="softmax_center",
+        num_deep_ssl_levels=0,
     ):
         super().__init__()
         self.student_temp = student_temp
@@ -53,6 +54,16 @@ class iBOTPatchTargetProcessing(nn.Module):
         self.len_teacher_patch_tokens = None
         self.async_batch_center = None
         self.teacher_style = teacher_style
+
+        # Per-level centers for deep SSL
+        self.num_deep_ssl_levels = num_deep_ssl_levels
+        for lvl in range(num_deep_ssl_levels):
+            self.register_buffer(f"center_L{lvl}", torch.zeros(1, 1, patch_out_dim))
+            setattr(self, f"updated_L{lvl}", True)
+            setattr(self, f"reduce_handle_L{lvl}", None)
+            setattr(self, f"len_teacher_patch_tokens_L{lvl}", None)
+            setattr(self, f"async_batch_center_L{lvl}", None)
+
         # self.center cannot be initialised with None then the code breaks hence the disabled pylint
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
@@ -108,7 +119,10 @@ class iBOTPatchTargetProcessing(nn.Module):
         Q *= B  # the columns must sum to 1 so that Q is an assignment
         return Q.t().view(batch_size, C, K)
 
-    def forward(self, teacher_output):
+    def forward(self, teacher_output, level_idx=None):
+        if level_idx is not None:
+            return self._forward_level(teacher_output, level_idx)
+
         if self.teacher_style == "softmax_center":
             processed_teacher_output = self.softmax_center_teacher(
                 teacher_output, self.teacher_temp
@@ -120,6 +134,45 @@ class iBOTPatchTargetProcessing(nn.Module):
         else:
             # this code should never be reached, see assert in __init__
             return teacher_output
+
+    @torch.no_grad()
+    def _forward_level(self, teacher_output, level_idx):
+        """Process teacher output for a specific deep SSL level using per-level center."""
+        if self.teacher_style == "softmax_center":
+            center = getattr(self, f"center_L{level_idx}")
+            self._apply_center_update_level(level_idx)
+            processed = F.softmax((teacher_output - center) / self.teacher_temp, dim=-1)
+            self._update_center_level(teacher_output, level_idx)
+            return processed
+        elif self.teacher_style == "sinkhorn_knopp":
+            return self.sinkhorn_knopp_teacher(teacher_output, self.teacher_temp)
+        else:
+            return teacher_output
+
+    @torch.no_grad()
+    def _update_center_level(self, teacher_patch_tokens, level_idx):
+        setattr(self, f"updated_L{level_idx}", False)
+        setattr(self, f"len_teacher_patch_tokens_L{level_idx}", len(teacher_patch_tokens))
+        async_center = torch.sum(teacher_patch_tokens.mean(1), dim=0, keepdim=True)
+        if dist.is_initialized():
+            handle = dist.all_reduce(async_center, async_op=True)
+            setattr(self, f"reduce_handle_L{level_idx}", handle)
+        setattr(self, f"async_batch_center_L{level_idx}", async_center)
+
+    @torch.no_grad()
+    def _apply_center_update_level(self, level_idx):
+        if getattr(self, f"updated_L{level_idx}") is False:
+            world_size = dist.get_world_size() if dist.is_initialized() else 1
+            handle = getattr(self, f"reduce_handle_L{level_idx}")
+            if handle is not None:
+                handle.wait()
+            async_center = getattr(self, f"async_batch_center_L{level_idx}")
+            length = getattr(self, f"len_teacher_patch_tokens_L{level_idx}")
+            _t = async_center / (length * world_size)
+            center = getattr(self, f"center_L{level_idx}")
+            new_center = center * self.center_momentum + _t * (1 - self.center_momentum)
+            setattr(self, f"center_L{level_idx}", new_center)
+            setattr(self, f"updated_L{level_idx}", True)
 
     @torch.no_grad()
     def update_center(self, teacher_patch_tokens):
@@ -164,6 +217,7 @@ class DINOTargetProcessing(nn.Module):
         center_momentum=0.9,
         teacher_temp=0.1,
         teacher_style="softmax_center",
+        num_deep_ssl_levels=0,
     ):
         super().__init__()
         self.student_temp = student_temp
@@ -175,6 +229,16 @@ class DINOTargetProcessing(nn.Module):
         self.len_teacher_output = None
         self.async_batch_center = None
         self.teacher_style = teacher_style
+
+        # Per-level centers for deep SSL
+        self.num_deep_ssl_levels = num_deep_ssl_levels
+        for lvl in range(num_deep_ssl_levels):
+            self.register_buffer(f"center_L{lvl}", torch.zeros(1, out_dim))
+            setattr(self, f"updated_L{lvl}", True)
+            setattr(self, f"reduce_handle_L{lvl}", None)
+            setattr(self, f"len_teacher_output_L{lvl}", None)
+            setattr(self, f"async_batch_center_L{lvl}", None)
+
         # self.center cannot be initialised with None then the code breaks hence the disabled pylint
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
@@ -218,7 +282,10 @@ class DINOTargetProcessing(nn.Module):
         Q *= B  # the columns must sum to 1 so that Q is an assignment
         return Q.t().view(batch_size, C, K)
 
-    def forward(self, teacher_output):
+    def forward(self, teacher_output, level_idx=None):
+        if level_idx is not None:
+            return self._forward_level(teacher_output, level_idx)
+
         if self.teacher_style == "softmax_center":
             processed_teacher_output = self.softmax_center_teacher(
                 teacher_output, self.teacher_temp
@@ -230,6 +297,45 @@ class DINOTargetProcessing(nn.Module):
         else:
             # this code should never be reached, see assert in __init__
             return teacher_output
+
+    @torch.no_grad()
+    def _forward_level(self, teacher_output, level_idx):
+        """Process teacher output for a specific deep SSL level using per-level center."""
+        if self.teacher_style == "softmax_center":
+            center = getattr(self, f"center_L{level_idx}")
+            self._apply_center_update_level(level_idx)
+            processed = F.softmax((teacher_output - center) / self.teacher_temp, dim=-1)
+            self._update_center_level(teacher_output, level_idx)
+            return processed
+        elif self.teacher_style == "sinkhorn_knopp":
+            return self.sinkhorn_knopp_teacher(teacher_output, self.teacher_temp)
+        else:
+            return teacher_output
+
+    @torch.no_grad()
+    def _update_center_level(self, teacher_output, level_idx):
+        setattr(self, f"updated_L{level_idx}", False)
+        setattr(self, f"len_teacher_output_L{level_idx}", len(teacher_output))
+        async_center = torch.sum(teacher_output, dim=0, keepdim=True)
+        if dist.is_initialized():
+            handle = dist.all_reduce(async_center, async_op=True)
+            setattr(self, f"reduce_handle_L{level_idx}", handle)
+        setattr(self, f"async_batch_center_L{level_idx}", async_center)
+
+    @torch.no_grad()
+    def _apply_center_update_level(self, level_idx):
+        if getattr(self, f"updated_L{level_idx}") is False:
+            world_size = dist.get_world_size() if dist.is_initialized() else 1
+            handle = getattr(self, f"reduce_handle_L{level_idx}")
+            if handle is not None:
+                handle.wait()
+            async_center = getattr(self, f"async_batch_center_L{level_idx}")
+            length = getattr(self, f"len_teacher_output_L{level_idx}")
+            _t = async_center / (length * world_size)
+            center = getattr(self, f"center_L{level_idx}")
+            new_center = center * self.center_momentum + _t * (1 - self.center_momentum)
+            setattr(self, f"center_L{level_idx}", new_center)
+            setattr(self, f"updated_L{level_idx}", True)
 
     @torch.no_grad()
     def update_center(self, teacher_output):
@@ -261,5 +367,5 @@ class JEPATargetProcessing(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, z):
+    def forward(self, z, level_idx=None):
         return z

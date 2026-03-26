@@ -1,0 +1,36 @@
+# JEPA sweep pipeline for launch-slurm-sophie.py
+#
+# Base template for LR / masking-rate sweeps. The sweep script should
+# override the swept parameters via the `options` list, e.g.:
+#
+#   stages[0].options:
+#     - training_config.learning_rate_scheduling.lr_max=5e-5
+#     - training_config.model_input.random_easy.masking_strategy_config.rate=0.6
+#
+# Usage:
+#   ./hpc/launch-slurm-sophie.py config/jepa_pipeline.yml               # dry-run
+#   ./hpc/launch-slurm-sophie.py --no-dry-run config/jepa_pipeline.yml  # submit
+
+# Global defaults
+nodes: 1
+register: true
+cleanup-scripts: yes
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  # Stage 1: JEPA pre-training (self-supervised)
+  - name: pretrain
+    command: train
+    base-config: ./config/config_jepa_frozen_mtm_sweep_2drope.yml
+    config: ./config/config_jepa_frozen_mtm_sweep_2drope.yml
+    options: []
+    chain: 1
+    nodes: 1
+
+  # Stage 2: Forecasting finetuning (freezes encoder, trains forecast head)
+  - name: finetune
+    command: train-continue
+    from: pretrain
+    config: ./config/config_jepa_finetuning.yml
+    chain: 1
