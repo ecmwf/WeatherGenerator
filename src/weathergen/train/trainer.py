@@ -164,9 +164,9 @@ class Trainer(TrainerBase):
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
-        available_flops = get_available_flops(torch.device(self.devices[0]), dtype=self.mixed_precision_dtype)  # Assuming same device type!
+        self._available_flops = get_available_flops(torch.device(self.devices[0]), dtype=self.mixed_precision_dtype)  # Assuming same device type!
         self.throughput = Throughput(
-            available_flops=available_flops,
+            available_flops=self._available_flops,
             world_size=self.world_size_original,
             window_size=20,
         )
@@ -502,6 +502,13 @@ class Trainer(TrainerBase):
 
         # training loop
         self.t_start = time.time()
+        # Reinitialize throughput tracker so its internal time window is fresh for this mini-epoch
+        if self.throughput is not None:
+            self.throughput = Throughput(
+                available_flops=self._available_flops,
+                world_size=self.world_size_original,
+                window_size=20,
+            )
         t0_throughput = time.time()
         total_batches = 0
         total_samples = 0
