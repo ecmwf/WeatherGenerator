@@ -90,65 +90,61 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             self.level_weights is not None and deep_preds is not None and deep_targets is not None
         )
 
-        if not has_deep_ssl:
-            # Standard single-level SSL loss
-            for name, (weight, loss_fn, extra_args) in self.losses.items():
-                preds_for_loss = self.gather_preds_for_loss(
-                    name, preds_latent[name], output_info, target2source_matching_idxs
-                )
-                targets_for_loss = self.gather_targets_for_loss(
-                    name, targets_latent[name], target_info, target2source_matching_idxs
-                )
-
-                loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
-                loss = loss + (weight * loss_value)
-                losses_all[name] = loss_value.item()
-        else:
-            # Deep SSL: per-level loss replaces the single-level loss
+        # Normalize both paths: name -> [(level_weight, student_data, teacher_data)]
+        if has_deep_ssl:
             deep_preds_fstep0 = deep_preds[0]  # fstep 0
-            for name, (weight, loss_fn, extra_args) in self.losses.items():
-                if name not in deep_preds_fstep0 or name not in deep_targets:
-                    continue
-                student_levels = deep_preds_fstep0[name]
-                teacher_levels = deep_targets[name]
-                for level_idx, (s_level, t_level) in enumerate(
-                    zip(student_levels, teacher_levels, strict=True)
-                ):
-                    preds_for_loss = self.gather_preds_for_loss(
-                        name, s_level, output_info, target2source_matching_idxs
+            levels_by_name = {
+                name: list(
+                    zip(
+                        self.level_weights, deep_preds_fstep0[name], deep_targets[name], strict=True
                     )
-                    targets_for_loss = self.gather_targets_for_loss(
-                        name, t_level, target_info, target2source_matching_idxs
-                    )
-                    level_loss = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
-                    level_w = self.level_weights[level_idx]
-                    loss = loss + level_w * weight * level_loss
-                    losses_all[f"{name}_L{level_idx}"] = level_loss.item()
+                )
+                for name in self.losses
+                if name in deep_preds_fstep0 and name in deep_targets
+            }
+        else:
+            levels_by_name = {
+                name: [(1.0, preds_latent[name], targets_latent[name])] for name in self.losses
+            }
 
-        # Context loss (V-JEPA 2.1): L1 on context (visible) tokens
-        if self.context_loss_weight > 0.0 and "JEPA" in self.losses:
+        # Context loss warmup (V-JEPA 2.1)
+        has_context_loss = self.context_loss_weight > 0.0 and "JEPA" in levels_by_name
+        if has_context_loss:
             warmup_factor = (
                 min(1.0, istep / self.context_loss_warmup_steps)
                 if self.context_loss_warmup_steps > 0
                 else 1.0
             )
             ctx_weight = self.context_loss_weight * warmup_factor
-
-            preds_for_ctx = self.gather_preds_for_loss(
-                "JEPA", preds_latent["JEPA"], output_info, target2source_matching_idxs
-            )
-            targets_for_ctx = self.gather_targets_for_loss(
-                "JEPA", targets_latent["JEPA"], target_info, target2source_matching_idxs
-            )
-            ctx_loss_value = context_loss(
-                student_patches=preds_for_ctx["student_patches_masked"],
-                student_masks=preds_for_ctx["student_masks"],
-                teacher_patches=targets_for_ctx["teacher_patches_masked"],
-                teacher_masks=targets_for_ctx["teacher_masks"],
-            ).mean()
-            loss = loss + ctx_weight * ctx_loss_value
-            losses_all["context"] = ctx_loss_value.item()
             losses_all["context_warmup"] = warmup_factor
+
+        # Unified loss loop over all levels
+        for name, (weight, loss_fn, extra_args) in self.losses.items():
+            if name not in levels_by_name:
+                continue
+            for level_idx, (level_w, s_data, t_data) in enumerate(levels_by_name[name]):
+                preds_for_loss = self.gather_preds_for_loss(
+                    name, s_data, output_info, target2source_matching_idxs
+                )
+                targets_for_loss = self.gather_targets_for_loss(
+                    name, t_data, target_info, target2source_matching_idxs
+                )
+
+                loss_value = loss_fn(**preds_for_loss, **targets_for_loss, **extra_args).mean()
+                suffix = f"_L{level_idx}" if has_deep_ssl else ""
+                loss = loss + level_w * weight * loss_value
+                losses_all[f"{name}{suffix}"] = loss_value.item()
+
+                # Context loss reuses already-gathered tensors
+                if name == "JEPA" and has_context_loss:
+                    ctx_loss_value = context_loss(
+                        student_patches=preds_for_loss["student_patches_masked"],
+                        student_masks=preds_for_loss["student_masks"],
+                        teacher_patches=targets_for_loss["teacher_patches_masked"],
+                        teacher_masks=targets_for_loss["teacher_masks"],
+                    )
+                    loss = loss + level_w * ctx_weight * ctx_loss_value
+                    losses_all[f"context{suffix}"] = ctx_loss_value.item()
 
         return LossValues(loss=loss, losses_all=losses_all, stddev_all={})
 
