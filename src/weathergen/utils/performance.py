@@ -81,7 +81,7 @@ def compute_source_bytes(source_samples) -> int:
     return total
 
 
-def build_throughput_metrics(
+def build_performance_metrics(
     lightning_metrics: dict[str, float],
     elapsed: float,
     total_batches: int,
@@ -91,7 +91,7 @@ def build_throughput_metrics(
     available_flops: float | None,
     recompute_factor: float = 4 / 3,
 ) -> dict[str, float]:
-    """Build the ``performance.throughput.*`` metrics dict ready for logging.
+    """Build the ``performance.*`` metrics dict ready for logging.
 
     Combines Lightning's Throughput.compute() output with MB/s, MFU, and HFU.
     Lightning's own ``mfu`` label is dropped: FlopCounterMode does not capture
@@ -109,16 +109,15 @@ def build_throughput_metrics(
         recompute_factor: Recompute correction for HFU. Default 4/3 (full per-layer ckpt).
 
     Returns:
-        Dict of ``"performance.throughput.<key>": value`` pairs.
+        Dict of ``"performance.<key>": value`` pairs.
     """
     steps_per_sec = total_batches / elapsed if elapsed > 0 else 0.0
 
     # Lift Lightning metrics, dropping its "mfu" label (recomputed below).
-    _DROP = {"device/mfu", "mfu"}
     metrics = {
         f"performance.throughput.{k.replace('/', '.')}": v
         for k, v in lightning_metrics.items()
-        if isinstance(v, (int, float)) and k not in _DROP
+        if isinstance(v, (int, float)) and k not in {"device/mfu", "mfu"}
     }
 
     metrics["performance.throughput.mb_per_sec"] = total_mb / elapsed if elapsed > 0 else 0.0
@@ -126,7 +125,7 @@ def build_throughput_metrics(
     util = compute_utilisation_metrics(
         flops_fwd, flops_total, steps_per_sec, available_flops, recompute_factor
     )
-    metrics.update({f"performance.throughput.{k}": v for k, v in util.items()})
+    metrics.update({f"performance.utilization.{k}": v for k, v in util.items()})
 
     return metrics
 

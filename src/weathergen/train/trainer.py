@@ -48,7 +48,7 @@ from weathergen.train.utils import (
 )
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import (
-    build_throughput_metrics,
+    build_performance_metrics,
     compute_source_bytes,
     measure_model_flops,
 )
@@ -175,7 +175,7 @@ class Trainer(TrainerBase):
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
-        if cf.train_logging.get("performance_metrics", True):
+        if cf.train_logging.get("track_performance_metrics"):
             self._available_flops = get_available_flops(torch.device(self.devices[0]), dtype=self.mixed_precision_dtype)  # Assuming same device type!
             if is_root():
                 if self._available_flops:
@@ -397,7 +397,7 @@ class Trainer(TrainerBase):
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
-        if self.cf.train_logging.get("performance_metrics", True):
+        if self.cf.train_logging.get("track_performance_metrics"):
             # precompute batch statistics for throughput/MFU tracking
             sample_batch = next(iter(self.data_loader))
             sample_batch.to_device(self.device)
@@ -614,10 +614,9 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
-            if self.throughput is not None:
+            if self.throughput:
                 torch.cuda.synchronize()
                 if not self._throughput_warmup_done:
-                    # One-time warmup: skip first N batches to exclude compilation overhead
                     if self.cf.general.istep == self._THROUGHPUT_WARMUP_STEPS - 1:
                         self._t0_throughput = time.time()
                         self._throughput_warmup_done = True
@@ -646,9 +645,10 @@ class Trainer(TrainerBase):
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log throughput metrics
-                if self.throughput is not None and is_root() and self._total_batches > 0:
+                if self.throughput and is_root() and self._total_batches > 0:
+                    # TODO: currently hard-code recompute factor to account for activation recomputation. Needed to compute model flops utilization.
                     recompute_factor = self.train_logging.get("throughput_recompute_factor", 4 / 3)
-                    perf_metrics = build_throughput_metrics(
+                    perf_metrics = build_performance_metrics(
                         self.throughput.compute(),
                         time.time() - self._t0_throughput,
                         self._total_batches,
