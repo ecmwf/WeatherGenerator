@@ -25,9 +25,9 @@ from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
-    get_target_aux_calculator,
     init_model_and_shard,
 )
+from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
