@@ -338,7 +338,7 @@ def write_output(
                 epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}"
                 # Add noise_level_rn to title if present for this stream
                 if noise_level is not None:
-                    eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.0e}'))
+                    eta_str = str(noise_level)
                 else:
                     eta_str = None
                 eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
@@ -359,8 +359,11 @@ def write_output(
                 )
                 src = channel_dir / f"{plot_name}.{plotter.image_format}"
                 dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
-                if src != dst and src.exists():
-                    src.replace(dst)
+                if src != dst:
+                    try:
+                        src.replace(dst)
+                    except (FileNotFoundError, OSError):
+                        pass  # another rank already renamed or removed the file
 
                 del sample_da, vals, sample_lat, sample_lon, valid
 
@@ -437,7 +440,7 @@ def write_output(
                     epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}_noised"
 
                     if noise_level is not None:
-                        eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.0e}'))
+                        eta_str = str(noise_level)
                     else:
                         eta_str = None
                     eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
@@ -458,8 +461,11 @@ def write_output(
                     )
                     src = channel_dir / f"{plot_name}.{plotter.image_format}"
                     dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
-                    if src != dst and src.exists():
-                        src.replace(dst)
+                    if src != dst:
+                        try:
+                            src.replace(dst)
+                        except (FileNotFoundError, OSError):
+                            pass  # another rank already renamed or removed the file
 
                     del sample_da, vals, sample_lat, sample_lon, valid
 

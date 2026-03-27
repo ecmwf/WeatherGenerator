@@ -342,6 +342,14 @@ def get_target_aux_calculator(
             with_fsdp=False,
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
+        # Free components not needed by DiffusionLatentTargetEncoder (only uses the encoder)
+        for attr in ("forecast_engine", "pred_heads", "target_token_engines",
+                     "embed_target_coords", "latent_heads", "latent_pre_norm"):
+            if hasattr(model, attr) and getattr(model, attr) is not None:
+                delattr(model, attr)
+                setattr(model, attr, None)
+        torch.cuda.empty_cache()
+
         target_aux = DiffusionLatentTargetEncoder(
             model, is_model_sharded=(cf.with_ddp and cf.with_fsdp)
         )

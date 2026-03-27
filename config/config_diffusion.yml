@@ -154,7 +154,7 @@ training_config:
   training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
   num_mini_epochs: 128
-  samples_per_mini_epoch: 512
+  samples_per_mini_epoch: 1024
   shuffle: True
  
   start_date: 2012-06-01T00:00
@@ -188,7 +188,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        weight: 0.1,
+        weight: 0.0,
         loss_fcts: {
           "mse": {},
         },
@@ -196,7 +196,7 @@ training_config:
     },
     "latent_diff": {
         type: LossLatentDiffusion,
-        weight: 0.9,
+        weight: 1.0,
         target_and_aux_calc: DiffusionLatentTargetEncoder,
         loss_fcts: { "mse": { }, },
         }
@@ -225,7 +225,8 @@ validation_config:
   # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
   # Each value produces a separate validation pass with independently logged metrics.
   # validation_noise_levels: [0.3, 0.5, 0.75, 1.0, 1.5]
-  validation_noise_levels: [1.0, 2.0, 4.0, 8.0, 16.0]
+  validation_noise_levels: [2.0, 3.0, 3.2, 3.5, 4.0]
+  # validation_noise_levels: [1.0, 2.0, 4.0, 8.0, 16.0]
 
   samples_per_mini_epoch: 16
   shuffle: False

@@ -95,11 +95,10 @@ class DiffusionForecastEngine(torch.nn.Module):
                 f"tokens were different between iterations "
                 f"– violates single sample overfitting {self.cur_token - tokens}"
             )
-        self.cur_token = tokens
+        self.cur_token = tokens.detach()
 
         # print("input tokens statistics")
         # print("mean", tokens.mean(), "std", tokens.std(), "max", tokens.max(), "min", tokens.min())
-
         # return self.inference(fstep=fstep, num_steps=100)
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
@@ -116,7 +115,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
 
-        self._noised_tokens = y + n
+        self._noised_tokens = (y + n).detach()
 
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
@@ -153,10 +152,22 @@ class DiffusionForecastEngine(torch.nn.Module):
         # https://github.com/NVlabs/edm/blob/main/generate.py
 
         # Sample noise (assuming single batch element for now)
-        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda") * 0.1
-        # x = self.cur_token + x
-        print("initial noise statistics")
-        print("mean", x.mean(), "std", x.std(), "max", x.max(), "min", x.min())
+        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda") * 1.0
+
+        # eta = torch.tensor([1.0], device="cuda").float() # 1.0 (good), 2.0 (okay), 2.2 (max), 2.5 (hard)
+        # sigma = (eta * self.p_std + self.p_mean).exp()
+        # print("sigma", sigma)
+        # n = torch.randn_like(x).to(device="cuda") * sigma
+        # x = self.cur_token + n
+
+        x = self.cur_token * 0.05 + x
+
+        # breakpoint()
+
+        
+        # return self.denoise(x=x, c=None, sigma=sigma, fstep=fstep)
+        # print("initial noise statistics")
+        # print("mean", x.mean(), "std", x.std(), "max", x.max(), "min", x.min())
 
         # Time step discretization.
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -175,6 +186,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         ):  # 0, ..., N-1
             t_cur = torch.tensor([t_cur], device="cuda").float()
             t_next = torch.tensor([t_next], device="cuda").float()
+
+            print(i, t_cur.item())
 
             x_cur = x_next
 

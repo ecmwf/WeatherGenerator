@@ -687,14 +687,16 @@ class Trainer(TrainerBase):
             noise_level: The eta value (standard normal space) to fix for validation.
                          sigma = exp(eta * p_std + p_mean). None resets to default (0.0).
         """
+        # Unwrap DDP/FSDP to access the underlying model
+        base_model = getattr(self.model, "module", self.model)
         # Set on the base model
-        if hasattr(self.model, "forecast_engine") and hasattr(
-            self.model.forecast_engine, "_fixed_noise_level"
+        if hasattr(base_model, "forecast_engine") and hasattr(
+            base_model.forecast_engine, "_fixed_noise_level"
         ):
-            self.model.forecast_engine._fixed_noise_level = noise_level
+            base_model.forecast_engine._fixed_noise_level = noise_level
         # Also set on the EMA model (separate model copy used during validation)
         if self.ema_model is not None:
-            ema_net = self.ema_model.ema_model
+            ema_net = getattr(self.ema_model.ema_model, "module", self.ema_model.ema_model)
             if hasattr(ema_net, "forecast_engine") and hasattr(
                 ema_net.forecast_engine, "_fixed_noise_level"
             ):
