@@ -263,7 +263,7 @@ training_config:
     "random_easy" : {
       # masking strategy: "random", "forecast"
       masking_strategy: "random",
-      num_samples: 2,
+      num_samples: 16,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
@@ -276,7 +276,7 @@ training_config:
   target_input: {
     "random_easy_target" : {
       masking_strategy: "healpix",
-      num_samples: 2,
+      num_samples: 1,
       masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
     },
   }
@@ -284,6 +284,7 @@ training_config:
   forecast :
     time_step: 00:00:00
     num_steps: 0
+    offset: 0
     policy: null
 
 
@@ -306,6 +307,7 @@ validation_config:
   output : {
     # number of samples that are written
     num_samples: 0,
+    offset: 0,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
