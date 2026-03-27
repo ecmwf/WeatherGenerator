@@ -13,6 +13,7 @@ ERA5 :
   stream_id : 0
   source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
   target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
+  write_output: ['2t']
   loss_weight : 1.
   location_weight : cosine_latitude
   masking_rate : 0.6

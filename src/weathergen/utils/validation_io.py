@@ -137,6 +137,29 @@ def write_output(
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
     source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
 
+    # filter channels per stream based on write_output config
+    for stream_idx, stream in enumerate(cf.streams):
+        write_vars = stream.get("write_output", None)
+        if write_vars is None:
+            continue
+        all_channels = target_channels[stream_idx]
+        keep_idxs = [i for i, ch in enumerate(all_channels) if ch in write_vars]
+        missing = set(write_vars) - set(all_channels)
+        if missing:
+            _logger.warning(
+                f"write_output for stream {stream.name} contains unknown channels: {missing}"
+            )
+        if len(keep_idxs) == len(all_channels):
+            continue
+        _logger.debug(
+            f"Filtering output channels for stream {stream.name}: "
+            f"{len(all_channels)} -> {len(keep_idxs)} channels"
+        )
+        target_channels[stream_idx] = [all_channels[i] for i in keep_idxs]
+        for t_idx in range(len(targets_all)):
+            targets_all[t_idx][stream_idx] = targets_all[t_idx][stream_idx][:, keep_idxs]
+            preds_all[t_idx][stream_idx] = preds_all[t_idx][stream_idx][:, :, keep_idxs]
+
     geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
 
     # calculate global sample indices for this batch by offsetting by sample_start
