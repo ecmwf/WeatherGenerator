@@ -125,6 +125,9 @@ train_logging:
   metrics: 1
   checkpoint: 250
   log_grad_norms: False
+  # Enable throughput and MFU/HFU tracking. Disable to skip FLOPs measurement
+  # and Throughput initialisation (saves one dummy forward+backward at startup).
+  performance_metrics: True
 
 # parameters for data loading
 data_loading :
