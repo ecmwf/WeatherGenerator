@@ -15,12 +15,11 @@ import time
 import numpy as np
 import torch
 import tqdm
+from lightning.fabric.utilities.throughput import Throughput, get_available_flops
 from omegaconf import OmegaConf
 
 # FSDP2
 from torch.distributed.tensor import DTensor
-from lightning.fabric.utilities.throughput import Throughput, get_available_flops
-
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
@@ -176,12 +175,16 @@ class Trainer(TrainerBase):
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
         if cf.train_logging.get("track_performance_metrics"):
-            self._available_flops = get_available_flops(torch.device(self.devices[0]), dtype=self.mixed_precision_dtype)  # Assuming same device type!
+            self._available_flops = get_available_flops(
+                torch.device(self.devices[0]), dtype=self.mixed_precision_dtype
+            )  # Assuming same device type!
             if is_root():
                 if self._available_flops:
                     logger.info(f"GPU peak FLOPS: {self._available_flops:.2e}")
                 else:
-                    logger.warning("GPU peak FLOPS not recognized by Lightning — MFU will not be available.")
+                    logger.warning(
+                        "GPU peak FLOPS not recognized by Lightning — MFU will not be available."
+                    )
             self.throughput = Throughput(
                 available_flops=self._available_flops,
                 world_size=self.world_size_original,
@@ -646,7 +649,7 @@ class Trainer(TrainerBase):
                 self._log(TRAIN)
                 # Log throughput metrics
                 if self.throughput and is_root() and self._total_batches > 0:
-                    # TODO: currently hard-code recompute factor to account for activation recomputation. Needed to compute model flops utilization.
+                    # TODO: currently hard-coding recompute factor, see docstring
                     recompute_factor = self.train_logging.get("throughput_recompute_factor", 4 / 3)
                     perf_metrics = build_performance_metrics(
                         self.throughput.compute(),

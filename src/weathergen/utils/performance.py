@@ -10,7 +10,7 @@
 """Utilities for measuring and computing model performance metrics (MFU, HFU)."""
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 import torch.nn as nn
 from lightning.fabric.utilities.throughput import measure_flops
@@ -119,7 +119,7 @@ def build_performance_metrics(
     metrics = {
         f"performance.throughput.{k.replace('/', '.')}": v
         for k, v in lightning_metrics.items()
-        if isinstance(v, (int, float)) and k not in {"device/mfu", "mfu"}
+        if isinstance(v, int | float) and k not in {"device/mfu", "mfu"}
     }
 
     device_mb_per_sec = total_mb / elapsed if elapsed > 0 else 0.0

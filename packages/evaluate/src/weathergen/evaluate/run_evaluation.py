@@ -254,8 +254,7 @@ def _process_stream(
     )
     metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
     scores_dict = merge(stream_loaded_scores, stream_computed_scores)
-    return run_id, stream, scores_dict 
-    
+    return run_id, stream, scores_dict
 
 
 # except Exception as e:

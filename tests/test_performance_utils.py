@@ -27,12 +27,6 @@ from weathergen.utils.performance import (
     measure_model_flops,
 )
 
-
-# ---------------------------------------------------------------------------
-# Minimal models
-# ---------------------------------------------------------------------------
-
-
 class TwoLayerLinear(nn.Module):
     """Two linear layers, no activation checkpointing."""
 
@@ -43,7 +37,6 @@ class TwoLayerLinear(nn.Module):
 
     def forward(self, x):
         return self.b(self.a(x))
-
 
 class TwoLayerLinearCheckpointed(nn.Module):
     """Same two linear layers but with activation checkpointing on the first."""
@@ -56,12 +49,6 @@ class TwoLayerLinearCheckpointed(nn.Module):
     def forward(self, x):
         x = checkpoint(self.a, x, use_reentrant=False)
         return self.b(x)
-
-
-# ---------------------------------------------------------------------------
-# measure_model_flops
-# ---------------------------------------------------------------------------
-
 
 def test_measure_model_flops_returns_positive_ints():
     model = TwoLayerLinear()
@@ -164,11 +151,6 @@ def test_measure_model_flops_handles_failure(monkeypatch):
     assert flops_total is None
 
 
-# ---------------------------------------------------------------------------
-# compute_mfu / compute_hfu
-# ---------------------------------------------------------------------------
-
-
 def test_compute_mfu_formula():
     flops_fwd = 1_000_000
     steps_per_sec = 10.0
@@ -223,11 +205,6 @@ def test_mfu_hfu_equal_without_recomputation():
     assert mfu == pytest.approx(hfu)
 
 
-# ---------------------------------------------------------------------------
-# compute_source_bytes
-# ---------------------------------------------------------------------------
-
-
 def _make_mock_source_samples(tensor_shapes: list[list[tuple]]):
     """Build a minimal mock of the source_samples object.
 
@@ -271,11 +248,6 @@ def test_compute_source_bytes_empty():
     assert compute_source_bytes(source) == 0
 
 
-# ---------------------------------------------------------------------------
-# compute_utilisation_metrics
-# ---------------------------------------------------------------------------
-
-
 def test_compute_utilisation_metrics_both_present():
     fwd, total = 1_000_000, 3_000_000
     metrics = compute_utilisation_metrics(fwd, total, steps_per_sec=10.0, available_flops=1e12)
@@ -298,11 +270,6 @@ def test_compute_utilisation_metrics_zero_steps():
 def test_compute_utilisation_metrics_no_available_flops():
     """Returns empty dict when peak FLOP/s is unknown."""
     assert compute_utilisation_metrics(1_000_000, 3_000_000, 10.0, None) == {}
-
-
-# ---------------------------------------------------------------------------
-# build_performance_metrics
-# ---------------------------------------------------------------------------
 
 
 def test_build_performance_metrics_keys():
