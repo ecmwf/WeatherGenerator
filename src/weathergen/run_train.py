@@ -114,7 +114,7 @@ def run_inference(args):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if cf.world_size == 1:
+        if mcf.world_size == 1:
             pdb.post_mortem(tb)
 
 
@@ -156,7 +156,7 @@ def run_continue(args):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if cf.world_size == 1:
+        if mcf.world_size == 1:
             pdb.post_mortem(tb)
 
 
@@ -198,7 +198,7 @@ def run_train(args):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if cf.world_size == 1:
+        if mcf.world_size == 1:
             pdb.post_mortem(tb)
 
 

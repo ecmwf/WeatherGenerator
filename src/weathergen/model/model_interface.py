@@ -329,7 +329,10 @@ def get_target_aux_calculator(
             is_model_sharded=(with_ddp and cf.with_fsdp),
         )
 
-        batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu
+        if mcf.world_size_original:
+            batch_size = mcf.world_size_original * batch_size_per_gpu
+        else:
+            batch_size = mcf.world_size * batch_size_per_gpu
         target_aux = EMATeacher(model, ema_model, batch_size, cf.training_config)
 
     else:

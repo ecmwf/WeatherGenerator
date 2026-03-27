@@ -138,9 +138,6 @@ class TrainerBase:
                     dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
                     cf.data_loader_rng_seed = l_seed.item()
 
-        cf.world_size = world_size
-        cf.rank = rank
-
         mcf.world_size = world_size
         mcf.rank = rank
         mcf.local_rank = local_rank

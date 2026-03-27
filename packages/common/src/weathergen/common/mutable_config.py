@@ -20,10 +20,12 @@ class MutableConfig():
 
     def __init__(self):
 
+        self.istep = None
         self.world_size = None
         self.world_size_original = None
         self.rank = None
         self.local_rank = None
         self.with_ddp = None
+        self.run_history = []
 
         print("Trolololo 1")

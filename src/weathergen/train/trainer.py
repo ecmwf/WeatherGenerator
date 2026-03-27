@@ -21,6 +21,7 @@ from omegaconf import OmegaConf
 from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
+from weathergen.common.mutable_config import MutableConfig
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
@@ -90,7 +91,7 @@ class Trainer(TrainerBase):
         """
         return self.world_size_original * batch_size_per_gpu
 
-    def init(self, cf: Config, devices):
+    def init(self, cf: Config, mcf: MutableConfig, devices):
         # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
@@ -105,6 +106,7 @@ class Trainer(TrainerBase):
             cf,
         )
         cf = self.cf
+        self.mcf = mcf
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
@@ -142,8 +144,14 @@ class Trainer(TrainerBase):
 
         # Get world_size of previous, to be continued run before
         # world_size gets overwritten by current setting during init_ddp()
-        self.world_size_original = cf.get("world_size_original", cf.get("world_size", None))
-        cf.world_size_original = self.world_size_original
+        if self.mcf.world_size_original:
+            self.world_size_original = mcf.world_size_original
+        elif self.mcf.world_size:
+            self.world_size_original = mcf.world_size
+        else:
+            self.world_size_original = None
+
+        self.mcf.world_size_original = self.world_size_original
 
         self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 
@@ -178,8 +186,7 @@ class Trainer(TrainerBase):
 
     def inference(self, cf, mcf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
-        self.init(cf, devices)
-        self.mcf = mcf
+        self.init(cf, mcf, devices)
 
         cf = self.cf
         device_type = torch.accelerator.current_accelerator()
@@ -190,6 +197,7 @@ class Trainer(TrainerBase):
         # only one needed since we only run the validation code path
         self.dataset = MultiStreamDataSampler(
             cf,
+            mcf,
             self.test_cfg,
             stage=VAL,
         )
@@ -234,8 +242,7 @@ class Trainer(TrainerBase):
 
     def run(self, cf, mcf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
-        self.init(cf, devices)
-        self.mcf = mcf
+        self.init(cf, mcf, devices)
         cf = self.cf
 
         device_type = torch.accelerator.current_accelerator()
@@ -245,8 +252,8 @@ class Trainer(TrainerBase):
         self.collapse_monitor.device = self.device
 
         # create data loaders
-        self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
-        self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
+        self.dataset = MultiStreamDataSampler(cf, mcf, self.training_cfg, stage=TRAIN)
+        self.dataset_val = MultiStreamDataSampler(cf, mcf, self.validation_cfg, stage=VAL)
 
         loader_params = {
             "batch_size": None,
@@ -334,7 +341,7 @@ class Trainer(TrainerBase):
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             self.batch_size_per_gpu,
-            cf.world_size,
+            self.mcf.world_size,
             cf.general.istep,
             lr_steps,
             self.training_cfg.learning_rate_scheduling,
