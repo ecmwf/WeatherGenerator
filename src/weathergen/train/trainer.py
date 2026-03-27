@@ -656,7 +656,8 @@ class Trainer(TrainerBase):
                         self.flops_per_batch_fwd,
                         self.flops_per_batch,
                         self._available_flops,
-                        recompute_factor,
+                        world_size=self.world_size_original,
+                        recompute_factor=recompute_factor,
                     )
                     self.train_logger.log_metrics(TRAIN, perf_metrics, step=self.cf.general.istep)
                 # Log collapse metrics

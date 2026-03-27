@@ -86,9 +86,10 @@ def build_performance_metrics(
     elapsed: float,
     total_batches: int,
     total_mb: float,
-    flops_fwd: int | None,
-    flops_total: int | None,
-    available_flops: float | None,
+    world_size: int = 1,
+    flops_fwd: int | None = None,
+    flops_total: int | None = None,
+    available_flops: float | None = None,
     recompute_factor: float = 4 / 3,
 ) -> dict[str, float]:
     """Build the ``performance.*`` metrics dict ready for logging.
@@ -102,7 +103,8 @@ def build_performance_metrics(
         lightning_metrics: Output of ``Throughput.compute()``.
         elapsed: Seconds since the start of throughput tracking (after warmup).
         total_batches: Number of tracked batches (equals steps when batch_size=1/rank).
-        total_mb: Cumulative megabytes of source data processed.
+        total_mb: Cumulative megabytes of source data processed on this device.
+        world_size: Number of data-parallel ranks. Used to compute global MB/s.
         flops_fwd: Forward-only FLOPs per step from measure_model_flops, or None.
         flops_total: Forward + backward FLOPs per step from measure_model_flops, or None.
         available_flops: Peak device FLOP/s from get_available_flops, or None.
@@ -120,7 +122,9 @@ def build_performance_metrics(
         if isinstance(v, (int, float)) and k not in {"device/mfu", "mfu"}
     }
 
-    metrics["performance.throughput.mb_per_sec"] = total_mb / elapsed if elapsed > 0 else 0.0
+    device_mb_per_sec = total_mb / elapsed if elapsed > 0 else 0.0
+    metrics["performance.throughput.device.mb_per_sec"] = device_mb_per_sec
+    metrics["performance.throughput.mb_per_sec"] = device_mb_per_sec * world_size
 
     util = compute_utilisation_metrics(
         flops_fwd, flops_total, steps_per_sec, available_flops, recompute_factor

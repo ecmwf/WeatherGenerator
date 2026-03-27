@@ -19,7 +19,7 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.utils.performance import (
-    build_throughput_metrics,
+    build_performance_metrics,
     compute_hfu,
     compute_mfu,
     compute_source_bytes,
@@ -301,14 +301,14 @@ def test_compute_utilisation_metrics_no_available_flops():
 
 
 # ---------------------------------------------------------------------------
-# build_throughput_metrics
+# build_performance_metrics
 # ---------------------------------------------------------------------------
 
 
-def test_build_throughput_metrics_keys():
+def test_build_performance_metrics_keys():
     """All expected keys are present and prefixed correctly."""
     lightning = {"device/batches_per_second": 5.0, "device/samples_per_second": 40.0}
-    metrics = build_throughput_metrics(
+    metrics = build_performance_metrics(
         lightning_metrics=lightning,
         elapsed=10.0,
         total_batches=50,
@@ -318,15 +318,16 @@ def test_build_throughput_metrics_keys():
         available_flops=1e12,
     )
     assert "performance.throughput.device.batches_per_second" in metrics
+    assert "performance.throughput.device.mb_per_sec" in metrics
     assert "performance.throughput.mb_per_sec" in metrics
-    assert "performance.throughput.device.mfu" in metrics
-    assert "performance.throughput.device.hfu" in metrics
+    assert "performance.utilization.device.mfu" in metrics
+    assert "performance.utilization.device.hfu" in metrics
 
 
-def test_build_throughput_metrics_drops_lightning_mfu():
+def test_build_performance_metrics_drops_lightning_mfu():
     """Lightning's own mfu label is excluded (we recompute it explicitly)."""
     lightning = {"device/mfu": 0.99, "mfu": 0.99, "device/batches_per_second": 5.0}
-    metrics = build_throughput_metrics(
+    metrics = build_performance_metrics(
         lightning_metrics=lightning,
         elapsed=10.0,
         total_batches=50,
@@ -335,12 +336,13 @@ def test_build_throughput_metrics_drops_lightning_mfu():
         flops_total=3_000_000,
         available_flops=1e12,
     )
-    assert "performance.throughput.device.mfu" in metrics  # our recomputed value
-    assert "performance.throughput.mfu" not in metrics     # Lightning's dropped label
+    assert "performance.utilization.device.mfu" in metrics  # our recomputed value
+    assert "performance.throughput.mfu" not in metrics      # Lightning's dropped label
 
 
-def test_build_throughput_metrics_mb_per_sec():
-    metrics = build_throughput_metrics(
+def test_build_performance_metrics_mb_per_sec_single_rank():
+    """With world_size=1 (default), device and global MB/s are equal."""
+    metrics = build_performance_metrics(
         lightning_metrics={},
         elapsed=4.0,
         total_batches=20,
@@ -349,12 +351,29 @@ def test_build_throughput_metrics_mb_per_sec():
         flops_total=None,
         available_flops=None,
     )
+    assert metrics["performance.throughput.device.mb_per_sec"] == pytest.approx(50.0)
     assert metrics["performance.throughput.mb_per_sec"] == pytest.approx(50.0)
 
 
-def test_build_throughput_metrics_no_flops_no_utilisation():
+def test_build_performance_metrics_mb_per_sec_multi_rank():
+    """Global MB/s = device MB/s × world_size."""
+    metrics = build_performance_metrics(
+        lightning_metrics={},
+        elapsed=4.0,
+        total_batches=20,
+        total_mb=200.0,
+        flops_fwd=None,
+        flops_total=None,
+        available_flops=None,
+        world_size=8,
+    )
+    assert metrics["performance.throughput.device.mb_per_sec"] == pytest.approx(50.0)
+    assert metrics["performance.throughput.mb_per_sec"] == pytest.approx(400.0)
+
+
+def test_build_performance_metrics_no_flops_no_utilisation():
     """MFU/HFU keys absent when FLOPs or available_flops are unavailable."""
-    metrics = build_throughput_metrics(
+    metrics = build_performance_metrics(
         lightning_metrics={},
         elapsed=4.0,
         total_batches=20,
@@ -363,5 +382,5 @@ def test_build_throughput_metrics_no_flops_no_utilisation():
         flops_total=None,
         available_flops=None,
     )
-    assert "performance.throughput.device.mfu" not in metrics
-    assert "performance.throughput.device.hfu" not in metrics
+    assert "performance.utilization.device.mfu" not in metrics
+    assert "performance.utilization.device.hfu" not in metrics
