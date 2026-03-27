@@ -7,3 +7,6 @@ train:
     fsgs25zq-stage1:
       slurm_id: 0
       description: "JEPA default 2d rope for attention"
+    u2fapj0c-stage1:
+      slurm_id: 0
+      description: "JEPA 2.1"
