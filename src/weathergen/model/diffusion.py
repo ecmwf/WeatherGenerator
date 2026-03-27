@@ -25,6 +25,7 @@
 
 import logging
 import math
+import numpy as np
 
 import torch
 
@@ -49,6 +50,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.noise_embedder = NoiseEmbedder(
             embedding_dim=self.embedding_dim, frequency_embedding_dim=self.frequency_embedding_dim
         )
+        self.datetime_embedder = DateTimeEncoder()
 
         # Parameters
         self.sigma_min = self.cf.sigma_min
@@ -82,7 +84,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = tokens
 
-        c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
+        c = torch.tensor([meta_info["ERA5"].params["datetime"]], device=tokens.device)  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
         y = tokens
 
         if self.training:
@@ -116,10 +118,11 @@ class DiffusionForecastEngine(torch.nn.Module):
         noise_emb = self.noise_embedder(c_noise)
 
         # Precondition input and feed through network
-        x = self.preconditioner.precondition(x, c)
+        x = self.preconditioner.precondition(x, c) #currently does nothing
+        c = self.datetime_embedder(c)
 
         return c_skip * x + c_out * self.net(
-            c_in * x, fstep=fstep, noise_emb=noise_emb
+            c_in * x, fstep=fstep, noise_emb=noise_emb, ada_ln_aux=c
         )  # Eq. (7) in EDM paper
 
     def inference(
@@ -221,3 +224,59 @@ class NoiseEmbedder(torch.nn.Module):
         t_freq = self.timestep_embedding(t)
         t_emb = self.mlp(t_freq)
         return t_emb
+
+class DateTimeEncoder(torch.nn.Module):
+    """
+    Encodes timestamp(s) in seconds since Unix epoch into a 4D vector:
+      [time_of_day_sin, time_of_day_cos, day_of_year_sin, day_of_year_cos]
+
+    Input shape:  scalar or any tensor shape (...)
+    Output shape:  (..., 4)
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, timestamp: torch.Tensor | np.ndarray) -> torch.Tensor:
+        """
+        Encode datetime64 timestamp into a 4D vector:
+        [time_of_day_sin, time_of_day_cos, day_of_year_sin, day_of_year_cos]
+
+        Input: np.datetime64 or torch.Tensor containing datetime64 values
+        Output: (..., 4) shaped tensor
+        """
+        # Convert to numpy if needed
+        if isinstance(timestamp, torch.Tensor):
+            timestamp = timestamp.detach().cpu().numpy()
+        
+        # Ensure datetime64[s] precision
+        timestamp = timestamp.astype('datetime64[s]')
+        orig_shape = timestamp.shape
+        timestamp_flat = timestamp.reshape(-1)
+        
+        two_pi = 2.0 * np.pi
+        
+        # --- Time of day from seconds since epoch ---
+        ts_int64 = timestamp_flat.astype('int64')  # seconds since Unix epoch
+        seconds_in_day = 86400.0
+        time_of_day = (ts_int64 % int(seconds_in_day)) / seconds_in_day
+        tod_sin = np.sin(two_pi * time_of_day).astype(np.float32)
+        tod_cos = np.cos(two_pi * time_of_day).astype(np.float32)
+        
+        # --- Day of year ---
+        day_np = timestamp_flat.astype('datetime64[D]')
+        year_start = day_np.astype('datetime64[Y]').astype('datetime64[D]')
+        next_year_start = (day_np.astype('datetime64[Y]') + np.timedelta64(1, 'Y')).astype('datetime64[D]')
+        
+        day_of_year_0 = (day_np - year_start).astype(np.int64)
+        days_in_year = (next_year_start - year_start).astype(np.int64)
+        doy_frac = day_of_year_0.astype(np.float32) / days_in_year.astype(np.float32)
+        
+        doy_sin = np.sin(two_pi * doy_frac).astype(np.float32)
+        doy_cos = np.cos(two_pi * doy_frac).astype(np.float32)
+        
+        # Stack and convert to tensor
+        out = np.stack([tod_sin, tod_cos, doy_sin, doy_cos], axis=-1)
+        out = torch.from_numpy(out).float()
+        
+        return out.reshape(*orig_shape, 4)

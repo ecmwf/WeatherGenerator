@@ -489,6 +489,7 @@ class ForecastingEngine(torch.nn.Module):
         fstep: int,
         meta_info: SampleMetaData = None,
         noise_emb: torch.Tensor = None,
+        ada_ln_aux: torch.Tensor = None,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
@@ -513,7 +514,7 @@ class ForecastingEngine(torch.nn.Module):
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = block(tokens)
                 else:
-                    tokens = block(tokens, coords, noise_emb, aux_info)
+                    tokens = block(tokens, coords, noise_emb, ada_ln_aux)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):

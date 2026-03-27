@@ -389,11 +389,13 @@ class Model(torch.nn.Module):
         mode_cfg = cf.training_config
         self.forecast_engine = None
         if cf.fe_num_blocks > 0:
-            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
             if cf.get("fe_diffusion_model", False):
+                self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells, dim_aux=self.cf.diffusion_conditioning_embed_dim)
                 self.forecast_engine = DiffusionForecastEngine(
                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
                 )
+            else:
+                self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -666,10 +668,19 @@ class Model(torch.nn.Module):
         tokens = (tokens - t_mean) / (t_std + 1e-6) * self.cf.sigma_data
         tokens = torch.clamp(tokens, -100.0, 100.0)
 
+        breakpoint()
+
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
+                
+                #TODO: move this to the appropriate place in batch consturction
+                batch.samples[0].meta_info['ERA5'].add_global_params({'datetime': batch.samples[0].streams_data['ERA5'].source_raw[0].datetimes[0]})
+                print(f'added {batch.samples[0].streams_data['ERA5'].source_raw[0].datetimes[0]}')
+                # add_global_params({'datetime': batch.samples[0].streams_data[self.stream_names[0]].source_raw[0].datetimes[0]})
+
+                breakpoint()
                 tokens = self.forecast_engine(
                     tokens,
                     step,
