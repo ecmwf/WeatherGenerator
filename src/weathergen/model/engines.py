@@ -958,6 +958,7 @@ class LatentPredictionHeadMLP(nn.Module):
 
         return torch.cat(outputs, dim=1)
 
+
 class EfficientBilinear(torch.nn.Module):
     def __init__(self, in1, in2, out, bias=False):
         super().__init__()
