@@ -20,6 +20,12 @@ from weathergen.model.ssl_target_processing import (
     JEPATargetProcessing,
     iBOTPatchTargetProcessing,
 )
+from weathergen.model.model import ModelParams
+from weathergen.model.model_interface import get_model
+from weathergen.train.teacher_utils import (
+    load_encoder_from_checkpoint,
+    prepare_encoder_teacher,
+)
 from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, TargetAuxOutput
 
 logger = logging.getLogger(__name__)
@@ -130,12 +136,6 @@ class FrozenTeacher(EncoderTeacher):
             device: Target device
             params: Dict with 'teacher_run_id' and optional 'teacher_mini_epoch'
         """
-        from weathergen.model.model import ModelParams
-        from weathergen.model.model_interface import get_model
-        from weathergen.train.teacher_utils import (
-            load_encoder_from_checkpoint,
-            prepare_encoder_teacher,
-        )
 
         teacher_run_id = params["teacher_run_id"]
         teacher_mini_epoch = params.get("teacher_mini_epoch", -1)
