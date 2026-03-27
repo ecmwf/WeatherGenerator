@@ -26,7 +26,7 @@ from weathergen.utils.train_logger import Metrics, TrainLogger
 _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
-MAX_FILENAME_LEN = 255
+MAX_FILENAME_LEN = 128
 
 
 ####################################################################################################
@@ -231,9 +231,9 @@ def plot_lr(
         return
 
     if legend_outside:
-        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small")
+        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="x-small")
     else:
-        plt.legend(legend_str)
+        plt.legend(legend_str, fontsize="x-small")
     plt.grid(True, which="both", ls="-")
     plt.yscale("log")
     plt.title("learning rate")
@@ -246,7 +246,7 @@ def plot_lr(
         rstr = rstr[: MAX_FILENAME_LEN - 6]
 
     # save the plot
-    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=["lr.png"])
+    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=["lr.png"], max_len=128)
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
     plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
@@ -285,9 +285,9 @@ def plot_loss_avg(
         ]
 
     if legend_outside:
-        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small")
+        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="x-small")
     else:
-        plt.legend(legend_str)
+        plt.legend(legend_str, fontsize="x-small")
     plt.grid(True, which="both", ls="-")
     plt.yscale("log")
     # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
@@ -298,7 +298,7 @@ def plot_loss_avg(
     plt.ylabel("loss")
     plt.xlabel("step")
     plt.tight_layout()
-    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"])
+    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"], max_len=128)
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
@@ -439,7 +439,7 @@ def plot_loss_per_stream(
                     continue
 
                 legend = plt.legend(
-                    legend_str, loc="upper right" if not x_scale_log else "lower left"
+                    legend_str, loc="upper right" if not x_scale_log else "lower left", fontsize="x-small"
                 )
                 for line in legend.get_lines():
                     line.set(alpha=1.0)
@@ -475,10 +475,9 @@ def plot_loss_per_stream(
                     # cut off run_ids_str so that the tail with err, channel etc is preserved
                     # required to retain unique names
                     run_ids_str = run_ids_str[: -(len(fname_tail) + 1)]
-                fname = run_ids_str + fname_tail
 
                 # save the plot
-                plt_fname = plot_dir / fname
+                plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{fname_tail}"], max_len=128)
 
                 _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
                 plt.savefig(plt_fname)
@@ -587,10 +586,10 @@ def plot_loss_per_run(
     plt.title(run_id + " : " + run_desc[1])
     if legend_outside:
         legend = plt.legend(
-            legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small"
+            legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="x-small"
         )
     else:
-        legend = plt.legend(legend_str, loc="lower left")
+        legend = plt.legend(legend_str, loc="lower left", fontsize="x-small")
     for line in legend.get_lines():
         line.set(alpha=1.0)
     plt.yscale("log")
