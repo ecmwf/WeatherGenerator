@@ -11,6 +11,7 @@
 import copy
 import logging
 import time
+from math import sqrt
 
 import numpy as np
 import torch
@@ -459,6 +460,7 @@ class Trainer(TrainerBase):
                 preds=preds,
                 targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
+                istep=self.cf.general.istep,
             )
 
             # TODO re-enable this, need to think on how to make it compatible with
@@ -596,6 +598,7 @@ class Trainer(TrainerBase):
                         preds=preds,
                         targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
+                        istep=self.cf.general.istep,
                     )
 
                     # log output
@@ -759,7 +762,9 @@ class Trainer(TrainerBase):
         grad_norms = {"grad_norm.total": self.last_grad_norm}
         for name, param in self.model.named_parameters():
             if param.grad is not None:
-                grad_norms["grad_norm." + name] = self._get_tensor_item(param.grad.norm())
+                grad_norms["grad_norm." + name] = self._get_tensor_item(
+                    param.grad.norm() / sqrt(param.numel())
+                )
 
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)

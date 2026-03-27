@@ -1,0 +1,63 @@
+# Plot config for iBOT pretraining runs (auto-generated)
+train:
+  plot:
+    yr8aqs2v-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=6.06e-06 mask=0.60"
+    py56m7zx-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=2.81e-05 mask=0.66"
+    cajczsev-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=1.17e-06 mask=0.39"
+    8m55jazq-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=3.78e-05 mask=0.18"
+    4tgjzq16-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=9.94e-06 mask=0.17"
+    y0gadbb7-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=2.42e-06 mask=0.55"
+    yvnr9ctz-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=1.58e-06 mask=0.22"
+    gteumexs-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=1.77e-05 mask=0.56"
+    b3dtwdq8-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=9.91e-06 mask=0.20"
+    vg1kaxny-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=1.79e-06 mask=0.63"
+    d4nc13ro-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=2.48e-05 mask=0.51"
+    cs8l7p5g-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=1.43e-05 mask=0.59"
+    c4b0iuvf-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=8.28e-06 mask=0.22"
+    6uw9bzdc-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=1.22e-05 mask=0.42"
+    t33cuvvn-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=4.42e-06 mask=0.43"
+    21szacib-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=1.74e-06 mask=0.17"
+    27wddlzp-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=1.42e-06 mask=0.71"
+    a90bsrbw-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=3.12e-05 mask=0.78"
+    0wcfbp4g-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=2.51e-06 mask=0.33"
+    nze2da6n-stage1:
+      slurm_id: 0
+      description: "JEPA window offset frozen MTM lr=2.48e-06 mask=0.77"

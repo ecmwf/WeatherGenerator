@@ -24,6 +24,7 @@ ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
+ae_adapter_type: "sum"
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 2
@@ -69,7 +70,7 @@ healpix_level: 5
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
-rope_2D: True 
+rope_2D: True
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -78,8 +79,8 @@ with_fsdp: False
 ddp_find_unused_parameters: False
 attention_dtype: bf16
 mixed_precision_dtype: bf16
-mlp_norm_eps: 1e-5
-norm_eps: 1e-4
+mlp_norm_eps: 1e-8
+norm_eps: 1e-8
 
 latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
@@ -97,7 +98,6 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 #####################################
 
 streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_nppatms_synop/"
 streams: ???
 
 general:
@@ -125,7 +125,7 @@ train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
-  log_grad_norms: False
+  log_grad_norms: True
 
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
@@ -169,31 +169,12 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["student_teacher"]
 
-  # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
-  # When enabled, intermediate encoder representations are tapped and used as additional
-  # targets/predictions for the SSL loss. Disabled by default (empty tap_after).
-  deep_ssl:
-    enabled: true
-    tap_after:                     # named tap points (final output always included implicitly)
-      - local2global               # after local-to-global adapter, before global attention
-      - "global:0"                 # after 1st global layer (0-indexed)
-      - "global:1"                 # after 2nd global layer
-    fusion_hidden_factor: 2        # MLP hidden dim = factor * dim_embed
-    level_weights: [0.25, 0.25, 0.25, 0.25]  # per-level loss weights (len = num taps + 1)
-
-  # Context loss (V-JEPA 2.1): L1 on context (visible) tokens between student and teacher.
-  # Complements the JEPA loss which targets masked tokens.
-  context_loss:
-    enabled: true
-    weight: 0.2
-    warmup_steps: 10000             # linear warmup from 0 to weight over this many steps
-
-  num_mini_epochs: 32
+  num_mini_epochs: 96
   samples_per_mini_epoch: 4096
   shuffle: True
 
   start_date: 1979-01-01T00:00
-  end_date: 2022-12-31T00:00
+  end_date: 2022-08-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -201,8 +182,8 @@ training_config:
   window_offset_prediction : 0
   
   learning_rate_scheduling :
-    lr_start: 1e-6
-    lr_max: 5e-5
+    lr_start: 5e-7
+    lr_max: 1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 512
@@ -214,7 +195,7 @@ training_config:
 
   optimizer:
     grad_clip: 1.0
-    weight_decay: 0.1
+    weight_decay: 0.02
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.975
@@ -228,19 +209,15 @@ training_config:
         weight: 1.0,
         loss_fcts : {
           "JEPA": {
-            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
-            "dropout_rate": 0.1,
+            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": mlp,
+            "dropout_rate": 0.2, "num_layers": 2, "hidden_factor":2, "with_residual":True,
             target_source_correspondence: {0 : {0 : "subset"} },
         },
         },
-        target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 900000,
-            model_param_overrides : { 
-              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
-            },
-          }
+        target_and_aux_calc: { "FrozenTeacher" : 
+            {teacher_run_id: "p43hxwic",      # run ID of the pre-trained model
+            teacher_mini_epoch: -1            # -1 = latest checkpoint
+          },
         }
       }
   }
@@ -263,7 +240,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+      masking_strategy_config : { rate : 0.6, hl_mask: 0, rate_sampling: False },
     },
   }
 
@@ -279,8 +256,8 @@ validation_config:
   samples_per_mini_epoch: 256
   shuffle: False
 
-  start_date: 2023-10-01T00:00
-  end_date: 2023-12-31T00:00
+  start_date: 2022-10-01T00:00
+  end_date: 2022-12-31T00:00
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
