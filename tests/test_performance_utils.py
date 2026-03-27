@@ -27,6 +27,7 @@ from weathergen.utils.performance import (
     measure_model_flops,
 )
 
+
 class TwoLayerLinear(nn.Module):
     """Two linear layers, no activation checkpointing."""
 
@@ -37,6 +38,7 @@ class TwoLayerLinear(nn.Module):
 
     def forward(self, x):
         return self.b(self.a(x))
+
 
 class TwoLayerLinearCheckpointed(nn.Module):
     """Same two linear layers but with activation checkpointing on the first."""
@@ -49,6 +51,7 @@ class TwoLayerLinearCheckpointed(nn.Module):
     def forward(self, x):
         x = checkpoint(self.a, x, use_reentrant=False)
         return self.b(x)
+
 
 def test_measure_model_flops_returns_positive_ints():
     model = TwoLayerLinear()
@@ -232,7 +235,7 @@ def _make_mock_source_samples(tensor_shapes: list[list[tuple]]):
 
 def test_compute_source_bytes_single_stream():
     # 1 sample, 1 stream, 1 tensor shape (4, 8) float32 → 4×8×4 = 128 bytes
-    source = _make_mock_source_samples([[ [(4, 8)] ]])
+    source = _make_mock_source_samples([[[(4, 8)]]])
     assert compute_source_bytes(source) == 128
 
 
@@ -254,7 +257,9 @@ def test_compute_utilisation_metrics_both_present():
     assert "device.mfu" in metrics
     assert "device.hfu" in metrics
     assert metrics["device.mfu"] == pytest.approx(compute_mfu(fwd, 10.0, 1e12))
-    assert metrics["device.hfu"] == pytest.approx(compute_hfu(total, 10.0, 1e12, recompute_factor=4 / 3))
+    assert metrics["device.hfu"] == pytest.approx(
+        compute_hfu(total, 10.0, 1e12, recompute_factor=4 / 3)
+    )
 
 
 def test_compute_utilisation_metrics_missing_flops():
@@ -304,7 +309,7 @@ def test_build_performance_metrics_drops_lightning_mfu():
         available_flops=1e12,
     )
     assert "performance.utilization.device.mfu" in metrics  # our recomputed value
-    assert "performance.throughput.mfu" not in metrics      # Lightning's dropped label
+    assert "performance.throughput.mfu" not in metrics  # Lightning's dropped label
 
 
 def test_build_performance_metrics_mb_per_sec_single_rank():
