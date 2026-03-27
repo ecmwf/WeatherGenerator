@@ -14,7 +14,7 @@ case "$1" in
         exit 0
       fi
       # Otherwise, use the gpu extra
-      uv sync --all-packages --extra gpu
+      uv sync --all-packages --extra gpu --verbose
     )
     ;;
   lint)

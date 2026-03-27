@@ -9,6 +9,7 @@ test_job:
   extends: .uenv-runner-santis-gh200
   image: prgenv-gnu/25.6:v2
   script: |
+    echo "Stage type: ${STAGE_TYPE}"
     ml gcc/14.2.0
 
     export PRIVATE_REPO_BRANCH="${PRIVATE_REPO_BRANCH:-main}"
@@ -21,8 +22,11 @@ test_job:
       --branch "$PRIVATE_REPO_BRANCH" \
       https://oauth2:${PRIVATE_REPO_TOKEN}@gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private.git
 
+    echo "Sync"
     ./scripts/actions.sh sync
+    echo "Create links and run tests"
     ./scripts/actions.sh create-links
+    echo "Run tests"
     ./scripts/actions.sh integration-test${STAGE_TYPE:-}
   variables:
     SLURM_JOB_NUM_NODES: 1
