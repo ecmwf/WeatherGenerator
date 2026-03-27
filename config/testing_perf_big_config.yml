@@ -122,7 +122,7 @@ general:
 # logging frequency in the training loop (in number of batches)
 train_logging:
   terminal: 10
-  metrics: 20
+  metrics: 5
   checkpoint: 250
   log_grad_norms: False
   performance_metrics: True
@@ -260,7 +260,7 @@ training_config:
     "random_easy" : {
       # masking strategy: "random", "forecast"
       masking_strategy: "random",
-      num_samples: 1,
+      num_samples: 8,
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
