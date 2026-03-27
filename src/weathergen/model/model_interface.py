@@ -269,5 +269,3 @@ def get_model(cf: Config, training_mode: TrainingMode, dataset, overrides):
     return Model(
         cf_with_overrides, sources_size, targets_num_channels, targets_coords_size
     ).create()
-
-
