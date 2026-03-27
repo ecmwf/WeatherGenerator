@@ -3,6 +3,7 @@ import glob
 import logging
 import os
 import re
+from tqdm import tqdm
 from pathlib import Path
 
 import cartopy
@@ -587,8 +588,8 @@ class Plotter:
         duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
 
         for region in self.regions:
-            for _, sa in enumerate(tqdm(samples, desc="Animating samples")):
-                for _, var in enumerate(tqdm(variables, desc="Variables", leave=False)):
+            for _, sa in enumerate(tqdm(samples, desc=f"Creating animations for region {region}", leave=False)):
+                for _, var in enumerate(variables):
                     _logger.debug(f"Creating animation for {var} sample: {sa} - {tag}")
                     image_paths = []
                     for _, fstep in enumerate(tqdm(fsteps, desc="Forecast steps", leave=False)):

@@ -241,15 +241,10 @@ def _process_stream(
         available_data = reader.check_availability(stream, mode="evaluation")
 
         # Use fast raw zarr I/O when available (bypasses ZarrIO/dask for ~20× speedup)
-        use_fast_io = (
-            hasattr(reader, "get_data_raw")
-            and getattr(reader, "_fast_io", False)
-        )
+        use_fast_io = hasattr(reader, "get_data_raw") and getattr(reader, "_fast_io", False)
 
         if use_fast_io:
-            _logger.info(
-                f"RUN {run_id} - {stream}: Using fast raw zarr I/O path."
-            )
+            _logger.info(f"RUN {run_id} - {stream}: Using fast raw zarr I/O path.")
             output_data = reader.get_data_raw(
                 stream,
                 fsteps=available_data.fsteps,
@@ -267,8 +262,7 @@ def _process_stream(
             )
 
         _logger.info(
-            f"RUN {run_id} - {stream}: Data loaded once — "
-            f"sharing between plotting and scoring."
+            f"RUN {run_id} - {stream}: Data loaded once — sharing between plotting and scoring."
         )
 
     # Plotting (pass pre-loaded data)
@@ -291,7 +285,11 @@ def _process_stream(
         return run_id, stream, scores_dict
 
     stream_computed_scores = calc_scores_per_stream(
-        reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps,
+        reader,
+        stream,
+        regions_to_compute,
+        metrics_to_compute,
+        plot_score_maps,
         output_data=output_data,
     )
     metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)

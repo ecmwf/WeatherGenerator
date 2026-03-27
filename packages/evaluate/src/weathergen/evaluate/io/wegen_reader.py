@@ -278,7 +278,9 @@ def _read_sample_raw(
 
         # Select channels by index
         if channel_idxs is not None:
-            pred_data = pred_data[:, channel_idxs] if pred_data.ndim == 2 else pred_data[:, channel_idxs, :]
+            pred_data = (
+                pred_data[:, channel_idxs] if pred_data.ndim == 2 else pred_data[:, channel_idxs, :]
+            )
             target_data = target_data[:, channel_idxs]
 
         # Handle sub-steps (gridded data with multiple valid_times per fstep).
@@ -752,9 +754,12 @@ class WeatherGenZarrReader(WeatherGenReader):
 
             # Count user processes (rough estimate via /proc)
             import subprocess
+
             result = subprocess.run(
                 ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "pid"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             user_procs = len(result.stdout.strip().splitlines()) if result.returncode == 0 else 0
 
@@ -841,10 +846,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
             # ZipStore detection: Python's zipfile.ZipFile is NOT thread-safe
             # when shared, but each thread can safely open its own handle.
-            is_zip_store = (
-                hasattr(zio, '_store')
-                and 'zip' in type(zio._store).__name__.lower()
-            )
+            is_zip_store = hasattr(zio, "_store") and "zip" in type(zio._store).__name__.lower()
 
             # # For ZipStore, never use parallel workers in get_data().
             # # ProcessPoolExecutor requires spawning new processes, which
@@ -886,14 +888,24 @@ class WeatherGenZarrReader(WeatherGenReader):
                     }
                     submit_args = lambda s, f: (
                         _load_single_sample_own_context,
-                        self.fname_zarr, s, stream, f, ensemble, is_gridded_data,
+                        self.fname_zarr,
+                        s,
+                        stream,
+                        f,
+                        ensemble,
+                        is_gridded_data,
                     )
                 else:
                     pool_cls = ThreadPoolExecutor
                     pool_kwargs = {"max_workers": effective_threads}
                     submit_args = lambda s, f: (
                         _load_single_sample,
-                        zio, s, stream, f, ensemble, is_gridded_data,
+                        zio,
+                        s,
+                        stream,
+                        f,
+                        ensemble,
+                        is_gridded_data,
                     )
 
                 try:
@@ -904,36 +916,35 @@ class WeatherGenZarrReader(WeatherGenReader):
                             for s in samples
                         }
                         for future in tqdm(
-                            as_completed(futures), total=n_total,
+                            as_completed(futures),
+                            total=n_total,
                             desc=f"Loading {self.run_id} - {stream}",
                         ):
                             result = future.result()
                             if result is not None:
                                 fstep_r, sample_r, target, pred, vt = result
-                                results_by_fstep[fstep_r].append(
-                                    (sample_r, target, pred, vt)
-                                )
+                                results_by_fstep[fstep_r].append((sample_r, target, pred, vt))
                 except (RuntimeError, OSError) as pool_err:
                     _logger.warning(
-                        f"Parallel pool failed ({pool_err}). "
-                        f"Falling back to sequential loading."
+                        f"Parallel pool failed ({pool_err}). Falling back to sequential loading."
                     )
                     effective_threads = 0  # force sequential below
 
             if effective_threads <= 1:
                 for f in fsteps:
-                    for s in tqdm(
-                        samples, desc=f"Loading {self.run_id} - {stream} - fstep {f}"
-                    ):
+                    for s in tqdm(samples, desc=f"Loading {self.run_id} - {stream} - fstep {f}"):
                         result = _load_single_sample(
-                            zio, s, stream, f, ensemble, is_gridded_data,
+                            zio,
+                            s,
+                            stream,
+                            f,
+                            ensemble,
+                            is_gridded_data,
                         )
                         if result is None:
                             continue
                         _, sample_r, target, pred, vt = result
-                        results_by_fstep[f].append(
-                            (sample_r, target, pred, vt)
-                        )
+                        results_by_fstep[f].append((sample_r, target, pred, vt))
 
         # ----------------------------------------------------------
         # Phase 2: Reassemble per-fstep (outside the zarr context)
@@ -944,9 +955,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         for fstep in fsteps:
             per_fstep = results_by_fstep[fstep]
             if not per_fstep:
-                _logger.info(
-                    f"[{self.run_id} - {stream}] No valid data for fstep {fstep}."
-                )
+                _logger.info(f"[{self.run_id} - {stream}] No valid data for fstep {fstep}.")
                 continue
 
             # Sort by sample index for deterministic output
@@ -1054,7 +1063,11 @@ class WeatherGenZarrReader(WeatherGenReader):
         try:
             if is_zip:
                 return self._get_data_raw_zip_impl(
-                    stream, samples, fsteps, channels, ensemble,
+                    stream,
+                    samples,
+                    fsteps,
+                    channels,
+                    ensemble,
                 )
             return self._get_data_raw_impl(stream, samples, fsteps, channels, ensemble)
         except Exception as e:
@@ -1105,9 +1118,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         # ---- Read coordinates and metadata once ----
         zarr_path = str(self.fname_zarr)
         is_zip = zarr_path.endswith(".zip")
-        coords_raw, zarr_channels, _ = _read_coords_and_meta(
-            zarr_path, stream, fsteps[0], is_zip
-        )
+        coords_raw, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
         if zarr_channels:
             read_channels = zarr_channels
             channel_idxs = None
@@ -1152,8 +1163,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         for fi, fs in enumerate(fsteps):
             _logger.info(
-                f"RUN {self.run_id} - {stream}: "
-                f"Reading fstep {fs} ({fi + 1}/{len(fsteps)})..."
+                f"RUN {self.run_id} - {stream}: Reading fstep {fs} ({fi + 1}/{len(fsteps)})..."
             )
 
             # Dispatch parallel reads for this single fstep.
@@ -1163,7 +1173,12 @@ class WeatherGenZarrReader(WeatherGenReader):
                 try:
                     results = Parallel(n_jobs=n_workers, backend=backend)(
                         delayed(_read_sample_raw)(
-                            zarr_path, s, stream, [fs], channel_idxs, is_zip,
+                            zarr_path,
+                            s,
+                            stream,
+                            [fs],
+                            channel_idxs,
+                            is_zip,
                             read_coords=need_per_sample_coords,
                             is_gridded=is_gridded_data,
                         )
@@ -1181,7 +1196,12 @@ class WeatherGenZarrReader(WeatherGenReader):
                     n_workers = 1  # sequential for this and all subsequent fsteps
                     results = [
                         _read_sample_raw(
-                            zarr_path, s, stream, [fs], channel_idxs, is_zip,
+                            zarr_path,
+                            s,
+                            stream,
+                            [fs],
+                            channel_idxs,
+                            is_zip,
                             read_coords=need_per_sample_coords,
                             is_gridded=is_gridded_data,
                         )
@@ -1190,7 +1210,12 @@ class WeatherGenZarrReader(WeatherGenReader):
             else:
                 results = [
                     _read_sample_raw(
-                        zarr_path, s, stream, [fs], channel_idxs, is_zip,
+                        zarr_path,
+                        s,
+                        stream,
+                        [fs],
+                        channel_idxs,
+                        is_zip,
                         read_coords=need_per_sample_coords,
                         is_gridded=is_gridded_data,
                     )
@@ -1229,29 +1254,29 @@ class WeatherGenZarrReader(WeatherGenReader):
                 for i in range(len(samples)):
                     time_entry = results[i][2][0]  # index 0: this is the only fstep
                     if n_sub > 1 and sub_idx < len(time_entry):
-                        per_sample_valid_times.append(
-                            np.datetime64(time_entry[sub_idx], "ns")
-                        )
+                        per_sample_valid_times.append(np.datetime64(time_entry[sub_idx], "ns"))
                     elif len(time_entry) > 0:
-                        per_sample_valid_times.append(
-                            np.datetime64(time_entry[0], "ns")
-                        )
+                        per_sample_valid_times.append(np.datetime64(time_entry[0], "ns"))
                     else:
-                        per_sample_valid_times.append(
-                            np.datetime64("NaT", "ns")
-                        )
+                        per_sample_valid_times.append(np.datetime64("NaT", "ns"))
 
                 if is_gridded_data:
                     da_tar, da_pred = self._build_gridded_dataarrays(
-                        tars_list, preds_list, samples, read_channels,
-                        lat, lon, per_sample_valid_times, source_interval_starts,
+                        tars_list,
+                        preds_list,
+                        samples,
+                        read_channels,
+                        lat,
+                        lon,
+                        per_sample_valid_times,
+                        source_interval_starts,
                         fs if n_sub == 1 else fstep_counter,
-                        ensemble, all_ens,
+                        ensemble,
+                        all_ens,
                     )
                 else:
                     per_sample_coords = [
-                        results[i][3].get("coords", None)
-                        for i in range(len(samples))
+                        results[i][3].get("coords", None) for i in range(len(samples))
                     ]
                     # For scatter data, times_all[0] is the full
                     # per-observation times array (not unique-only).
@@ -1260,19 +1285,24 @@ class WeatherGenZarrReader(WeatherGenReader):
                         for i in range(len(samples))
                     ]
                     da_tar, da_pred = self._build_scatter_dataarrays(
-                        tars_list, preds_list, samples, read_channels,
-                        per_sample_valid_times, source_interval_starts,
+                        tars_list,
+                        preds_list,
+                        samples,
+                        read_channels,
+                        per_sample_valid_times,
+                        source_interval_starts,
                         fs if n_sub == 1 else fstep_counter,
-                        ensemble, all_ens, per_sample_coords, coords_raw,
+                        ensemble,
+                        all_ens,
+                        per_sample_coords,
+                        coords_raw,
                         per_sample_obs_times=per_sample_obs_times,
                     )
 
                 # Free raw numpy lists before post-processing creates more copies
                 del tars_list, preds_list
 
-                da_tar, da_pred = _select_channels(
-                    da_tar, da_pred, stream, channels, stream_cfg
-                )
+                da_tar, da_pred = _select_channels(da_tar, da_pred, stream, channels, stream_cfg)
 
                 if is_gridded_data:
                     da_tar = _add_lead_time_coord(da_tar)
@@ -1338,8 +1368,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         all_channels = self.get_channels(stream)
         is_gridded_data = self.is_gridded_data(stream)
         _logger.info(
-            f"RUN {self.run_id}: Processing stream {stream} "
-            f"(fast raw I/O – ZipStore parallel)..."
+            f"RUN {self.run_id}: Processing stream {stream} (fast raw I/O – ZipStore parallel)..."
         )
 
         fsteps = sorted(int(f) for f in (fsteps or self.get_forecast_steps()))
@@ -1356,9 +1385,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         # ---- Read coordinates and metadata once ----
         zarr_path = str(self.fname_zarr)
         is_zip = zarr_path.endswith(".zip")
-        coords_raw, zarr_channels, _ = _read_coords_and_meta(
-            zarr_path, stream, fsteps[0], is_zip
-        )
+        coords_raw, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
         if zarr_channels:
             read_channels = zarr_channels
             channel_idxs = None
@@ -1397,7 +1424,12 @@ class WeatherGenZarrReader(WeatherGenReader):
             try:
                 results = Parallel(n_jobs=n_workers, backend=backend)(
                     delayed(_read_sample_raw)(
-                        zarr_path, s, stream, fsteps, channel_idxs, is_zip,
+                        zarr_path,
+                        s,
+                        stream,
+                        fsteps,
+                        channel_idxs,
+                        is_zip,
                         read_coords=need_per_sample_coords,
                         is_gridded=is_gridded_data,
                     )
@@ -1405,8 +1437,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 )
             except (RuntimeError, OSError) as pool_err:
                 _logger.warning(
-                    f"ZipStore parallel pool failed ({pool_err}). "
-                    f"Switching to sequential reads."
+                    f"ZipStore parallel pool failed ({pool_err}). Switching to sequential reads."
                 )
                 try:
                     get_reusable_executor().shutdown(wait=True)
@@ -1415,7 +1446,12 @@ class WeatherGenZarrReader(WeatherGenReader):
                 n_workers = 1
                 results = [
                     _read_sample_raw(
-                        zarr_path, s, stream, fsteps, channel_idxs, is_zip,
+                        zarr_path,
+                        s,
+                        stream,
+                        fsteps,
+                        channel_idxs,
+                        is_zip,
                         read_coords=need_per_sample_coords,
                         is_gridded=is_gridded_data,
                     )
@@ -1424,7 +1460,12 @@ class WeatherGenZarrReader(WeatherGenReader):
         else:
             results = [
                 _read_sample_raw(
-                    zarr_path, s, stream, fsteps, channel_idxs, is_zip,
+                    zarr_path,
+                    s,
+                    stream,
+                    fsteps,
+                    channel_idxs,
+                    is_zip,
                     read_coords=need_per_sample_coords,
                     is_gridded=is_gridded_data,
                 )
@@ -1478,30 +1519,29 @@ class WeatherGenZarrReader(WeatherGenReader):
                 for i in range(len(samples)):
                     time_entry = results[i][2][fi]  # fi-th fstep
                     if n_sub > 1 and sub_idx < len(time_entry):
-                        per_sample_valid_times.append(
-                            np.datetime64(time_entry[sub_idx], "ns")
-                        )
+                        per_sample_valid_times.append(np.datetime64(time_entry[sub_idx], "ns"))
                     elif len(time_entry) > 0:
-                        per_sample_valid_times.append(
-                            np.datetime64(time_entry[0], "ns")
-                        )
+                        per_sample_valid_times.append(np.datetime64(time_entry[0], "ns"))
                     else:
-                        per_sample_valid_times.append(
-                            np.datetime64("NaT", "ns")
-                        )
+                        per_sample_valid_times.append(np.datetime64("NaT", "ns"))
 
                 if is_gridded_data:
                     da_tar, da_pred = self._build_gridded_dataarrays(
-                        tars_list, preds_list, samples, read_channels,
-                        lat, lon, per_sample_valid_times,
+                        tars_list,
+                        preds_list,
+                        samples,
+                        read_channels,
+                        lat,
+                        lon,
+                        per_sample_valid_times,
                         source_interval_starts,
                         fs if n_sub == 1 else fstep_counter,
-                        ensemble, all_ens,
+                        ensemble,
+                        all_ens,
                     )
                 else:
                     per_sample_coords = [
-                        results[i][3].get("coords", None)
-                        for i in range(len(samples))
+                        results[i][3].get("coords", None) for i in range(len(samples))
                     ]
                     # For scatter data, times_all[fi] is the full
                     # per-observation times array (not unique-only).
@@ -1510,18 +1550,23 @@ class WeatherGenZarrReader(WeatherGenReader):
                         for i in range(len(samples))
                     ]
                     da_tar, da_pred = self._build_scatter_dataarrays(
-                        tars_list, preds_list, samples, read_channels,
-                        per_sample_valid_times, source_interval_starts,
+                        tars_list,
+                        preds_list,
+                        samples,
+                        read_channels,
+                        per_sample_valid_times,
+                        source_interval_starts,
                         fs if n_sub == 1 else fstep_counter,
-                        ensemble, all_ens, per_sample_coords, coords_raw,
+                        ensemble,
+                        all_ens,
+                        per_sample_coords,
+                        coords_raw,
                         per_sample_obs_times=per_sample_obs_times,
                     )
 
                 del tars_list, preds_list
 
-                da_tar, da_pred = _select_channels(
-                    da_tar, da_pred, stream, channels, stream_cfg
-                )
+                da_tar, da_pred = _select_channels(da_tar, da_pred, stream, channels, stream_cfg)
 
                 if is_gridded_data:
                     da_tar = _add_lead_time_coord(da_tar)
@@ -1588,7 +1633,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         sub_lat = lat[:n_ipoints]
         sub_lon = lon[:n_ipoints]
 
-        tars_stacked = np.stack(tars_list, axis=0)   # (n_samples, n_ipoints, n_channels)
+        tars_stacked = np.stack(tars_list, axis=0)  # (n_samples, n_ipoints, n_channels)
         preds_stacked = np.stack(preds_list, axis=0)  # (n_samples, n_ipoints, n_channels[, n_ens])
 
         # valid_time must be 2D (sample, ipoint) to match the shape produced by
@@ -1599,7 +1644,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         # so we build a 2D array where row i is filled with sample i's time.
         vt_col = np.array(per_sample_valid_times, dtype="datetime64[ns]")  # (n_samples,)
         valid_time_2d = np.broadcast_to(
-            vt_col[:, np.newaxis],     # (n_samples, 1)
+            vt_col[:, np.newaxis],  # (n_samples, 1)
             (n_samples, n_ipoints),
         ).copy()  # copy: broadcast arrays are read-only
 
@@ -1621,7 +1666,10 @@ class WeatherGenZarrReader(WeatherGenReader):
         )
 
         da_pred = WeatherGenZarrReader._build_pred_dataarray(
-            preds_stacked, base_coords, ensemble, all_ens,
+            preds_stacked,
+            base_coords,
+            ensemble,
+            all_ens,
         )
 
         return da_tar, da_pred
@@ -1670,7 +1718,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
         for si, sample in enumerate(samples):
             n_ip = tars_list[si].shape[0]
-            tar_data = tars_list[si]    # (n_ip, n_channels)
+            tar_data = tars_list[si]  # (n_ip, n_channels)
             pred_data = preds_list[si]  # (n_ip, n_channels[, n_ens])
 
             # Use per-sample coords if available, otherwise fall back to reference
@@ -1721,7 +1769,11 @@ class WeatherGenZarrReader(WeatherGenReader):
                         coords=pred_coords,
                     )
                 else:
-                    ens_idxs = [all_ens.index(e) for e in ensemble] if all_ens else list(range(pred_data.shape[-1]))
+                    ens_idxs = (
+                        [all_ens.index(e) for e in ensemble]
+                        if all_ens
+                        else list(range(pred_data.shape[-1]))
+                    )
                     pred_data = pred_data[:, :, ens_idxs]
                     pred_coords = dict(sample_coords)
                     pred_coords["ens"] = ensemble
@@ -1860,9 +1912,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             # TODO: improve this to get ensemble from io class
             with zarrio_reader(self.fname_zarr) as zio:
                 dummy = zio.get_data(0, stream, zio.forecast_steps[0])
-            self._cached_ensemble[stream] = list(
-                dummy.prediction.as_xarray().coords["ens"].values
-            )
+            self._cached_ensemble[stream] = list(dummy.prediction.as_xarray().coords["ens"].values)
         return self._cached_ensemble[stream]
 
     def is_gridded_data(self, stream: str) -> bool:

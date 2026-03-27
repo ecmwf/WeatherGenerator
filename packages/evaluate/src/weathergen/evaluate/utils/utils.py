@@ -17,13 +17,12 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from joblib import Parallel, delayed
-from joblib.externals.loky import get_reusable_executor
-        
 # Third-party
 import numpy as np
 import omegaconf as oc
 import xarray as xr
+from joblib import Parallel, delayed
+from joblib.externals.loky import get_reusable_executor
 from tqdm import tqdm
 
 # Local application / package
@@ -111,8 +110,7 @@ def _score_single_fstep(
 
     # Apply region mask
     tars, preds, tars_next, preds_next = [
-        bbox.apply_mask(x) if x is not None else None
-        for x in (tars, preds, tars_next, preds_next)
+        bbox.apply_mask(x) if x is not None else None for x in (tars, preds, tars_next, preds_next)
     ]
 
     score_data = VerifiedData(preds, tars, preds_next, tars_next, climatology)
@@ -259,9 +257,7 @@ def calc_scores_per_stream(
             preds_fs = da_preds[fstep]
             preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
-            fstep_tasks.append(
-                (fstep, tars_fs, preds_fs, preds_next, tars_next, climatology)
-            )
+            fstep_tasks.append((fstep, tars_fs, preds_fs, preds_next, tars_next, climatology))
 
         # --- Execute scoring (threaded or sequential) ---
         num_scoring_threads = int(reader.eval_cfg.get("num_scoring_threads", 8))
@@ -272,11 +268,17 @@ def calc_scores_per_stream(
                 futures = {
                     executor.submit(
                         _score_single_fstep,
-                        fstep, tars_fs, preds_fs, preds_next, tars_next,
-                        climatology, bbox, metrics, group_by_coord,
+                        fstep,
+                        tars_fs,
+                        preds_fs,
+                        preds_next,
+                        tars_next,
+                        climatology,
+                        bbox,
+                        metrics,
+                        group_by_coord,
                     ): fstep
-                    for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology
-                    in fstep_tasks
+                    for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks
                 }
                 fstep_results = []
                 for i, future in enumerate(as_completed(futures), 1):
@@ -298,8 +300,15 @@ def calc_scores_per_stream(
                 1,
             ):
                 result = _score_single_fstep(
-                    fstep, tars_fs, preds_fs, preds_next, tars_next,
-                    climatology, bbox, metrics, group_by_coord,
+                    fstep,
+                    tars_fs,
+                    preds_fs,
+                    preds_next,
+                    tars_next,
+                    climatology,
+                    bbox,
+                    metrics,
+                    group_by_coord,
                 )
                 if result is not None:
                     fstep_results.append(result)
@@ -535,8 +544,7 @@ def _resolve_num_plot_workers(requested: int = 0) -> int:
 
     except Exception as e:
         _logger.debug(
-            f"Could not auto-detect process limits for plotting ({e}). "
-            f"Defaulting to sequential."
+            f"Could not auto-detect process limits for plotting ({e}). Defaulting to sequential."
         )
         return 1
 
@@ -593,6 +601,7 @@ def _plot_single_sample(
         Plain-dict copies of the per-variable colour-range configs.
     """
     import matplotlib
+
     matplotlib.use("Agg")  # ensure non-interactive backend in worker
 
     # Convert plain dicts back to OmegaConf for Plotter compatibility
@@ -609,19 +618,13 @@ def _plot_single_sample(
 
     if plot_maps:
         if plot_target:
-            plotter.create_maps_per_sample(
-                tars, plot_chs, data_selection, "targets", maps_cfg
-            )
+            plotter.create_maps_per_sample(tars, plot_chs, data_selection, "targets", maps_cfg)
 
         if plot_bias and bias_data is not None:
-            plotter.create_maps_per_sample(
-                bias_data, plot_chs, data_selection, "bias", bias_cfg
-            )
+            plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
         for ens in ensemble:
-            preds_ens = (
-                preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
-            )
+            preds_ens = preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
             preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
             preds_name = "_".join(filter(None, ["preds", preds_tag]))
 
@@ -787,9 +790,7 @@ def plot_data(
     output_basedir = str(reader.runplot_dir)
 
     # Determine parallel workers
-    num_plot_workers = _resolve_num_plot_workers(
-        int(reader.eval_cfg.get("num_plot_workers", 0))
-    )
+    num_plot_workers = _resolve_num_plot_workers(int(reader.eval_cfg.get("num_plot_workers", 0)))
 
     # Build task list: one entry per (fstep, sample)
     tasks: list[dict] = []
