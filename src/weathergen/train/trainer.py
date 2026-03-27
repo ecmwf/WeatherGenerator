@@ -19,7 +19,7 @@ from omegaconf import OmegaConf
 
 # FSDP2
 from torch.distributed.tensor import DTensor
-from lightning.fabric.utilities.throughput import Throughput, measure_flops, get_available_flops
+from lightning.fabric.utilities.throughput import Throughput, get_available_flops
 
 
 import weathergen.common.config as config
@@ -47,6 +47,11 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
+from weathergen.utils.performance import (
+    build_throughput_metrics,
+    compute_source_bytes,
+    measure_model_flops,
+)
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -87,6 +92,7 @@ class Trainer(TrainerBase):
         self.collapse_monitor: CollapseMonitor | None = None
         self.throughput: Throughput | None = None
         self.flops_per_batch: int | None = None
+        self.flops_per_batch_fwd: int | None = None
         self._source_bytes_per_batch: int = 0
         self._THROUGHPUT_WARMUP_STEPS: int = 2
         self._t0_throughput: float | None = None
@@ -441,30 +447,24 @@ class Trainer(TrainerBase):
             else:
                 assert False, "validate_before_training must be integer or boolean."
 
-    @staticmethod
-    def _batch_bytes(batch_samples) -> int:
-        """Total bytes of source token tensors in a BatchSamples object."""
-        total = 0
-        for sample in batch_samples.samples:
-            for stream_data in sample.streams_data.values():
-                for t in stream_data.source_tokens_cells:
-                    total += t.nbytes
-        return total
+    def _compute_targets_and_auxs(self, sample_batch) -> dict:
+        """Build the targets-and-auxiliaries dict required by the loss calculator."""
+        targets_and_auxs = {}
+        for loss_name, target_aux in self.target_and_aux_calculators.items():
+            target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+            targets_and_auxs[loss_name] = target_aux.compute(
+                self.cf.general.istep,
+                sample_batch.get_target_samples(target_idxs),
+                self.model_params,
+                self.model,
+            )
+        return targets_and_auxs
 
     def precompute_flops(self, sample_batch) -> None:
-        """Measure FLOPs for one forward+backward pass on a single batch."""
+        """Measure FLOPs for one training step (forward-only and full fwd+bwd)."""
         try:
             source = sample_batch.get_source_samples()
-
-            targets_and_auxs = {}
-            for loss_name, target_aux in self.target_and_aux_calculators.items():
-                target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
-                targets_and_auxs[loss_name] = target_aux.compute(
-                    self.cf.general.istep,
-                    sample_batch.get_target_samples(target_idxs),
-                    self.model_params,
-                    self.model,
-                )
+            targets_and_auxs = self._compute_targets_and_auxs(sample_batch)
             metadata = extract_batch_metadata(sample_batch)
 
             cf = self.cf
@@ -473,7 +473,7 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                self.flops_per_batch = measure_flops(
+                self.flops_per_batch_fwd, self.flops_per_batch = measure_model_flops(
                     self.model,
                     lambda: self.model(self.model_params, source),
                     lambda output: self.loss_calculator.compute_loss(
@@ -489,16 +489,18 @@ class Trainer(TrainerBase):
             self.loss_calculator.stddev_unweighted_hist.pop()
 
             if is_root():
-                logger.info(f"Measured FLOPs per batch: {self.flops_per_batch:.2e}")
+                logger.info(f"Measured FLOPs per batch (fwd+bwd): {self.flops_per_batch:.2e}")
+                logger.info(f"Measured FLOPs per batch (fwd only): {self.flops_per_batch_fwd:.2e}")
         except Exception as e:
             if is_root():
-                logger.warning(f"Failed to measure FLOPs: {e}. MFU will not be available.")
+                logger.warning(f"Failed to measure FLOPs: {e}. MFU/HFU will not be available.")
             self.flops_per_batch = None
+            self.flops_per_batch_fwd = None
 
     def precompute_source_bytes(self, sample_batch) -> None:
         """Precompute source tensor bytes per batch for MB/s tracking."""
         try:
-            self._source_bytes_per_batch = self._batch_bytes(sample_batch.get_source_samples())
+            self._source_bytes_per_batch = compute_source_bytes(sample_batch.get_source_samples())
             if is_root():
                 logger.info(f"Source bytes per batch: {self._source_bytes_per_batch / 1e6:.1f} MB")
         except Exception:
@@ -643,13 +645,18 @@ class Trainer(TrainerBase):
                 self._log(TRAIN)
                 # Log throughput metrics
                 if self.throughput is not None and is_root() and self._total_batches > 0:
-                    throughput_metrics = self.throughput.compute()
-                    elapsed = time.time() - self._t0_throughput
-                    self.train_logger.log_metrics(TRAIN, {
-                        f"performance.throughput.{k.replace('/', '.')}": v for k, v in throughput_metrics.items()
-                        if isinstance(v, (int, float))
-                    } | {"performance.throughput.mb_per_sec": self._total_mb / elapsed if elapsed > 0 else 0.0},
-                    step=self.cf.general.istep)
+                    recompute_factor = self.train_logging.get("throughput_recompute_factor", 4 / 3)
+                    perf_metrics = build_throughput_metrics(
+                        self.throughput.compute(),
+                        time.time() - self._t0_throughput,
+                        self._total_batches,
+                        self._total_mb,
+                        self.flops_per_batch_fwd,
+                        self.flops_per_batch,
+                        self._available_flops,
+                        recompute_factor,
+                    )
+                    self.train_logger.log_metrics(TRAIN, perf_metrics, step=self.cf.general.istep)
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
