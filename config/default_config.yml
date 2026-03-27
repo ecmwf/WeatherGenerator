@@ -245,11 +245,13 @@ validation_config:
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 0,
+    num_samples: 1,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
+    # filter channels
+    allow_filter_output_channels: True
     }
 
   # run validation before training starts (mainly for model development)
