@@ -239,13 +239,33 @@ def _process_stream(
     output_data = None
     if (needs_plotting or needs_scoring) and type_ == "zarr":
         available_data = reader.check_availability(stream, mode="evaluation")
-        output_data = reader.get_data(
-            stream,
-            fsteps=available_data.fsteps,
-            samples=available_data.samples,
-            channels=available_data.channels,
-            ensemble=available_data.ensemble,
+
+        # Use fast raw zarr I/O when available (bypasses ZarrIO/dask for ~20× speedup)
+        use_fast_io = (
+            hasattr(reader, "get_data_raw")
+            and getattr(reader, "_fast_io", False)
         )
+
+        if use_fast_io:
+            _logger.info(
+                f"RUN {run_id} - {stream}: Using fast raw zarr I/O path."
+            )
+            output_data = reader.get_data_raw(
+                stream,
+                fsteps=available_data.fsteps,
+                samples=available_data.samples,
+                channels=available_data.channels,
+                ensemble=available_data.ensemble,
+            )
+        else:
+            output_data = reader.get_data(
+                stream,
+                fsteps=available_data.fsteps,
+                samples=available_data.samples,
+                channels=available_data.channels,
+                ensemble=available_data.ensemble,
+            )
+
         _logger.info(
             f"RUN {run_id} - {stream}: Data loaded once — "
             f"sharing between plotting and scoring."

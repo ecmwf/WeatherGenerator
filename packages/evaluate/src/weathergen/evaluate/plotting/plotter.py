@@ -147,7 +147,11 @@ class Plotter:
             xarray DataArray with selected data.
         """
         for key, value in selection.items():
-            if key in da.coords and key not in da.dims:
+            if key not in da.coords and key not in da.dims:
+                # Key is not a coordinate or dimension of this DataArray
+                # (e.g. "stream" is used for file-naming only). Skip it.
+                continue
+            elif key in da.coords and key not in da.dims:
                 # Coordinate like 'sample' aligned to another dim
                 da = da.where(da[key] == value, drop=True)
             else:
@@ -192,7 +196,7 @@ class Plotter:
 
         if not os.path.exists(hist_output_dir):
             _logger.info(f"Creating dir {hist_output_dir}")
-            os.makedirs(hist_output_dir)
+            os.makedirs(hist_output_dir, exist_ok=True)
 
         for var in variables:
             select_var = self.select | {"channel": var}
@@ -353,7 +357,7 @@ class Plotter:
 
         if not os.path.exists(map_output_dir):
             _logger.info(f"Creating dir {map_output_dir}")
-            os.makedirs(map_output_dir)
+            os.makedirs(map_output_dir, exist_ok=True)
 
         for region in self.regions:
             if region != "global":
@@ -369,8 +373,8 @@ class Plotter:
 
                 if self.plot_subtimesteps:
                     ntimes_unique = len(np.unique(da.valid_time))
-                    _logger.info(
-                        f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
+                    _logger.debug(
+                        f"Creating maps for variable {var} - {tag}"
                     )
                     if ntimes_unique == 0:
                         _logger.warning(
@@ -379,7 +383,7 @@ class Plotter:
                         continue
                     groups = da.groupby("valid_time")
                 else:
-                    _logger.info(f"Creating maps for all valid times of {var} - {tag}")
+                    _logger.debug(f"Creating maps for variable {var} - {tag}")
                     groups = [(None, da)]  # single dummy group
 
                 for valid_time, da_t in groups:
@@ -483,6 +487,8 @@ class Plotter:
 
         ax = fig.add_subplot(1, 1, 1, projection=proj)
         ax.coastlines()
+        
+        data = data.squeeze()
 
         assert data["lon"].shape == data["lat"].shape == data.shape, (
             f"Scatter plot:: Data shape do not match. Shapes: "
@@ -581,11 +587,11 @@ class Plotter:
         duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
 
         for region in self.regions:
-            for _, sa in enumerate(samples):
-                for _, var in enumerate(variables):
-                    _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
+            for _, sa in enumerate(tqdm(samples, desc="Animating samples")):
+                for _, var in enumerate(tqdm(variables, desc="Variables", leave=False)):
+                    _logger.debug(f"Creating animation for {var} sample: {sa} - {tag}")
                     image_paths = []
-                    for _, fstep in enumerate(fsteps):
+                    for _, fstep in enumerate(tqdm(fsteps, desc="Forecast steps", leave=False)):
                         # TODO: refactor to avoid code duplication with scatter_plot
                         parts = [
                             "map",

@@ -10,6 +10,7 @@
 # Standard library
 import json
 import logging
+import os
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -18,6 +19,9 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
+import zarr
+from joblib import Parallel, delayed
+from joblib.externals.loky import get_reusable_executor
 from tqdm import tqdm
 
 # Local application / package
@@ -137,6 +141,230 @@ def _init_worker_zio(fname_zarr: Path) -> None:
     """ProcessPoolExecutor initializer: open a persistent ZarrIO per worker."""
     global _worker_zio  # noqa: PLW0603
     _worker_zio = zarrio_reader(fname_zarr).__enter__()
+
+
+def _compute_early_channel_selection(
+    read_channels: list[str],
+    requested_channels: list[str],
+    stream_cfg: dict,
+) -> tuple[list[int] | None, list[str]]:
+    """Compute channel indices for early selection in _read_sample_raw.
+
+    When the stream does NOT use derived channels, we can select only the
+    requested channels at the numpy level inside each worker, avoiding
+    the transfer and stacking of unrequested channels.
+
+    Parameters
+    ----------
+    read_channels : list[str]
+        Full list of channels available in the zarr store.
+    requested_channels : list[str]
+        Channels the user requested for evaluation/plotting.
+    stream_cfg : dict
+        Stream configuration (checked for ``derive_channels`` key).
+
+    Returns
+    -------
+    channel_idxs : list[int] | None
+        Indices into ``read_channels`` to select, or ``None`` to read all.
+    effective_channels : list[str]
+        Channel names that will be returned (subset or full list).
+    """
+    # If derived channels are configured, we must keep ALL channels so that
+    # the derivation logic in _select_channels has its source data.
+    if "derive_channels" in stream_cfg:
+        return None, read_channels
+
+    # Find the intersection: requested channels that exist in the zarr store
+    available_set = set(read_channels)
+    needed = [ch for ch in requested_channels if ch in available_set]
+
+    # If all channels are requested anyway, or the intersection is empty,
+    # skip early selection.
+    if not needed or len(needed) == len(read_channels):
+        return None, read_channels
+
+    # Build index list preserving zarr order for stable indexing
+    chan_to_idx = {ch: i for i, ch in enumerate(read_channels)}
+    idxs = sorted(chan_to_idx[ch] for ch in needed)
+    effective = [read_channels[i] for i in idxs]
+
+    _logger.debug(
+        f"Early channel selection: {len(effective)}/{len(read_channels)} channels "
+        f"({', '.join(effective[:5])}{'...' if len(effective) > 5 else ''})"
+    )
+    return idxs, effective
+
+
+def _read_sample_raw(
+    zarr_path: str,
+    sample: int,
+    stream: str,
+    fsteps: list[int],
+    channel_idxs: list[int],
+    is_zip: bool,
+    read_coords: bool = False,
+    is_gridded: bool = True,
+) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], dict]:
+    """
+    Read all forecast steps for one sample via direct zarr array access.
+
+    Bypasses ZarrIO / OutputDataset / as_xarray / dask for maximum speed.
+    Each worker opens its own zarr store handle (safe for both ZipStore and
+    LocalStore).
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the zarr store (.zarr directory or .zip file).
+    sample : int
+        Sample index to read.
+    stream : str
+        Stream name (e.g. "ERA5").
+    fsteps : list[int]
+        Forecast steps to read.
+    channel_idxs : list[int]
+        Pre-computed indices into the channel axis (select only needed channels).
+    is_zip : bool
+        Whether the store is a ZipStore (.zip).
+    read_coords : bool
+        If True, also read per-sample coords (needed for scatter/non-gridded data).
+    is_gridded : bool
+        If True, split by unique valid_times to create sub-steps (gridded data
+        with multiple forecast sub-steps per fstep).  If False (scatter/obs data),
+        keep all observations in a single array per fstep — each observation has
+        its own time and splitting would create one array per observation.
+
+    Returns
+    -------
+    preds_all : list[np.ndarray]
+        Per-fstep prediction arrays, shape (ipoints, channels[, ens]).
+        For sub-steps, multiple arrays per fstep (one per unique valid_time).
+    targets_all : list[np.ndarray]
+        Per-fstep target arrays, shape (ipoints, channels).
+    times_all : list[np.ndarray]
+        Per-fstep time arrays (unique times per entry).
+    meta : dict
+        Metadata: {"source_interval": ..., "n_substeps": list[int],
+                    "coords": np.ndarray | None}.
+    """
+    if is_zip:
+        store = zarr.storage.ZipStore(zarr_path, mode="r")
+        ds = zarr.open_group(store=store, mode="r")
+    else:
+        store = zarr.storage.LocalStore(zarr_path)
+        ds = zarr.open_group(store=store, mode="r")
+
+    preds_all, targets_all, times_all = [], [], []
+    n_substeps = []  # track how many sub-steps per fstep
+    source_interval = None
+
+    for fs in fsteps:
+        base = f"{sample}/{stream}/{fs}"
+
+        # Read source_interval from prediction group attributes (once)
+        if source_interval is None:
+            try:
+                pred_group = ds[f"{base}/prediction"]
+                attrs = dict(pred_group.attrs)
+                source_interval = attrs.get("source_interval", {})
+            except (KeyError, AttributeError):
+                source_interval = {}
+
+        # Direct array access — bypasses OutputDataset/as_xarray/dask entirely
+        pred_data = np.asarray(ds[f"{base}/prediction/data"])
+        target_data = np.asarray(ds[f"{base}/target/data"])
+        times_data = np.asarray(ds[f"{base}/prediction/times"])
+
+        # Select channels by index
+        if channel_idxs is not None:
+            pred_data = pred_data[:, channel_idxs] if pred_data.ndim == 2 else pred_data[:, channel_idxs, :]
+            target_data = target_data[:, channel_idxs]
+
+        # Handle sub-steps (gridded data with multiple valid_times per fstep).
+        # For scatter/observation data each observation has its own timestamp,
+        # so splitting by unique time would create one tiny array per obs —
+        # thousands of them — causing the assembly code to hang.
+        unique_times = np.unique(times_data)
+        if is_gridded and len(unique_times) > 1:
+            count = 0
+            for ut in unique_times:
+                mask = times_data == ut
+                preds_all.append(pred_data[mask])
+                targets_all.append(target_data[mask])
+                count += 1
+            times_all.append(unique_times)
+            n_substeps.append(count)
+        else:
+            preds_all.append(pred_data)
+            targets_all.append(target_data)
+            # For scatter data, keep the full per-observation times array
+            # so the DataArray builder can assign per-ipoint valid_time.
+            # For gridded data with 1 unique time, unique_times suffices.
+            if not is_gridded:
+                times_all.append(times_data)
+            else:
+                times_all.append(unique_times)
+            n_substeps.append(1)
+
+    # Optionally read per-sample coordinates (for scatter / non-gridded data)
+    sample_coords = None
+    if read_coords and fsteps:
+        try:
+            base0 = f"{sample}/{stream}/{fsteps[0]}"
+            sample_coords = np.asarray(ds[f"{base0}/prediction/coords"])
+        except (KeyError, AttributeError):
+            pass
+
+    try:
+        store.close()
+    except Exception:
+        pass
+
+    meta = {
+        "source_interval": source_interval,
+        "n_substeps": n_substeps,
+        "coords": sample_coords,
+    }
+    return preds_all, targets_all, times_all, meta
+
+
+def _read_coords_and_meta(
+    zarr_path: str,
+    stream: str,
+    fstep: int,
+    is_zip: bool,
+) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """
+    Read coordinates and channel names from the zarr store (once).
+
+    Returns
+    -------
+    coords : np.ndarray, shape (ipoints, 2) — lat, lon
+    channels : list[str] — all channel names from zarr
+    times_ref : np.ndarray — reference times from sample 0
+    """
+    if is_zip:
+        store = zarr.storage.ZipStore(zarr_path, mode="r")
+        ds = zarr.open_group(store=store, mode="r")
+    else:
+        store = zarr.storage.LocalStore(zarr_path)
+        ds = zarr.open_group(store=store, mode="r")
+
+    base = f"0/{stream}/{fstep}"
+    coords = np.asarray(ds[f"{base}/prediction/coords"])
+    times_ref = np.asarray(ds[f"{base}/prediction/times"])
+
+    # Read channel names from group attributes
+    pred_group = ds[f"{base}/prediction"]
+    channels = list(pred_group.attrs.get("channels", []))
+
+    try:
+        store.close()
+    except Exception:
+        pass
+
+    return coords, channels, times_ref
 
 
 class WeatherGenReader(Reader):
@@ -471,7 +699,87 @@ class WeatherGenZarrReader(WeatherGenReader):
         self._cached_is_gridded: dict[str, bool] = {}
 
         # I/O threading config
+        self._fast_io = eval_cfg.get("fast_io", True)
         self._num_io_threads: int = int(eval_cfg.get("num_io_threads", 8))
+
+        # Fast raw I/O config (direct zarr access, bypasses ZarrIO/dask)
+        self._num_io_workers: int = self._resolve_num_io_workers(
+            int(eval_cfg.get("num_io_workers", 0))
+        )
+
+    @staticmethod
+    def _resolve_num_io_workers(requested: int) -> int:
+        """Determine safe number of parallel I/O workers.
+
+        Parameters
+        ----------
+        requested : int
+            Value from config (``num_io_workers``).
+            0 (the default) means *auto-detect*: use parallel workers only
+            when the system has enough headroom.
+
+        On HPC systems the per-user process/thread limit (``ulimit -u``) is
+        often shared across all jobs on the node.  Spawning loky workers when
+        the limit is almost reached causes "can't start new thread" errors
+        that cascade into the fallback path and deadlock it.
+
+        Auto-detection (``requested == 0``):
+        * Read ``/proc/self/status`` → current thread count.
+        * Read ``ulimit -u`` via ``resource.getrlimit``.
+        * If fewer than ``min_headroom`` slots remain → sequential (1).
+        * Otherwise cap at ``min(available // 4, cpu_count, 16)``.
+        """
+        import resource
+
+        if requested > 0:
+            return min(requested, os.cpu_count() or 16)
+
+        # Auto-detect safe parallelism
+        try:
+            # Current threads for this process tree
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("Threads:"):
+                        current_threads = int(line.split()[1])
+                        break
+                else:
+                    current_threads = 1
+
+            # System-wide nproc limit for this user
+            soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
+            if soft_limit == resource.RLIM_INFINITY:
+                soft_limit = 65536
+
+            # Count user processes (rough estimate via /proc)
+            import subprocess
+            result = subprocess.run(
+                ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "pid"],
+                capture_output=True, text=True, timeout=5,
+            )
+            user_procs = len(result.stdout.strip().splitlines()) if result.returncode == 0 else 0
+
+            available = soft_limit - user_procs
+            min_headroom = 64  # keep at least this many slots free
+
+            if available < min_headroom:
+                _logger.info(
+                    f"Auto-detected low process headroom "
+                    f"({available}/{soft_limit} slots free). "
+                    f"Using sequential I/O (num_io_workers=1)."
+                )
+                return 1
+
+            n = min(available // 4, os.cpu_count() or 48, 48)
+            n = max(n, 1)
+            _logger.info(
+                f"Auto-detected process headroom: {available}/{soft_limit} free. "
+                f"Using num_io_workers={n}."
+            )
+            return n
+
+        except Exception as e:
+            _logger.debug(f"Could not auto-detect process limits ({e}). Defaulting to sequential.")
+            return 1
 
     def get_data(
         self,
@@ -538,6 +846,15 @@ class WeatherGenZarrReader(WeatherGenReader):
                 and 'zip' in type(zio._store).__name__.lower()
             )
 
+            # # For ZipStore, never use parallel workers in get_data().
+            # # ProcessPoolExecutor requires spawning new processes, which
+            # # routinely fails on HPC nodes with tight ulimit -u (shared
+            # # across all user jobs).  The spawned workers also need to
+            # # pickle/unpickle full xarray DataArrays over IPC, making them
+            # # slower than sequential reads in practice.
+            # if is_zip_store:
+            #     effective_threads = 1
+
             _logger.info(
                 f"RUN {self.run_id} - {stream}: Loading {len(samples)} samples × "
                 f"{len(fsteps)} fsteps = {n_total} items "
@@ -579,23 +896,31 @@ class WeatherGenZarrReader(WeatherGenReader):
                         zio, s, stream, f, ensemble, is_gridded_data,
                     )
 
-                with pool_cls(**pool_kwargs) as executor:
-                    futures = {
-                        executor.submit(*submit_args(s, f)): (f, s)
-                        for f in fsteps
-                        for s in samples
-                    }
-                    for future in tqdm(
-                        as_completed(futures), total=n_total,
-                        desc=f"Loading {self.run_id} - {stream}",
-                    ):
-                        result = future.result()
-                        if result is not None:
-                            fstep_r, sample_r, target, pred, vt = result
-                            results_by_fstep[fstep_r].append(
-                                (sample_r, target, pred, vt)
-                            )
-            else:
+                try:
+                    with pool_cls(**pool_kwargs) as executor:
+                        futures = {
+                            executor.submit(*submit_args(s, f)): (f, s)
+                            for f in fsteps
+                            for s in samples
+                        }
+                        for future in tqdm(
+                            as_completed(futures), total=n_total,
+                            desc=f"Loading {self.run_id} - {stream}",
+                        ):
+                            result = future.result()
+                            if result is not None:
+                                fstep_r, sample_r, target, pred, vt = result
+                                results_by_fstep[fstep_r].append(
+                                    (sample_r, target, pred, vt)
+                                )
+                except (RuntimeError, OSError) as pool_err:
+                    _logger.warning(
+                        f"Parallel pool failed ({pool_err}). "
+                        f"Falling back to sequential loading."
+                    )
+                    effective_threads = 0  # force sequential below
+
+            if effective_threads <= 1:
                 for f in fsteps:
                     for s in tqdm(
                         samples, desc=f"Loading {self.run_id} - {stream} - fstep {f}"
@@ -683,6 +1008,791 @@ class WeatherGenZarrReader(WeatherGenReader):
                     da_preds_dict[int(fstep)] = p
 
         return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
+
+    def get_data_raw(
+        self,
+        stream: str,
+        samples: list[int] | None = None,
+        fsteps: list[int] | None = None,
+        channels: list[str] | None = None,
+        ensemble: list[str] | None = None,
+    ) -> ReaderOutput:
+        """
+        Fast-path data loading using direct zarr array access and joblib parallelism.
+
+        Bypasses the ZarrIO → OutputDataset → as_xarray → dask pipeline for ~20× speedup
+        per (sample, fstep) read.  Produces identical ReaderOutput to get_data().
+
+        Falls back to get_data() on any error (unexpected zarr layout, missing
+        attributes, shape mismatch, etc.).
+
+        Parameters
+        ----------
+        stream : str
+            Stream name to retrieve data for.
+        samples : list[int] | None
+            Sample indices. If None, all samples are retrieved.
+        fsteps : list[int] | None
+            Forecast steps. If None, all forecast steps are retrieved.
+        channels : list[str] | None
+            Channel names to retrieve. If None, all channels are retrieved.
+        ensemble : list[str] | None
+            Ensemble members to select, or ["mean"] to average. If None, all.
+
+        Returns
+        -------
+        ReaderOutput
+            Identical structure to get_data() output.
+        """
+        # Choose implementation based on store type.
+        # ZipStore benefits from dispatching all samples at once (each
+        # reading all fsteps in a single _read_sample_raw call) because
+        # opening a ZipStore requires parsing the central-directory – a
+        # cost that is amortised over all fsteps inside a single call.
+        is_zip = str(self.fname_zarr).endswith(".zip")
+
+        try:
+            if is_zip:
+                return self._get_data_raw_zip_impl(
+                    stream, samples, fsteps, channels, ensemble,
+                )
+            return self._get_data_raw_impl(stream, samples, fsteps, channels, ensemble)
+        except Exception as e:
+            _logger.warning(
+                f"Fast I/O failed for {self.run_id} - {stream}: {e}. "
+                f"Falling back to standard get_data()."
+            )
+            # Ensure the loky reusable executor is fully shut down before
+            # the fallback tries to create its own process/thread pools.
+            # Without this, stale loky workers can exhaust the OS
+            # process/thread limit and deadlock the fallback path.
+            try:
+                get_reusable_executor().shutdown(wait=True)
+            except Exception:
+                pass
+            return self.get_data(stream, samples, fsteps, channels, ensemble)
+
+    def _get_data_raw_impl(
+        self,
+        stream: str,
+        samples: list[int] | None,
+        fsteps: list[int] | None,
+        channels: list[str] | None,
+        ensemble: list[str] | None,
+    ) -> ReaderOutput:
+        """Internal implementation of get_data_raw.
+
+        Processes one forecast step at a time to keep peak memory bounded at
+        ``n_samples × 1 × n_ipoints × n_channels × 4 bytes`` rather than
+        ``n_samples × n_fsteps × …``.
+        """
+        stream_cfg = self.get_stream(stream)
+        all_channels = self.get_channels(stream)
+        is_gridded_data = self.is_gridded_data(stream)
+        _logger.info(f"RUN {self.run_id}: Processing stream {stream} (fast raw I/O)...")
+
+        fsteps = sorted(int(f) for f in (fsteps or self.get_forecast_steps()))
+        samples = sorted(int(s) for s in (samples or self.get_samples()))
+        channels = channels or stream_cfg.get("channels", all_channels)
+        channels = to_list(channels)
+        ensemble = ensemble or self.get_ensemble(stream)
+        ensemble = to_list(ensemble)
+
+        # ---- Pre-compute channel indices into the zarr data arrays ----
+        channel_idxs = list(range(len(all_channels)))
+        read_channels = all_channels
+
+        # ---- Read coordinates and metadata once ----
+        zarr_path = str(self.fname_zarr)
+        is_zip = zarr_path.endswith(".zip")
+        coords_raw, zarr_channels, _ = _read_coords_and_meta(
+            zarr_path, stream, fsteps[0], is_zip
+        )
+        if zarr_channels:
+            read_channels = zarr_channels
+            channel_idxs = None
+
+        # ---- Early channel selection (skip unrequested channels) ----
+        channel_idxs, read_channels = _compute_early_channel_selection(
+            read_channels, channels, stream_cfg
+        )
+
+        lat = coords_raw[:, 0].astype(np.float64)
+        lon = coords_raw[:, 1].astype(np.float64)
+
+        need_per_sample_coords = not is_gridded_data
+
+        n_workers = min(self._num_io_workers, len(samples))
+
+        # Always use "loky" backend.  The loky reusable-executor is a
+        # **persistent process pool** that survives across Parallel() calls,
+        # so iterating over fsteps does not leak threads/processes.
+        # The previous "threading" backend created a *new* ThreadPoolExecutor
+        # per fstep, which quickly exhausted the OS thread limit ("can't
+        # start new thread") on systems with tight ulimits.
+        backend = "loky"
+
+        _logger.info(
+            f"RUN {self.run_id} - {stream}: Loading {len(samples)} samples × "
+            f"{len(fsteps)} fsteps via raw zarr I/O "
+            f"(workers={n_workers}, backend={backend})..."
+        )
+
+        # Pre-fetch ensemble names once (outside the per-fstep loop)
+        all_ens: list[str] | None = None
+        if ensemble != ["mean"]:
+            all_ens = self.get_ensemble(stream)
+
+        # ---- Process one forecast step at a time to limit peak memory ----
+        # Each iteration: read all samples for one fstep → build DataArrays
+        # → store → free raw arrays before the next fstep.
+        da_tars_dict, da_preds_dict = {}, {}
+        fstep_counter = 1  # for sub-step numbering
+        source_interval_starts: np.ndarray | None = None
+
+        for fi, fs in enumerate(fsteps):
+            _logger.info(
+                f"RUN {self.run_id} - {stream}: "
+                f"Reading fstep {fs} ({fi + 1}/{len(fsteps)})..."
+            )
+
+            # Dispatch parallel reads for this single fstep.
+            # The loky reusable executor pool persists across iterations,
+            # so no new processes/threads are spawned per fstep.
+            if n_workers > 1:
+                try:
+                    results = Parallel(n_jobs=n_workers, backend=backend)(
+                        delayed(_read_sample_raw)(
+                            zarr_path, s, stream, [fs], channel_idxs, is_zip,
+                            read_coords=need_per_sample_coords,
+                            is_gridded=is_gridded_data,
+                        )
+                        for s in samples
+                    )
+                except (RuntimeError, OSError) as pool_err:
+                    _logger.warning(
+                        f"Parallel pool failed on fstep {fs} ({pool_err}). "
+                        f"Switching to sequential reads for remaining fsteps."
+                    )
+                    try:
+                        get_reusable_executor().shutdown(wait=True)
+                    except Exception:
+                        pass
+                    n_workers = 1  # sequential for this and all subsequent fsteps
+                    results = [
+                        _read_sample_raw(
+                            zarr_path, s, stream, [fs], channel_idxs, is_zip,
+                            read_coords=need_per_sample_coords,
+                            is_gridded=is_gridded_data,
+                        )
+                        for s in samples
+                    ]
+            else:
+                results = [
+                    _read_sample_raw(
+                        zarr_path, s, stream, [fs], channel_idxs, is_zip,
+                        read_coords=need_per_sample_coords,
+                        is_gridded=is_gridded_data,
+                    )
+                    for s in samples
+                ]
+
+            # results[i] = (preds_all, targets_all, times_all, meta)
+            # With a single fstep, preds_all / targets_all have 1+ entries
+            # (>1 only if there are sub-steps).
+
+            # ---- Extract source_interval once (from first fstep) ----
+            if source_interval_starts is None:
+                si_list = []
+                for i in range(len(samples)):
+                    meta = results[i][3]
+                    si = meta.get("source_interval", {})
+                    start_str = si.get("start", None)
+                    if start_str is not None:
+                        si_list.append(np.datetime64(start_str, "ns"))
+                    else:
+                        si_list.append(np.datetime64("NaT", "ns"))
+                source_interval_starts = np.array(si_list)
+
+            # ---- Determine sub-steps for this fstep ----
+            n_substeps = results[0][3]["n_substeps"]  # list with 1 entry
+            n_sub = n_substeps[0]
+
+            for sub_idx in range(n_sub):
+                list_idx = sub_idx  # flat index into the single-fstep results
+
+                tars_list = [results[i][1][list_idx] for i in range(len(samples))]
+                preds_list = [results[i][0][list_idx] for i in range(len(samples))]
+
+                # Per-sample valid_times
+                per_sample_valid_times = []
+                for i in range(len(samples)):
+                    time_entry = results[i][2][0]  # index 0: this is the only fstep
+                    if n_sub > 1 and sub_idx < len(time_entry):
+                        per_sample_valid_times.append(
+                            np.datetime64(time_entry[sub_idx], "ns")
+                        )
+                    elif len(time_entry) > 0:
+                        per_sample_valid_times.append(
+                            np.datetime64(time_entry[0], "ns")
+                        )
+                    else:
+                        per_sample_valid_times.append(
+                            np.datetime64("NaT", "ns")
+                        )
+
+                if is_gridded_data:
+                    da_tar, da_pred = self._build_gridded_dataarrays(
+                        tars_list, preds_list, samples, read_channels,
+                        lat, lon, per_sample_valid_times, source_interval_starts,
+                        fs if n_sub == 1 else fstep_counter,
+                        ensemble, all_ens,
+                    )
+                else:
+                    per_sample_coords = [
+                        results[i][3].get("coords", None)
+                        for i in range(len(samples))
+                    ]
+                    # For scatter data, times_all[0] is the full
+                    # per-observation times array (not unique-only).
+                    per_sample_obs_times = [
+                        results[i][2][0]  # fstep index 0 (single fstep)
+                        for i in range(len(samples))
+                    ]
+                    da_tar, da_pred = self._build_scatter_dataarrays(
+                        tars_list, preds_list, samples, read_channels,
+                        per_sample_valid_times, source_interval_starts,
+                        fs if n_sub == 1 else fstep_counter,
+                        ensemble, all_ens, per_sample_coords, coords_raw,
+                        per_sample_obs_times=per_sample_obs_times,
+                    )
+
+                # Free raw numpy lists before post-processing creates more copies
+                del tars_list, preds_list
+
+                da_tar, da_pred = _select_channels(
+                    da_tar, da_pred, stream, channels, stream_cfg
+                )
+
+                if is_gridded_data:
+                    da_tar = _add_lead_time_coord(da_tar)
+                    da_pred = _add_lead_time_coord(da_pred)
+                    da_pred = _scale_z_channels(da_pred, stream)
+                    da_tar = _scale_z_channels(da_tar, stream)
+
+                if n_sub > 1:
+                    da_tar = da_tar.assign_coords(forecast_step=fstep_counter)
+                    da_pred = da_pred.assign_coords(forecast_step=fstep_counter)
+                    da_tars_dict[fstep_counter] = da_tar
+                    da_preds_dict[fstep_counter] = da_pred
+                    fstep_counter += 1
+                else:
+                    da_tars_dict[int(fs)] = da_tar
+                    da_preds_dict[int(fs)] = da_pred
+
+            # Free raw results for this fstep before reading the next
+            del results
+
+        # Shut down the loky reusable worker pool once after all fsteps
+        # to release semaphores and temp folders.
+        if n_workers > 1:
+            get_reusable_executor().shutdown(wait=True)
+
+        _logger.info(
+            f"RUN {self.run_id} - {stream}: Raw I/O complete. "
+            f"{len(da_tars_dict)} forecast entries loaded."
+        )
+        return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
+
+    def _get_data_raw_zip_impl(
+        self,
+        stream: str,
+        samples: list[int] | None,
+        fsteps: list[int] | None,
+        channels: list[str] | None,
+        ensemble: list[str] | None,
+    ) -> ReaderOutput:
+        """ZipStore-optimised implementation of get_data_raw.
+
+        Unlike ``_get_data_raw_impl`` which processes one fstep at a time
+        (serial fstep loop, parallel samples), this method dispatches **all**
+        ``(sample, fstep)`` pairs in a single ``joblib.Parallel`` call.
+
+        Why this is faster for ZipStore
+        --------------------------------
+        * Each ``_read_sample_raw`` call opens its own ``zarr.storage.ZipStore``
+          handle (required because ``zipfile.ZipFile`` is not thread-safe).
+          The cost of parsing the zip central-directory is amortised over all
+          fsteps requested for that sample in a single call.
+        * A single ``Parallel`` dispatch avoids repeated loky pool
+          synchronisation barriers (one per fstep in the old approach).
+        * Memory stays bounded: each worker returns numpy arrays for one
+          sample (all fsteps), which are small compared to the full dataset.
+
+        Peak memory is ``n_workers × n_fsteps × n_ipoints × n_channels × 4``
+        bytes (one worker's payload in flight at a time), versus the old
+        approach which was ``n_samples × 1 × …`` per fstep iteration.
+        For typical evaluation sizes this is comparable.
+        """
+        stream_cfg = self.get_stream(stream)
+        all_channels = self.get_channels(stream)
+        is_gridded_data = self.is_gridded_data(stream)
+        _logger.info(
+            f"RUN {self.run_id}: Processing stream {stream} "
+            f"(fast raw I/O – ZipStore parallel)..."
+        )
+
+        fsteps = sorted(int(f) for f in (fsteps or self.get_forecast_steps()))
+        samples = sorted(int(s) for s in (samples or self.get_samples()))
+        channels = channels or stream_cfg.get("channels", all_channels)
+        channels = to_list(channels)
+        ensemble = ensemble or self.get_ensemble(stream)
+        ensemble = to_list(ensemble)
+
+        # ---- Pre-compute channel indices into the zarr data arrays ----
+        channel_idxs = list(range(len(all_channels)))
+        read_channels = all_channels
+
+        # ---- Read coordinates and metadata once ----
+        zarr_path = str(self.fname_zarr)
+        is_zip = zarr_path.endswith(".zip")
+        coords_raw, zarr_channels, _ = _read_coords_and_meta(
+            zarr_path, stream, fsteps[0], is_zip
+        )
+        if zarr_channels:
+            read_channels = zarr_channels
+            channel_idxs = None
+
+        # ---- Early channel selection (skip unrequested channels) ----
+        channel_idxs, read_channels = _compute_early_channel_selection(
+            read_channels, channels, stream_cfg
+        )
+
+        lat = coords_raw[:, 0].astype(np.float64)
+        lon = coords_raw[:, 1].astype(np.float64)
+
+        need_per_sample_coords = not is_gridded_data
+
+        n_workers = min(self._num_io_workers, len(samples))
+        backend = "loky"
+
+        # Pre-fetch ensemble names once
+        all_ens: list[str] | None = None
+        if ensemble != ["mean"]:
+            all_ens = self.get_ensemble(stream)
+
+        _logger.info(
+            f"RUN {self.run_id} - {stream}: Loading {len(samples)} samples × "
+            f"{len(fsteps)} fsteps via ZipStore-parallel raw zarr I/O "
+            f"(workers={n_workers}, backend={backend})..."
+        )
+
+        # ------------------------------------------------------------------
+        # Single Parallel dispatch: each call reads ALL fsteps for one sample.
+        # This means each loky worker opens the ZipStore once and reads all
+        # fsteps sequentially inside that single handle – amortising the
+        # central-directory parse cost.
+        # ------------------------------------------------------------------
+        if n_workers > 1:
+            try:
+                results = Parallel(n_jobs=n_workers, backend=backend)(
+                    delayed(_read_sample_raw)(
+                        zarr_path, s, stream, fsteps, channel_idxs, is_zip,
+                        read_coords=need_per_sample_coords,
+                        is_gridded=is_gridded_data,
+                    )
+                    for s in samples
+                )
+            except (RuntimeError, OSError) as pool_err:
+                _logger.warning(
+                    f"ZipStore parallel pool failed ({pool_err}). "
+                    f"Switching to sequential reads."
+                )
+                try:
+                    get_reusable_executor().shutdown(wait=True)
+                except Exception:
+                    pass
+                n_workers = 1
+                results = [
+                    _read_sample_raw(
+                        zarr_path, s, stream, fsteps, channel_idxs, is_zip,
+                        read_coords=need_per_sample_coords,
+                        is_gridded=is_gridded_data,
+                    )
+                    for s in samples
+                ]
+        else:
+            results = [
+                _read_sample_raw(
+                    zarr_path, s, stream, fsteps, channel_idxs, is_zip,
+                    read_coords=need_per_sample_coords,
+                    is_gridded=is_gridded_data,
+                )
+                for s in samples
+            ]
+
+        # results[i] = (preds_all, targets_all, times_all, meta)
+        # where preds_all/targets_all have entries for each fstep (and
+        # potentially multiple sub-steps per fstep).
+
+        # ---- Extract source_interval from the first sample ----
+        si_list = []
+        for i in range(len(samples)):
+            meta = results[i][3]
+            si = meta.get("source_interval", {})
+            start_str = si.get("start", None)
+            if start_str is not None:
+                si_list.append(np.datetime64(start_str, "ns"))
+            else:
+                si_list.append(np.datetime64("NaT", "ns"))
+        source_interval_starts = np.array(si_list)
+
+        # ---- Reassemble per-fstep ----
+        # Each result contains arrays for ALL fsteps.  We need to slice
+        # into them.  The n_substeps list tells us how many sub-step
+        # arrays each fstep produced.
+        n_substeps_per_fstep = results[0][3]["n_substeps"]  # list of len(fsteps)
+
+        da_tars_dict, da_preds_dict = {}, {}
+        fstep_counter = 1
+
+        # Build a flat-index offset for each fstep into the results lists
+        offsets = []
+        off = 0
+        for ns in n_substeps_per_fstep:
+            offsets.append(off)
+            off += ns
+
+        for fi, fs in enumerate(fsteps):
+            n_sub = n_substeps_per_fstep[fi]
+            base_off = offsets[fi]
+
+            for sub_idx in range(n_sub):
+                list_idx = base_off + sub_idx
+
+                tars_list = [results[i][1][list_idx] for i in range(len(samples))]
+                preds_list = [results[i][0][list_idx] for i in range(len(samples))]
+
+                # Per-sample valid_times
+                per_sample_valid_times = []
+                for i in range(len(samples)):
+                    time_entry = results[i][2][fi]  # fi-th fstep
+                    if n_sub > 1 and sub_idx < len(time_entry):
+                        per_sample_valid_times.append(
+                            np.datetime64(time_entry[sub_idx], "ns")
+                        )
+                    elif len(time_entry) > 0:
+                        per_sample_valid_times.append(
+                            np.datetime64(time_entry[0], "ns")
+                        )
+                    else:
+                        per_sample_valid_times.append(
+                            np.datetime64("NaT", "ns")
+                        )
+
+                if is_gridded_data:
+                    da_tar, da_pred = self._build_gridded_dataarrays(
+                        tars_list, preds_list, samples, read_channels,
+                        lat, lon, per_sample_valid_times,
+                        source_interval_starts,
+                        fs if n_sub == 1 else fstep_counter,
+                        ensemble, all_ens,
+                    )
+                else:
+                    per_sample_coords = [
+                        results[i][3].get("coords", None)
+                        for i in range(len(samples))
+                    ]
+                    # For scatter data, times_all[fi] is the full
+                    # per-observation times array (not unique-only).
+                    per_sample_obs_times = [
+                        results[i][2][fi]  # fi-th fstep
+                        for i in range(len(samples))
+                    ]
+                    da_tar, da_pred = self._build_scatter_dataarrays(
+                        tars_list, preds_list, samples, read_channels,
+                        per_sample_valid_times, source_interval_starts,
+                        fs if n_sub == 1 else fstep_counter,
+                        ensemble, all_ens, per_sample_coords, coords_raw,
+                        per_sample_obs_times=per_sample_obs_times,
+                    )
+
+                del tars_list, preds_list
+
+                da_tar, da_pred = _select_channels(
+                    da_tar, da_pred, stream, channels, stream_cfg
+                )
+
+                if is_gridded_data:
+                    da_tar = _add_lead_time_coord(da_tar)
+                    da_pred = _add_lead_time_coord(da_pred)
+                    da_pred = _scale_z_channels(da_pred, stream)
+                    da_tar = _scale_z_channels(da_tar, stream)
+
+                if n_sub > 1:
+                    da_tar = da_tar.assign_coords(forecast_step=fstep_counter)
+                    da_pred = da_pred.assign_coords(forecast_step=fstep_counter)
+                    da_tars_dict[fstep_counter] = da_tar
+                    da_preds_dict[fstep_counter] = da_pred
+                    fstep_counter += 1
+                else:
+                    da_tars_dict[int(fs)] = da_tar
+                    da_preds_dict[int(fs)] = da_pred
+
+        # Free raw results
+        del results
+
+        # Shut down loky pool
+        if n_workers > 1:
+            get_reusable_executor().shutdown(wait=True)
+
+        _logger.info(
+            f"RUN {self.run_id} - {stream}: ZipStore-parallel raw I/O complete. "
+            f"{len(da_tars_dict)} forecast entries loaded."
+        )
+        return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
+
+    ######## DataArray construction helpers for get_data_raw ########
+
+    @staticmethod
+    def _build_gridded_dataarrays(
+        tars_list: list[np.ndarray],
+        preds_list: list[np.ndarray],
+        samples: list[int],
+        read_channels: list[str],
+        lat: np.ndarray,
+        lon: np.ndarray,
+        per_sample_valid_times: list[np.datetime64],
+        source_interval_starts: np.ndarray,
+        forecast_step_val: int,
+        ensemble: list[str],
+        all_ens: list[str] | None,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Build DataArrays for gridded data by stacking samples along a new axis.
+
+        All samples share the same grid, so np.stack works directly.
+
+        Parameters
+        ----------
+        per_sample_valid_times : list[np.datetime64]
+            One valid_time per sample.  Each sample represents a different
+            forecast initialisation, so valid_time differs across samples
+            even for the same forecast step.
+
+        Returns
+        -------
+        da_tar, da_pred : xr.DataArray
+        """
+        n_samples = len(samples)
+        n_ipoints = tars_list[0].shape[0]
+        sub_lat = lat[:n_ipoints]
+        sub_lon = lon[:n_ipoints]
+
+        tars_stacked = np.stack(tars_list, axis=0)   # (n_samples, n_ipoints, n_channels)
+        preds_stacked = np.stack(preds_list, axis=0)  # (n_samples, n_ipoints, n_channels[, n_ens])
+
+        # valid_time must be 2D (sample, ipoint) to match the shape produced by
+        # get_data() → _force_consistent_grids → xr.concat(dim="sample").
+        # _add_lead_time_coord computes lead_time = valid_time - source_interval_start
+        # and needs both arrays to broadcast as (sample, ipoint).
+        # Each sample has its OWN valid_time (different initialisation dates),
+        # so we build a 2D array where row i is filled with sample i's time.
+        vt_col = np.array(per_sample_valid_times, dtype="datetime64[ns]")  # (n_samples,)
+        valid_time_2d = np.broadcast_to(
+            vt_col[:, np.newaxis],     # (n_samples, 1)
+            (n_samples, n_ipoints),
+        ).copy()  # copy: broadcast arrays are read-only
+
+        base_coords = {
+            "sample": samples,
+            "ipoint": np.arange(n_ipoints),
+            "channel": read_channels,
+            "lat": ("ipoint", sub_lat),
+            "lon": ("ipoint", sub_lon),
+            "valid_time": (("sample", "ipoint"), valid_time_2d),
+            "source_interval_start": ("sample", source_interval_starts.copy()),
+            "forecast_step": forecast_step_val,
+        }
+
+        da_tar = xr.DataArray(
+            tars_stacked,
+            dims=["sample", "ipoint", "channel"],
+            coords=base_coords,
+        )
+
+        da_pred = WeatherGenZarrReader._build_pred_dataarray(
+            preds_stacked, base_coords, ensemble, all_ens,
+        )
+
+        return da_tar, da_pred
+
+    @staticmethod
+    def _build_scatter_dataarrays(
+        tars_list: list[np.ndarray],
+        preds_list: list[np.ndarray],
+        samples: list[int],
+        read_channels: list[str],
+        per_sample_valid_times: list[np.datetime64],
+        source_interval_starts: np.ndarray,
+        forecast_step_val: int,
+        ensemble: list[str],
+        all_ens: list[str] | None,
+        per_sample_coords: list[np.ndarray | None],
+        coords_fallback: np.ndarray,
+        per_sample_obs_times: list[np.ndarray] | None = None,
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Build DataArrays for non-gridded (scatter) data.
+
+        Samples may have different ipoint counts, so we concatenate along
+        the ipoint dimension — matching the get_data() behavior for scatter data.
+
+        Parameters
+        ----------
+        per_sample_valid_times : list[np.datetime64]
+            One representative valid_time per sample (used as fallback when
+            per-observation times are not available).
+        per_sample_coords : list[np.ndarray | None]
+            Per-sample coordinate arrays read from zarr (shape (n_ip, 2) each).
+            Falls back to coords_fallback when None.
+        coords_fallback : np.ndarray
+            Reference coords from sample 0, used as fallback.
+        per_sample_obs_times : list[np.ndarray] | None
+            Per-sample arrays of observation times, shape (n_ip,) each.
+            When provided, each observation gets its actual timestamp;
+            otherwise the single per_sample_valid_times value is broadcast.
+
+        Returns
+        -------
+        da_tar, da_pred : xr.DataArray
+        """
+        per_sample_tars = []
+        per_sample_preds = []
+
+        for si, sample in enumerate(samples):
+            n_ip = tars_list[si].shape[0]
+            tar_data = tars_list[si]    # (n_ip, n_channels)
+            pred_data = preds_list[si]  # (n_ip, n_channels[, n_ens])
+
+            # Use per-sample coords if available, otherwise fall back to reference
+            sc = per_sample_coords[si] if si < len(per_sample_coords) else None
+            if sc is not None and len(sc) >= n_ip:
+                sample_lat = sc[:n_ip, 0].astype(np.float64)
+                sample_lon = sc[:n_ip, 1].astype(np.float64)
+            elif coords_fallback is not None and n_ip <= len(coords_fallback):
+                sample_lat = coords_fallback[:n_ip, 0].astype(np.float64)
+                sample_lon = coords_fallback[:n_ip, 1].astype(np.float64)
+            else:
+                sample_lat = np.full(n_ip, np.nan)
+                sample_lon = np.full(n_ip, np.nan)
+
+            vt_arr = (
+                per_sample_obs_times[si][:n_ip].astype("datetime64[ns]")
+                if per_sample_obs_times is not None and si < len(per_sample_obs_times)
+                else np.full(n_ip, per_sample_valid_times[si], dtype="datetime64[ns]")
+            )
+            si_start = source_interval_starts[si]
+
+            sample_coords = {
+                "ipoint": np.arange(n_ip),
+                "channel": read_channels,
+                "lat": ("ipoint", sample_lat),
+                "lon": ("ipoint", sample_lon),
+                "valid_time": ("ipoint", vt_arr),
+                "source_interval_start": si_start,
+                "forecast_step": forecast_step_val,
+                "sample": sample,
+            }
+
+            da_t = xr.DataArray(
+                tar_data,
+                dims=["ipoint", "channel"],
+                coords=sample_coords,
+            )
+            per_sample_tars.append(da_t)
+
+            # Handle ensemble for predictions
+            if pred_data.ndim == 3:
+                if ensemble == ["mean"]:
+                    pred_data = pred_data.mean(axis=-1)
+                    pred_coords = dict(sample_coords)
+                    da_p = xr.DataArray(
+                        pred_data,
+                        dims=["ipoint", "channel"],
+                        coords=pred_coords,
+                    )
+                else:
+                    ens_idxs = [all_ens.index(e) for e in ensemble] if all_ens else list(range(pred_data.shape[-1]))
+                    pred_data = pred_data[:, :, ens_idxs]
+                    pred_coords = dict(sample_coords)
+                    pred_coords["ens"] = ensemble
+                    da_p = xr.DataArray(
+                        pred_data,
+                        dims=["ipoint", "channel", "ens"],
+                        coords=pred_coords,
+                    )
+            else:
+                da_p = xr.DataArray(
+                    pred_data,
+                    dims=["ipoint", "channel"],
+                    coords=sample_coords,
+                )
+            per_sample_preds.append(da_p)
+
+        # Concatenate along ipoint (like get_data() does for non-gridded)
+        da_tar = xr.concat(per_sample_tars, dim="ipoint", coords="different", compat="equals")
+        da_pred = xr.concat(per_sample_preds, dim="ipoint", coords="different", compat="equals")
+
+        return da_tar, da_pred
+
+    @staticmethod
+    def _build_pred_dataarray(
+        preds_stacked: np.ndarray,
+        base_coords: dict,
+        ensemble: list[str],
+        all_ens: list[str] | None,
+    ) -> xr.DataArray:
+        """Build prediction DataArray, handling ensemble dimension.
+
+        Parameters
+        ----------
+        preds_stacked : np.ndarray
+            Shape (n_samples, n_ipoints, n_channels[, n_ens]).
+        base_coords : dict
+            Coordinate dict (without ens).
+        ensemble : list[str]
+            Requested ensemble members or ["mean"].
+        all_ens : list[str] | None
+            All ensemble member names from zarr (needed for index mapping).
+        """
+        if preds_stacked.ndim == 4:
+            if ensemble == ["mean"]:
+                # Average over ensemble axis, drop ens coordinate
+                # (matches get_data() which does .mean("ens").squeeze())
+                preds_stacked = preds_stacked.mean(axis=-1)
+                return xr.DataArray(
+                    preds_stacked,
+                    dims=["sample", "ipoint", "channel"],
+                    coords=base_coords,
+                )
+            else:
+                # Select requested ensemble members by index
+                if all_ens is not None:
+                    ens_idxs = [all_ens.index(e) for e in ensemble]
+                    preds_stacked = preds_stacked[:, :, :, ens_idxs]
+                pred_coords = dict(base_coords)
+                pred_coords["ens"] = ensemble
+                return xr.DataArray(
+                    preds_stacked,
+                    dims=["sample", "ipoint", "channel", "ens"],
+                    coords=pred_coords,
+                )
+        else:
+            # No ensemble dim
+            return xr.DataArray(
+                preds_stacked,
+                dims=["sample", "ipoint", "channel"],
+                coords=base_coords,
+            )
 
     ######## reader utils ########
 

@@ -10,10 +10,16 @@
 # Standard library
 import json
 import logging
+import os
+import resource
+import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from joblib import Parallel, delayed
+from joblib.externals.loky import get_reusable_executor
+        
 # Third-party
 import numpy as np
 import omegaconf as oc
@@ -221,7 +227,7 @@ def calc_scores_per_stream(
 
         _logger.info(
             f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
-            f" and metrics {list(metrics.keys())}..."
+            f" across {len(fsteps)} fsteps and metrics {list(metrics.keys())}..."
         )
         metric_stream = xr.DataArray(
             np.full(
@@ -273,15 +279,23 @@ def calc_scores_per_stream(
                     in fstep_tasks
                 }
                 fstep_results = []
-                for future in as_completed(futures):
+                for i, future in enumerate(as_completed(futures), 1):
+                    fs = futures[future]
                     result = future.result()
                     if result is not None:
                         fstep_results.append(result)
+                    _logger.info(
+                        f"RUN {reader.run_id} - {stream}: Scored fstep {fs} for region"
+                        f" {region} ({i}/{len(fstep_tasks)})."
+                    )
         else:
             fstep_results = []
-            for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in tqdm(
-                fstep_tasks,
-                desc=f"Computing scores for {reader.run_id} - stream {stream} and region {region}",
+            for i, (fstep, tars_fs, preds_fs, preds_next, tars_next, climatology) in enumerate(
+                tqdm(
+                    fstep_tasks,
+                    desc=f"Computing scores for {reader.run_id} - stream {stream} and region {region}",
+                ),
+                1,
             ):
                 result = _score_single_fstep(
                     fstep, tars_fs, preds_fs, preds_next, tars_next,
@@ -289,6 +303,10 @@ def calc_scores_per_stream(
                 )
                 if result is not None:
                     fstep_results.append(result)
+                _logger.info(
+                    f"RUN {reader.run_id} - {stream}: Scored fstep {fstep} for region"
+                    f" {region} ({i}/{len(fstep_tasks)})."
+                )
 
         # --- Reassemble results into metric_stream (sequential, deterministic order) ---
         fstep_results.sort(key=lambda r: r[0])
@@ -461,6 +479,166 @@ def _plot_score_maps_per_stream(
                 plotter.scatter_plot(data, map_dir, channel, region, tag=tag, title=title)
 
 
+# ---------------------------------------------------------------------------
+#  Parallel plotting helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_num_plot_workers(requested: int = 0) -> int:
+    """Return a safe number of parallel plot workers.
+
+    Parameters
+    ----------
+    requested : int
+        Value from config (``num_plot_workers``).  ``0`` means auto-detect.
+
+    Returns
+    -------
+    int
+        Number of workers (≥ 1).
+    """
+    if requested > 0:
+        return min(requested, os.cpu_count() or 8)
+
+    # Auto-detect safe parallelism based on process headroom
+    try:
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
+        if soft_limit == resource.RLIM_INFINITY:
+            soft_limit = 65536
+
+        result = subprocess.run(
+            ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "pid"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        user_procs = len(result.stdout.strip().splitlines()) if result.returncode == 0 else 0
+
+        available = soft_limit - user_procs
+        min_headroom = 64
+
+        if available < min_headroom:
+            _logger.info(
+                f"Parallel plotting: low process headroom "
+                f"({available}/{soft_limit} slots free). Using sequential plotting."
+            )
+            return 1
+
+        # Be conservative — plotting is memory-heavy (matplotlib + cartopy)
+        n = min(available // 8, os.cpu_count() or 8, 8)
+        n = max(n, 1)
+        _logger.info(
+            f"Parallel plotting: process headroom {available}/{soft_limit} free. "
+            f"Using num_plot_workers={n}."
+        )
+        return n
+
+    except Exception as e:
+        _logger.debug(
+            f"Could not auto-detect process limits for plotting ({e}). "
+            f"Defaulting to sequential."
+        )
+        return 1
+
+
+def _plot_single_sample(
+    plotter_cfg: dict,
+    output_basedir: str,
+    tars: xr.DataArray,
+    preds: xr.DataArray,
+    bias_data: xr.DataArray | None,
+    sample: int | str,
+    fstep: int | str,
+    stream: str,
+    plot_chs: list[str],
+    ensemble: list,
+    plot_maps: bool,
+    plot_bias: bool,
+    plot_target: bool,
+    plot_histograms: bool,
+    maps_config: dict,
+    bias_config: dict,
+) -> None:
+    """Plot all maps/histograms for a single (fstep, sample) pair.
+
+    This is a **module-level** function so that it is picklable by loky.
+    Each worker creates its own :class:`Plotter` instance (and therefore its
+    own matplotlib state), avoiding all thread-safety issues.
+
+    Parameters
+    ----------
+    plotter_cfg : dict
+        Plain-dict copy of the plotter configuration.
+    output_basedir : str
+        Path to ``reader.runplot_dir``.
+    tars : xr.DataArray
+        Target data for this fstep (all samples).
+    preds : xr.DataArray
+        Prediction data for this fstep (all samples).
+    bias_data : xr.DataArray | None
+        ``preds - tars`` for this fstep (or *None* when bias not requested).
+    sample : int | str
+        The sample identifier to plot.
+    fstep : int | str
+        The forecast step identifier.
+    stream : str
+        Stream name.
+    plot_chs : list[str]
+        Channels / variables to plot.
+    ensemble : list
+        Ensemble members to iterate over.
+    plot_maps, plot_bias, plot_target, plot_histograms : bool
+        Feature flags.
+    maps_config, bias_config : dict
+        Plain-dict copies of the per-variable colour-range configs.
+    """
+    import matplotlib
+    matplotlib.use("Agg")  # ensure non-interactive backend in worker
+
+    # Convert plain dicts back to OmegaConf for Plotter compatibility
+    maps_cfg = oc.OmegaConf.create(maps_config)
+    bias_cfg = oc.OmegaConf.create(bias_config)
+
+    plotter = Plotter(plotter_cfg, Path(output_basedir))
+
+    data_selection = {
+        "sample": sample,
+        "stream": stream,
+        "forecast_step": fstep,
+    }
+
+    if plot_maps:
+        if plot_target:
+            plotter.create_maps_per_sample(
+                tars, plot_chs, data_selection, "targets", maps_cfg
+            )
+
+        if plot_bias and bias_data is not None:
+            plotter.create_maps_per_sample(
+                bias_data, plot_chs, data_selection, "bias", bias_cfg
+            )
+
+        for ens in ensemble:
+            preds_ens = (
+                preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
+            )
+            preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+            preds_name = "_".join(filter(None, ["preds", preds_tag]))
+
+            plotter.create_maps_per_sample(
+                preds_ens, plot_chs, data_selection, preds_name, maps_cfg
+            )
+
+            if plot_histograms:
+                plotter.create_histograms_per_sample(
+                    tars, preds_ens, plot_chs, data_selection, preds_tag
+                )
+
+    # clean_data_selection is called inside create_maps/create_histograms,
+    # but call it explicitly to be safe.
+    plotter.clean_data_selection()
+
+
 def plot_data(
     reader: Reader,
     stream: str,
@@ -553,6 +731,46 @@ def plot_data(
         _logger.info(f"Skipping Plot Data for {stream}. Targets are empty.")
         return
 
+    # -----------------------------------------------------------------
+    # Filter pre-loaded data to plotting selection
+    # -----------------------------------------------------------------
+    # When output_data is shared with scoring, it may contain more fsteps,
+    # samples, and channels than the plotting config requests.  Restrict to
+    # the plotting-specific subset so we don't plot everything.
+    plot_fstep_set = set(available_data.fsteps) if available_data.fsteps is not None else None
+    plot_sample_set = set(available_data.samples) if available_data.samples is not None else None
+    plot_channel_set = set(available_data.channels) if available_data.channels is not None else None
+
+    # ---- Substep-aware fstep filter ----
+    # When the raw I/O splits hourly sub-steps, the output dict may contain
+    # *more* fstep keys than the zarr-level set returned by check_availability.
+    # For example, 3 zarr fsteps × 6 sub-steps → keys 1..18, but
+    # check_availability returns {1, 2, 3}.  Detect this and expand the
+    # filter to include all output keys so that sub-steps are not dropped.
+    output_fstep_keys = set(da_tars.keys())
+    if plot_fstep_set is not None and output_fstep_keys - plot_fstep_set:
+        # Output has keys beyond the filter set → sub-step expansion happened.
+        # Check if the user requested "all" (original config was None / "all")
+        # by seeing if plot_fstep_set matches the zarr-level fstep set.
+        zarr_fsteps = set(int(f) for f in reader.get_forecast_steps())
+        if plot_fstep_set == zarr_fsteps:
+            # "all" was requested — expand to all output keys
+            _logger.debug(
+                f"Sub-step expansion detected: output has {len(output_fstep_keys)} "
+                f"entries vs {len(zarr_fsteps)} zarr fsteps. "
+                f"Expanding plotting filter to all output fsteps."
+            )
+            plot_fstep_set = output_fstep_keys
+
+    # Filter fsteps
+    if plot_fstep_set is not None:
+        da_tars = {fs: da for fs, da in da_tars.items() if fs in plot_fstep_set}
+        da_preds = {fs: da for fs, da in da_preds.items() if fs in plot_fstep_set}
+
+    if not da_tars:
+        _logger.info(f"Skipping Plot Data for {stream}. No matching fsteps after filtering.")
+        return
+
     # get common ranges across all run_ids
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
@@ -563,52 +781,133 @@ def plot_data(
         da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
     )
 
+    # Convert OmegaConf to plain dicts for pickling across loky workers
+    maps_config_dict = oc.OmegaConf.to_container(maps_config, resolve=True)
+    bias_config_dict = oc.OmegaConf.to_container(bias_config, resolve=True)
+    output_basedir = str(reader.runplot_dir)
+
+    # Determine parallel workers
+    num_plot_workers = _resolve_num_plot_workers(
+        int(reader.eval_cfg.get("num_plot_workers", 0))
+    )
+
+    # Build task list: one entry per (fstep, sample)
+    tasks: list[dict] = []
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
-        plot_chs = list(np.atleast_1d(tars.channel.values))
-        plot_samples = list(np.unique(tars.sample.values))
+        # Channels available in the data, filtered to plotting selection
+        all_chs = list(np.atleast_1d(tars.channel.values))
+        plot_chs = (
+            [ch for ch in all_chs if ch in plot_channel_set]
+            if plot_channel_set is not None
+            else all_chs
+        )
+        if not plot_chs:
+            continue
 
-        for sample in tqdm(plot_samples, desc=f"Plotting {run_id} - {stream} - fstep {fstep}"):
-            data_selection = {
-                "sample": sample,
-                "stream": stream,
-                "forecast_step": fstep,
-            }
+        # Samples available in the data, filtered to plotting selection
+        all_samples = list(np.unique(tars.sample.values))
+        plot_samples = (
+            [s for s in all_samples if s in plot_sample_set]
+            if plot_sample_set is not None
+            else all_samples
+        )
+        if not plot_samples:
+            continue
 
-            if plot_maps:
-                if plot_target:
-                    plotter.create_maps_per_sample(
-                        tars, plot_chs, data_selection, "targets", maps_config
-                    )
+        bias_data = (preds - tars) if plot_bias else None
 
-                if plot_bias:
-                    plotter.create_maps_per_sample(
-                        preds - tars, plot_chs, data_selection, "bias", bias_config
-                    )
+        for sample in plot_samples:
+            tasks.append(
+                {
+                    "plotter_cfg": plotter_cfg,
+                    "output_basedir": output_basedir,
+                    "tars": tars,
+                    "preds": preds,
+                    "bias_data": bias_data,
+                    "sample": sample,
+                    "fstep": fstep,
+                    "stream": stream,
+                    "plot_chs": plot_chs,
+                    "ensemble": list(available_data.ensemble),
+                    "plot_maps": plot_maps,
+                    "plot_bias": plot_bias,
+                    "plot_target": plot_target,
+                    "plot_histograms": plot_histograms,
+                    "maps_config": maps_config_dict,
+                    "bias_config": bias_config_dict,
+                }
+            )
 
-                for ens in available_data.ensemble:
-                    preds_ens = (
-                        preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
-                    )
-                    preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
-                    preds_name = "_".join(
-                        filter(None, ["preds", preds_tag])
-                    )  # avoid trailing underscore
+    effective_workers = min(num_plot_workers, len(tasks))
 
-                    plotter.create_maps_per_sample(
-                        preds_ens, plot_chs, data_selection, preds_name, maps_config
-                    )
+    if effective_workers > 1 and len(tasks) > 1:
+        _logger.info(
+            f"Parallel plotting: dispatching {len(tasks)} (fstep, sample) tasks "
+            f"across {effective_workers} loky workers."
+        )
+        try:
+            Parallel(
+                n_jobs=effective_workers,
+                backend="loky",
+                verbose=0,
+            )(
+                delayed(_plot_single_sample)(**task)
+                for task in tqdm(tasks, desc=f"Plotting {run_id} - {stream}")
+            )
 
-                    if plot_histograms:
-                        plotter.create_histograms_per_sample(
-                            tars, preds_ens, plot_chs, data_selection, preds_tag
-                        )
+            # Clean up loky workers to free process slots
+            try:
+                get_reusable_executor().shutdown(wait=True)
+            except Exception:
+                pass
 
-            plotter = plotter.clean_data_selection()
+        except Exception as exc:
+            _logger.warning(
+                f"Parallel plotting failed ({type(exc).__name__}: {exc}). "
+                f"Falling back to sequential plotting."
+            )
+            # Clean up loky workers before fallback
+            try:
+                get_reusable_executor().shutdown(wait=True)
+            except Exception:
+                pass
+
+            for task in tqdm(tasks, desc=f"Plotting {run_id} - {stream} (sequential fallback)"):
+                _plot_single_sample(**task)
+    else:
+        # Sequential path (single worker or single task)
+        for task in tqdm(tasks, desc=f"Plotting {run_id} - {stream}"):
+            _plot_single_sample(**task)
 
     if plot_animations:
+        # Animations must run sequentially after all plots are written.
+        # Use a single Plotter for animations (reads generated images).
+        plotter = Plotter(plotter_cfg, reader.runplot_dir)
+        # Recover plot_chs / plot_samples from the last fstep, filtered to
+        # the plotting selection
+        last_fstep = list(da_tars.keys())[-1]
+        last_tars = da_tars[last_fstep]
+        last_preds = da_preds[last_fstep]
+        all_chs = list(np.atleast_1d(last_tars.channel.values))
+        plot_chs = (
+            [ch for ch in all_chs if ch in plot_channel_set]
+            if plot_channel_set is not None
+            else all_chs
+        )
+        all_samples = list(np.unique(last_tars.sample.values))
+        plot_samples = (
+            [s for s in all_samples if s in plot_sample_set]
+            if plot_sample_set is not None
+            else all_samples
+        )
         plot_fsteps = da_tars.keys()
+        data_selection = {
+            "sample": plot_samples[-1],
+            "stream": stream,
+            "forecast_step": last_fstep,
+        }
         for ens in available_data.ensemble:
-            preds_name = "preds" if "ens" not in preds.dims else f"preds_ens_{ens}"
+            preds_name = "preds" if "ens" not in last_preds.dims else f"preds_ens_{ens}"
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
         if plot_target:
             plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
