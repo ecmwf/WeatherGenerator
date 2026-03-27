@@ -646,9 +646,10 @@ class Trainer(TrainerBase):
                     throughput_metrics = self.throughput.compute()
                     elapsed = time.time() - self._t0_throughput
                     self.train_logger.log_metrics(TRAIN, {
-                        f"performance.throughput.{k}": v for k, v in throughput_metrics.items()
+                        f"performance.throughput.{k.replace('/', '.')}": v for k, v in throughput_metrics.items()
                         if isinstance(v, (int, float))
-                    } | {"performance.throughput.mb_per_sec": self._total_mb / elapsed if elapsed > 0 else 0.0})
+                    } | {"performance.throughput.mb_per_sec": self._total_mb / elapsed if elapsed > 0 else 0.0},
+                    step=self.cf.general.istep)
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
