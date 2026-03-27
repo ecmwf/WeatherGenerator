@@ -11,8 +11,6 @@
 
 import itertools
 import logging
-import re
-from pathlib import Path
 
 import omegaconf
 import torch
@@ -22,7 +20,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import distribute_tensor
 
-from weathergen.common.config import Config, merge_configs
+from weathergen.common.config import Config, get_path_model, merge_configs
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -33,7 +31,7 @@ from weathergen.model.attention import (
 from weathergen.model.ema import EMAModel
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import freeze_weights
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.utils.distributed import is_root
@@ -62,14 +60,7 @@ def init_model_and_shard(
         model = get_model(cf, training_mode, dataset, overrides)
 
     # freeze request model part
-    for name, module in model.named_modules():
-        name = module.name if hasattr(module, "name") else name
-        # avoid the whole model element which has name ''
-        if name == "":
-            continue
-        if re.fullmatch(cf.freeze_modules, name) is not None:
-            logger.info(f"Froze weights {name}")
-            freeze_weights(module)
+    apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
 
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
@@ -156,15 +147,21 @@ def init_model_and_shard(
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
     # complete initalization and load model if inference/continuing a run
-    if run_id_contd is None:
+    if run_id_contd is not None:
+        if is_root():
+            logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
+        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
+    elif cf.get("load_chkpt", {}).get("run_id", None):
+        run_id = cf.load_chkpt.run_id
+        mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
+        if is_root():
+            logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
+        model = load_model(cf, model, device, run_id, mini_epoch)
+    else:
         if with_ddp and with_fsdp:
             model.to_empty(device="cuda")
             if with_fsdp:
                 model.reset_parameters()
-    else:
-        if is_root():
-            logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
-        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -181,7 +178,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         mini_epoch : The mini_epoch to load. Default (-1) is the latest mini_epoch
     """
 
-    path_run = Path(cf.model_path) / run_id
+    path_run = get_path_model(run_id=run_id)
     mini_epoch_id = (
         f"chkpt{mini_epoch:05d}" if mini_epoch != -1 and mini_epoch is not None else "latest"
     )
@@ -228,11 +225,22 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
                 module_to_init.reset_parameters()
 
     else:
-        if not cf.with_ddp:
+        # fix mismatch between state_dict keys that can occur between interactive/non-interactive
+        model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
+        params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
+        if model_has_prefix_module and not params_has_prefix_module:
+            # add "module." prefix
+            params_temp = {}
+            for k in params.keys():
+                params_temp["module." + k] = params[k]
+            params = params_temp
+        elif not model_has_prefix_module and params_has_prefix_module:
+            # remove "module." prefix
             params_temp = {}
             for k in params.keys():
                 params_temp[k.replace("module.", "")] = params[k]
             params = params_temp
+        # load checkpoint
         mkeys, ukeys = model.load_state_dict(params, strict=False)
         model = model.to(device)
 
@@ -242,7 +250,7 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
     if len(mkeys) > 0:
         logger.warning(f"Missing keys when loading model: {mkeys}")
     if len(ukeys) > 0:
-        logger.warning(f"Unused keys when loading model: {mkeys}")
+        logger.warning(f"Unused keys when loading model: {ukeys}")
 
     return model
 

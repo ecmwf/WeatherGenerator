@@ -98,7 +98,7 @@ class EmbeddingEngine(torch.nn.Module):
 
             sdata = torch.cat(sdata).to(tokens_all.dtype)
             # skip empty stream
-            if len(sdata) == 0:
+            if sdata.numel() == 0:
                 continue
 
             # embedding from physical space to per patch latent representation
@@ -274,6 +274,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             else:
@@ -305,12 +306,13 @@ class QueryAggregationEngine(torch.nn.Module):
                 )
             )
 
-    def forward(self, tokens, batch_lens, use_reentrant):
+    def forward(self, tokens, batch_lens, use_reentrant, coords=None):
         for block in self.ae_aggregation_blocks:
+            aux_info = None
             if isinstance(block, MultiSelfAttentionHeadVarlen):
-                tokens = block(tokens, x_lens=batch_lens)
+                tokens = block(tokens, x_lens=batch_lens, coords=coords)
             else:
-                tokens = block(tokens)
+                tokens = block(tokens, coords, aux_info)
         return tokens
 
 
@@ -346,6 +348,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             else:
@@ -361,6 +364,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             # MLP block
@@ -380,9 +384,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                 torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
             )
 
-    def forward(self, tokens):
+    def forward(self, tokens, coords=None):
+        aux_info = None
         for block in self.ae_global_blocks:
-            tokens = block(tokens)
+            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -405,7 +410,7 @@ class ForecastingEngine(torch.nn.Module):
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
-                if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
+                if (i % global_rate == 0) or i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
                         MultiSelfAttentionHead(
                             self.cf.ae_global_dim_embed,
@@ -417,6 +422,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            with_2d_rope=self.cf.get("rope_2D", False),
                         )
                     )
                 else:
@@ -433,6 +439,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
+                            with_2d_rope=self.cf.get("rope_2D", False),
                         )
                     )
                 # Add MLP block
@@ -462,7 +469,7 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep):
+    def forward(self, tokens, fstep, coords=None):
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
@@ -472,9 +479,9 @@ class ForecastingEngine(torch.nn.Module):
         aux_info = None
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
-                tokens = block(tokens)
+                tokens = checkpoint(block, tokens, use_reentrant=False)
             else:
-                tokens = block(tokens, aux_info)
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -542,7 +549,7 @@ class TargetPredictionEngineClassic(nn.Module):
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
         softcap,
-        stream_name: str,
+        stream_config: dict,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -555,7 +562,7 @@ class TargetPredictionEngineClassic(nn.Module):
         :param softcap: Softcap value for the attention layers.
         """
         super(TargetPredictionEngineClassic, self).__init__()
-        self.name = f"TargetPredictionEngine_{stream_name}"
+        self.name = f"TargetPredictionEngine_{stream_config['name']}"
 
         self.cf = cf
         self.dims_embed = dims_embed
@@ -571,7 +578,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 MultiCrossAttentionHeadVarlen(
                     dim_embed_q=self.dims_embed[i],
                     dim_embed_kv=self.cf.ae_global_dim_embed,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    num_heads=stream_config["target_readout"]["num_heads"],
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
@@ -590,7 +597,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 self.tte.append(
                     MultiSelfAttentionHeadVarlen(
                         dim_embed=self.dims_embed[i],
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=stream_config["target_readout"]["num_heads"],
                         dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
@@ -624,14 +631,16 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = block(tc_tokens, tcs_lens, tcs_aux)
+                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
             else:
-                tc_tokens = block(
+                tc_tokens = checkpoint(
+                    block,
                     tc_tokens,
                     tokens_stream,
                     tcs_lens,
                     tokens_lens,
                     tcs_aux,
+                    use_reentrant=False,
                 )
         return tc_tokens
 

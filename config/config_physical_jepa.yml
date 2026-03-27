@@ -115,10 +115,11 @@ general:
   run_history: []
 
 # logging frequency in the training loop (in number of batches)
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
+  log_grad_norms: False
 
 # parameters for data loading
 data_loading :
@@ -267,12 +268,12 @@ validation_config:
     ema_halflife_in_thousands: 1e-3
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: 8
+  validate_before_training: 0
 
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 8,
+    num_samples: 0,
     # write samples in normalized model space
     normalized_samples: True,
     # output streams to write; default all

@@ -1,3 +1,4 @@
+# pylint: disable=bad-builtin
 # ruff: noqa: T201
 
 # (C) Copyright 2025 WeatherGenerator contributors.
@@ -18,7 +19,7 @@ from omegaconf import DictConfig
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
-from weathergen.utils.train_logger import TRAIN, VAL, Stage
+from weathergen.train.utils import TRAIN, VAL, Stage
 
 _logger = logging.getLogger(__name__)
 
@@ -319,7 +320,7 @@ class LossPhysical(LossModuleBase):
                         # batch loss
                         loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
                         loss_st_corr = loss_st_corr + loss_cur_w
-                        ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
+                        ctr_loss_fcts += 1 if (loss_lfct > 0.0 and sw > 0.0) else 0
 
                     loss_timestep = loss_timestep + loss_st_corr
                     ctr_batch += 1 if ctr_loss_fcts > 0.0 else 0
@@ -339,7 +340,7 @@ class LossPhysical(LossModuleBase):
                 "Loss is 0.0, likely incorrect configuration. Check stream"
                 " support time and training configuration."
             )
-        loss = loss / ctr_streams
+        loss = loss / ctr_streams if ctr_streams > 0 else loss
 
         def _nested_dict():
             return defaultdict(dict)
