@@ -954,7 +954,7 @@ class EfficientBilinear(torch.nn.Module):
     def __init__(self, in1, in2, out, bias=False):
         super().__init__()
         self.weight = nn.Parameter(torch.randn(out, in1, in2))
-        self.bias = nn.Parameter(torch.zeros(out)) if bias else  0.
+        self.bias = nn.Parameter(torch.zeros(out)) if bias else 0.0
         self.total_in = in1 * in2
 
     def forward(self, x1, x2):
@@ -969,16 +969,13 @@ class EfficientBilinear(torch.nn.Module):
             nn.init.zeros_(self.bias)
 
 
-
 class BilinearDecoder(nn.Module):
     def __init__(self, stream_name, coord_dim, latent_dim, out_dim):
         super().__init__()
 
         self.name = f"BilinearDecoder_{stream_name}"
         self.latent_dim = latent_dim
-        self.bilin = EfficientBilinear(
-            coord_dim, latent_dim, out_dim
-        )  # nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
+        self.bilin = EfficientBilinear(coord_dim, latent_dim, out_dim)
 
     def forward(self, coords_md, latent_nd, tcs_lens_n1):
         """
