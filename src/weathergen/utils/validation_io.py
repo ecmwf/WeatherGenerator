@@ -137,9 +137,9 @@ def write_output(
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
     source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
 
-    # filter channels per stream based on write_output config
+    # filter channels per stream based on filter_output_channels config
     for stream_idx, stream in enumerate(cf.streams):
-        write_vars = stream.get("write_output", None)
+        write_vars = stream.get("filter_output_channels", None)
         if write_vars is None:
             continue
         all_channels = target_channels[stream_idx]
@@ -147,7 +147,7 @@ def write_output(
         missing = set(write_vars) - set(all_channels)
         if missing:
             _logger.warning(
-                f"write_output for stream {stream.name} contains unknown channels: {missing}"
+                f"filter_output_channels for stream {stream.name} contains unknown channels: {missing}"
             )
         if len(keep_idxs) == len(all_channels):
             continue

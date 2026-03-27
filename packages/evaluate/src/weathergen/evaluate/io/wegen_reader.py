@@ -153,11 +153,11 @@ class WeatherGenReader(Reader):
         all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
         _logger.debug(f"Channels found in config: {all_channels}")
 
-        # filter to write_output subset if specified
-        write_output = self.get_inference_stream_attr(stream, "write_output")
-        if write_output is not None:
-            all_channels = [ch for ch in all_channels if ch in write_output]
-            _logger.debug(f"Filtered channels by write_output: {all_channels}")
+        # filter to filter_output_channels subset if specified
+        filter_output_channels = self.get_inference_stream_attr(stream, "filter_output_channels")
+        if filter_output_channels is not None:
+            all_channels = [ch for ch in all_channels if ch in filter_output_channels]
+            _logger.debug(f"Filtered channels by filter_output_channels: {all_channels}")
 
         return all_channels
 
