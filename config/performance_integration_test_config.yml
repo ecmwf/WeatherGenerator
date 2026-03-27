@@ -245,7 +245,7 @@ training_config:
             'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
             "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
             "dropout_rate": 0.1,
-            target_source_correspondence: {0 : {0 : "subset"} },
+            target_source_correspondence: {0 : {0 : "subset", 1: "subset", 2: "subset", 3: "subset", 4: "subset", 5: "subset", 6: "subset", 7: "subset"} },
         },
         },
         target_and_aux_calc: { "EMATeacher" : 
@@ -276,7 +276,7 @@ training_config:
   target_input: {
     "random_easy_target" : {
       masking_strategy: "healpix",
-      num_samples: 8,
+      num_samples: 1,
       masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
     },
   }
