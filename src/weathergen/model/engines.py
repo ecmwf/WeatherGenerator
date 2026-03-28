@@ -13,8 +13,8 @@ import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
-from weathergen.common.config import Config
 
+from weathergen.common.config import Config
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
