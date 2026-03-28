@@ -28,6 +28,7 @@ from weathergen.model.engines import (
     BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
+    IdentityEngine,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
@@ -316,7 +317,7 @@ class Model(torch.nn.Module):
 
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
-        self.forecast_engine: ForecastingEngine | None = None
+        self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
@@ -370,9 +371,10 @@ class Model(torch.nn.Module):
         )
 
         mode_cfg = cf.training_config
-        self.forecast_engine = None
         if cf.fe_num_blocks > 0:
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+        else:
+            self.forecast_engine = IdentityEngine()
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -615,9 +617,7 @@ class Model(torch.nn.Module):
         num_params_latent_heads = get_num_parameters(self.latent_heads)
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_fe = (
-            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
-        )
+        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
@@ -697,35 +697,20 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
+        # Allow for pushforward trick
+        p_fwd = self.cf.get("pushforward_trick", False)
         # roll-out in latent space, iterate and generate output over requested output steps
-        pushforward_trick = self.cf.get("pushforward_trick", False)
         for step in batch.get_output_idxs():
-            # apply forecasting engine (if present)
-            if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+            all_grad = not p_fwd or not self.training or step == max(batch.get_output_idxs())
 
-                needs_full_prediction = (
-                    not pushforward_trick
-                    or not self.training
-                    or step == max(batch.get_output_idxs())
-                )
-
-                if needs_full_prediction:
-                    tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
-                    output = self.predict_latent(model_params, step, tokens, batch, output)
-                    output = self.predict_decoders(model_params, step, tokens, batch, output)
-                else:
-                    # Pushforward mode: only add empty predictions (no grad, no engine call)
-                    with torch.no_grad():
-                        tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
-
-                    # Add empty predictions for all streams (vectorized / batched if possible)
-                    for stream_name in self.stream_names:
-                        output.add_physical_prediction(step, stream_name, [])
-
-                    output.add_latent_prediction(step, "latent_state", [])
-                    for name, _ in self.latent_heads.items():
-                        output.add_latent_prediction(step, name, [])
+            if all_grad:
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                output = self.predict_latent(model_params, step, tokens, batch, output)
+                output = self.predict_decoders(model_params, step, tokens, batch, output)
+            else:
+                # Pushforward mode: advance tokens without grad
+                with torch.no_grad():
+                    tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
 
         return output
 
