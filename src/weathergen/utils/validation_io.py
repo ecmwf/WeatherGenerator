@@ -159,7 +159,7 @@ def write_output(
 
     for stream_idx, stream in enumerate(cf.streams):
         stream_name = str(stream.name)
-        write_vars = output_filter_per_stream.get(stream_name, None)
+        write_vars = output_filter_per_stream.get(stream_name)
 
         if write_vars is None:
             continue
@@ -178,7 +178,8 @@ def write_output(
         missing = set(write_vars) - set(all_channels)
         if missing:
             _logger.warning(
-                f"filter_output_channels for stream {stream.name} contains unknown channels: {missing}"
+                f"filter_output_channels for stream {stream.name} "
+                f"contains unknown channels: {missing}"
             )
         if len(keep_idxs) == len(all_channels):
             continue
