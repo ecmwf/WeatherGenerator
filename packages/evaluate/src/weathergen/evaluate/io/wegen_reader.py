@@ -150,16 +150,8 @@ class WeatherGenReader(Reader):
             A list of channel names.
         """
         _logger.debug(f"Getting channels for stream {stream}...")
-        all_channels=[]
-
-        # filter to filter_output_channels subset if specified
-        filter_output_channels = self.get_inference_stream_attr(stream, "filter_output_channels")
-        if filter_output_channels is not None:
-            all_channels = [ch for ch in all_channels if ch in filter_output_channels]
-            _logger.debug(f"Filtered channels by filter_output_channels: {all_channels}")
-        else:
-            all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
-            _logger.debug(f"Channels found in config: {all_channels}")
+        all_channels = self.get_inference_stream_attr(stream, "val_target_channels")
+        _logger.debug(f"Channels found in config: {all_channels}")
         return all_channels
 
     def load_scores(
@@ -365,6 +357,43 @@ class WeatherGenZarrReader(WeatherGenReader):
             f"Expected directory for 'zarr' or file for 'zip'."
         )
         self.fname_zarr = fname_zarr
+
+    def get_channels(self, stream: str) -> list[str]:
+        """
+        Get channel names for a stream directly from the Zarr output.
+
+        This uses stored dataset metadata rather than inference config, so it reflects
+        the channels actually written by validation/inference.
+        """
+        _logger.debug(f"Getting channels for stream {stream} from zarr output...")
+
+        with zarrio_reader(self.fname_zarr) as zio:
+            samples = sorted(int(s) for s in zio.samples)
+            fsteps = sorted(int(f) for f in zio.forecast_steps)
+
+            for sample in samples:
+                for fstep in fsteps:
+                    out = zio.get_data(sample, stream, fstep)
+
+                    if out.target is not None:
+                        channels = list(out.target.channels)
+                        _logger.debug(
+                            f"Channels for stream {stream} read from target metadata: {channels}"
+                        )
+                        return channels
+
+                    if out.prediction is not None:
+                        channels = list(out.prediction.channels)
+                        _logger.debug(
+                            "Channels for stream "
+                            f"{stream} read from prediction metadata: {channels}"
+                        )
+                        return channels
+
+        _logger.warning(
+            f"No channel metadata found in zarr output for stream {stream}. Returning empty list."
+        )
+        return []
 
     def get_data(
         self,

@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import logging
 
 import numpy as np
@@ -136,14 +137,44 @@ def write_output(
 
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
     source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
+    output_channels: list[list[str]] = copy.deepcopy(target_channels)
 
-    # filter channels per stream based on filter_output_channels config
+    # Filter channels per stream from output.filter_output_channels.
+    # Supported config shape:
+    # {allow: bool, STREAM_NAME: [channels], ...}
+    filter_cfg = val_cfg.get("output", {}).get("filter_output_channels", None)
+    use_allowlist = True
+    output_filter_per_stream: dict[str, list[str]] = {}
+
+    if filter_cfg is not None:
+        use_allowlist = bool(filter_cfg.get("allow", True))
+
+        # Preferred top-level mapping format, e.g. {"allow": True, "ERA5": ["2t"]}
+        for key, value in filter_cfg.items():
+            if key == "allow":
+                continue
+            if value is None:
+                continue
+            output_filter_per_stream[str(key)] = list(value)
+
     for stream_idx, stream in enumerate(cf.streams):
-        write_vars = stream.get("filter_output_channels", None)
+        stream_name = str(stream.name)
+        write_vars = output_filter_per_stream.get(stream_name, None)
+
         if write_vars is None:
             continue
-        all_channels = target_channels[stream_idx]
-        keep_idxs = [i for i, ch in enumerate(all_channels) if ch in write_vars]
+
+        if isinstance(write_vars, str):
+            write_vars = [write_vars]
+        else:
+            write_vars = list(write_vars)
+
+        all_channels = output_channels[stream_idx]
+        if use_allowlist:
+            keep_idxs = [i for i, ch in enumerate(all_channels) if ch in write_vars]
+        else:
+            keep_idxs = [i for i, ch in enumerate(all_channels) if ch not in write_vars]
+
         missing = set(write_vars) - set(all_channels)
         if missing:
             _logger.warning(
@@ -155,7 +186,7 @@ def write_output(
             f"Filtering output channels for stream {stream.name}: "
             f"{len(all_channels)} -> {len(keep_idxs)} channels"
         )
-        target_channels[stream_idx] = [all_channels[i] for i in keep_idxs]
+        output_channels[stream_idx] = [all_channels[i] for i in keep_idxs]
         for t_idx in range(len(targets_all)):
             targets_all[t_idx][stream_idx] = targets_all[t_idx][stream_idx][:, keep_idxs]
             preds_all[t_idx][stream_idx] = preds_all[t_idx][stream_idx][:, :, keep_idxs]
@@ -189,6 +220,7 @@ def write_output(
         targets_lens,
         output_streams,
         target_channels,
+        output_channels,
         source_channels,
         geoinfo_channels,
         sample_start,

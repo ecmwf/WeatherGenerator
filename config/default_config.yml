@@ -251,7 +251,10 @@ validation_config:
     # output streams to write; default all
     streams: null,
     # filter channels
-    allow_filter_output_channels: True
+    filter_output_channels: {
+      "allow": True,
+      "ERA5": ["2t"]
+      }
     }
 
   # run validation before training starts (mainly for model development)
