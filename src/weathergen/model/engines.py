@@ -13,8 +13,8 @@ import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
-
 from weathergen.common.config import Config
+
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -387,6 +387,17 @@ class GlobalAssimilationEngine(torch.nn.Module):
         aux_info = None
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+        return tokens
+
+
+class IdentityEngine(torch.nn.Module):
+    """Identity engine that passes tokens through unchanged."""
+
+    def __init__(self):
+        super().__init__()
+        self.fe_blocks = torch.nn.ModuleList()
+
+    def forward(self, tokens, *args, **kwargs):
         return tokens
 
 
