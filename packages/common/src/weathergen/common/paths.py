@@ -23,5 +23,7 @@ def get_wg_private_path() -> Path:
         path = _REPO_ROOT.parent / "WeatherGenerator-private"
 
     path = path.resolve()
-    assert path.is_dir(), f"WeatherGenerator private repo path does not exist or is not a directory: {path}"
+    assert path.is_dir(), (
+        f"WeatherGenerator private repo path does not exist or is not a directory: {path}"
+    )
     return path
