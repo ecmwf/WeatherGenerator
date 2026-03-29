@@ -577,7 +577,6 @@ class OutputBatchData:
 
     # stream, channel name
     target_channels: list[list[str]]
-    output_channels: list[list[str]]
     source_channels: list[list[str]]
     geoinfo_channels: list[list[str]]
 
@@ -662,8 +661,8 @@ class OutputBatchData:
         data_coords = self._extract_coordinates(stream_idx, offset_key, datapoints)
 
         if (datapoints.stop - datapoints.start) == 0:
-            target_data = np.zeros((0, len(self.output_channels[stream_idx])), dtype=np.float32)
-            preds_data = np.zeros((0, len(self.output_channels[stream_idx])), dtype=np.float32)
+            target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
+            preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
         else:
             target_data = self.targets[offset_key.forecast_step][stream_idx][datapoints]
             preds_data = self.predictions[offset_key.forecast_step][stream_idx].transpose(1, 2, 0)[
@@ -730,7 +729,7 @@ class OutputBatchData:
         times = self.targets_times[offset_key.forecast_step][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?
-        channels = self.output_channels[stream_idx]
+        channels = self.target_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
         return DataCoordinates(times, coords, geoinfo, channels, geoinfo_channels)

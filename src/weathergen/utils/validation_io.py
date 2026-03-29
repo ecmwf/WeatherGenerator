@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
 import logging
 
 import numpy as np
@@ -137,7 +136,6 @@ def write_output(
 
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
     source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
-    output_channels: list[list[str]] = copy.deepcopy(target_channels)
 
     # Filter channels per stream from output.filter_output_channels.
     # Supported config shape:
@@ -170,7 +168,7 @@ def write_output(
         else:
             write_vars = list(write_vars)
 
-        all_channels = output_channels[stream_idx]
+        all_channels = target_channels[stream_idx]
         keep_idxs = [i for i, ch in enumerate(all_channels) if ch in write_vars]
 
         missing = set(write_vars) - set(all_channels)
@@ -185,7 +183,7 @@ def write_output(
             f"Filtering output channels for stream {stream.name}: "
             f"{len(all_channels)} -> {len(keep_idxs)} channels"
         )
-        output_channels[stream_idx] = [all_channels[i] for i in keep_idxs]
+        target_channels[stream_idx] = [all_channels[i] for i in keep_idxs]
         for t_idx in range(len(targets_all)):
             targets_all[t_idx][stream_idx] = targets_all[t_idx][stream_idx][:, keep_idxs]
             preds_all[t_idx][stream_idx] = preds_all[t_idx][stream_idx][:, :, keep_idxs]
@@ -219,7 +217,6 @@ def write_output(
         targets_lens,
         output_streams,
         target_channels,
-        output_channels,
         source_channels,
         geoinfo_channels,
         sample_start,
