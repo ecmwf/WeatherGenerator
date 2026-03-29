@@ -257,9 +257,7 @@ class Local2GlobalSumEngine(torch.nn.Module):
     def __init__(self, cf: Config) -> None:
         super(Local2GlobalSumEngine, self).__init__()
         self.cf = cf
-        self.proj = torch.nn.Linear(
-            cf.ae_local_dim_embed, cf.ae_global_dim_embed, bias=False
-        )
+        self.proj = torch.nn.Linear(cf.ae_local_dim_embed, cf.ae_global_dim_embed, bias=False)
         ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
         self.mlp_blocks = torch.nn.ModuleList()
         for _ in range(ae_adapter_num_blocks - 1):
