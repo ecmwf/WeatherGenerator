@@ -15,21 +15,28 @@ from typing import Any
 import torch
 
 from weathergen.common.config import Config, load_run_config, merge_configs
+from weathergen.model.model import ModelParams
+from weathergen.model.model_interface import get_model
 from weathergen.model.ssl_target_processing import (
     DINOTargetProcessing,
     JEPATargetProcessing,
     iBOTPatchTargetProcessing,
 )
 from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, TargetAuxOutput
+from weathergen.train.teacher_utils import (
+    load_encoder_from_checkpoint,
+    prepare_encoder_teacher,
+)
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
 
 class EncoderTeacher(TargetAndAuxModuleBase):
     """Base class for SSL teacher models.
 
     Handles shared logic: SSL loss extraction, target postprocessing, compute loop.
-    Subclasses must implement _forward_teacher().
+    Subclasses must implement forward_teacher().
     """
 
     def __init__(self, teacher_model, training_cfg, **kwargs):
@@ -44,12 +51,12 @@ class EncoderTeacher(TargetAndAuxModuleBase):
         # TODO: support multiple LossLatentSSLStudentTeacher loss terms
         self.postprocess_targets = get_target_postprocessing(losses_cfg[0], training_cfg, **kwargs)
 
-    def _forward_teacher(self, model_params, batch) -> Any:
-        raise NotImplementedError("Subclasses must implement _forward_teacher()")
+    def forward_teacher(self, model_params, batch) -> Any:
+        raise NotImplementedError("Subclasses must implement forward_teacher()")
 
     def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
         with torch.no_grad():
-            outputs = self._forward_teacher(model_params, batch).get_latent_prediction(0)
+            outputs = self.forward_teacher(model_params, batch).get_latent_prediction(0)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
@@ -85,7 +92,7 @@ class EMATeacher(EncoderTeacher):
         self.batch_size = batch_size
         self.reset()
 
-    def _forward_teacher(self, model_params, batch):
+    def forward_teacher(self, model_params, batch):
         return self.ema_model.forward_eval(model_params, batch)
 
     def reset(self, batch_size=None):
@@ -130,18 +137,12 @@ class FrozenTeacher(EncoderTeacher):
             device: Target device
             params: Dict with 'teacher_run_id' and optional 'teacher_mini_epoch'
         """
-        from weathergen.model.model import ModelParams
-        from weathergen.model.model_interface import get_model
-        from weathergen.train.teacher_utils import (
-            load_encoder_from_checkpoint,
-            prepare_encoder_teacher,
-        )
 
         teacher_run_id = params["teacher_run_id"]
         teacher_mini_epoch = params.get("teacher_mini_epoch", -1)
 
         # Load teacher's config, create model with teacher's architecture
-        teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, cf.model_path)
+        teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, model_path=None)
         teacher_config = merge_configs(teacher_config, {"with_ddp": False, "with_fsdp": False})
 
         teacher_model = get_model(teacher_config, "student", dataset, {})
@@ -149,17 +150,15 @@ class FrozenTeacher(EncoderTeacher):
         # Load only encoder weights
         load_encoder_from_checkpoint(teacher_model, cf, teacher_run_id, teacher_mini_epoch, device)
 
-        # Strip to encoder + create fresh heads (heads are created on CPU, so re-move to device)
-        teacher_dim = teacher_config.ae_global_dim_embed
-        prepare_encoder_teacher(teacher_model, cf.training_config, teacher_dim)
-        teacher_model.to(device)
+        # Strip to encoder + create fresh heads
+        prepare_encoder_teacher(teacher_model, cf.training_config, teacher_config)
 
         # Create model params matching teacher's architecture
         teacher_model_params = ModelParams(teacher_config).create(teacher_config).to(device)
 
         return cls(teacher_model, cf.training_config, teacher_model_params)
 
-    def _forward_teacher(self, model_params, batch):
+    def forward_teacher(self, model_params, batch):
         params = (
             self.teacher_model_params if self.teacher_model_params is not None else model_params
         )

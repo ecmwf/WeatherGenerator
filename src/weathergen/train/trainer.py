@@ -26,13 +26,13 @@ from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
-    get_target_aux_calculator,
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
@@ -556,7 +556,9 @@ class Trainer(TrainerBase):
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(total=mode_cfg.samples_per_mini_epoch, disable=self.cf.with_ddp) as pbar:
+            with tqdm.tqdm(
+                total=len(self.data_loader_validation), disable=self.cf.with_ddp
+            ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
                         # pin memory for faster CPU-GPU transfer

@@ -147,11 +147,15 @@ line-ending = "lf"
 # Some useful warnings are not yet in ruff
 
 [tool.pylint.main]
-ignore = ["tests"]
+ignore = ["tests", ".venv", ".git", ".tox", ".ruff_cache"]
+load-plugins = ["pylint.extensions.bad_builtin"]
+
+[tool.pylint.bad_builtins]
+bad-functions = ["getattr", "setattr"]
 
 [tool.pylint.messages_control]
 disable = ["all"]
-enable = ["W0201"]
+enable = ["W0201", "W0141"]
 
 
 [tool.uv]
@@ -251,7 +255,7 @@ torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
 # branch = "feature/any-zarr-version-in-pyproject/"
-anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", branch = "feature/any-zarr-version-in-pyproject"}
+anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
 
 [tool.pytest.ini_options]
 log_cli = true

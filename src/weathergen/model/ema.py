@@ -77,7 +77,7 @@ class EMAModel:
         """
         halflife_steps = self.halflife_steps
         if self.rampup_ratio is not None:
-            halflife_steps = min(halflife_steps, cur_step / self.rampup_ratio)
+            halflife_steps = min(halflife_steps, cur_step * self.rampup_ratio)
         beta = 0.5 ** (self.batch_size / max(halflife_steps, 1e-6))
         return beta
 

@@ -21,7 +21,8 @@ jobs:
               "science": "science",
               "infrastructure and engineering": "infra",
               "evaluation, export and visualization": "eval",
-              "documentation": "documentation"
+              "documentation": "documentation",
+              "performance": "performance"
             };
 
             const issue = context.payload.issue;
