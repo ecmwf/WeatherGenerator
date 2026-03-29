@@ -20,12 +20,7 @@ import numpy as np
 import yaml
 
 import weathergen.common.config as config
-<<<<<<< HEAD
-from weathergen.evaluate.plotting.plot_utils import create_filename
-from weathergen.train.utils import TRAIN, VAL
-=======
 from weathergen.train.utils import TRAIN
->>>>>>> 9653c22cdf7830ed7bf81aeccf03ce6660b0304c
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
@@ -247,7 +242,7 @@ def plot_lr(
         rstr = rstr[: MAX_FILENAME_LEN - 6]
 
     # save the plot
-    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=["lr.png"])
+    plt_fname = plot_dir / f"{rstr}lr.png"
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -288,7 +283,9 @@ def plot_loss_avg(plot_dir: Path, runs_ids, runs_data, runs_active, stage=TRAIN,
     plt.ylabel("loss")
     plt.xlabel("step")
     plt.tight_layout()
-    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"])
+    rstr = "".join([f"{r}_" for r in runs_ids])
+
+    plt_fname = plot_dir / f"{rstr}{str(stage)}_avg.png"
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname)
     plt.close()
@@ -841,29 +838,24 @@ def plot_train(args=None):
 
     # plot all cols for all run_ids
     for run_id, run_data in zip(runs_ids, runs_data, strict=False):
-        try:
-            stream_names = get_stream_names(run_id, model_path=model_base_dir)
-        except Exception as e:
-            _logger.warning(f"Skipping run_id '{run_id}' (could not get stream names): {e}")
-            continue
         plot_loss_per_run(
             ["train", "val"],
             run_id,
             runs_ids[run_id],
             run_data,
-            stream_names,
+            get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
             channels=args.channels,
             plot_dir=out_dir,
         )
-        plot_loss_per_run(
-            ["val"],
-            run_id,
-            runs_ids[run_id],
-            run_data,
-            stream_names,
-            channels=args.channels,
-            plot_dir=out_dir,
-        )
+    plot_loss_per_run(
+        ["val"],
+        run_id,
+        runs_ids[run_id],
+        run_data,
+        get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
+        channels=args.channels,
+        plot_dir=out_dir,
+    )
 
 
 if __name__ == "__main__":
