@@ -143,12 +143,13 @@ def write_output(
     # Supported config shape:
     # {allow: bool, STREAM_NAME: [channels], ...}
     filter_cfg = val_cfg.get("output", {}).get("filter_output_channels", None)
-    use_allowlist = True
     output_filter_per_stream: dict[str, list[str]] = {}
 
     if filter_cfg is not None:
-        use_allowlist = bool(filter_cfg.get("allow", True))
+        if not bool(filter_cfg.get("allow", True)):
+            filter_cfg = None  # disable filtering entirely
 
+    if filter_cfg is not None:
         # Preferred top-level mapping format, e.g. {"allow": True, "ERA5": ["2t"]}
         for key, value in filter_cfg.items():
             if key == "allow":
@@ -170,10 +171,7 @@ def write_output(
             write_vars = list(write_vars)
 
         all_channels = output_channels[stream_idx]
-        if use_allowlist:
-            keep_idxs = [i for i, ch in enumerate(all_channels) if ch in write_vars]
-        else:
-            keep_idxs = [i for i, ch in enumerate(all_channels) if ch not in write_vars]
+        keep_idxs = [i for i, ch in enumerate(all_channels) if ch in write_vars]
 
         missing = set(write_vars) - set(all_channels)
         if missing:
