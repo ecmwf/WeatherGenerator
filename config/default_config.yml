@@ -245,15 +245,15 @@ validation_config:
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 1,
+    num_samples: 0,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
     # filter channels
     filter_output_channels: {
-      "allow": True,
-      "ERA5": ["2t"]
+      "allow": False,
+      "ERA5": []
       }
     }
 
