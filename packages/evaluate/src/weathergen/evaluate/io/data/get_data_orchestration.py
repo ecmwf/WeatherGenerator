@@ -19,12 +19,12 @@ from pathlib import Path
 import xarray as xr
 from tqdm import tqdm
 
-from weathergen.evaluate.io.data._raw_io_workers import (
+from weathergen.evaluate.io.data.raw_io_workers import (
     _init_worker_zio,
     _load_single_sample,
     _load_single_sample_own_context,
 )
-from weathergen.evaluate.io.data._xarray_utils import (
+from weathergen.evaluate.io.data.xarray_utils import (
     _add_lead_time_coord,
     _scale_z_channels,
     _select_channels,

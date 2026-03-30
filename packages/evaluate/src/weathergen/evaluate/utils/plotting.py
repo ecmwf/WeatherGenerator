@@ -640,7 +640,9 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     metrics = cfg.evaluation.metrics
     print_summary = cfg.evaluation.get("print_summary", False)
     regions = cfg.evaluation.get("regions", ["global"])
-    plt_opt = cfg.get("global_plotting_options", {})
+    # image_format / dpi_val etc. live at the top level of the config,
+    # not under a "global_plotting_options" sub-key.
+    plt_opt = cfg.get("global_plotting_options", cfg)
     eval_opt = cfg.get("evaluation", {})
 
     plot_cfg = {

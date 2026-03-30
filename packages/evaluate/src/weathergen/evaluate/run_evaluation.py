@@ -35,16 +35,9 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenZarrReader,
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
-from weathergen.evaluate.utils.utils import (
-    calc_scores_per_stream,
-    merge,
-    metric_list_to_json,
-    parse_metric_params,
-    plot_data,
-    plot_score_maps_per_stream,
-    plot_summary,
-    triple_nested_dict,
-)
+from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
+from weathergen.evaluate.utils.plotting import plot_data, plot_score_maps_per_stream, plot_summary
+from weathergen.evaluate.utils.scoring import calc_scores_per_stream, metric_list_to_json
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
     get_or_create_mlflow_parent_run,
