@@ -801,11 +801,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # worker. After the bit-wise copy, the rng seed needs to be made unique for
             # DDP workers, loader process, mini_epoch.
             dist = torch.distributed
-            self.data_loader_rng_seed *= (
-                (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
-                * ((worker_info.id + 1) * 37)
-                * (self.mini_epoch + 13)
-                * 7
+            rank_factor = ((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1
+            self.data_loader_rng_seed = self._mix_rng_seed(
+                self.data_loader_rng_seed, worker_info.id, self.mini_epoch, rank_factor
             )
             # split workload
             per_worker = (local_end - local_start) // worker_info.num_workers
@@ -819,3 +817,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             )
 
         return iter_start, iter_end
+
+    def _mix_rng_seed(self, base_seed, worker_id, mini_epoch, rank_factor=1):
+        return base_seed * rank_factor * ((worker_id + 1) * 37) * (mini_epoch + 13) * 7
