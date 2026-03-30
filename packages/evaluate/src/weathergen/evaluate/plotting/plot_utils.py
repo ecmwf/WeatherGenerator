@@ -230,7 +230,7 @@ def ratio_plot_metric_region(
         run_ids = []
         for run_id, run_data in runs.items():
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data.isnull().all():
+            if data is None or data.isnull().all():
                 continue
             selected_data.append(data)
             label = run_data.get("label", run_id)
@@ -289,7 +289,7 @@ def heat_maps_metric_region(
         run_ids = []
         for run_id in runs:
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data.isnull().all():
+            if data is None or data.isnull().all():
                 continue
 
             selected_data.append(data)
@@ -349,10 +349,15 @@ def score_card_metric_region(
             selected_data.append(data)
             run_ids.append(run_id)
 
-        if selected_data:
+        if len(selected_data) >= 2:
             _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
+        elif len(selected_data) == 1:
+            _logger.info(
+                f"Skipping score card for {metric} - {region} - {stream}: "
+                f"only one run available (need at least 2 to compare)."
+            )
 
 
 def bar_plot_metric_region(

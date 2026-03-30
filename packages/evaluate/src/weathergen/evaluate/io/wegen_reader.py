@@ -1171,7 +1171,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             # so no new processes/threads are spawned per fstep.
             if n_workers > 1:
                 try:
-                    results = Parallel(n_jobs=n_workers, backend=backend)(
+                    results = Parallel(n_jobs=n_workers, backend=backend, verbose = 5 )(
                         delayed(_read_sample_raw)(
                             zarr_path,
                             s,
@@ -1422,7 +1422,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         # ------------------------------------------------------------------
         if n_workers > 1:
             try:
-                results = Parallel(n_jobs=n_workers, backend=backend)(
+                results = Parallel(n_jobs=n_workers, backend=backend, verbose = 5 )(
                     delayed(_read_sample_raw)(
                         zarr_path,
                         s,

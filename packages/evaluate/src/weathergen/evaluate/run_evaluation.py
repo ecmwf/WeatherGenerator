@@ -41,6 +41,7 @@ from weathergen.evaluate.utils.utils import (
     metric_list_to_json,
     parse_metric_params,
     plot_data,
+    plot_score_maps_per_stream, 
     plot_summary,
     triple_nested_dict,
 )
@@ -273,12 +274,14 @@ def _process_stream(
     if not needs_scoring:
         return run_id, stream, {}
 
+    score_maps = (plot_score_maps and type_ == "zarr")
+
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif plot_score_maps and type_ == "zarr":
+    elif score_maps:
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
@@ -289,11 +292,20 @@ def _process_stream(
         stream,
         regions_to_compute,
         metrics_to_compute,
-        plot_score_maps,
         output_data=output_data,
     )
     metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
     scores_dict = merge(stream_loaded_scores, stream_computed_scores)
+
+    if score_maps:
+        plot_score_maps_per_stream(
+            reader,
+            stream,
+            regions_to_compute,
+            metrics_to_compute,
+            output_data=output_data,
+        )
+
     return run_id, stream, scores_dict
 
 

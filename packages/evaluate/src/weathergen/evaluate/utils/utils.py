@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # Third-party
+import matplotlib
 import numpy as np
 import omegaconf as oc
 import xarray as xr
@@ -159,8 +160,7 @@ def calc_scores_per_stream(
     stream: str,
     regions: list[str],
     metrics_dict: dict,
-    plot_score_maps: bool = False,
-    output_data: "ReaderOutput | None" = None,
+    output_data: ReaderOutput | None = None,
 ):
     """
     Calculate scores for a given run and stream using the specified metrics.
@@ -175,27 +175,20 @@ def calc_scores_per_stream(
         List of regions to calculate scores on.
     metrics_dict :
         Dictionary mapping regions to lists of metric names to calculate.
-    plot_score_maps :
-        When it is True and the stream is on a regular grid the scores are
-        recomputed as a function of the "ipoint" and plotted on a 2D scatter map.
-        NOTE: the scores are averaged over the "sample" dimension and for most
-        of the metrics this does not give the same results as averaging over
-        the "ipoint" dimension.
     output_data : ReaderOutput | None
         Pre-loaded data.  When provided, reader.get_data() is skipped — this
         avoids the double-load when data is already loaded for plotting.
+
     Returns
     -------
     Dictionary containing scores for each metric and stream.
+
+    See Also
+    --------
+    plot_score_maps_per_stream : Call after this function to produce spatial
+        score maps (aggregated over samples rather than spatial points).
     """
     local_scores = {}  # top-level dict: metric -> region -> stream -> run_id
-    if plot_score_maps:
-        _logger.info(f"RUN {reader.run_id} - {stream}: Plotting scores is enabled.")
-
-        map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
-        map_dir.mkdir(parents=True, exist_ok=True)
-
-        _logger.info(f"RUN {reader.run_id} - {stream}: Saving plotted scores to {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
     fsteps = available_data.fsteps
@@ -260,7 +253,7 @@ def calc_scores_per_stream(
             fstep_tasks.append((fstep, tars_fs, preds_fs, preds_next, tars_next, climatology))
 
         # --- Execute scoring (threaded or sequential) ---
-        num_scoring_threads = int(reader.eval_cfg.get("num_scoring_threads", 8))
+        num_scoring_threads = int(reader.eval_cfg.get("num_scoring_threads", 12))
         effective_threads = min(num_scoring_threads, len(fstep_tasks))
 
         if effective_threads > 1 and len(fstep_tasks) > 2:
@@ -370,19 +363,6 @@ def calc_scores_per_stream(
                         coord_name
                     ]
 
-        # Plot score maps (sequential — needs VerifiedData with all samples)
-        if is_gridded_data and plot_score_maps:
-            for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks:
-                tars_r, preds_r, tars_next_r, preds_next_r = [
-                    bbox.apply_mask(x) if x is not None else None
-                    for x in (tars_fs, preds_fs, tars_next, preds_next)
-                ]
-                score_data = VerifiedData(preds_r, tars_r, preds_next_r, tars_next_r, climatology)
-                _logger.info(f"Plotting scores on a map {stream} - forecast step: {fstep}...")
-                _plot_score_maps_per_stream(
-                    reader, map_dir, stream, region, score_data, metrics, fstep
-                )
-
         _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
         _logger.debug(f"all_metric_attrs keys: {list(all_metric_attrs.keys())}")
 
@@ -404,65 +384,271 @@ def calc_scores_per_stream(
     return local_scores
 
 
-def _plot_score_maps_per_stream(
+def plot_score_maps_per_stream(
     reader: Reader,
+    stream: str,
+    regions: list[str],
+    metrics_dict: dict,
+    output_data: "ReaderOutput | None" = None,
+) -> None:
+    """Plot spatial score maps for all regions and forecast steps.
+
+    This is the public counterpart to :func:`calc_scores_per_stream`.  It
+    recomputes scores aggregated over the **sample** dimension (keeping the
+    spatial ``ipoint`` dimension) so that the results can be displayed as 2-D
+    maps.  Call it after :func:`calc_scores_per_stream` and pass the same
+    pre-loaded *output_data* to avoid re-reading from disk.
+
+    All ``(region, fstep)`` combinations are dispatched in parallel via loky.
+    The number of outer workers is controlled by ``num_plot_workers`` in the
+    eval config (same key used by :func:`plot_data`).
+
+    Parameters
+    ----------
+    reader : Reader
+        Reader object containing all info about a particular run.
+    stream : str
+        Stream name to plot score maps for.
+    regions : list[str]
+        List of regions to plot.
+    metrics_dict : dict
+        Dictionary mapping region names to metric dicts (same shape as for
+        :func:`calc_scores_per_stream`).
+    output_data : ReaderOutput | None
+        Pre-loaded data.  When provided, ``reader.get_data()`` is skipped —
+        pass the same object used for scoring to avoid a second I/O round.
+    """
+    if not reader.is_gridded_data(stream):
+        _logger.debug(
+            f"RUN {reader.run_id} - {stream}: Skipping score maps (non-gridded data)."
+        )
+        return
+
+    map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
+    map_dir.mkdir(parents=True, exist_ok=True)
+    _logger.info(
+        f"RUN {reader.run_id} - {stream}: Plotting score maps → {map_dir}"
+    )
+
+    available_data = reader.check_availability(stream, mode="evaluation")
+    fsteps = available_data.fsteps
+    samples = available_data.samples
+    channels = available_data.channels
+    ensemble = available_data.ensemble
+
+    if output_data is None:
+        output_data = reader.get_data(
+            stream,
+            fsteps=fsteps,
+            samples=samples,
+            channels=channels,
+            ensemble=ensemble,
+        )
+
+    da_preds = output_data.prediction
+    da_tars = output_data.target
+    fsteps = sorted(da_preds.keys())
+    aligned_clim_data = get_climatology(reader, da_tars, stream)
+
+    # Resolve worker count once — shared across all fstep/region calls below.
+    n_plot_workers = _resolve_num_plot_workers(int(reader.eval_cfg.get("num_plot_workers", 0)))
+
+    # Extract picklable config from reader so loky workers don't need the
+    # full Reader object (which may contain file handles / locks).
+    cfg = reader.global_plotting_options
+    plotter_cfg = {
+        "image_format": cfg.get("image_format", "png"),
+        "dpi_val": cfg.get("dpi_val", 300),
+        "fig_size": cfg.get("fig_size", (8, 10)),
+    }
+    output_basedir = str(reader.runplot_dir)
+    run_id = reader.run_id
+
+    # Build one task per (region, fstep) — all data pre-computed here so
+    # workers receive plain DataArrays and dicts only.
+    fstep_tasks: list[dict] = []
+    for region in regions:
+        bbox = RegionBoundingBox.from_region_name(region)
+        metrics = metrics_dict[region]
+        for fstep in fsteps:
+            tars_fs = da_tars[fstep]
+            preds_fs = da_preds[fstep]
+            preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+            climatology = aligned_clim_data[fstep] if aligned_clim_data else None
+            tars_r, preds_r, tars_next_r, preds_next_r = [
+                bbox.apply_mask(x) if x is not None else None
+                for x in (tars_fs, preds_fs, tars_next, preds_next)
+            ]
+            score_data = VerifiedData(preds_r, tars_r, preds_next_r, tars_next_r, climatology)
+            fstep_tasks.append(
+                {
+                    "plotter_cfg": plotter_cfg,
+                    "output_basedir": output_basedir,
+                    "map_dir": str(map_dir),
+                    "stream": stream,
+                    "region": region,
+                    "score_data": score_data,
+                    "metrics": dict(metrics),
+                    "fstep": fstep,
+                    "run_id": run_id,
+                }
+            )
+
+    n_tasks = len(fstep_tasks)
+    effective = min(n_plot_workers, n_tasks)
+    _logger.info(
+        f"RUN {run_id} - {stream}: Plotting {n_tasks} score-map tasks "
+        f"({len(regions)} region(s) × {len(fsteps)} fstep(s)) "
+        f"with {effective} worker(s)."
+    )
+
+    if effective > 1 and n_tasks > 1:
+        try:
+            Parallel(n_jobs=effective, backend="loky", verbose=2)(
+                delayed(_score_map_fstep_worker)(**t)
+                for t in fstep_tasks
+            )
+            try:
+                get_reusable_executor().shutdown(wait=True)
+            except Exception:
+                pass
+        except Exception as exc:
+            _logger.warning(
+                f"Parallel score-map fstep dispatch failed "
+                f"({type(exc).__name__}: {exc}). Falling back to sequential."
+            )
+            try:
+                get_reusable_executor().shutdown(wait=True)
+            except Exception:
+                pass
+            for t in tqdm(fstep_tasks, desc=f"Score maps {stream} (sequential)"):
+                _score_map_fstep_worker(**t)
+    else:
+        for t in tqdm(fstep_tasks, desc=f"Score maps {stream}"):
+            _score_map_fstep_worker(**t)
+
+
+def _score_map_fstep_worker(
+    plotter_cfg: dict,
+    output_basedir: str,
     map_dir: str,
     stream: str,
     region: str,
-    score_data: VerifiedData,
-    metrics: dict[str, object],
+    score_data: "VerifiedData",
+    metrics: dict,
     fstep: int,
+    run_id: str,
 ) -> None:
-    """Plot 2D score maps for all metrics and channels.
+    """Module-level loky worker: compute scores + plot maps for one (region, fstep).
+
+    Accepts only plain dicts, strings, and DataArrays so that loky can pickle
+    this task without needing the full :class:`Reader` object.
+
     Parameters
     ----------
-    reader: Reader
-        Reader object containing all infos about the run
-    map_dir: str
-        Directory where the plots are saved.
-    stream: str
-        Stream name to plot score maps for.
-     region :
-        Region name to plot score maps for.
-    score_data: VerifiedData
-        prediction and target stored in the data class.
-    metrics: str
-        List of all metrics to plot.
-    fstep:
-        forecast step to plot.
-
-    Return
-    ------
-    None
+    plotter_cfg : dict
+        Plotter configuration (image_format, dpi_val, fig_size).
+    output_basedir : str
+        Path to ``reader.runplot_dir``.
+    map_dir : str
+        Output directory for score-map plots.
+    stream : str
+        Stream name.
+    region : str
+        Region name.
+    score_data : VerifiedData
+        Pre-masked prediction/target data for this (region, fstep).
+    metrics : dict
+        Metric name → parameter dict.
+    fstep : int
+        Forecast step index.
+    run_id : str
+        Run identifier (logging only).
     """
-
-    cfg = reader.global_plotting_options
-
-    # TODO: add support for climatology-dependent metrics as well
-
-    plotter = Plotter(
-        {
-            "image_format": cfg.get("image_format", "png"),
-            "dpi_val": cfg.get("dpi_val", 300),
-            "fig_size": cfg.get("fig_size", (8, 10)),
-        },
-        reader.runplot_dir,
-        stream,
+    _plot_score_maps_per_stream(
+        plotter_cfg=plotter_cfg,
+        output_basedir=output_basedir,
+        map_dir=map_dir,
+        stream=stream,
+        region=region,
+        score_data=score_data,
+        metrics=metrics,
+        fstep=fstep,
+        run_id=run_id,
     )
+
+
+def _plot_score_maps_per_stream(
+    plotter_cfg: dict,
+    output_basedir: str,
+    map_dir: str,
+    stream: str,
+    region: str,
+    score_data: "VerifiedData",
+    metrics: dict[str, object],
+    fstep: int,
+    run_id: str = "",
+) -> None:
+    """Plot 2D score maps for all metrics and channels for one (region, fstep).
+
+    Accepts only picklable arguments so it can be called from both the
+    parallel loky worker :func:`_score_map_fstep_worker` and directly in
+    sequential fallback paths.
+
+    Parameters
+    ----------
+    plotter_cfg : dict
+        Plotter configuration (image_format, dpi_val, fig_size).
+    output_basedir : str
+        Path to ``reader.runplot_dir``.
+    map_dir : str
+        Directory where the plots are saved.
+    stream : str
+        Stream name to plot score maps for.
+    region : str
+        Region name to plot score maps for.
+    score_data : VerifiedData
+        Prediction and target stored in the data class.
+    metrics : dict
+        Metric name → parameter dict.
+    fstep : int
+        Forecast step to plot.
+    run_id : str
+        Run identifier used in log messages.
+    """
+    # TODO: add support for climatology-dependent metrics as well
 
     preds = score_data.prediction
 
+    # --- Parallel metric computation (threads: xarray/numpy release the GIL) ---
+    metric_names = list(metrics.keys())
+    metric_params = list(metrics.values())
+    score_results: list[xr.DataArray | None] = [None] * len(metric_names)
+    with ThreadPoolExecutor(max_workers=min(12, len(metric_names))) as executor:
+        future_to_idx = {
+            executor.submit(
+                get_score, score_data, m,
+                agg_dims="sample", parameters=p,
+            ): i
+            for i, (m, p) in enumerate(zip(metric_names, metric_params))
+        }
+        for future in as_completed(future_to_idx):
+            score_results[future_to_idx[future]] = future.result()
+
+    valid = [(m, r) for m, r in zip(metric_names, score_results) if r is not None]
+    if not valid:
+        return
+
     plot_metrics = xr.concat(
-        [get_score(score_data, m, agg_dims="sample", parameters=p) for m, p in metrics.items()],
+        [r for _, r in valid],
         dim="metric",
         coords="minimal",
         combine_attrs="drop_conflicts",
     )
-
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=list(metrics.keys()),
+        metric=[m for m, _ in valid],
     ).compute()
 
     if "ens" in preds.dims:
@@ -471,8 +657,11 @@ def _plot_score_maps_per_stream(
     has_ens = "ens" in plot_metrics.coords
     ens_values = plot_metrics.coords["ens"].values if has_ens else [None]
 
+    # --- Build task list: one entry per (metric, ens, channel) ---
+    # Each task is a plain-dict so it is picklable by loky workers.
+    plot_tasks: list[dict] = []
     for metric in plot_metrics.coords["metric"].values:
-        for ens_val in tqdm(ens_values, f"Plotting metric - {metric}"):
+        for ens_val in ens_values:
             tag = f"score_maps_{metric}_fstep_{fstep}" + (
                 f"_ens_{ens_val}" if ens_val is not None else ""
             )
@@ -480,12 +669,72 @@ def _plot_score_maps_per_stream(
                 sel = {"metric": metric, "channel": channel}
                 if ens_val is not None:
                     sel["ens"] = ens_val
-
                 data = plot_metrics.sel(**sel).squeeze()
                 title = f"{metric} - {channel}: fstep {fstep}" + (
                     f", ens {ens_val}" if ens_val is not None else ""
                 )
-                plotter.scatter_plot(data, map_dir, channel, region, tag=tag, title=title)
+                plot_tasks.append(
+                    {
+                        "plotter_cfg": plotter_cfg,
+                        "output_basedir": output_basedir,
+                        "stream": stream,
+                        "data": data,
+                        "map_dir": str(map_dir),
+                        "channel": str(channel),
+                        "region": region,
+                        "tag": tag,
+                        "title": title,
+                    }
+                )
+
+    # --- Sequential scatter plots: fsteps already run in parallel loky workers,
+    # so no nested loky is needed here. ---
+    for t in plot_tasks:
+        _scatter_plot_single(**t)
+
+
+def _scatter_plot_single(
+    plotter_cfg: dict,
+    output_basedir: str,
+    stream: str,
+    data: xr.DataArray,
+    map_dir: str,
+    channel: str,
+    region: str,
+    tag: str,
+    title: str,
+) -> None:
+    """Plot a single score-map scatter plot.
+
+    Module-level so it is picklable by loky workers. Each worker creates its
+    own :class:`Plotter` instance, keeping matplotlib state isolated.
+
+    Parameters
+    ----------
+    plotter_cfg : dict
+        Plain-dict copy of the plotter configuration (image_format, dpi_val, fig_size).
+    output_basedir : str
+        Path to ``reader.runplot_dir`` (passed to :class:`Plotter`).
+    stream : str
+        Stream name.
+    data : xr.DataArray
+        Pre-selected, squeezed DataArray for this (metric, channel[, ens]).
+    map_dir : str
+        Output directory for the plot file.
+    channel : str
+        Variable/channel name.
+    region : str
+        Region name.
+    tag : str
+        Filename tag.
+    title : str
+        Plot title.
+    """
+
+    matplotlib.use("Agg")
+
+    plotter = Plotter(plotter_cfg, Path(output_basedir), stream)
+    plotter.scatter_plot(data, Path(map_dir), channel, region, tag=tag, title=title)
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +756,7 @@ def _resolve_num_plot_workers(requested: int = 0) -> int:
         Number of workers (≥ 1).
     """
     if requested > 0:
-        return min(requested, os.cpu_count() or 8)
+        return min(requested, os.cpu_count() or 12)
 
     # Auto-detect safe parallelism based on process headroom
     try:
@@ -534,7 +783,7 @@ def _resolve_num_plot_workers(requested: int = 0) -> int:
             return 1
 
         # Be conservative — plotting is memory-heavy (matplotlib + cartopy)
-        n = min(available // 8, os.cpu_count() or 8, 8)
+        n = min(available // 8, os.cpu_count() or 12, 12)
         n = max(n, 1)
         _logger.info(
             f"Parallel plotting: process headroom {available}/{soft_limit} free. "
@@ -850,10 +1099,10 @@ def plot_data(
             Parallel(
                 n_jobs=effective_workers,
                 backend="loky",
-                verbose=0,
+                verbose=2,
             )(
                 delayed(_plot_single_sample)(**task)
-                for task in tqdm(tasks, desc=f"Plotting {run_id} - {stream}")
+                for task in tasks
             )
 
             # Clean up loky workers to free process slots
