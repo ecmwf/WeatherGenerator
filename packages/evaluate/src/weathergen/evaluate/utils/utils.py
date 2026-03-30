@@ -847,7 +847,6 @@ def _plot_single_sample(
     maps_config, bias_config : dict
         Plain-dict copies of the per-variable colour-range configs.
     """
-    import matplotlib
 
     matplotlib.use("Agg")  # ensure non-interactive backend in worker
 

@@ -12,6 +12,8 @@ import contextlib
 import json
 import logging
 import os
+import resource
+import subprocess
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -729,7 +731,6 @@ class WeatherGenZarrReader(WeatherGenReader):
         * If fewer than ``min_headroom`` slots remain → sequential (1).
         * Otherwise cap at ``min(available // 4, cpu_count, 16)``.
         """
-        import resource
 
         if requested > 0:
             return min(requested, os.cpu_count() or 16)
@@ -750,8 +751,6 @@ class WeatherGenZarrReader(WeatherGenReader):
                 soft_limit = 65536
 
             # Count user processes (rough estimate via /proc)
-            import subprocess
-
             result = subprocess.run(
                 ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "pid"],
                 capture_output=True,
