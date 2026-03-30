@@ -597,7 +597,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         out = self.proj_out(outs.flatten(-2, -1))
         if self.with_residual:
-            out = out + x_in * gate if self.noise_conditioning else out + x_in
+            # out = out + x_in * gate if self.noise_conditioning else out + x_in
+            out = x_in + out * gate if self.noise_conditioning else x_in + out
 
         return out
 

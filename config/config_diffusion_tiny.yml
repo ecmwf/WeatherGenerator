@@ -11,24 +11,24 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 2048
+ae_local_dim_embed: 128
 ae_local_num_blocks: 0
-ae_local_num_heads: 16
-ae_local_dropout_rate: 0.1
+ae_local_num_heads: 8
+ae_local_dropout_rate: 0.0
 ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
-ae_adapter_num_heads: 16
+ae_adapter_num_heads: 8
 ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
-ae_adapter_dropout_rate: 0.1
+ae_adapter_dropout_rate: 0.0
 
-ae_global_dim_embed: 2048
+ae_global_dim_embed: 128
 ae_global_num_blocks: 4
-ae_global_num_heads: 32
-ae_global_dropout_rate: 0.1
+ae_global_num_heads: 8
+ae_global_dropout_rate: 0.0
 ae_global_with_qk_lnorm: True
 # TODO: switching to < 1 triggers triton-related issues.
 # See https://github.com/ecmwf/WeatherGenerator/issues/1050
@@ -38,8 +38,8 @@ ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
 ae_aggregation_num_blocks: 0
-ae_aggregation_num_heads: 32
-ae_aggregation_dropout_rate: 0.1
+ae_aggregation_num_heads: 4
+ae_aggregation_dropout_rate: 0.0
 ae_aggregation_with_qk_lnorm: True
 ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
@@ -55,13 +55,13 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 6
-fe_num_heads: 16
-fe_dropout_rate: 0.1
+fe_num_blocks: 4
+fe_num_heads: 4
+fe_dropout_rate: 0.0
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0.0  # 1e-4
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_impute_latent_noise_std: 0.0
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 with_step_conditioning: True # False
@@ -69,14 +69,13 @@ with_step_conditioning: True # False
 frequency_embedding_dim: 256
 embedding_dim: 512
 sigma_min: 0.002
-sigma_max: 80  # 170
-sigma_data: 0.5  # 1.7
+sigma_max: 50000
+sigma_data: 0.5
 rho: 7
-p_mean: -1.2
-p_std: 1.2
+p_mean: 0.0  # -1.2
+p_std: 1.2  # 1.2
 
-
-healpix_level: 5
+healpix_level: 3
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -95,13 +94,13 @@ latent_noise_deterministic_latents: True
 
 
 freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
-load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}
+load_chkpt: {'run_id': 'lgrasnq6', 'epoch': -1}
 
 norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
+streams_directory: "./config/streams/era5_1deg_diffusion_tiny/"
 streams: ???
 
 # type of zarr_store
@@ -117,7 +116,7 @@ general:
   # local_rank, 
   # with_ddp,
   # data_path_*, 
-  # model_path,
+  # model_path, 
   # run_path, 
   # path_shared_
   
@@ -153,10 +152,10 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
-  num_mini_epochs: 512
-  samples_per_mini_epoch: 1024
+  num_mini_epochs: 150
+  samples_per_mini_epoch: 66
   shuffle: True
- 
+
   start_date: 2012-06-01T00:00
   end_date: 2012-06-01T18:00
 
@@ -164,8 +163,8 @@ training_config:
   time_window_len: 06:00:00
   
   learning_rate_scheduling :
-    lr_start: 1e-5 #5e-5
-    lr_max: 1e-4 #1e-4
+    lr_start: 1e-6 #5e-5
+    lr_max: 5e-5 #1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 64
@@ -188,7 +187,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        weight: 0.0,
+        weight: 0.1,
         loss_fcts: {
           "mse": {},
         },
@@ -196,7 +195,7 @@ training_config:
     },
     "latent_diff": {
         type: LossLatentDiffusion,
-        weight: 1.0,
+        weight: 0.9,
         target_and_aux_calc: DiffusionLatentTargetEncoder,
         loss_fcts: { "mse": { }, },
         }
@@ -207,7 +206,7 @@ training_config:
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       masking_strategy_config: {diffusion_rn: True},
-      num_samples: 1
+      num_samples: 3
       }
     }
 
@@ -220,13 +219,6 @@ training_config:
 
 # validation config; full validation config is merge of training and validation config
 validation_config: 
-
-  # Noise levels (eta values in standard normal space) at which to evaluate the
-  # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
-  # Each value produces a separate validation pass with independently logged metrics.
-  # validation_noise_levels: [0.3, 0.5, 0.75, 1.0, 1.5]
-  validation_noise_levels: [2.0, 3.0, 3.2, 3.5, 4.0, 5.0]
-  # validation_noise_levels: [1.0, 2.0, 4.0, 8.0, 16.0]
 
   samples_per_mini_epoch: 16
   shuffle: False

@@ -160,7 +160,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # n = torch.randn_like(x).to(device="cuda") * sigma
         # x = self.cur_token + n
 
-        x = self.cur_token * 0.05 + x
+        x = self.cur_token * 0.01 + x
 
         # breakpoint()
 
