@@ -19,7 +19,7 @@ import tqdm
 from omegaconf import OmegaConf
 
 # FSDP2
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
@@ -338,6 +338,10 @@ class Trainer(TrainerBase):
             lr_steps,
             self.training_cfg.learning_rate_scheduling,
         )
+
+        # Restore optimizer momentum buffers when continuing from a checkpoint
+        if run_id_contd is not None:
+            self._load_optimizer_state(run_id_contd, mini_epoch_contd)
 
         if self.cf.general.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
@@ -683,7 +687,9 @@ class Trainer(TrainerBase):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
         max_mini_epoch = self.training_cfg.num_mini_epochs
         assert mini_epoch <= max_mini_epoch, (mini_epoch, max_mini_epoch)
+        # Gather full state dicts (collective ops for FSDP — all ranks must participate)
         model_state_dict = self._get_full_model_state_dict()
+        optim_state_dict = self._get_full_optimizer_state_dict()
 
         if is_root():
             filename = "".join(
@@ -701,11 +707,70 @@ class Trainer(TrainerBase):
             torch.save(model_state_dict, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
-            if is_root():
-                logger.info(f"Saved model to {file_out}")
+            logger.info(f"Saved model to {file_out}")
+
+            # save optimizer state keyed by parameter name for robust resumption
+            param_names = [n for n, _ in self.model.named_parameters()]
+            named_optim_state = {}
+            for idx, pname in enumerate(param_names):
+                if idx in optim_state_dict["state"]:
+                    named_optim_state[pname] = optim_state_dict["state"][idx]
+            if named_optim_state:
+                optim_out = base_path / (filename + ".optim")
+                optim_tmp = base_path / (filename + "_tmp.optim")
+                torch.save(named_optim_state, optim_tmp)
+                optim_tmp.replace(optim_out)
+                logger.info(f"Saved optimizer state to {optim_out}")
 
             # save config
             config.save(self.cf, mini_epoch)
+
+    def _load_optimizer_state(self, run_id: str, mini_epoch):
+        """Load optimizer state from checkpoint if available.
+
+        Restores AdamW momentum buffers (exp_avg, exp_avg_sq) so that training
+        resumes smoothly when chaining jobs via train_continue.
+        """
+        path_run = config.get_path_model(run_id=run_id)
+        mini_epoch_id = (
+            f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
+        )
+        optim_file = path_run / f"{run_id}_{mini_epoch_id}.optim"
+
+        if not optim_file.exists():
+            if is_root():
+                logger.info(f"No optimizer state found at {optim_file}, starting fresh.")
+            return
+
+        if is_root():
+            logger.info(f"Loading optimizer state from {optim_file}")
+
+        named_state = torch.load(
+            optim_file, map_location=torch.device("cpu"), mmap=True, weights_only=True
+        )
+        is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
+
+        loaded = 0
+        for name, param in self.model.named_parameters():
+            if name not in named_state:
+                continue
+            entry = named_state[name]
+            new_entry = {}
+            for key, val in entry.items():
+                if isinstance(val, torch.Tensor) and val.dim() > 0 and is_model_sharded:
+                    new_entry[key] = distribute_tensor(
+                        val, param.device_mesh, param.placements
+                    )
+                elif isinstance(val, torch.Tensor):
+                    new_entry[key] = val.to(device=param.device)
+                else:
+                    new_entry[key] = val
+            self.optimizer.state[param] = new_entry
+            loaded += 1
+
+        if is_root():
+            total = sum(1 for _ in self.model.parameters())
+            logger.info(f"Loaded optimizer state for {loaded}/{total} parameters.")
 
     def _log(self, stage: Stage):
         """
