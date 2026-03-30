@@ -10,12 +10,108 @@
 """Utilities for measuring and computing model performance metrics (MFU, HFU)."""
 
 import logging
+import time
 from collections.abc import Callable
 
+import torch
 import torch.nn as nn
-from lightning.fabric.utilities.throughput import measure_flops
+from lightning.fabric.utilities.throughput import Throughput, get_available_flops, measure_flops
+
+from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
+
+
+class ThroughputTracker:
+    """Tracks training throughput and hardware utilisation metrics.
+
+    Encapsulates Lightning's Throughput, per-batch FLOPs and source-byte
+    bookkeeping, and the warmup / accumulation logic required to produce
+    stable MFU / HFU estimates.
+    """
+
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        world_size: int,
+        window_size: int = 2,
+        warmup_steps: int = 2,
+    ) -> None:
+        self._available_flops = get_available_flops(device, dtype=dtype)
+        if is_root():
+            if self._available_flops:
+                logger.info(f"GPU peak FLOPS: {self._available_flops:.2e}")
+            else:
+                logger.warning(
+                    "GPU peak FLOPS not recognized by Lightning — MFU will not be available."
+                )
+        self._throughput = Throughput(
+            available_flops=self._available_flops,
+            world_size=world_size,
+            window_size=window_size,
+        )
+        self.flops_per_batch: int | None = None
+        self.flops_per_batch_fwd: int | None = None
+        self._source_bytes_per_batch: int = 0
+        self._warmup_steps = warmup_steps
+        self._t0: float | None = None
+        self._warmup_done: bool = False
+        self._total_batches: int = 0
+        self._total_samples: int = 0
+        self._total_mb: float = 0.0
+        self._world_size = world_size
+
+    def set_source_bytes(self, sample_batch) -> None:
+        """Precompute source tensor bytes per batch for MB/s tracking."""
+        try:
+            self._source_bytes_per_batch = compute_source_bytes(sample_batch.get_source_samples())
+            if is_root():
+                logger.info(f"Source bytes per batch: {self._source_bytes_per_batch / 1e6:.1f} MB")
+        except Exception:
+            self._source_bytes_per_batch = 0
+
+    def update(self, batch_size_per_gpu: int, istep: int) -> None:
+        """Record one training step, handling warmup internally."""
+        torch.cuda.synchronize()
+        if not self._warmup_done:
+            if istep == self._warmup_steps - 1:
+                self._t0 = time.time()
+                self._warmup_done = True
+        else:
+            self._total_batches += 1
+            self._total_samples += batch_size_per_gpu
+            self._total_mb += self._source_bytes_per_batch / 1e6
+            self._throughput.update(
+                time=time.time() - self._t0,
+                batches=self._total_batches,
+                samples=self._total_samples,
+                flops=self.flops_per_batch,
+            )
+
+    def compute_metrics(self, recompute_factor: float = 4 / 3) -> dict[str, float] | None:
+        """Return performance metrics dict, or None if warmup is not yet complete.
+
+        Args:
+            recompute_factor: Recompute correction for HFU. Default 4/3 (full per-layer ckpt).
+
+        Returns:
+            Dict of ``"performance.<key>": value`` pairs, or None if no data yet.
+        """
+        if self._total_batches == 0 or self._t0 is None:
+            return None
+        elapsed = time.time() - self._t0
+        return build_performance_metrics(
+            self._throughput.compute(),
+            elapsed,
+            self._total_batches,
+            self._total_mb,
+            world_size=self._world_size,
+            flops_fwd=self.flops_per_batch_fwd,
+            flops_total=self.flops_per_batch,
+            available_flops=self._available_flops,
+            recompute_factor=recompute_factor,
+        )
 
 
 def measure_model_flops(

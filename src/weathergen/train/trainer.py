@@ -15,7 +15,6 @@ import time
 import numpy as np
 import torch
 import tqdm
-from lightning.fabric.utilities.throughput import Throughput, get_available_flops
 from omegaconf import OmegaConf
 
 # FSDP2
@@ -47,8 +46,7 @@ from weathergen.train.utils import (
 )
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import (
-    build_performance_metrics,
-    compute_source_bytes,
+    ThroughputTracker,
     measure_model_flops,
 )
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
@@ -89,16 +87,7 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
-        self.throughput: Throughput | None = None
-        self.flops_per_batch: int | None = None
-        self.flops_per_batch_fwd: int | None = None
-        self._source_bytes_per_batch: int = 0
-        self._THROUGHPUT_WARMUP_STEPS: int = 2
-        self._t0_throughput: float | None = None
-        self._throughput_warmup_done: bool = False
-        self._total_batches: int = 0
-        self._total_samples: int = 0
-        self._total_mb: float = 0.0
+        self.perf_tracker: ThroughputTracker | None = None
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -175,18 +164,9 @@ class Trainer(TrainerBase):
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
         if cf.train_logging.get("track_performance_metrics"):
-            self._available_flops = get_available_flops(
-                torch.device(self.devices[0]), dtype=self.mixed_precision_dtype
-            )  # Assuming same device type!
-            if is_root():
-                if self._available_flops:
-                    logger.info(f"GPU peak FLOPS: {self._available_flops:.2e}")
-                else:
-                    logger.warning(
-                        "GPU peak FLOPS not recognized by Lightning — MFU will not be available."
-                    )
-            self.throughput = Throughput(
-                available_flops=self._available_flops,
+            self.perf_tracker = ThroughputTracker(
+                device=torch.device(self.devices[0]),  # Assuming same device type!
+                dtype=self.mixed_precision_dtype,
                 world_size=self.world_size_original,
                 window_size=cf.train_logging.get("throughput_window_size", 2),
             )
@@ -403,8 +383,8 @@ class Trainer(TrainerBase):
             sample_batch = next(iter(self.data_loader))
             sample_batch.to_device(self.device)
             self.precompute_flops(sample_batch)
-            self.precompute_source_bytes(sample_batch)
-            if is_root() and self.flops_per_batch is None:
+            self.perf_tracker.set_source_bytes(sample_batch)
+            if is_root() and self.perf_tracker.flops_per_batch is None:
                 logger.warning("flops_per_batch is None — MFU will not be available.")
 
         # run validation before training if requested
@@ -476,14 +456,16 @@ class Trainer(TrainerBase):
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
-                self.flops_per_batch_fwd, self.flops_per_batch = measure_model_flops(
-                    self.model,
-                    lambda: self.model(self.model_params, source),
-                    lambda output: self.loss_calculator.compute_loss(
-                        preds=output,
-                        targets_and_aux=targets_and_auxs,
-                        metadata=metadata,
-                    ),
+                self.perf_tracker.flops_per_batch_fwd, self.perf_tracker.flops_per_batch = (
+                    measure_model_flops(
+                        self.model,
+                        lambda: self.model(self.model_params, source),
+                        lambda output: self.loss_calculator.compute_loss(
+                            preds=output,
+                            targets_and_aux=targets_and_auxs,
+                            metadata=metadata,
+                        ),
+                    )
                 )
 
             # pop the history entries added during FLOPs measurement
@@ -492,22 +474,17 @@ class Trainer(TrainerBase):
             self.loss_calculator.stddev_unweighted_hist.pop()
 
             if is_root():
-                logger.info(f"Measured FLOPs per batch (fwd+bwd): {self.flops_per_batch:.2e}")
-                logger.info(f"Measured FLOPs per batch (fwd only): {self.flops_per_batch_fwd:.2e}")
+                logger.info(
+                    f"Measured FLOPs per batch (fwd+bwd): {self.perf_tracker.flops_per_batch:.2e}"
+                )
+                logger.info(
+                    f"Measured FLOPs per batch (fwd only): {self.perf_tracker.flops_per_batch_fwd:.2e}"
+                )
         except Exception as e:
             if is_root():
                 logger.warning(f"Failed to measure FLOPs: {e}. MFU/HFU will not be available.")
-            self.flops_per_batch = None
-            self.flops_per_batch_fwd = None
-
-    def precompute_source_bytes(self, sample_batch) -> None:
-        """Precompute source tensor bytes per batch for MB/s tracking."""
-        try:
-            self._source_bytes_per_batch = compute_source_bytes(sample_batch.get_source_samples())
-            if is_root():
-                logger.info(f"Source bytes per batch: {self._source_bytes_per_batch / 1e6:.1f} MB")
-        except Exception:
-            self._source_bytes_per_batch = 0
+            self.perf_tracker.flops_per_batch = None
+            self.perf_tracker.flops_per_batch_fwd = None
 
     def train(self, mini_epoch):
         """
@@ -615,22 +592,8 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
-            if self.throughput:
-                torch.cuda.synchronize()
-                if not self._throughput_warmup_done:
-                    if self.cf.general.istep == self._THROUGHPUT_WARMUP_STEPS - 1:
-                        self._t0_throughput = time.time()
-                        self._throughput_warmup_done = True
-                else:
-                    self._total_batches += 1
-                    self._total_samples += self.batch_size_per_gpu
-                    self._total_mb += self._source_bytes_per_batch / 1e6
-                    self.throughput.update(
-                        time=time.time() - self._t0_throughput,
-                        batches=self._total_batches,
-                        samples=self._total_samples,
-                        flops=self.flops_per_batch,
-                    )
+            if self.perf_tracker:
+                self.perf_tracker.update(self.batch_size_per_gpu, self.cf.general.istep)
 
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
@@ -646,21 +609,14 @@ class Trainer(TrainerBase):
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log throughput metrics
-                if self.throughput and is_root() and self._total_batches > 0:
+                if self.perf_tracker and is_root():
                     # TODO: currently hard-coding recompute factor, see docstring
                     recompute_factor = self.train_logging.get("throughput_recompute_factor", 4 / 3)
-                    perf_metrics = build_performance_metrics(
-                        self.throughput.compute(),
-                        time.time() - self._t0_throughput,
-                        self._total_batches,
-                        self._total_mb,
-                        self.flops_per_batch_fwd,
-                        self.flops_per_batch,
-                        self._available_flops,
-                        world_size=self.world_size_original,
-                        recompute_factor=recompute_factor,
-                    )
-                    self.train_logger.log_metrics(TRAIN, perf_metrics, step=self.cf.general.istep)
+                    perf_metrics = self.perf_tracker.compute_metrics(recompute_factor)
+                    if perf_metrics is not None:
+                        self.train_logger.log_metrics(
+                            TRAIN, perf_metrics, step=self.cf.general.istep
+                        )
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
