@@ -3,10 +3,12 @@ import glob
 import logging
 import os
 import re
+import warnings
 from pathlib import Path
 
 import cartopy
 import cartopy.crs as ccrs
+from cartopy.io import DownloadWarning
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,18 +25,55 @@ from weathergen.evaluate.plotting.plot_utils import (
 )
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
+_logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
+
+_CARTOPY_WARNING_HOOK_INSTALLED = False
+_ORIGINAL_SHOWWARNING = warnings.showwarning
+
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
 cartopy.config["data_dir"] = str(work_dir)
 cartopy.config["pre_existing_data_dir"] = str(work_dir)
 os.environ["CARTOPY_DATA_DIR"] = str(work_dir)
 
+def _install_cartopy_download_warning_hook() -> None:
+    """Log Cartopy download attempts when Cartopy emits DownloadWarning."""
+
+    global _CARTOPY_WARNING_HOOK_INSTALLED
+    if _CARTOPY_WARNING_HOOK_INSTALLED:
+        return
+
+    def _showwarning(message, category, filename, lineno, file=None, line=None):
+        if issubclass(category, DownloadWarning):
+            msg = (
+                "Cartopy attempted to download external map data. "
+                f"Details: {message}"
+            )
+            _logger.warning(msg)
+            return
+        _ORIGINAL_SHOWWARNING(message, category, filename, lineno, file=file, line=line)
+
+    warnings.showwarning = _showwarning
+    _CARTOPY_WARNING_HOOK_INSTALLED = True
+
+
+def _set_cartopy_offline_mode(enabled: bool) -> None:
+    """Enable/disable blocking Cartopy downloads by elevating DownloadWarning to error."""
+    if enabled:
+        warnings.filterwarnings("error", category=DownloadWarning)
+        _logger.info(
+            "Cartopy offline mode enabled from plotting config. "
+            "Auto-downloads are blocked; only local cartopy data will be used."
+        )
+    else:
+        warnings.filterwarnings("default", category=DownloadWarning)
+
+_install_cartopy_download_warning_hook()
+
 np.seterr(divide="ignore", invalid="ignore")
 
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
-
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
 
 _logger.debug(f"Taking cartopy paths from {work_dir}")
 
@@ -72,6 +111,8 @@ class Plotter:
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
         self.regions = plotter_cfg.get("regions")
+        self.cartopy_offline = bool(plotter_cfg.get("cartopy_offline", False))
+        _set_cartopy_offline_mode(self.cartopy_offline)
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -482,7 +523,12 @@ class Plotter:
             proj = ccrs.Robinson()
 
         ax = fig.add_subplot(1, 1, 1, projection=proj)
-        ax.coastlines()
+        if self.cartopy_offline:
+            _logger.info(
+                "Skipping coastlines in Cartopy offline mode to avoid triggering downloads."
+            )
+        else:
+            ax.coastlines()
 
         assert data["lon"].shape == data["lat"].shape == data.shape, (
             f"Scatter plot:: Data shape do not match. Shapes: "
