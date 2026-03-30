@@ -338,13 +338,11 @@ def _key_loss(st_name: str, lf_name: str) -> str:
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
     st_name = clean_name(st_name)
     return f"LossPhysical.{st_name}.{lf_name}.{ch_name}"  # LossPhysical.ERA5.mse.t_500.1
-    # return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
 def _key_stddev(st_name: str) -> str:
     st_name = clean_name(st_name)
-    return "LossPhysical.loss_avg"  #
-    # return f"stream.{st_name}.stddev_avg"
+    return "LossPhysical.loss_avg"
 
 
 def prepare_losses_for_logging(
