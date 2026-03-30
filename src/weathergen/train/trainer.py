@@ -45,10 +45,7 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import (
-    ThroughputTracker,
-    measure_model_flops,
-)
+from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -87,7 +84,7 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
-        self.perf_tracker: ThroughputTracker | None = None
+        self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -378,15 +375,6 @@ class Trainer(TrainerBase):
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
-        if self.cf.train_logging.get("track_performance_metrics"):
-            # precompute batch statistics for throughput/MFU tracking
-            sample_batch = next(iter(self.data_loader))
-            sample_batch.to_device(self.device)
-            self.precompute_flops(sample_batch)
-            self.perf_tracker.set_source_bytes(sample_batch)
-            if is_root() and self.perf_tracker.flops_per_batch is None:
-                logger.warning("flops_per_batch is None — MFU will not be available.")
-
         # run validation before training if requested
         self.validate_before_training()
 
@@ -430,62 +418,6 @@ class Trainer(TrainerBase):
             else:
                 assert False, "validate_before_training must be integer or boolean."
 
-    def _compute_targets_and_auxs(self, sample_batch) -> dict:
-        """Build the targets-and-auxiliaries dict required by the loss calculator."""
-        targets_and_auxs = {}
-        for loss_name, target_aux in self.target_and_aux_calculators.items():
-            target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
-            targets_and_auxs[loss_name] = target_aux.compute(
-                self.cf.general.istep,
-                sample_batch.get_target_samples(target_idxs),
-                self.model_params,
-                self.model,
-            )
-        return targets_and_auxs
-
-    def precompute_flops(self, sample_batch) -> None:
-        """Measure FLOPs for one training step (forward-only and full fwd+bwd)."""
-        try:
-            source = sample_batch.get_source_samples()
-            targets_and_auxs = self._compute_targets_and_auxs(sample_batch)
-            metadata = extract_batch_metadata(sample_batch)
-
-            cf = self.cf
-            with torch.autocast(
-                device_type=f"cuda:{cf.local_rank}",
-                dtype=self.mixed_precision_dtype,
-                enabled=cf.with_mixed_precision,
-            ):
-                self.perf_tracker.flops_per_batch_fwd, self.perf_tracker.flops_per_batch = (
-                    measure_model_flops(
-                        self.model,
-                        lambda: self.model(self.model_params, source),
-                        lambda output: self.loss_calculator.compute_loss(
-                            preds=output,
-                            targets_and_aux=targets_and_auxs,
-                            metadata=metadata,
-                        ),
-                    )
-                )
-
-            # pop the history entries added during FLOPs measurement
-            self.loss_calculator.loss_hist.pop()
-            self.loss_calculator.losses_unweighted_hist.pop()
-            self.loss_calculator.stddev_unweighted_hist.pop()
-
-            if is_root():
-                logger.info(
-                    f"Measured FLOPs per batch (fwd+bwd): {self.perf_tracker.flops_per_batch:.2e}"
-                )
-                logger.info(
-                    f"Measured FLOPs per batch (fwd only): {self.perf_tracker.flops_per_batch_fwd:.2e}"
-                )
-        except Exception as e:
-            if is_root():
-                logger.warning(f"Failed to measure FLOPs: {e}. MFU/HFU will not be available.")
-            self.perf_tracker.flops_per_batch = None
-            self.perf_tracker.flops_per_batch_fwd = None
-
     def train(self, mini_epoch):
         """
         Perform training for one epoch
@@ -509,58 +441,83 @@ class Trainer(TrainerBase):
 
             batch.to_device(self.device)
 
-            with torch.autocast(
-                device_type=f"cuda:{cf.local_rank}",
-                dtype=self.mixed_precision_dtype,
-                enabled=cf.with_mixed_precision,
-            ):
-                preds = self.model(
-                    self.model_params,
-                    batch.get_source_samples(),
+            with self.perf_tracker.step_context():
+                with torch.autocast(
+                    device_type=f"cuda:{cf.local_rank}",
+                    dtype=self.mixed_precision_dtype,
+                    enabled=cf.with_mixed_precision,
+                ):
+                    with self.perf_tracker.forward_context():
+                        preds = self.model(
+                            self.model_params,
+                            batch.get_source_samples(),
+                        )
+
+                    targets_and_auxs = {}
+                    for loss_name, target_aux in self.target_and_aux_calculators.items():
+                        # find targets for this target-aux calculator
+                        target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                        # apply target-aux calculator
+                        targets_and_auxs[loss_name] = target_aux.compute(
+                            self.cf.general.istep,
+                            batch.get_target_samples(target_idxs),
+                            self.model_params,
+                            self.model,
+                        )
+
+                loss = self.loss_calculator.compute_loss(
+                    preds=preds,
+                    targets_and_aux=targets_and_auxs,
+                    metadata=extract_batch_metadata(batch),
                 )
 
-                targets_and_auxs = {}
-                for loss_name, target_aux in self.target_and_aux_calculators.items():
-                    # find targets for this target-aux calculator
-                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
-                    # apply target-aux calculator
-                    targets_and_auxs[loss_name] = target_aux.compute(
-                        self.cf.general.istep,
-                        batch.get_target_samples(target_idxs),
-                        self.model_params,
-                        self.model,
-                    )
+                # TODO re-enable this, need to think on how to make it compatible with
+                # student-teacher training
+                # if cf.latent_noise_kl_weight > 0.0:
+                #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
+                #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
-            loss = self.loss_calculator.compute_loss(
-                preds=preds,
-                targets_and_aux=targets_and_auxs,
-                metadata=extract_batch_metadata(batch),
-            )
+                [
+                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators.items()
+                ]
+                [
+                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators_val.items()
+                ]
 
-            # TODO re-enable this, need to think on how to make it compatible with
-            # student-teacher training
-            # if cf.latent_noise_kl_weight > 0.0:
-            #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
-            #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+                # backward pass
+                self.optimizer.zero_grad()
+                self.grad_scaler.scale(loss).backward()
 
-            [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators_val.items()
-            ]
+                # gradient clipping
+                self.grad_scaler.unscale_(self.optimizer)
+                total_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
+                )
 
-            # backward pass
-            self.optimizer.zero_grad()
-            self.grad_scaler.scale(loss).backward()
+                # optimizer step
+                self.grad_scaler.step(self.optimizer)
+                self.grad_scaler.update()
 
-            # gradient clipping
-            self.grad_scaler.unscale_(self.optimizer)
-            total_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
-            )
+                # update learning rate
+                self.lr_scheduler.step()
+
+                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+                step = batch_size_total * self.cf.general.istep
+
+                [
+                    target_aux.update_state_post_opt_step(step, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators.items()
+                ]
+                [
+                    target_aux.update_state_post_opt_step(step, batch, self.model)
+                    for _, target_aux in self.target_and_aux_calculators_val.items()
+                ]
+
+                # EMA update
+                if self.validate_with_ema:
+                    self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
             # log gradient norms
             if self.log_grad_norms:
@@ -569,32 +526,14 @@ class Trainer(TrainerBase):
                 if bidx % self.train_logging.metrics == 0:
                     self._log_instant_grad_norms(TRAIN)
 
-            # optimizer step
-            self.grad_scaler.step(self.optimizer)
-            self.grad_scaler.update()
-
-            # update learning rate
-            self.lr_scheduler.step()
-
-            batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-            step = batch_size_total * self.cf.general.istep
-
-            [
-                target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators.items()
-            ]
-            [
-                target_aux.update_state_post_opt_step(step, batch, self.model)
-                for _, target_aux in self.target_and_aux_calculators_val.items()
-            ]
-
-            # EMA update
-            if self.validate_with_ema:
-                self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
-
-            if self.perf_tracker:
-                self.perf_tracker.update(self.batch_size_per_gpu, self.cf.general.istep)
-
+            self.perf_tracker.step(
+                batch,
+                self.batch_size_per_gpu,
+                self.cf.general.istep,
+                log_fn=lambda m: self.train_logger.log_metrics(
+                    TRAIN, m, step=self.cf.general.istep
+                ),
+            )
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
                 self.collapse_monitor._compute_collapse_metrics(
@@ -608,15 +547,6 @@ class Trainer(TrainerBase):
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
-                # Log throughput metrics
-                if self.perf_tracker and is_root():
-                    # TODO: currently hard-coding recompute factor, see docstring
-                    recompute_factor = self.train_logging.get("throughput_recompute_factor", 4 / 3)
-                    perf_metrics = self.perf_tracker.compute_metrics(recompute_factor)
-                    if perf_metrics is not None:
-                        self.train_logger.log_metrics(
-                            TRAIN, perf_metrics, step=self.cf.general.istep
-                        )
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)

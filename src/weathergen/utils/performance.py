@@ -12,10 +12,12 @@
 import logging
 import time
 from collections.abc import Callable
+from contextlib import contextmanager, nullcontext
 
 import torch
 import torch.nn as nn
-from lightning.fabric.utilities.throughput import Throughput, get_available_flops, measure_flops
+from lightning.fabric.utilities.throughput import Throughput, get_available_flops
+from torch.utils.flop_counter import FlopCounterMode
 
 from weathergen.utils.distributed import is_root
 
@@ -37,6 +39,7 @@ class ThroughputTracker:
         world_size: int,
         window_size: int = 2,
         warmup_steps: int = 2,
+        recompute_factor: float = 4 / 3,
     ) -> None:
         self._available_flops = get_available_flops(device, dtype=dtype)
         if is_root():
@@ -51,9 +54,8 @@ class ThroughputTracker:
             world_size=world_size,
             window_size=window_size,
         )
-        self.flops_per_batch: int | None = None
         self.flops_per_batch_fwd: int | None = None
-        self._source_bytes_per_batch: int = 0
+        self.flops_per_batch: int | None = None
         self._warmup_steps = warmup_steps
         self._t0: float | None = None
         self._warmup_done: bool = False
@@ -61,18 +63,78 @@ class ThroughputTracker:
         self._total_samples: int = 0
         self._total_mb: float = 0.0
         self._world_size = world_size
+        self._recompute_factor = recompute_factor
 
-    def set_source_bytes(self, sample_batch) -> None:
-        """Precompute source tensor bytes per batch for MB/s tracking."""
-        try:
-            self._source_bytes_per_batch = compute_source_bytes(sample_batch.get_source_samples())
-            if is_root():
-                logger.info(f"Source bytes per batch: {self._source_bytes_per_batch / 1e6:.1f} MB")
-        except Exception:
-            self._source_bytes_per_batch = 0
+    @contextmanager
+    def step_context(self):
+        """Context manager spanning the full training step (fwd + bwd + optimizer).
 
-    def update(self, batch_size_per_gpu: int, istep: int) -> None:
-        """Record one training step, handling warmup internally."""
+        Wrap the entire training step body with this to count all compute ops.
+        Nest ``flop_ctx()`` inside it around the model forward to additionally
+        capture forward-only FLOPs for MFU:
+
+            with self.perf_tracker.step_ctx():
+                with self.perf_tracker.flop_ctx():
+                    preds = model(...)
+                loss = loss_fn(preds)
+                loss.backward()
+                optimizer.step()
+        """
+        with FlopCounterMode(display=False) as counter:
+            yield
+        self.flops_per_batch = counter.get_total_flops()
+
+    @contextmanager
+    def forward_context(self):
+        """Context manager that counts forward-only FLOPs. Nest inside ``step_ctx()``.
+
+        Wrap the model forward pass with this to separately capture forward FLOPs
+        for MFU, while the enclosing ``step_ctx()`` accumulates the full total:
+
+            with self.perf_tracker.flop_ctx():
+                preds = model(params, batch.get_source_samples())
+        """
+        with FlopCounterMode(display=False) as counter:
+            yield
+        self.flops_per_batch_fwd = counter.get_total_flops()
+
+    def step(
+        self,
+        batch,
+        batch_size_per_gpu: int,
+        istep: int,
+        log_fn: Callable[[dict[str, float]], None] | None = None,
+    ) -> None:
+        """Record one training step and optionally log metrics.
+
+        Wrapper around ``update`` and ``compute_metrics`` that also computes
+        source bytes from the batch on the fly. When metrics are available and
+        the current rank is root, ``log_fn`` is called with the metrics dict.
+
+        Args:
+            batch: The current training batch (must expose ``get_source_samples()``).
+            batch_size_per_gpu: Number of samples processed on this rank.
+            istep: Global training step index.
+            log_fn: Called with the metrics dict on the root rank once warmup is
+                    complete. Typically ``lambda m: logger.log_metrics(stage, m, step=istep)``.
+        """
+        source_mb = compute_source_bytes(batch.get_source_samples()) / 1e6
+        self.update(batch_size_per_gpu, istep, source_mb)
+        if log_fn is not None and is_root():
+            metrics = self.compute_metrics()
+            if metrics is not None:
+                log_fn(metrics)
+
+    def update(self, batch_size_per_gpu: int, istep: int, source_mb: float) -> None:
+        """Record one training step, handling warmup internally.
+
+        Args:
+            batch_size_per_gpu: Number of samples processed on this rank.
+            istep: Global training step index (used for warmup countdown).
+            source_mb: Source tensor megabytes for this batch. Should be computed
+                       fresh each step via ``compute_source_bytes`` as batch sizes
+                       can vary across samples.
+        """
         torch.cuda.synchronize()
         if not self._warmup_done:
             if istep == self._warmup_steps - 1:
@@ -81,19 +143,15 @@ class ThroughputTracker:
         else:
             self._total_batches += 1
             self._total_samples += batch_size_per_gpu
-            self._total_mb += self._source_bytes_per_batch / 1e6
+            self._total_mb += source_mb
             self._throughput.update(
                 time=time.time() - self._t0,
                 batches=self._total_batches,
                 samples=self._total_samples,
-                flops=self.flops_per_batch,
             )
 
-    def compute_metrics(self, recompute_factor: float = 4 / 3) -> dict[str, float] | None:
+    def compute_metrics(self) -> dict[str, float] | None:
         """Return performance metrics dict, or None if warmup is not yet complete.
-
-        Args:
-            recompute_factor: Recompute correction for HFU. Default 4/3 (full per-layer ckpt).
 
         Returns:
             Dict of ``"performance.<key>": value`` pairs, or None if no data yet.
@@ -110,53 +168,26 @@ class ThroughputTracker:
             flops_fwd=self.flops_per_batch_fwd,
             flops_total=self.flops_per_batch,
             available_flops=self._available_flops,
-            recompute_factor=recompute_factor,
+            recompute_factor=self._recompute_factor,
         )
 
 
-def measure_model_flops(
-    model: nn.Module,
-    forward_fn: Callable,
-    loss_fn: Callable,
-) -> tuple[int | None, int | None]:
-    """Measure forward-only and total training FLOPs for one batch.
 
-    Runs two separate measurements:
-    - Forward-only (no backward): used to compute MFU.
-    - Full training step (forward + backward): used to compute a measured utilisation.
+class NullThroughputTracker:
+    """No-op throughput tracker used when performance tracking is disabled.
 
-    The caller is responsible for any required autocast context.
-
-    Note: PyTorch's FlopCounterMode does NOT count activation-checkpoint recomputation
-    with use_reentrant=False. Both measurements therefore reflect the same recompute
-    behaviour (or lack thereof). The "3×" factor in compute_mfu accounts for the
-    conventional forward + backward estimate independently of this limitation.
-
-    Args:
-        model: The model to profile.
-        forward_fn: Performs one model forward pass and returns its output.
-        loss_fn: Takes the output of forward_fn and returns a scalar loss.
-                 measure_flops calls loss.backward() to also count backward FLOPs.
-
-    Returns:
-        (flops_fwd, flops_total):
-            flops_fwd   — forward-only FLOPs, or None if measurement failed.
-            flops_total — forward + backward + recompute FLOPs, or None if measurement failed.
+    Implements the same interface as ``ThroughputTracker`` so call sites in the
+    training loop need no ``if`` guards.
     """
-    flops_fwd = None
-    flops_total = None
 
-    try:
-        flops_fwd = measure_flops(model, forward_fn)
-    except Exception as e:
-        logger.warning(f"Failed to measure forward FLOPs: {e}")
+    def step_context(self):
+        return nullcontext()
 
-    try:
-        flops_total = measure_flops(model, forward_fn, loss_fn)
-    except Exception as e:
-        logger.warning(f"Failed to measure training FLOPs: {e}")
+    def forward_context(self):
+        return nullcontext()
 
-    return flops_fwd, flops_total
+    def step(self, batch, batch_size_per_gpu: int, istep: int, log_fn=None) -> None:
+        pass
 
 
 def compute_source_bytes(source_samples) -> int:
