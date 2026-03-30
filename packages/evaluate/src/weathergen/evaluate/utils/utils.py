@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 # Standard library
+import contextlib
 import json
 import logging
 import os
@@ -288,7 +289,10 @@ def calc_scores_per_stream(
             for i, (fstep, tars_fs, preds_fs, preds_next, tars_next, climatology) in enumerate(
                 tqdm(
                     fstep_tasks,
-                    desc=f"Computing scores for {reader.run_id} - stream {stream} and region {region}",
+                    desc=(
+                        f"Computing scores for {reader.run_id}"
+                        f" - stream {stream} and region {region}"
+                    ),
                 ),
                 1,
             ):
@@ -419,16 +423,12 @@ def plot_score_maps_per_stream(
         pass the same object used for scoring to avoid a second I/O round.
     """
     if not reader.is_gridded_data(stream):
-        _logger.debug(
-            f"RUN {reader.run_id} - {stream}: Skipping score maps (non-gridded data)."
-        )
+        _logger.debug(f"RUN {reader.run_id} - {stream}: Skipping score maps (non-gridded data).")
         return
 
     map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
     map_dir.mkdir(parents=True, exist_ok=True)
-    _logger.info(
-        f"RUN {reader.run_id} - {stream}: Plotting score maps → {map_dir}"
-    )
+    _logger.info(f"RUN {reader.run_id} - {stream}: Plotting score maps → {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
     fsteps = available_data.fsteps
@@ -505,22 +505,17 @@ def plot_score_maps_per_stream(
     if effective > 1 and n_tasks > 1:
         try:
             Parallel(n_jobs=effective, backend="loky", verbose=2)(
-                delayed(_score_map_fstep_worker)(**t)
-                for t in fstep_tasks
+                delayed(_score_map_fstep_worker)(**t) for t in fstep_tasks
             )
-            try:
+            with contextlib.suppress(Exception):
                 get_reusable_executor().shutdown(wait=True)
-            except Exception:
-                pass
         except Exception as exc:
             _logger.warning(
                 f"Parallel score-map fstep dispatch failed "
                 f"({type(exc).__name__}: {exc}). Falling back to sequential."
             )
-            try:
+            with contextlib.suppress(Exception):
                 get_reusable_executor().shutdown(wait=True)
-            except Exception:
-                pass
             for t in tqdm(fstep_tasks, desc=f"Score maps {stream} (sequential)"):
                 _score_map_fstep_worker(**t)
     else:
@@ -627,15 +622,18 @@ def _plot_score_maps_per_stream(
     with ThreadPoolExecutor(max_workers=min(12, len(metric_names))) as executor:
         future_to_idx = {
             executor.submit(
-                get_score, score_data, m,
-                agg_dims="sample", parameters=p,
+                get_score,
+                score_data,
+                m,
+                agg_dims="sample",
+                parameters=p,
             ): i
-            for i, (m, p) in enumerate(zip(metric_names, metric_params))
+            for i, (m, p) in enumerate(zip(metric_names, metric_params, strict=False))
         }
         for future in as_completed(future_to_idx):
             score_results[future_to_idx[future]] = future.result()
 
-    valid = [(m, r) for m, r in zip(metric_names, score_results) if r is not None]
+    valid = [(m, r) for m, r in zip(metric_names, score_results, strict=False) if r is not None]
     if not valid:
         return
 
@@ -1100,16 +1098,11 @@ def plot_data(
                 n_jobs=effective_workers,
                 backend="loky",
                 verbose=2,
-            )(
-                delayed(_plot_single_sample)(**task)
-                for task in tasks
-            )
+            )(delayed(_plot_single_sample)(**task) for task in tasks)
 
             # Clean up loky workers to free process slots
-            try:
+            with contextlib.suppress(Exception):
                 get_reusable_executor().shutdown(wait=True)
-            except Exception:
-                pass
 
         except Exception as exc:
             _logger.warning(
@@ -1117,10 +1110,8 @@ def plot_data(
                 f"Falling back to sequential plotting."
             )
             # Clean up loky workers before fallback
-            try:
+            with contextlib.suppress(Exception):
                 get_reusable_executor().shutdown(wait=True)
-            except Exception:
-                pass
 
             for task in tqdm(tasks, desc=f"Plotting {run_id} - {stream} (sequential fallback)"):
                 _plot_single_sample(**task)

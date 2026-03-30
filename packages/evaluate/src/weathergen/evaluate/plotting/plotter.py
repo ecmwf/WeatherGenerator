@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
 from pathlib import Path
 
 import cartopy
@@ -18,6 +17,7 @@ import xarray as xr
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
+from tqdm import tqdm
 
 from weathergen.common.config import _load_private_conf
 from weathergen.evaluate.plotting.plot_utils import (
@@ -375,9 +375,7 @@ class Plotter:
 
                 if self.plot_subtimesteps:
                     ntimes_unique = len(np.unique(da.valid_time))
-                    _logger.debug(
-                        f"Creating maps for variable {var} - {tag}"
-                    )
+                    _logger.debug(f"Creating maps for variable {var} - {tag}")
                     if ntimes_unique == 0:
                         _logger.warning(
                             f"No valid times found for variable {var} - {tag}. Skipping."
@@ -489,7 +487,7 @@ class Plotter:
 
         ax = fig.add_subplot(1, 1, 1, projection=proj)
         ax.coastlines()
-        
+
         data = data.squeeze()
 
         assert data["lon"].shape == data["lat"].shape == data.shape, (
@@ -612,10 +610,7 @@ class Plotter:
 
         if n_workers > 1 and len(tasks) > 1:
             with ThreadPoolExecutor(max_workers=n_workers) as executor:
-                futures = {
-                    executor.submit(_build_single_animation, **t): t
-                    for t in tasks
-                }
+                futures = {executor.submit(_build_single_animation, **t): t for t in tasks}
                 for future in tqdm(
                     as_completed(futures),
                     total=len(futures),
@@ -696,9 +691,7 @@ def _build_single_animation(
 
     image_paths = sorted(image_paths)
     images = [Image.open(p) for p in image_paths]
-    out_path = (
-        f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.gif"
-    )
+    out_path = f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.gif"
     images[0].save(
         out_path,
         save_all=True,

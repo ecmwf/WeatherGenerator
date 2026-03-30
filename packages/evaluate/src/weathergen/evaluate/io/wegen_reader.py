@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 # Standard library
+import contextlib
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ import xarray as xr
 import zarr
 from joblib import Parallel, delayed
 from joblib.externals.loky import get_reusable_executor
+from numpy.typing import NDArray
 from tqdm import tqdm
 
 # Local application / package
@@ -205,7 +207,7 @@ def _read_sample_raw(
     is_zip: bool,
     read_coords: bool = False,
     is_gridded: bool = True,
-) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], dict]:
+) -> tuple[list[NDArray], list[NDArray], list[NDArray], dict]:
     """
     Read all forecast steps for one sample via direct zarr array access.
 
@@ -318,10 +320,8 @@ def _read_sample_raw(
         except (KeyError, AttributeError):
             pass
 
-    try:
+    with contextlib.suppress(Exception):
         store.close()
-    except Exception:
-        pass
 
     meta = {
         "source_interval": source_interval,
@@ -336,7 +336,7 @@ def _read_coords_and_meta(
     stream: str,
     fstep: int,
     is_zip: bool,
-) -> tuple[np.ndarray, list[str], np.ndarray]:
+) -> tuple[NDArray, list[str], NDArray]:
     """
     Read coordinates and channel names from the zarr store (once).
 
@@ -361,10 +361,8 @@ def _read_coords_and_meta(
     pred_group = ds[f"{base}/prediction"]
     channels = list(pred_group.attrs.get("channels", []))
 
-    try:
+    with contextlib.suppress(Exception):
         store.close()
-    except Exception:
-        pass
 
     return coords, channels, times_ref
 
@@ -742,10 +740,9 @@ class WeatherGenZarrReader(WeatherGenReader):
             with open("/proc/self/status") as f:
                 for line in f:
                     if line.startswith("Threads:"):
-                        current_threads = int(line.split()[1])
                         break
                 else:
-                    current_threads = 1
+                    pass
 
             # System-wide nproc limit for this user
             soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
@@ -1079,10 +1076,8 @@ class WeatherGenZarrReader(WeatherGenReader):
             # the fallback tries to create its own process/thread pools.
             # Without this, stale loky workers can exhaust the OS
             # process/thread limit and deadlock the fallback path.
-            try:
+            with contextlib.suppress(Exception):
                 get_reusable_executor().shutdown(wait=True)
-            except Exception:
-                pass
             return self.get_data(stream, samples, fsteps, channels, ensemble)
 
     def _get_data_raw_impl(
@@ -1159,7 +1154,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         # → store → free raw arrays before the next fstep.
         da_tars_dict, da_preds_dict = {}, {}
         fstep_counter = 1  # for sub-step numbering
-        source_interval_starts: np.ndarray | None = None
+        source_interval_starts: NDArray | None = None
 
         for fi, fs in enumerate(fsteps):
             _logger.info(
@@ -1171,7 +1166,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             # so no new processes/threads are spawned per fstep.
             if n_workers > 1:
                 try:
-                    results = Parallel(n_jobs=n_workers, backend=backend, verbose = 5 )(
+                    results = Parallel(n_jobs=n_workers, backend=backend, verbose=5)(
                         delayed(_read_sample_raw)(
                             zarr_path,
                             s,
@@ -1189,10 +1184,8 @@ class WeatherGenZarrReader(WeatherGenReader):
                         f"Parallel pool failed on fstep {fs} ({pool_err}). "
                         f"Switching to sequential reads for remaining fsteps."
                     )
-                    try:
+                    with contextlib.suppress(Exception):
                         get_reusable_executor().shutdown(wait=True)
-                    except Exception:
-                        pass
                     n_workers = 1  # sequential for this and all subsequent fsteps
                     results = [
                         _read_sample_raw(
@@ -1422,7 +1415,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         # ------------------------------------------------------------------
         if n_workers > 1:
             try:
-                results = Parallel(n_jobs=n_workers, backend=backend, verbose = 5 )(
+                results = Parallel(n_jobs=n_workers, backend=backend, verbose=5)(
                     delayed(_read_sample_raw)(
                         zarr_path,
                         s,
@@ -1439,10 +1432,8 @@ class WeatherGenZarrReader(WeatherGenReader):
                 _logger.warning(
                     f"ZipStore parallel pool failed ({pool_err}). Switching to sequential reads."
                 )
-                try:
+                with contextlib.suppress(Exception):
                     get_reusable_executor().shutdown(wait=True)
-                except Exception:
-                    pass
                 n_workers = 1
                 results = [
                     _read_sample_raw(
@@ -1601,14 +1592,14 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     @staticmethod
     def _build_gridded_dataarrays(
-        tars_list: list[np.ndarray],
-        preds_list: list[np.ndarray],
+        tars_list: list[NDArray],
+        preds_list: list[NDArray],
         samples: list[int],
         read_channels: list[str],
-        lat: np.ndarray,
-        lon: np.ndarray,
+        lat: NDArray,
+        lon: NDArray,
         per_sample_valid_times: list[np.datetime64],
-        source_interval_starts: np.ndarray,
+        source_interval_starts: NDArray,
         forecast_step_val: int,
         ensemble: list[str],
         all_ens: list[str] | None,
@@ -1676,18 +1667,18 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     @staticmethod
     def _build_scatter_dataarrays(
-        tars_list: list[np.ndarray],
-        preds_list: list[np.ndarray],
+        tars_list: list[NDArray],
+        preds_list: list[NDArray],
         samples: list[int],
         read_channels: list[str],
         per_sample_valid_times: list[np.datetime64],
-        source_interval_starts: np.ndarray,
+        source_interval_starts: NDArray,
         forecast_step_val: int,
         ensemble: list[str],
         all_ens: list[str] | None,
-        per_sample_coords: list[np.ndarray | None],
-        coords_fallback: np.ndarray,
-        per_sample_obs_times: list[np.ndarray] | None = None,
+        per_sample_coords: list[NDArray | None],
+        coords_fallback: NDArray,
+        per_sample_obs_times: list[NDArray] | None = None,
     ) -> tuple[xr.DataArray, xr.DataArray]:
         """Build DataArrays for non-gridded (scatter) data.
 
@@ -1798,7 +1789,7 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     @staticmethod
     def _build_pred_dataarray(
-        preds_stacked: np.ndarray,
+        preds_stacked: NDArray,
         base_coords: dict,
         ensemble: list[str],
         all_ens: list[str] | None,
