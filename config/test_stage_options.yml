@@ -1,0 +1,32 @@
+# Minimal test pipeline to verify per-stage config isolation.
+# Dry-run:
+#   ../WeatherGenerator-private/hpc/launch-slurm-sophie.py config/test_stage_options.yml \
+#       --stage-options "pretrain:training_config.learning_rate_scheduling.lr_max=1e-4" \
+#       --stage-options "finetune:training_config.learning_rate_scheduling.lr_max=2e-5"
+#
+# Expected: two separate config_command_line_{pretrain,finetune}.yaml files
+# with non-overlapping content.
+
+nodes: 1
+register: false
+cleanup-scripts: no
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  - name: pretrain
+    command: train
+    base-config: ./config/config_jepa_frozen_mtm_sweep_2drope.yml
+    config: ./config/config_jepa_frozen_mtm_sweep_2drope.yml
+    options:
+      - training_config.num_mini_epochs=2
+    chain: 1
+    nodes: 1
+
+  - name: finetune
+    command: train-continue
+    from: pretrain
+    config: ./config/config_jepa_finetuning.yml
+    options:
+      - training_config.num_mini_epochs=1
+    chain: 1
