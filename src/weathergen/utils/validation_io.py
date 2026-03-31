@@ -94,7 +94,7 @@ def write_output(
         if loss_term.type == "LossPhysical"
     ]
     assert len(outputs_physical) == 1
-    breakpoint()
+    
     target_aux_out = target_aux_out[outputs_physical[0]]
 
     # collect all target / prediction-related information

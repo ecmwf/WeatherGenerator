@@ -234,6 +234,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         if dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
+            self.lnorm_final = AdaLayerNormFinal(dim_embed, dim_aux, norm_eps=norm_eps)
         else:
             self.lnorm = norm(dim_embed, eps=norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
@@ -268,7 +269,12 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
     def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+        
+        # Handle ada_ln_aux conditioning
+        if ada_ln_aux is None:
+            x = self.lnorm(x)
+        else:
+            x = self.lnorm(x, ada_ln_aux)
 
         if self.noise_conditioning:
             x, gate = self.noise_conditioning(x, emb)
@@ -287,8 +293,12 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
         out = self.proj_out(self.dropout(outs.flatten(-2, -1)))
+
+        if ada_ln_aux is not None:
+            out = self.lnorm_final(out, ada_ln_aux)
+
         if self.with_residual:
-            out = x_in + out * gate if self.noise_conditioning else x_in + out
+            out = x_in + out * gate if self.noise_conditioning is not None else x_in + out
 
         return out
 
@@ -566,16 +576,20 @@ class MultiSelfAttentionHead(torch.nn.Module):
         if with_noise_conditioning:
             # NOTE: noise_emb_dim currently hard-coded
             self.noise_conditioning = LinearNormConditioning(
-                latent_space_dim=dim_embed, noise_emb_dim=512, dtype=self.dtype
+                latent_space_dim=dim_embed, dtype=self.dtype
             )
 
     def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
-        x = self.lnorm(x) if ada_ln_aux is None else self.lnorm(x, ada_ln_aux)
+        
+        # Handle ada_ln_aux conditioning
+        if ada_ln_aux is None:
+            x = self.lnorm(x)
+        else:
+            x = self.lnorm(x, ada_ln_aux)
 
         if self.noise_conditioning:
-            assert emb is not None, "Need noise embedding if using noise conditioning"
             x, gate = self.noise_conditioning(x, emb)
 
         # project onto heads and q,k,v and
@@ -597,6 +611,10 @@ class MultiSelfAttentionHead(torch.nn.Module):
         outs = flash_attn_func(qs, ks, vs, softcap=self.softcap, dropout_p=dropout_rate)
 
         out = self.proj_out(outs.flatten(-2, -1))
+
+        if ada_ln_aux is not None:
+            out = self.lnorm_final(out, ada_ln_aux)
+
         if self.with_residual:
             out = x_in + out * gate if self.noise_conditioning else out + x_in
 

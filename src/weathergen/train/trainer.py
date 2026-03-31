@@ -434,8 +434,6 @@ class Trainer(TrainerBase):
 
             batch.to_device(self.device)
 
-            breakpoint()
-
             with torch.autocast(
                 device_type=f"cuda:{cf.local_rank}",
                 dtype=self.mixed_precision_dtype,

@@ -96,7 +96,7 @@ class Sample:
         """
         Add metadata for stream @stream_name to sample
         """
-        print(meta_info.__dict__)
+
         self.meta_info[stream_name] = meta_info
 
     def get_stream_data(self, stream_name: str) -> StreamData:

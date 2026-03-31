@@ -84,7 +84,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = tokens
 
-        c = torch.tensor([meta_info["ERA5"].params["datetime"]], device=tokens.device)  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
+        c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
         y = tokens
 
         if self.training:
@@ -99,6 +99,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         n = torch.randn_like(y) * sigma
 
         self._noised_tokens = y + n
+
+        print(f"date was: {c}")
 
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
@@ -119,8 +121,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c) #currently does nothing
-        c = self.datetime_embedder(c)
-
+        c = self.datetime_embedder(c).to(x.device)
+    
         return c_skip * x + c_out * self.net(
             c_in * x, fstep=fstep, noise_emb=noise_emb, ada_ln_aux=c
         )  # Eq. (7) in EDM paper
@@ -227,56 +229,80 @@ class NoiseEmbedder(torch.nn.Module):
 
 class DateTimeEncoder(torch.nn.Module):
     """
-    Encodes timestamp(s) in seconds since Unix epoch into a 4D vector:
-      [time_of_day_sin, time_of_day_cos, day_of_year_sin, day_of_year_cos]
-
+    Encodes timestamp(s) into multi-frequency sinusoidal calendar embeddings.
+    
+    Inspired by cBottle (Climate in a Bottle) with k=1..8 frequency scales.
+    Captures seasonal (day-of-year) and diurnal (time-of-day) cycles at multiple timescales.
+    
     Input shape:  scalar or any tensor shape (...)
-    Output shape:  (..., 4)
+    Output shape:  (..., 32) — 8 frequencies × 4 components (cos/sin per signal)
+    
+    Output structure for k=1..8:
+      [cos(2πk·doy/365.25), sin(2πk·doy/365.25), cos(k·t), sin(k·t)]
+    where:
+      - doy = day of year (0-365.25)
+      - t = 2π·seconds_of_day/86400 (time of day in radians, UTC)
     """
 
     def __init__(self):
         super().__init__()
+        self.num_frequencies = 8
 
-    def forward(self, timestamp: torch.Tensor | np.ndarray) -> torch.Tensor:
+    def forward(self, timestamp: np.ndarray) -> torch.Tensor:
         """
-        Encode datetime64 timestamp into a 4D vector:
-        [time_of_day_sin, time_of_day_cos, day_of_year_sin, day_of_year_cos]
+        Encode numpy datetime64 timestamps into 32D multi-frequency calendar embeddings.
 
-        Input: np.datetime64 or torch.Tensor containing datetime64 values
-        Output: (..., 4) shaped tensor
+        Args:
+            timestamp: np.datetime64 scalar or array of timestamps
+            
+        Returns:
+            torch.Tensor of shape (..., 32) containing multi-frequency embeddings
         """
-        # Convert to numpy if needed
-        if isinstance(timestamp, torch.Tensor):
-            timestamp = timestamp.detach().cpu().numpy()
-        
-        # Ensure datetime64[s] precision
-        timestamp = timestamp.astype('datetime64[s]')
+
+        # TODO: Consider adding local time encoding (e.g., using longitude)
+
         orig_shape = timestamp.shape
         timestamp_flat = timestamp.reshape(-1)
         
         two_pi = 2.0 * np.pi
         
-        # --- Time of day from seconds since epoch ---
+        # --- Extract time components ---
         ts_int64 = timestamp_flat.astype('int64')  # seconds since Unix epoch
         seconds_in_day = 86400.0
-        time_of_day = (ts_int64 % int(seconds_in_day)) / seconds_in_day
-        tod_sin = np.sin(two_pi * time_of_day).astype(np.float32)
-        tod_cos = np.cos(two_pi * time_of_day).astype(np.float32)
+        seconds_of_day = (ts_int64 % int(seconds_in_day)) / seconds_in_day  # [0, 1)
         
-        # --- Day of year ---
+        # --- Extract day of year ---
         day_np = timestamp_flat.astype('datetime64[D]')
         year_start = day_np.astype('datetime64[Y]').astype('datetime64[D]')
         next_year_start = (day_np.astype('datetime64[Y]') + np.timedelta64(1, 'Y')).astype('datetime64[D]')
         
-        day_of_year_0 = (day_np - year_start).astype(np.int64)
-        days_in_year = (next_year_start - year_start).astype(np.int64)
-        doy_frac = day_of_year_0.astype(np.float32) / days_in_year.astype(np.float32)
+        day_of_year_0 = (day_np - year_start).astype(np.int64)  # [0, 365] or [0, 366]
+        days_in_year = (next_year_start - year_start).astype(np.int64)  # 365 or 366
+        doy_frac = day_of_year_0.astype(np.float32) / days_in_year.astype(np.float32)  # [0, 1)
         
-        doy_sin = np.sin(two_pi * doy_frac).astype(np.float32)
-        doy_cos = np.cos(two_pi * doy_frac).astype(np.float32)
+        # --- Multi-frequency sinusoidal embeddings ---
+        # Build output for all 8 frequency scales
+        embeddings = []
+        for k in range(1, self.num_frequencies + 1):
+            k_float = float(k)
+            
+            # Day-of-year components: cos(2π·k·doy/365.25), sin(2π·k·doy/365.25)
+            doy_phase = two_pi * k_float * doy_frac
+            doy_cos = np.cos(doy_phase).astype(np.float32)
+            doy_sin = np.sin(doy_phase).astype(np.float32)
+            
+            # Time-of-day components: cos(k·t), sin(k·t) where t = 2π·seconds_of_day
+            tot_phase = k_float * two_pi * seconds_of_day
+            tot_cos = np.cos(tot_phase).astype(np.float32)
+            tot_sin = np.sin(tot_phase).astype(np.float32)
+            
+            embeddings.append(doy_cos)
+            embeddings.append(doy_sin)
+            embeddings.append(tot_cos)
+            embeddings.append(tot_sin)
         
-        # Stack and convert to tensor
-        out = np.stack([tod_sin, tod_cos, doy_sin, doy_cos], axis=-1)
+        # Stack all components: (N, 32)
+        out = np.stack(embeddings, axis=-1)
         out = torch.from_numpy(out).float()
         
-        return out.reshape(*orig_shape, 4)
+        return out.reshape(*orig_shape, self.num_frequencies * 4)

@@ -668,19 +668,11 @@ class Model(torch.nn.Module):
         tokens = (tokens - t_mean) / (t_std + 1e-6) * self.cf.sigma_data
         tokens = torch.clamp(tokens, -100.0, 100.0)
 
-        breakpoint()
-
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                
-                #TODO: move this to the appropriate place in batch consturction
-                batch.samples[0].meta_info['ERA5'].add_global_params({'datetime': batch.samples[0].streams_data['ERA5'].source_raw[0].datetimes[0]})
-                print(f'added {batch.samples[0].streams_data['ERA5'].source_raw[0].datetimes[0]}')
-                # add_global_params({'datetime': batch.samples[0].streams_data[self.stream_names[0]].source_raw[0].datetimes[0]})
-
-                breakpoint()
+            
                 tokens = self.forecast_engine(
                     tokens,
                     step,
