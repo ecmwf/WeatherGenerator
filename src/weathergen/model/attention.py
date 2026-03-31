@@ -94,7 +94,7 @@ class MultiSelfAttentionHeadVarlen(BaseAttention):
         if dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=self.norm_eps)
         else:
-            self.lnorm = self.norm(dim_embed, eps=norm_eps)
+            self.lnorm = self.norm(dim_embed, eps=self.norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
@@ -227,7 +227,7 @@ class MultiSelfAttentionHeadLocal(BaseAttention):
         if dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=self.norm_eps)
         else:
-            self.lnorm = self.norm(dim_embed, eps=norm_eps)
+            self.lnorm = self.norm(dim_embed, eps=self.norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
