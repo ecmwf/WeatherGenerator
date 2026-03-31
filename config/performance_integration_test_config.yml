@@ -284,7 +284,6 @@ training_config:
   forecast :
     time_step: 00:00:00
     num_steps: 0
-    offset: 0
     policy: null
 
 
@@ -307,7 +306,6 @@ validation_config:
   output : {
     # number of samples that are written
     num_samples: 0,
-    offset: 0,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
