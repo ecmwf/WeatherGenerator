@@ -7,11 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# config for training
-training_config:
+# logging config
+train_logging:
 
   # performance metrics:
   track_performance_metrics: True
+
+# config for training
+training_config:
+
   metrics: 2
 
 
