@@ -286,12 +286,7 @@ class DataReaderMesh(DataReaderTimestep):
         channel_indices = [self.available_channels.index(c) for c in channels]
         start_t, end_t = t_idxs[0], t_idxs[-1] + 1
         n_steps = len(t_idxs)
-<<<<<<< sbAsma/1044-unified-ReaderData
-
-        lats_ref = self.lats_src if is_source else self.lats_trg
-=======
         
->>>>>>> develop
         spatial_indices_ref = self.spatial_indices_src if is_source else self.spatial_indices_trg
         coords_ref = self.coords_src if is_source else self.coords_trg
         ds_ref = self.ds_source if is_source else self.ds_target
@@ -331,32 +326,6 @@ class DataReaderMesh(DataReaderTimestep):
             lat_0 = self.roi_min_lat + patch_rng.random() * lat_range
             lon_0 = self.roi_min_lon + patch_rng.random() * lon_range
 
-<<<<<<< sbAsma/1044-unified-ReaderData
-            while attempts < 100:
-                lat_0 = lat_0_candidates[attempts]
-                lon_0 = lon_0_candidates[attempts]
-
-                mask_src = (
-                    (self.lats_src >= lat_0)
-                    & (self.lats_src < lat_0 + self.patch_size_deg)
-                    & (self.lons_src >= lon_0)
-                    & (self.lons_src < lon_0 + self.patch_size_deg)
-                )
-                mask_trg = (
-                    (self.lats_trg >= lat_0)
-                    & (self.lats_trg < lat_0 + self.patch_size_deg)
-                    & (self.lons_trg >= lon_0)
-                    & (self.lons_trg < lon_0 + self.patch_size_deg)
-                )
-
-                pts_src = np.count_nonzero(mask_src)
-                pts_trg = np.count_nonzero(mask_trg)
-
-                if pts_src >= MIN_PATCH_POINTS and pts_trg >= MIN_PATCH_POINTS:
-                    patch_indices_local = np.where(mask_src if is_source else mask_trg)[0]
-                    break
-                attempts += 1
-=======
             mask_src = (
                 (self.lats_src >= lat_0) & (self.lats_src < lat_0 + self.patch_size_deg) &
                 (self.lons_src >= lon_0) & (self.lons_src < lon_0 + self.patch_size_deg)
@@ -365,7 +334,6 @@ class DataReaderMesh(DataReaderTimestep):
                 (self.lats_trg >= lat_0) & (self.lats_trg < lat_0 + self.patch_size_deg) &
                 (self.lons_trg >= lon_0) & (self.lons_trg < lon_0 + self.patch_size_deg)
             )
->>>>>>> develop
 
             patch_indices_local = np.where(mask_src if is_source else mask_trg)[0]
 
