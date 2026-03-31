@@ -243,7 +243,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             else cf.data_loading.rng_seed * 97
         )
 
-        self.tokenizer = TokenizerMasking(cf.healpix_level, Masker(cf.healpix_level, stage))
+        self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
+        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         self.mini_epoch = 0
 
@@ -575,16 +576,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
     def _get_source_target_masks(self, training_mode):
         """
-        Generate source and target masks for all streams
+        Generate source and target masks for all streams.
         """
-
         masks = {}
         for stream_info in self.streams:
             # Build source and target sample masks
             masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
                 training_mode,
                 self.num_healpix_cells,
-                self.mode_cfg,
                 stream_info,
             )
             # identical for all streams
@@ -752,8 +751,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 batch = self._get_batch(idx, num_forecast_steps)
 
+                # ensure the batch is valid, i.e. not completely empty and no NaN values
+                # student teacher has no classical targets
+                mode = self.mode_cfg.get("training_mode")
+                not_valid = batch.sources_empty() or batch.is_nan()
+                not_valid = not_valid or (batch.targets_empty() if "masking" in mode else False)
+
                 # skip completely empty batch item or when all targets are empty -> no grad
-                if batch.is_empty() or batch.is_nan():
+                if not_valid:
                     logger.warning(f"Skipping empty batch with idx={idx}.")
                 else:
                     break

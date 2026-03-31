@@ -15,6 +15,7 @@
 # --regrid-degree 0.25 --regrid-type regular_ll
 import argparse
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -31,6 +32,25 @@ if not _logger.handlers:
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     handler.setFormatter(formatter)
     _logger.addHandler(handler)
+
+
+def parse_range(value: str) -> list[int]:
+    """Parse fsteps argument, supporting both individual values and range tuples like (0,360,2)."""
+    value = value.strip()
+    if value.startswith("(") and value.endswith(")"):
+        parts = [int(x.strip()) for x in value[1:-1].split(",")]
+        if len(parts) not in (2, 3):
+            raise argparse.ArgumentTypeError(f"Range tuple must have 2 or 3 elements, got: {value}")
+        return list(range(*parts))
+    return [int(value)]
+
+
+def flatten_lists(kwargs: object) -> object:
+    """Flatten a list of lists into a single list."""
+    for key, value in kwargs.items():
+        if isinstance(value, list) and all(isinstance(i, list) for i in value):
+            kwargs[key] = [item for sublist in value for item in sublist]
+    return kwargs
 
 
 def parse_args(args: list) -> argparse.Namespace:
@@ -90,19 +110,20 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--fsteps",
-        type=int,
+        type=parse_range,
         nargs="+",
         default=None,
-        help="List of forecast steps to retrieve (e.g. 1 2 3). "
+        help="List of forecast steps to retrieve (e.g. 1 2 3) or a range tuple like (0,360,2). "
         "If not provided, retrieves all available forecast steps.",
     )
 
     parser.add_argument(
         "--samples",
-        type=int,
+        type=parse_range,
         nargs="+",
         default=None,
-        help="List of samples to process (e.g. 0 1 2). If not provided, processes all samples.",
+        help="List of samples to process (e.g. 0 1 2) or a range tuple like (0,10,2)."
+        "If not provided, processes all samples.",
     )
 
     parser.add_argument(
@@ -196,6 +217,34 @@ def export() -> None:
     export_from_args(sys.argv[1:])
 
 
+def generate_new_expver() -> str:
+    """
+    Generate a new expver string for the quaver parser.
+    Returns
+    -------
+        str: newly generated string.
+    """
+    _logger.info("Generating new expver using getNewId command...")
+    result = subprocess.run(
+        ["getNewId", "--class", "rd"], capture_output=True, text=True, check=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to get new expver: {result.stderr}."
+            "if you are on ATOS, please run `ml pifsenv` and rerun the command, "
+            "or use the --expver flag."
+            "NOTE: the expver can be generated with `getNewId --class rd` command "
+            "on ATOS, and it does NOT work on other environments."
+            "if you have an expver that you want to use, you can also pass "
+            "it with the --expver flag."
+        )
+
+    expver = result.stdout.strip()
+
+    _logger.info(f"Generated new expver: {expver}")
+    return expver
+
+
 def export_from_args(args: list) -> None:
     # Get run_id zarr data as lists of xarray DataArrays
     """
@@ -213,6 +262,10 @@ def export_from_args(args: list) -> None:
     assert len(config["variables"].keys()) > 0, "Config file not loaded correctly"
 
     kwargs = vars(args).copy()
+    kwargs = flatten_lists(kwargs)  # Flatten list of lists
+
+    if kwargs.get("expver") == "NEW":
+        kwargs["expver"] = generate_new_expver()
 
     _logger.info(kwargs)
 
@@ -222,8 +275,8 @@ def export_from_args(args: list) -> None:
 
     for dtype in args.type:
         _logger.info(
-            f"Starting processing {dtype} for run ID {args.run_id}. "
-            f"Detected {args.samples} samples and {args.fsteps} forecast steps."
+            f"Starting processing {dtype} for run ID {kwargs['run_id']}. "
+            f"Detected {kwargs['samples']} samples and {kwargs['fsteps']} forecast steps."
         )
 
         export_model_outputs(dtype, config, **kwargs)
