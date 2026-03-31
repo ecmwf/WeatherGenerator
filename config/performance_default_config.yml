@@ -221,8 +221,8 @@ training_config:
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
-      },
       num_samples: 2
+      },
     }
 
   forecast :
