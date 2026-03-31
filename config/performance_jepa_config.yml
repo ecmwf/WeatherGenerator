@@ -202,7 +202,7 @@ training_config:
       ema_beta:
         enabled: true
 
-  num_mini_epochs: 32
+  num_mini_epochs: 2
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -284,7 +284,6 @@ training_config:
   forecast :
     time_step: 00:00:00
     num_steps: 0
-    offset: 0
     policy: null
 
 
