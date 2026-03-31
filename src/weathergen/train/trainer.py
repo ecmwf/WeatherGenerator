@@ -165,7 +165,7 @@ class Trainer(TrainerBase):
                 device=torch.device(self.devices[0]),  # Assuming same device type!
                 dtype=self.mixed_precision_dtype,
                 world_size=self.world_size_original,
-                window_size=cf.train_logging.get("throughput_window_size", 2),
+                warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
             )
 
     def get_target_aux_calculators(self, mode_cfg):

@@ -37,7 +37,7 @@ class ThroughputTracker:
         device: torch.device,
         dtype: torch.dtype,
         world_size: int,
-        warmup_steps: int = 2,
+        warmup_steps: int,
         recompute_factor: float = 4 / 3,
     ) -> None:
         self._available_flops = get_available_flops(device, dtype=dtype)
@@ -131,7 +131,7 @@ class ThroughputTracker:
         """
         torch.cuda.synchronize()
         if not self._warmup_done:
-            if istep == self._warmup_steps - 1:
+            if istep >= self._warmup_steps - 1:
                 self._t0 = time.time()
                 self._warmup_done = True
         else:
