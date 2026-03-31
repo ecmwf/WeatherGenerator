@@ -470,6 +470,7 @@ class Masker:
 
             if "diffusion_rn" in masking_strategy_config:
                 masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
+                # masking_params["noise_level_rn"] = self.rng.uniform(-1.0, 5.0)
 
         elif strategy == "healpix":
             # prepare healpix-based masking

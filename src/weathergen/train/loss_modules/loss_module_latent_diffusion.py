@@ -56,6 +56,8 @@ class LossLatentDiffusion(LossModuleBase):
             for name, params in loss_fcts.items()
         ]
 
+        self.random_target = None
+
     def _get_noise_weight(self, eta):
         sigma = (eta * self.p_std + self.p_mean).exp()
         return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
@@ -101,7 +103,8 @@ class LossLatentDiffusion(LossModuleBase):
         fsteps = len(target_tokens_all)
 
         # During validation, use unweighted loss (no noise-level scaling)
-        noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta)
+        # noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta)
+        noise_weight = 1.0
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -115,6 +118,18 @@ class LossLatentDiffusion(LossModuleBase):
             # if forecast_offset==0, then the timepoints correspond.
             # Otherwise targets don't encode the source timestep, so we don't need to skip
             for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
+                
+
+
+                # Try random fixed target
+                if self.random_target is None:
+                    # self.random_target = torch.randn_like(target_tokens) * 1.0 + 1
+                    self.random_target = torch.ones_like(target_tokens)
+                target_tokens = self.random_target
+
+                print("pred std", pred_tokens.std().item(), "pred mean", pred_tokens.mean().item())
+                print("trgt std", target_tokens.std().item(), "trgt mean", target_tokens.mean().item(), )
+
                 loss_lfct = self._loss_per_loss_function(
                     loss_fct,
                     target=target_tokens,

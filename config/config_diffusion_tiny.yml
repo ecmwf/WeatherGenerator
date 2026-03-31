@@ -60,7 +60,7 @@ fe_num_heads: 4
 fe_dropout_rate: 0.0
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
-fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
@@ -69,11 +69,11 @@ with_step_conditioning: True # False
 frequency_embedding_dim: 256
 embedding_dim: 512
 sigma_min: 0.002
-sigma_max: 50000
-sigma_data: 0.5
+sigma_max: 80  # 170
+sigma_data: 0.7855  # 0.5  # 1.7
 rho: 7
-p_mean: 0.0  # -1.2
-p_std: 1.2  # 1.2
+p_mean: -1.2
+p_std: 1.2
 
 healpix_level: 3
 
@@ -152,8 +152,8 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
-  num_mini_epochs: 150
-  samples_per_mini_epoch: 66
+  num_mini_epochs: 128
+  samples_per_mini_epoch: 1024
   shuffle: True
 
   start_date: 2012-06-01T00:00
@@ -175,8 +175,8 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 1.0
-    weight_decay: 0.1
+    grad_clip: 10.0  # 1.0
+    weight_decay: 0.0  # 0.1
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
@@ -187,7 +187,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        weight: 0.1,
+        weight: 0.0,
         loss_fcts: {
           "mse": {},
         },
@@ -195,7 +195,7 @@ training_config:
     },
     "latent_diff": {
         type: LossLatentDiffusion,
-        weight: 0.9,
+        weight: 1.0,
         target_and_aux_calc: DiffusionLatentTargetEncoder,
         loss_fcts: { "mse": { }, },
         }
@@ -206,7 +206,7 @@ training_config:
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       masking_strategy_config: {diffusion_rn: True},
-      num_samples: 3
+      num_samples: 1
       }
     }
 
@@ -220,7 +220,14 @@ training_config:
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 16
+  # Noise levels (eta values in standard normal space) at which to evaluate the
+  # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
+  # Each value produces a separate validation pass with independently logged metrics.
+  # validation_noise_levels: [0.3, 0.5, 0.75, 1.0, 1.5]
+  validation_noise_levels: [1.0, 2.0, 3.0, 4.0]
+  # validation_noise_levels: [1.0, 2.0, 4.0, 8.0, 16.0]
+
+  samples_per_mini_epoch: 8
   shuffle: False
 
   start_date: 2012-06-01T00:00
@@ -243,7 +250,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config
