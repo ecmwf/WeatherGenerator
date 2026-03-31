@@ -50,7 +50,7 @@ class BaseAttention(torch.nn.Module):
         )
 
         if norm_type == "LayerNorm":
-            self.norm = partial(torch.nn.LayerNorm, elementwise_affine=False, eps=norm_eps)
+            self.norm = partial(torch.nn.LayerNorm, elementwise_affine=False)
         else:
             self.norm = RMSNorm
 
