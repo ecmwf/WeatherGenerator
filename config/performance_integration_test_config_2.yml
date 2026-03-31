@@ -11,23 +11,23 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1024
-ae_local_num_blocks: 2
-ae_local_num_heads: 16
+ae_local_dim_embed: 128
+ae_local_num_blocks: 1
+ae_local_num_heads: 4
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
-ae_adapter_num_heads: 16
-ae_adapter_embed: 128
+ae_adapter_num_heads: 4
+ae_adapter_embed: 32
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 2
-ae_global_num_heads: 32
+ae_global_dim_embed: 256
+ae_global_num_blocks: 1
+ae_global_num_heads: 4
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 # TODO: switching to < 1 triggers triton-related issues.
@@ -180,7 +180,7 @@ training_config:
       ema_beta:
         enabled: false  # only relevant for SSL with EMA teacher
 
-  num_mini_epochs: 32
+  num_mini_epochs: 2
   samples_per_mini_epoch: 4096
   shuffle: True
 
