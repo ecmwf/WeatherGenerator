@@ -29,6 +29,7 @@ class RegionLibrary:
         "tropics": (-30.0, 30.0, -180.0, 180.0),
         "belgium": (49, 52, 2, 7),
         "europe": (35, 70, -10, 40),
+        "madagaskar": (-25, -10, 43, 50),
     }
 
 

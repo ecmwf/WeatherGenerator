@@ -161,6 +161,25 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         msg = f"Unsupported stream type {stream_info['type']}"
                         f"for stream name '{stream_info['name']}'."
                         raise ValueError(msg)
+            for fname in stream_info["filenames"]:
+                kwargs = {
+                    "tw_handler": self.time_window_handler,
+                    "stream_info": stream_info,
+                }
+                dataset: type[AnyDataReader] | None = None
+                match stream_info["type"]:
+                    case "obs":
+                        dataset = DataReaderObs
+                    case "anemoi":
+                        dataset = DataReaderAnemoi
+                    case "fesom":
+                        dataset = DataReaderFesom
+                    case type_name:
+                        dataset = get_extra_reader(type_name)
+                        if dataset is None:
+                            msg = f"Unsupported stream type {stream_info['type']}"
+                            f"for stream name '{stream_info['name']}'."
+                            raise ValueError(msg)
 
             for fname in stream_info["filenames"]:
                 fname = pathlib.Path(fname)
