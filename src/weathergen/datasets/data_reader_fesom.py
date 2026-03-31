@@ -17,11 +17,10 @@ import dask.array as da
 import numpy as np
 import zarr
 
+from weathergen.common.data import DTRange, ReaderData
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    DTRange,
     NDArray,
-    ReaderData,
     TimeWindowHandler,
     TIndex,
     t_epsilon,

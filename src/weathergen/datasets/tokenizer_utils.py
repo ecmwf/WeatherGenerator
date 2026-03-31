@@ -4,7 +4,7 @@ import torch
 from astropy_healpix.healpy import ang2pix
 from torch import Tensor
 
-from weathergen.common.io import IOReaderData
+from weathergen.common.data import ReaderData
 from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
     locs_to_ctr_coords,
@@ -199,7 +199,7 @@ def tokenize_spacetime(
     for _, t in enumerate(t_unique):
         # data for current time step
         mask = t == rdata.datetimes
-        rdata_cur = IOReaderData(
+        rdata_cur = ReaderData(
             rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
         )
         idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens)

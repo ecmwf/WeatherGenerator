@@ -16,6 +16,7 @@ from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
 
 from weathergen.common.config import timedelta_to_str
+from weathergen.common.data import DTRange, ReaderData
 from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 
 _logger = logging.getLogger(__name__)
@@ -46,22 +47,6 @@ class TimeIndexRange:
 
     start: TIndex
     end: TIndex
-
-
-@dataclass
-class DTRange:
-    """
-    Defines a time window for indexing into datasets.
-
-    It is defined as numpy datetime64 objects.
-    """
-
-    start: NPDT64
-    end: NPDT64
-
-    def __post_init__(self):
-        assert self.start < self.end, "start time must be before end time"
-        assert self.start > _DT_ZERO, "start time must be after 1850-01-01T00:00"
 
 
 class TimeWindowHandler:
@@ -143,154 +128,6 @@ class TimeWindowHandler:
         t_end_win = t_start_win + self.t_window_len
 
         return DTRange(t_start_win, t_end_win)
-
-
-@dataclass
-class ReaderData:
-    """
-    Wrapper for return values from DataReader.get_source and DataReader.get_target
-    """
-
-    coords: NDArray[DType]
-    geoinfos: NDArray[DType]
-    data: NDArray[DType]
-    datetimes: NDArray[NPDT64]
-    is_spoof: bool = False
-
-    @staticmethod
-    def empty(num_data_fields: int, num_geo_fields: int) -> "ReaderData":
-        """
-        Create an empty ReaderData object
-
-        Returns
-        -------
-        ReaderData
-            Empty ReaderData object
-        """
-        return ReaderData(
-            coords=np.zeros((0, 2), dtype=np.float32),
-            geoinfos=np.zeros((0, num_geo_fields), dtype=np.float32),
-            data=np.zeros((0, num_data_fields), dtype=np.float32),
-            datetimes=np.zeros((0,), dtype=np.datetime64),
-            is_spoof=False,
-        )
-
-    def is_empty(self):
-        return self.len() == 0
-
-    def len(self):
-        """
-        Length of data
-
-        Returns
-        -------
-        length of data
-        """
-        return len(self.data)
-
-    def remove_nan_coords_and_geoinfos(self) -> "ReaderData":
-        """
-        Remove all data points where coords or geoinfos contain NaN
-
-        Returns
-        -------
-        self
-        """
-        idx_valid = ~np.isnan(self.coords)
-        # filter should be if any (of the two) coords is NaN
-        idx_valid = np.logical_and(idx_valid[:, 0], idx_valid[:, 1])
-
-        # also filter rows where any geoinfo field is NaN
-        idx_valid_geoinfos = ~np.isnan(self.geoinfos).any(axis=1)
-        idx_valid = np.logical_and(idx_valid, idx_valid_geoinfos)
-
-        # apply
-        return ReaderData(
-            self.coords[idx_valid],
-            self.geoinfos[idx_valid],
-            self.data[idx_valid],
-            self.datetimes[idx_valid],
-        )
-
-    def shuffle(self, rng, shuffle: bool, num_subset: int) -> "ReaderData":
-        """
-        Drop a random subset of points as specified by num_subset
-        num_subset = -1 indicates no points to be dropped
-
-        Returns
-        -------
-        self
-        """
-
-        # nothing to be done
-        if num_subset < 0 and shuffle is False:
-            return self
-
-        num_datapoints = self.coords.shape[0]
-        if (num_datapoints == 0) or (num_datapoints < num_subset and shuffle is False):
-            return self
-
-        # only shuffling
-        if num_subset == -1 and shuffle is True:
-            num_subset = num_datapoints
-
-        # ensure num_subset <= num_datapoints
-        num_subset = min(num_subset, num_datapoints)
-
-        idxs_subset = rng.choice(num_datapoints, num_subset, replace=False)
-        if shuffle is False:
-            idxs_subset = np.sort(idxs_subset)
-
-        self.coords = self.coords[idxs_subset]
-        self.geoinfos = self.geoinfos[idxs_subset]
-        self.data = self.data[idxs_subset]
-        self.datetimes = self.datetimes[idxs_subset]
-
-        return self
-
-
-def check_reader_data(rdata: ReaderData, dtr: DTRange) -> None:
-    """
-    Check that ReaderData is valid
-
-    Parameters
-    ----------
-    rdata :
-        ReaderData to check
-    dtr :
-        datetime range of window for which the rdata is valid
-
-    Returns
-    -------
-    None
-    """
-
-    assert rdata.coords.ndim == 2, f"coords must be 2D {rdata.coords.shape}"
-    assert rdata.coords.shape[1] == 2, (
-        f"coords must have 2 columns (lat, lon), got {rdata.coords.shape}"
-    )
-    assert rdata.geoinfos.ndim == 2, f"geoinfos must be 2D, got {rdata.geoinfos.shape}"
-    assert rdata.data.ndim == 2, f"data must be 2D {rdata.data.shape}"
-    assert rdata.datetimes.ndim == 1, f"datetimes must be 1D {rdata.datetimes.shape}"
-
-    assert rdata.coords.shape[0] == rdata.data.shape[0], "coords and data must have same length"
-    assert rdata.geoinfos.shape[0] == rdata.data.shape[0], "geoinfos and data must have same length"
-
-    # Check that all fields have the same length
-    assert (
-        rdata.coords.shape[0]
-        == rdata.geoinfos.shape[0]
-        == rdata.data.shape[0]
-        == rdata.datetimes.shape[0]
-    ), (
-        f"coords, geoinfos, data and datetimes must have the same length "
-        f"{rdata.coords.shape[0]}, {rdata.geoinfos.shape[0]}, {rdata.data.shape[0]}, "
-        f"{rdata.datetimes.shape[0]}"
-    )
-
-    assert np.logical_and(rdata.datetimes >= dtr.start, rdata.datetimes < dtr.end).all(), (
-        f"datetimes for data points violate window {dtr}."
-    )
 
 
 class DataReaderBase(metaclass=ABCMeta):

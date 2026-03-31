@@ -2,7 +2,7 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
-from weathergen.common.io import IOReaderData
+from weathergen.common.data import ReaderData
 
 
 @runtime_checkable
@@ -20,13 +20,13 @@ class Pinnable(Protocol):
     def pin_memory(self): ...
 
 
-def pin_object(obj: Pinnable | torch.Tensor | IOReaderData | list | dict | None):
+def pin_object(obj: Pinnable | torch.Tensor | ReaderData | list | dict | None):
     if obj is None:
         return
     elif isinstance(obj, torch.Tensor | Pinnable):
         obj.pin_memory()
-    elif isinstance(obj, IOReaderData):
-        # Special case: IOReaderData is in common package and can't have torch deps
+    elif isinstance(obj, ReaderData):
+        # Special case: ReaderData is in common package and can't have torch deps
         # Note: These SHOULD be numpy arrays per the type hints, but might be tensors
         pin_object(obj.coords)
         pin_object(obj.data)

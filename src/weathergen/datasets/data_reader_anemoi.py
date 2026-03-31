@@ -17,12 +17,11 @@ from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
 
+from weathergen.common.data import ReaderData, check_reader_data
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
-    ReaderData,
     TimeWindowHandler,
     TIndex,
-    check_reader_data,
 )
 
 _logger = logging.getLogger(__name__)

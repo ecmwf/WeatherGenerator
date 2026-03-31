@@ -11,7 +11,7 @@ import astropy_healpix as hp
 import numpy as np
 import torch
 
-from weathergen.common.io import IOReaderData
+from weathergen.common.io import ReaderData
 
 
 def _pin_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -128,7 +128,7 @@ class StreamData:
         self.source_idxs_embed = _pin_tensor_list(self.source_idxs_embed)
         self.source_idxs_embed_pe = _pin_tensor_list(self.source_idxs_embed_pe)
 
-        # Pin source_raw (list of IOReaderData objects)
+        # Pin source_raw (list of ReaderData objects)
         if hasattr(self, "source_raw"):
             for raw_data in self.source_raw:
                 if raw_data is not None and hasattr(raw_data, "pin_memory"):
@@ -170,14 +170,14 @@ class StreamData:
         return self
 
     def add_source(
-        self, step: int, ss_raw: IOReaderData, ss_lens: torch.Tensor, ss_cells: list
+        self, step: int, ss_raw: ReaderData, ss_lens: torch.Tensor, ss_cells: list
     ) -> None:
         """
         Add data for source for one input.
 
         Parameters
         ----------
-        ss_raw : IOReaderData( dataclass containing coords, geoinfos, data, and datetimes )
+        ss_raw : ReaderData( dataclass containing coords, geoinfos, data, and datetimes )
         ss_lens : torch.Tensor( number of healpix cells )
         ss_cells : list( number of healpix cells )
             [ torch.Tensor( tokens per cell, token size, number of channels) ]
@@ -429,7 +429,7 @@ class StreamData:
         return self.source_is_spoof or self.target_is_spoof
 
 
-def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:
+def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> ReaderData:
     """
     Spoof an instance from data_reader_base.ReaderData instance.
     other should be such an instance.
@@ -465,4 +465,4 @@ def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderD
         (n_datapoints,),
     )
 
-    return IOReaderData(coords, geoinfos, data, datetimes)
+    return ReaderData(coords, geoinfos, data, datetimes)
