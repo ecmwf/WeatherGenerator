@@ -170,8 +170,6 @@ training_config:
 
   # performance metrics:
   track_performance_metrics: True
-  throughput_window_size: 4
-  metrics: 5 
 
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
