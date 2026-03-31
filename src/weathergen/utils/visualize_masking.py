@@ -16,9 +16,9 @@ This script can run on a cpu or logging node without GPUs.
 Please activate your .venv before running.
 
 Usage:
-  python -m weathergen.utils.visualize_masking -c config/config_jepa.yml
-  python -m weathergen.utils.visualize_masking -c config/config_jepa.yml --variable 2t
-  python -m weathergen.utils.visualize_masking -c config/config_jepa.yml --stream ERA5
+  uv run src/weathergen/utils/visualize_masking.py -c config/config_jepa.yml
+  uv run src/weathergen/utils/visualize_masking.py -c config/config_jepa.yml --variable 2t
+  uv run src/weathergen/utils/visualize_masking.py -c config/config_jepa.yml --stream ERA5
 """
 
 from __future__ import annotations
@@ -45,8 +45,7 @@ from omegaconf import OmegaConf, open_dict
 
 import weathergen.common.config as wg_config  
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler  
-from weathergen.train.utils import filter_config_by_enabled  
-from weathergen.utils.train_logger import TRAIN, VAL  
+from weathergen.train.utils import TRAIN, VAL, filter_config_by_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -189,8 +188,8 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--prefix",
         type=str,
-        default="masking_preview",
-        help="Filename prefix used when --output is not provided.",
+        default="",
+        help="Filename prefix used when --output is not provided (default: auto timestamp).",
     )
     parser.add_argument(
         "--dpi",
@@ -297,7 +296,10 @@ def _to_numpy(arr):
 
 
 def _wrap_lons(lons: np.ndarray) -> np.ndarray:
-    return ((lons + 180.0) % 360.0) - 180.0
+    wrapped = ((lons + 180.0) % 360.0) - 180.0
+    # Clip just inside ±180 to prevent cartopy from rendering antimeridian points
+    # on both edges of the projection simultaneously (reflection artifact).
+    return np.clip(wrapped, -179.9999, 179.9999)
 
 
 def _format_mask_params(params: dict) -> str:
@@ -656,7 +658,7 @@ def _plot_cartopy_three_panel(
         vmax = np.nanpercentile(vals_ref, 98)
 
     proj = ccrs.Robinson()
-    fig = plt.figure(figsize=(8 * ncols, 7.5), dpi=dpi)
+    fig = plt.figure(figsize=(7 * ncols, 5), dpi=dpi)
 
     # Size for masked-out background points
     bg_point_size = max(1.0, point_size * 0.5)
@@ -694,10 +696,10 @@ def _plot_cartopy_three_panel(
     # Panel 2: Source
     ax2 = fig.add_subplot(1, ncols, 2 if include_full else 1, projection=proj)
     _setup_axis(ax2, src_label)
-    if len(lats_full) and len(src_visible):
+    if len(lats_full):
         ax2.scatter(
-            lons_full[~src_visible],
-            lats_full[~src_visible],
+            lons_full,
+            lats_full,
             c="#d3d3d3",
             s=bg_point_size,
             alpha=0.3,
@@ -724,56 +726,41 @@ def _plot_cartopy_three_panel(
     # Panel 3: Target
     ax3 = fig.add_subplot(1, ncols, 3 if include_full else 2, projection=proj)
     _setup_axis(ax3, tgt_label)
-    if len(lats_full) and len(tgt_visible):
+    if len(lats_full):
         ax3.scatter(
-            lons_full[~tgt_visible],
-            lats_full[~tgt_visible],
+            lons_full,
+            lats_full,
             c="#d3d3d3",
             s=bg_point_size,
             alpha=0.3,
             transform=ccrs.PlateCarree(),
             rasterized=True,
         )
-    if len(vals_tgt):
-        sc3 = ax3.scatter(
-            lons_tgt,
-            lats_tgt,
-            c=vals_tgt,
-            s=point_size,
-            cmap=cmap,
-            alpha=0.8,
-            vmin=vmin,
-            vmax=vmax,
-            transform=ccrs.PlateCarree(),
-            rasterized=True,
-        )
-    else:
-        sc3 = ax3.scatter(
-            lons_full[tgt_visible],
-            lats_full[tgt_visible],
-            c=vals_full[tgt_visible],
-            s=point_size,
-            cmap=cmap,
-            alpha=0.8,
-            vmin=vmin,
-            vmax=vmax,
-            transform=ccrs.PlateCarree(),
-            rasterized=True,
-        )
+    sc3 = ax3.scatter(
+        lons_tgt,
+        lats_tgt,
+        c=vals_tgt,
+        s=point_size,
+        cmap=cmap,
+        alpha=0.8,
+        vmin=vmin,
+        vmax=vmax,
+        transform=ccrs.PlateCarree(),
+        rasterized=True,
+    )
     axes.append(ax3)
     scatters.append(sc3)
     if not shared_colorbar:
         plt.colorbar(sc3, ax=ax3, fraction=0.04, pad=0.02, orientation="horizontal")
 
-    fig.suptitle(title, fontsize=14, fontweight="bold", y=0.99)
+    fig.suptitle(title, fontsize=12, fontweight="bold")
 
     if shared_colorbar:
-        # Add a single shared colorbar below all panels
-        fig.subplots_adjust(top=0.92, bottom=0.18, wspace=0.06)
-        cbar_ax = fig.add_axes([0.15, 0.08, 0.7, 0.03])
+        fig.subplots_adjust(top=0.90, bottom=0.14, wspace=0.04, left=0.02, right=0.98)
+        cbar_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
         fig.colorbar(scatters[0], cax=cbar_ax, orientation="horizontal")
     else:
-        fig.subplots_adjust(top=0.96, bottom=0.08, wspace=0.06)
+        fig.subplots_adjust(top=0.88, bottom=0.08, wspace=0.04, left=0.02, right=0.98)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
@@ -1013,6 +1000,7 @@ def main(args=None) -> int:
         f"time={time_win.start}..{time_win.end}"
     )
 
+    ts = time.strftime("%Y%m%d_%H%M%S")
     outputs = []
     for p in pairs_data:
         if parsed.output is not None:
@@ -1021,8 +1009,9 @@ def main(args=None) -> int:
             suffix = base.suffix or ".png"
             out_path = base.with_name(f"{stem}_pair{p['pair_idx']}{suffix}")
         else:
+            prefix = parsed.prefix or ts
             out_name = (
-                f"{parsed.prefix}_{stream_name}_pair{p['pair_idx']}_"
+                f"{prefix}_{stream_name}_pair{p['pair_idx']}_"
                 f"{_safe_name(p['source_var_name'])}_vs_{_safe_name(p['target_var_name'])}.png"
             )
             out_path = parsed.output_dir / out_name
