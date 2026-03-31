@@ -122,13 +122,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         self._noised_tokens = (y + n).detach()
 
         # return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
-        #n = torch.ones_like(y)
-        if self._noise is None:
-            self._noise = torch.randn_like(y)
-        n = self._noise
-        return self.denoise(x=n, c=c, sigma=sigma, fstep=fstep)
+        n = torch.ones_like(y)
+        # if self._noise is None:
+        #     self._noise = torch.randn_like(y)
+        # n = self._noise
+        return self.denoise(x=n, c=c, sigma=sigma, fstep=fstep, coords=coords)
 
-    def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int) -> torch.Tensor:
+    def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int, coords: torch.Tensor = None) -> torch.Tensor:
         """
         The actual diffusion step, where the model removes noise from the input x under
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
@@ -147,7 +147,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         x = self.preconditioner.precondition(x, c)
 
         # Direct prediction: network outputs denoised estimate directly
-        return self.net(x, fstep=fstep, noise_emb=noise_emb)
+        return self.net(x, fstep=fstep, coords=coords, noise_emb=noise_emb)
         # return c_skip * x + c_out * self.net(
         #     c_in * x, fstep=fstep, noise_emb=noise_emb
         # )  # Eq. (7) in EDM paper

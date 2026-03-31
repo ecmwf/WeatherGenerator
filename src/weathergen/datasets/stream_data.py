@@ -350,6 +350,46 @@ class StreamData:
             torch.tensor([s.sum() if len(s) > 0 else 0 for s in self.source_tokens_lens]).sum() == 0
         )
 
+    def target_nan(self) -> bool:
+        """
+        Check if target for stream is all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if target is empty for stream, else False
+        """
+
+        is_nan = torch.isnan(torch.cat(self.target_tokens))
+        return is_nan.all() if len(is_nan) > 0 else False
+
+    def source_nan(self) -> bool:
+        """
+        Check if source for stream is all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if source is all NaN for stream, else False
+        """
+
+        is_nan = torch.tensor(
+            [
+                torch.isnan(s.coords).all() or torch.isnan(s.data).all()
+                for s in self.source_raw
+                if s is not None
+            ]
+        )
+        return is_nan.all() if len(is_nan) > 0 else False
+
     def empty(self):
         """
         Test if stream (source and target) are empty
@@ -365,6 +405,22 @@ class StreamData:
         """
 
         return self.source_empty() and self.target_empty()
+
+    def nan(self) -> bool:
+        """
+        Check if stream (source and target) are all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if stream is all NaN
+        """
+
+        return self.source_nan() and self.target_nan()
 
     def is_spoof(self) -> bool:
         """

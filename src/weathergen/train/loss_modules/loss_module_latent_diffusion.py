@@ -123,8 +123,8 @@ class LossLatentDiffusion(LossModuleBase):
 
                 # Try random fixed target
                 if self.random_target is None:
-                    # self.random_target = torch.randn_like(target_tokens) * 1.0 + 1
-                    self.random_target = torch.ones_like(target_tokens)
+                    self.random_target = torch.randn_like(target_tokens) * 1.0 + 0.0
+                    # self.random_target = torch.ones_like(target_tokens)
                 target_tokens = self.random_target
 
                 print("pred std", pred_tokens.std().item(), "pred mean", pred_tokens.mean().item())

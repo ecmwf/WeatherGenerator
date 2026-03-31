@@ -59,7 +59,7 @@ fe_num_blocks: 4
 fe_num_heads: 4
 fe_dropout_rate: 0.0
 fe_with_qk_lnorm: True
-fe_diffusion_model: True
+fe_diffusion_model: False
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -76,6 +76,11 @@ p_mean: -1.2
 p_std: 1.2
 
 healpix_level: 3
+
+# Use 2D RoPE instead of traditional global positional encoding
+# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
+# When False: uses traditional pe_global positional encoding
+rope_2D: True
 
 with_mixed_precision: True
 with_flash_attention: True

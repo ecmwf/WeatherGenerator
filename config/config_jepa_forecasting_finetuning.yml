@@ -7,76 +7,26 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-embed_orientation: "channels"
-embed_unembed_mode: "block"
-embed_dropout_rate: 0.1
-
-ae_local_dim_embed: 1024
-ae_local_num_blocks: 2
-ae_local_num_heads: 16
-ae_local_dropout_rate: 0.1
-ae_local_with_qk_lnorm: True
-
-ae_local_num_queries: 1
-ae_local_queries_per_cell: False
-ae_adapter_num_heads: 16
-ae_adapter_embed: 128
-ae_adapter_with_qk_lnorm: True
-ae_adapter_with_residual: True
-ae_adapter_dropout_rate: 0.1
-
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 2
-ae_global_num_heads: 32
-ae_global_dropout_rate: 0.1
-ae_global_with_qk_lnorm: True
-# TODO: switching to < 1 triggers triton-related issues.
-# See https://github.com/ecmwf/WeatherGenerator/issues/1050
-ae_global_att_dense_rate: 1.0
-ae_global_block_factor: 64
-ae_global_mlp_hidden_factor: 2
-ae_global_trailing_layer_norm: False
-
-ae_aggregation_num_blocks: 0
-ae_aggregation_num_heads: 32
-ae_aggregation_dropout_rate: 0.1
-ae_aggregation_with_qk_lnorm: True
-ae_aggregation_att_dense_rate: 1.0
-ae_aggregation_block_factor: 64
-ae_aggregation_mlp_hidden_factor: 2
-
-decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
-pred_adapter_kv: False
-pred_self_attention: True
-pred_dyadic_dims: False
-pred_mlp_adaln: True
-
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
 fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_diffusion_model: False
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
-
-num_class_tokens: 0
-num_register_tokens: 0
+with_step_conditioning: True # False
 
 healpix_level: 5
 
-# Use 2D RoPE instead of traditional global positional encoding
-# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
-# When False: uses traditional pe_global positional encoding
-rope_2D: False
-
+# performance
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: True
+with_fsdp: False
+ddp_find_unused_parameters: False #True
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -88,18 +38,18 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
-freeze_modules: ""
-load_chkpt: {}
+freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
 
 norm_type: "LayerNorm"
+
+# type of zarr_store
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
 streams_directory: "./config/streams/era5_1deg/"
+# streams_directory: "./config/streams/era5_synop_finetuning/"
 streams: ???
-
-# type of zarr_store
-zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 general:
 
@@ -114,7 +64,7 @@ general:
   # model_path, 
   # run_path, 
   # path_shared_
-  
+
   multiprocessing_method: "fork"
 
   desc: ""
@@ -143,38 +93,10 @@ data_loading :
 
 # config for training
 training_config:
-
+  
   # training_mode: "masking", "student_teacher", "latent_loss"
+  # training_mode: ["student_teacher"]
   training_mode: ["masking"]
-
-  # Collapse monitoring for detecting representation collapse
-  # Works with SSL training (JEPA/DINO) and forecasting modes
-  # For forecasting, monitors latent_state.patch_tokens at each forecast step
-  collapse_monitoring:
-    enabled: true
-    compute_frequency: 100  # batches between metric computations
-    log_frequency: 100      # batches between metric logging
-    metrics:
-      effective_rank:
-        enabled: true
-        tensor_source: "student"  # "student", "teacher", or "both"
-        sample_size: 2048         # max samples for SVD (0 = no sampling)
-        # For forecasting sequences: "all" (per-step + aggregates),
-        # "aggregate_only" (mean/min/max/degradation), "per_step_only"
-        forecast_aggregation: "all"
-      singular_values:
-        enabled: true
-        tensor_source: "student"
-        sample_size: 2048
-        forecast_aggregation: "all"
-      dimension_variance:
-        enabled: true
-        tensor_source: "student"
-        forecast_aggregation: "all"
-      prototype_entropy:
-        enabled: false  # only relevant for DINO
-      ema_beta:
-        enabled: false  # only relevant for SSL with EMA teacher
 
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
@@ -209,6 +131,10 @@ training_config:
       eps : 2e-08
 
   losses : {
+    "student-teacher": {
+        enabled: False,
+        type: Disabled,
+        },
     "physical": {
         type: LossPhysical,
         loss_fcts: { "mse": { }, },
@@ -216,9 +142,19 @@ training_config:
     }
   
   model_input: {
+    "random_easy" : {
+      enabled: False,
+      num_samples: 0,
+      },
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
+      },
+    }
+
+  target_input: {
+    "random_easy_target" : {
+      enabled: False,
       },
     }
 
@@ -240,24 +176,23 @@ validation_config:
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
-    enabled : True
+    enabled : False
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 0,
+    num_samples: 8,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
-    }
+  }
 
   # run validation before training starts (mainly for model development)
   validate_before_training: False
-
-
+  
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
 
