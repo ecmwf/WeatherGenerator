@@ -253,7 +253,7 @@ def export_from_args(args: list) -> None:
     ----------
         args : List of command line arguments.
     """
-    args = parse_args(sys.argv[1:])
+    args = parse_args(args)
 
     # Load configuration
     config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2cf.yaml")

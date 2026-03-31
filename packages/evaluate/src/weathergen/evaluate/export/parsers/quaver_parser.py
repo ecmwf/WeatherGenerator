@@ -68,24 +68,6 @@ class QuaverParser(CfParser):
 
         self.template_cache = self.cache_templates()
 
-        # Cached sort order for assign_coords — computed on first call.
-        self._coord_order = None
-
-        # Pre-compute per-variable metadata that is constant across all samples/fsteps.
-        self._var_info = {}  # var -> (level, level_type, scale_factor, add_offset)
-        for var in self.channels:
-            _, level, level_type = self.extract_var_info(var)
-            var_short = var.split("_")[0] if "_" in var else var
-            var_config = self.mapping.get(var_short, {})
-            raw = var_config.get("scale_factor", "1.0")
-            if isinstance(raw, str) and "/" in raw:
-                parts = raw.split("/")
-                scale_factor = float(parts[0]) / float(parts[1])
-            else:
-                scale_factor = float(raw)
-            add_offset = float(var_config.get("add_offset", 0.0))
-            self._var_info[var] = (level, level_type, scale_factor, add_offset)
-
     def process_sample(
         self,
         fstep_iterator_results: iter,
@@ -105,41 +87,35 @@ class QuaverParser(CfParser):
             if result is None:
                 continue
 
-            # result is already a materialized xarray DataArray (built in the worker).
             if not isinstance(result, xr.DataArray):
                 result = result.as_xarray().squeeze()
             result = result.sel(channel=self.channels)
             da_fs = self.assign_coords(result)
 
-            # forecast_step may be a scalar (from lightweight worker) or array
-            fs_val = result.forecast_step.values
-            step = int(fs_val) if np.ndim(fs_val) == 0 else int(np.unique(fs_val).item())
+            step = np.unique(result.forecast_step.values)
+            if len(step) != 1:
+                raise ValueError(f"Expected single step value, got {step}")
 
-            # Extract the full numpy data and channel list once to avoid
-            # repeated xarray .sel() overhead in the inner loop.
-            all_values = da_fs.values  # (npoints, nchannels)
-            channel_list = list(da_fs.channel.values)
-            channel_to_col = {ch: i for i, ch in enumerate(channel_list)}
+            step = int(step[0])
 
             sf_fields = []
             pl_fields = []
             for var in self.channels:
-                level, level_type, scale_factor, add_offset = self._var_info[var]
+                _, level, level_type = self.extract_var_info(var)
 
-                col = channel_to_col[var]
-                field_values = all_values[:, col]
+                _logger.info(f"[Worker] Encoding var={var}, level={level}")
 
-                if scale_factor != 1.0 or add_offset != 0.0:
-                    field_values = field_values * scale_factor + add_offset
-
+                field_data = da_fs.sel(channel=var)
+                field_data = self.scale_data(field_data, var)
                 template_field = self.template_cache.get((var, level), None)
                 if template_field is None:
+                    _logger.error(f"Template for var={var}, level={level} not found. Skipping.")
                     continue
 
                 metadata = self.get_metadata(ref_time=ref_time, step=step, level=level)
 
                 encoded = self.encoder.encode(
-                    values=field_values, template=template_field, metadata=metadata
+                    values=field_data.values, template=template_field, metadata=metadata
                 )
 
                 field_list = pl_fields if level_type == "pl" else sf_fields
@@ -237,13 +213,8 @@ class QuaverParser(CfParser):
         if {"lon", "lat"}.issubset(data.coords):
             lons = (data.lon.values + 360) % 360
             data = data.assign_coords(lon=("ipoint", lons))
-
-            # Cache the sort order — the grid is identical across all fsteps,
-            # so lexsort only needs to run once.
-            if not hasattr(self, "_coord_order") or self._coord_order is None:
-                self._coord_order = np.lexsort((data.lon.values, -data.lat.values))
-
-            data = data.isel(ipoint=self._coord_order)
+            order = np.lexsort((data.lon.values, -data.lat.values))
+            data = data.isel(ipoint=order)
         return data
 
     def get_metadata(
