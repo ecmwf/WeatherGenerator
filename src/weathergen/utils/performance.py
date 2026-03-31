@@ -7,17 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Utilities for measuring and computing model performance metrics (MFU, HFU)."""
+"""Utilities for measuring training throughput metrics."""
 
 import logging
 import time
 from collections.abc import Callable
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 
 import torch
-import torch.nn as nn
-from torch.utils.flop_counter import FlopCounterMode
-from lightning.fabric.utilities.throughput import get_available_flops
 
 from weathergen.utils.distributed import is_root
 
@@ -25,32 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 class ThroughputTracker:
-    """Tracks training throughput and hardware utilisation metrics.
+    """Tracks training throughput metrics.
 
-    Accumulates per-batch FLOPs and source-byte counts across ranks, with the warmup
-    / accumulation logic required to produce stable MFU / HFU estimates and global
-    throughput metrics.
+    Accumulates per-batch sample and source-byte counts across ranks, with the warmup
+    / accumulation logic required to produce stable global throughput metrics.
     """
 
     def __init__(
         self,
         device: torch.device,
-        dtype: torch.dtype,
         world_size: int,
         warmup_steps: int,
-        recompute_factor: float = 4 / 3,
     ) -> None:
-        self._available_flops = get_available_flops(device, dtype=dtype)
         self._device = device
-        if is_root():
-            if self._available_flops:
-                logger.info(f"GPU peak FLOPS: {self._available_flops:.2e}")
-            else:
-                logger.warning(
-                    "GPU peak FLOPS not recognized — MFU will not be available."
-                )
-        self.flops_per_batch_fwd: int | None = None
-        self.flops_per_batch: int | None = None
         self._warmup_steps = warmup_steps
         self._t0: float | None = None
         self._warmup_done: bool = False
@@ -58,45 +42,17 @@ class ThroughputTracker:
         self._total_samples: int = 0
         self._total_mb: float = 0.0
         self._world_size = world_size
-        self._recompute_factor = recompute_factor
         # Cached results from the last _sync() call (set on all ranks, read on root).
         self._synced_elapsed: float | None = None
         self._synced_global_batches: int = 0
         self._synced_global_samples: int = 0
         self._synced_global_mb: float = 0.0
 
-    @contextmanager
     def step_context(self):
-        """Context manager spanning the full training step (fwd + bwd + optimizer).
+        return nullcontext()
 
-        Wrap the entire training step body with this to count all compute ops.
-        Nest ``flop_ctx()`` inside it around the model forward to additionally
-        capture forward-only FLOPs for MFU:
-
-            with self.perf_tracker.step_ctx():
-                with self.perf_tracker.flop_ctx():
-                    preds = model(...)
-                loss = loss_fn(preds)
-                loss.backward()
-                optimizer.step()
-        """
-        with FlopCounterMode(display=False) as counter:
-            yield
-        self.flops_per_batch = counter.get_total_flops()
-
-    @contextmanager
     def forward_context(self):
-        """Context manager that counts forward-only FLOPs. Nest inside ``step_ctx()``.
-
-        Wrap the model forward pass with this to separately capture forward FLOPs
-        for MFU, while the enclosing ``step_ctx()`` accumulates the full total:
-
-            with self.perf_tracker.flop_ctx():
-                preds = model(params, batch.get_source_samples())
-        """
-        with FlopCounterMode(display=False) as counter:
-            yield
-        self.flops_per_batch_fwd = counter.get_total_flops()
+        return nullcontext()
 
     def step(
         self,
@@ -184,30 +140,11 @@ class ThroughputTracker:
         if self._total_batches == 0 or self._t0 is None:
             return None
         elapsed = time.time() - self._t0
-        steps_per_sec = self._total_batches / elapsed if elapsed > 0 else 0.0
-
-        metrics = {}
-        metrics.update(self._compute_throughput_metrics(elapsed))
-        metrics.update(self._compute_utilization_metrics(steps_per_sec))
-        return metrics
-
-    def _compute_throughput_metrics(self, elapsed: float) -> dict[str, float]:
-        """Compute throughput metrics (samples/sec, batches/sec, MB/s).
-
-        Measures both device-level (this rank) and global (all ranks) throughput.
-        Global values come from ``_sync()``, which must have been called on all ranks
-        before this method is invoked on the root rank.
-
-        Args:
-            elapsed: Device-local seconds elapsed since tracking started (after warmup).
-
-        Returns:
-            Dict of ``"performance.throughput.*"`` metrics.
-        """
-        metrics: dict[str, float] = {}
 
         if elapsed <= 0 or self._synced_elapsed is None or self._synced_elapsed <= 0:
-            return metrics
+            return None
+
+        metrics: dict[str, float] = {}
 
         # Device-level throughput (this rank only).
         metrics["performance.throughput.device.batches_per_sec"] = self._total_batches / elapsed
@@ -221,38 +158,6 @@ class ThroughputTracker:
         metrics["performance.throughput.global.mb_per_sec"] = self._synced_global_mb / synced_elapsed
 
         return metrics
-
-    def _compute_utilization_metrics(self, steps_per_sec: float) -> dict[str, float]:
-        """Compute model and hardware FLOPs utilization (MFU and HFU).
-
-        Args:
-            steps_per_sec: Training steps per second.
-
-        Returns:
-            Dict of ``"performance.utilization.*"`` metrics (empty if data unavailable).
-        """
-        metrics: dict[str, float] = {}
-
-        if not self._available_flops or steps_per_sec <= 0:
-            return metrics
-
-        if self.flops_per_batch_fwd:
-            # MFU = 3 × fwd_flops × steps/sec / available_flops
-            mfu = 3 * self.flops_per_batch_fwd * steps_per_sec / self._available_flops
-            metrics["performance.utilization.device.mfu"] = mfu
-
-        if self.flops_per_batch:
-            # HFU = total_flops × recompute_factor × steps/sec / available_flops
-            hfu = (
-                self.flops_per_batch
-                * self._recompute_factor
-                * steps_per_sec
-                / self._available_flops
-            )
-            metrics["performance.utilization.device.hfu"] = hfu
-
-        return metrics
-
 
 
 class NullThroughputTracker:
@@ -288,6 +193,3 @@ def compute_source_bytes(source_samples) -> int:
             for t in stream_data.source_tokens_cells:
                 total += t.nbytes
     return total
-
-
-
