@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# Workaround: the anemoi-datasets git branch has a non-PEP 440 tag (v0.0.1-special-zarr3)
-# that causes setuptools_scm to fail. Override the version for that package.
-export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ANEMOI_DATASETS=0.0.1
-
 # TODO: this is the root weathergenerator directory, rename the variable.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 PRIVATE_REPO_PATH="${WEATHERGEN_PRIVATE_REPO_PATH:-$SCRIPT_DIR/../WeatherGenerator-private}"
