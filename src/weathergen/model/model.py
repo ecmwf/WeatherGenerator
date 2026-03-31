@@ -389,13 +389,14 @@ class Model(torch.nn.Module):
         mode_cfg = cf.training_config
         self.forecast_engine = None
         if cf.fe_num_blocks > 0:
-            if cf.get("fe_diffusion_model", False):
+            if cf.get("diffusion_conditioning_embed_dim", None) is None:
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells, dim_aux=self.cf.diffusion_conditioning_embed_dim)
-                self.forecast_engine = DiffusionForecastEngine(
-                    cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
-                )
             else:
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            if cf.get("fe_diffusion_model", False):
+                    self.forecast_engine = DiffusionForecastEngine(
+                    cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                )
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate

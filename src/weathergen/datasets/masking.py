@@ -37,8 +37,6 @@ class MaskData:
         }
         if "noise_level_rn" in params:
             global_params["noise_level_rn"] = params["noise_level_rn"]
-        print(mask)
-        print(params)
         self.masks += [mask]
         self.metadata += [
             SampleMetaData(

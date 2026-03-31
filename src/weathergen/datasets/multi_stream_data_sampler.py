@@ -626,7 +626,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # get/coordinate masks
         masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
-        
+
         source_select, target_select = [], []
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
@@ -710,15 +710,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     input_mask=target_mask,
                 )
                 target_metadata = target_masks.metadata[tidx]
-                # Add output timestamp to metadata - use actual target times from data
-                if target_metadata.params is None:
-                    target_metadata.params = {}
+
                 # Get first target step's times (using self.output_offset as the first output step index)
                 if self.diffusion_model_conditioning == "date_time":
                     target_times_array = sdata.target_times_raw[self.output_offset]
-                    target_metadata.params['timestamp'] = (
+                    target_metadata.add_params({'timestamp': (
                         target_times_array[0] if len(target_times_array) > 0 else None
-                    )
+                    )})
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
                 # Map target to all source students
@@ -747,8 +745,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for stream_name in [s["name"] for s in self.streams]:
                 if stream_name in target_sample.meta_info and stream_name in source_sample.meta_info:
                     target_timestamp = target_sample.meta_info[stream_name].params.get('timestamp')
-                    source_sample.meta_info[stream_name].params['timestamp'] = target_timestamp
-        
+                    source_sample.meta_info[stream_name].add_params({'timestamp': target_timestamp})
+
         return batch
 
     def __iter__(self) -> ModelBatch:

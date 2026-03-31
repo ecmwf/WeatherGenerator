@@ -30,6 +30,10 @@ class SampleMetaData:
             self.global_params = {}
         self.global_params.update(params)
 
+    def add_params(self, params: dict) -> None:
+        if self.params is None:
+            self.params = {}
+        self.params.update(params)
 
 class Sample:
     # keys: stream name, values: SampleMetaData

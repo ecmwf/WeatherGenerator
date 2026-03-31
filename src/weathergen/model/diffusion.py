@@ -100,7 +100,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self._noised_tokens = y + n
 
-        print(f"date was: {c}")
+        logger.info(f"Conditioning on date: {c}")
 
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
