@@ -83,7 +83,7 @@ class Sample:
         """
         Check if sample is all NaN
         """
-        is_nan = [s.nan() if s is not None else True for _, s in self.streams_data.items()]
+        is_nan = [s.nan() if s is not None else False for _, s in self.streams_data.items()]
         return np.array(is_nan).all()
 
     def sources_empty(self) -> bool:
@@ -97,7 +97,7 @@ class Sample:
         """
         Check if sources for sample are all NaN
         """
-        is_nan = [s.source_nan() if s is not None else True for _, s in self.streams_data.items()]
+        is_nan = [s.source_nan() if s is not None else False for _, s in self.streams_data.items()]
         return np.array(is_nan).all()
 
     def targets_empty(self) -> bool:
@@ -111,7 +111,7 @@ class Sample:
         """
         Check if targets for sample are all NaN
         """
-        is_nan = [s.target_nan() if s is not None else True for _, s in self.streams_data.items()]
+        is_nan = [s.target_nan() if s is not None else False for _, s in self.streams_data.items()]
         return np.array(is_nan).all()
 
     def add_stream_data(self, stream_name: str, stream_data: StreamData) -> None:
@@ -228,13 +228,13 @@ class BatchSamples:
         """
         Check if sources for all samples are all NaN
         """
-        return np.array([s.sources_nan() if s is not None else True for s in self.samples]).all()
+        return np.array([s.sources_nan() if s is not None else False for s in self.samples]).all()
 
     def targets_nan(self) -> bool:
         """
         Check if targets for all samples are all NaN
         """
-        return np.array([s.targets_nan() if s is not None else True for s in self.samples]).all()
+        return np.array([s.targets_nan() if s is not None else False for s in self.samples]).all()
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
@@ -377,6 +377,30 @@ class ModelBatch:
         Check if batch is all NaN
         """
         return self.source_samples.sources_nan() or self.target_samples.targets_nan()
+
+    def sources_empty(self):
+        """
+        Check if batch sources are empty
+        """
+        return self.source_samples.sources_empty()
+
+    def sources_nan(self):
+        """
+        Check if batch sources are all NaN
+        """
+        return self.source_samples.sources_nan()
+
+    def targets_empty(self):
+        """
+        Check if batch targets are empty
+        """
+        return self.target_samples.targets_empty()
+
+    def targets_nan(self):
+        """
+        Check if batch targets are all NaN
+        """
+        return self.target_samples.targets_nan()
 
     def len_sources(self) -> int:
         """
