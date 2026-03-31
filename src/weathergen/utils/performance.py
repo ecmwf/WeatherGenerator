@@ -41,6 +41,7 @@ class ThroughputTracker:
         recompute_factor: float = 4 / 3,
     ) -> None:
         self._available_flops = get_available_flops(device, dtype=dtype)
+        self._device = device
         if is_root():
             if self._available_flops:
                 logger.info(f"GPU peak FLOPS: {self._available_flops:.2e}")
@@ -58,6 +59,11 @@ class ThroughputTracker:
         self._total_mb: float = 0.0
         self._world_size = world_size
         self._recompute_factor = recompute_factor
+        # Cached results from the last _sync() call (set on all ranks, read on root).
+        self._synced_elapsed: float | None = None
+        self._synced_global_batches: int = 0
+        self._synced_global_samples: int = 0
+        self._synced_global_mb: float = 0.0
 
     @contextmanager
     def step_context(self):
@@ -114,6 +120,7 @@ class ThroughputTracker:
         """
         source_mb = compute_source_bytes(batch.get_source_samples()) / 1e6
         self.update(batch_size_per_gpu, istep, source_mb)
+        self._sync()  # collective: all ranks must participate
         if log_fn is not None and is_root():
             metrics = self.compute_metrics()
             if metrics is not None:
@@ -139,6 +146,35 @@ class ThroughputTracker:
             self._total_samples += batch_size_per_gpu
             self._total_mb += source_mb
 
+    def _sync(self) -> None:
+        """Collective: reduce per-rank counters across all ranks and cache the result.
+
+        Must be called on every rank at the same point in the training loop.
+        The cached values are later read by ``compute_metrics()`` on the root rank.
+        """
+        if self._total_batches == 0 or self._t0 is None:
+            return
+
+        elapsed = time.time() - self._t0
+
+        global_batches = torch.tensor(self._total_batches, dtype=torch.int64, device=self._device)
+        global_samples = torch.tensor(self._total_samples, dtype=torch.int64, device=self._device)
+        global_total_mb = torch.tensor(self._total_mb, dtype=torch.float32, device=self._device)
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            elapsed_tensor = torch.tensor(elapsed, dtype=torch.float32, device=self._device)
+            torch.distributed.all_reduce(elapsed_tensor, op=torch.distributed.ReduceOp.AVG)
+            elapsed = elapsed_tensor.item()
+
+            torch.distributed.all_reduce(global_batches)
+            torch.distributed.all_reduce(global_samples)
+            torch.distributed.all_reduce(global_total_mb)
+
+        self._synced_elapsed = elapsed
+        self._synced_global_batches = int(global_batches.item())
+        self._synced_global_samples = int(global_samples.item())
+        self._synced_global_mb = global_total_mb.item()
+
     def compute_metrics(self) -> dict[str, float] | None:
         """Return performance metrics dict, or None if warmup is not yet complete.
 
@@ -151,55 +187,38 @@ class ThroughputTracker:
         steps_per_sec = self._total_batches / elapsed if elapsed > 0 else 0.0
 
         metrics = {}
-        metrics.update(self._compute_throughput_metrics(elapsed, steps_per_sec))
+        metrics.update(self._compute_throughput_metrics(elapsed))
         metrics.update(self._compute_utilization_metrics(steps_per_sec))
         return metrics
 
-    def _compute_throughput_metrics(self, elapsed: float, steps_per_sec: float) -> dict[str, float]:
-        """Compute throughput metrics (samples/sec, baches/sec, MB/s).
+    def _compute_throughput_metrics(self, elapsed: float) -> dict[str, float]:
+        """Compute throughput metrics (samples/sec, batches/sec, MB/s).
 
         Measures both device-level (this rank) and global (all ranks) throughput.
-        When training across multiple compute nodes, elapsed time is synchronized
-        via all_reduce to ensure consistent global throughput calculations.
+        Global values come from ``_sync()``, which must have been called on all ranks
+        before this method is invoked on the root rank.
 
         Args:
-            elapsed: Seconds elapsed since tracking started (after warmup).
-            steps_per_sec: Training steps per second (batches per second, device-level).
+            elapsed: Device-local seconds elapsed since tracking started (after warmup).
 
         Returns:
             Dict of ``"performance.throughput.*"`` metrics.
         """
         metrics: dict[str, float] = {}
 
-        if elapsed <= 0:
+        if elapsed <= 0 or self._synced_elapsed is None or self._synced_elapsed <= 0:
             return metrics
 
         # Device-level throughput (this rank only).
         metrics["performance.throughput.device.batches_per_sec"] = self._total_batches / elapsed
         metrics["performance.throughput.device.samples_per_sec"] = self._total_samples / elapsed
-        device_mb_per_sec = self._total_mb / elapsed
-        metrics["performance.throughput.device.mb_per_sec"] = device_mb_per_sec
+        metrics["performance.throughput.device.mb_per_sec"] = self._total_mb / elapsed
 
-        # Global throughput (aggregate across all ranks, including multi-node).
-        # Sum batch/sample counts across all ranks.
-        global_batches = torch.tensor(self._total_batches, dtype=torch.uint32)
-        global_samples = torch.tensor(self._total_samples, dtype=torch.uint32)
-        global_total_mb = torch.tensor(self._total_mb, dtype=torch.float32)
-
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            # Synchronize elapsed time across all ranks (for multi-node consistency).
-            elapsed_tensor = torch.tensor(elapsed, dtype=torch.float32)
-            torch.distributed.all_reduce(elapsed_tensor, op=torch.distributed.ReduceOp.AVG)
-            elapsed = elapsed_tensor.item()
-
-            # Sum counts across all ranks.
-            torch.distributed.all_reduce(global_batches)
-            torch.distributed.all_reduce(global_samples)
-            torch.distributed.all_reduce(global_total_mb)
-
-        metrics["performance.throughput.global.batches_per_sec"] = global_batches.item() / elapsed
-        metrics["performance.throughput.global.samples_per_sec"] = global_samples.item() / elapsed
-        metrics["performance.throughput.global.mb_per_sec"] = global_total_mb.item() / elapsed
+        # Global throughput: use values already reduced across all ranks by _sync().
+        synced_elapsed = self._synced_elapsed
+        metrics["performance.throughput.global.batches_per_sec"] = self._synced_global_batches / synced_elapsed
+        metrics["performance.throughput.global.samples_per_sec"] = self._synced_global_samples / synced_elapsed
+        metrics["performance.throughput.global.mb_per_sec"] = self._synced_global_mb / synced_elapsed
 
         return metrics
 
