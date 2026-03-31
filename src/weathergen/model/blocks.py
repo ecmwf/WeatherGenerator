@@ -25,7 +25,17 @@ class SelfAttentionBlock(nn.Module):
     layer norm with a FFN.
     """
 
-    def __init__(self, dim, dim_aux, with_adanorm, num_heads, dropout_rate, mlp_type="mlp", **kwargs):
+    def __init__(
+        self,
+        dim,
+        dim_aux,
+        with_adanorm,
+        num_heads,
+        dropout_rate,
+        mlp_type="mlp",
+        use_xsa=False,
+        **kwargs,
+    ):
         super().__init__()
 
         self.with_adanorm = with_adanorm
@@ -34,6 +44,7 @@ class SelfAttentionBlock(nn.Module):
             dim_embed=dim,
             num_heads=num_heads,
             with_residual=False,
+            use_xsa=use_xsa,
             **kwargs["attention_kwargs"],
         )
         if self.with_adanorm:
@@ -100,6 +111,7 @@ class CrossAttentionBlock(nn.Module):
         num_heads,
         dropout_rate,
         mlp_type="mlp",
+        use_xsa=False,
         **kwargs,
     ):
         super().__init__()
@@ -113,6 +125,7 @@ class CrossAttentionBlock(nn.Module):
                 dim_embed=dim_q,
                 num_heads=num_heads,
                 with_residual=False,
+                use_xsa=use_xsa,
                 **kwargs["attention_kwargs"],
             )
             if self.with_adanorm:
@@ -238,6 +251,7 @@ class OriginalPredictionBlock(nn.Module):
                     dim_aux=dim_aux,
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
+                    use_xsa=self.cf.get("use_xsa", False),
                 )
             )
 
