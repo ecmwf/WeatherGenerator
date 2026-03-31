@@ -33,6 +33,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         dropout_rate=0.0,
         norm_type="LayerNorm",
         mlp_type="mlp",
+        use_xsa=False,
         unembed_mode="full",
         stream_name="stream_embed",
     ):
@@ -58,6 +59,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.num_blocks = num_blocks
         self.num_heads = num_heads
         self.mlp_type = mlp_type
+        self.use_xsa = use_xsa
         self.unembed_mode = unembed_mode
 
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
@@ -71,6 +73,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=True,
                     with_flash=True,
+                    use_xsa=self.use_xsa,
                 )
             )
             self.layers.append(

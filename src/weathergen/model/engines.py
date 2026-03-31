@@ -70,6 +70,7 @@ class EmbeddingEngine(torch.nn.Module):
                     dropout_rate=self.cf.embed_dropout_rate,
                     norm_type=self.cf.norm_type,
                     mlp_type=self.cf.get("mlp_type", "mlp"),
+                    use_xsa=self.cf.get("use_xsa", False),
                     unembed_mode=self.cf.embed_unembed_mode,
                     stream_name=stream_name,
                 )
@@ -222,6 +223,7 @@ class LocalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_local_dropout_rate,
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
+                    use_xsa=self.cf.get("use_xsa", False),
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
@@ -408,6 +410,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
+                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -426,6 +429,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
+                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -490,6 +494,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_global_dropout_rate,
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
+                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -507,6 +512,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_global_dropout_rate,
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
+                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -572,6 +578,7 @@ class ForecastingEngine(torch.nn.Module):
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
+                            use_xsa=self.cf.get("use_xsa", False),
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
@@ -590,6 +597,7 @@ class ForecastingEngine(torch.nn.Module):
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
+                            use_xsa=self.cf.get("use_xsa", False),
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
@@ -761,6 +769,7 @@ class TargetPredictionEngineClassic(nn.Module):
                         dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
+                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         dim_aux=self.dim_coord_in,
@@ -901,6 +910,7 @@ class TargetPredictionEngine(nn.Module):
                         with_adanorm=True,
                         dropout_rate=0.1,
                         mlp_type=self.tr_mlp_type,
+                        use_xsa=self.cf.get("use_xsa", False),
                     )
                 )
             elif self.cf.decoder_type == "CrossAttentionConditioning":
@@ -915,6 +925,7 @@ class TargetPredictionEngine(nn.Module):
                         with_mlp=True,
                         dropout_rate=0.1,
                         mlp_type=self.tr_mlp_type,
+                        use_xsa=self.cf.get("use_xsa", False),
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -930,6 +941,7 @@ class TargetPredictionEngine(nn.Module):
                         with_mlp=True,
                         dropout_rate=0.1,
                         mlp_type=self.tr_mlp_type,
+                        use_xsa=self.cf.get("use_xsa", False),
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -1068,6 +1080,7 @@ class LatentPredictionHeadTransformer(nn.Module):
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=with_qk_lnorm,
                     with_flash=self.global_cf.with_flash_attention,
+                    use_xsa=self.global_cf.get("use_xsa", False),
                     norm_type=self.global_cf.norm_type,
                     qk_norm_type=self.global_cf.qk_norm_type,
                     # dim_aux=dim_aux,
