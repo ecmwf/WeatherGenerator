@@ -12,7 +12,7 @@ Visualize masked source/target samples using the training data pipeline.
 
 This script loads a config, builds a MultiStreamDataSampler, extracts one batch,
 and plots a single variable for source and target with masking/cropping applied.
-This script can run on a cpu or logging node without GPUs. 
+This script can run on a cpu or logging node without GPUs.
 Please activate your .venv before running.
 
 Usage:
@@ -30,21 +30,21 @@ import time
 from pathlib import Path
 from typing import Any
 
+import matplotlib
 import numpy as np
+import numpy.typing as npt
 import torch
 
-import matplotlib
-
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  
-import astropy.units as u  
-import astropy_healpix as hp  
-import cartopy.crs as ccrs  
-import cartopy.feature as cfeature  
-from omegaconf import OmegaConf, open_dict  
+import astropy.units as u
+import astropy_healpix as hp
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
+from omegaconf import OmegaConf, open_dict
 
-import weathergen.common.config as wg_config  
-from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler  
+import weathergen.common.config as wg_config
+from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.train.utils import TRAIN, VAL, filter_config_by_enabled
 
 logger = logging.getLogger(__name__)
@@ -219,7 +219,10 @@ def get_parser() -> argparse.ArgumentParser:
         "--shared-colorbar",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Use a single shared colorbar below all panels instead of per-panel colorbars (default: False).",
+        help=(
+            "Use a single shared colorbar below all panels instead of per-panel colorbars"
+            " (default: False)."
+        ),
     )
 
     return parser
@@ -295,7 +298,7 @@ def _to_numpy(arr):
     return np.asarray(arr)
 
 
-def _wrap_lons(lons: np.ndarray) -> np.ndarray:
+def _wrap_lons(lons: npt.NDArray) -> npt.NDArray:
     wrapped = ((lons + 180.0) % 360.0) - 180.0
     # Clip just inside ±180 to prevent cartopy from rendering antimeridian points
     # on both edges of the projection simultaneously (reflection artifact).
@@ -309,7 +312,7 @@ def _format_mask_params(params: dict) -> str:
     cfg = params.get("masking_strategy_config", {})
     rate = cfg.get("rate", None)
     parts = [strategy]
-    if isinstance(rate, (int, float)):
+    if isinstance(rate, int | float):
         parts.append(f"rate={rate:.2f}")
     if "hl_mask" in cfg:
         parts.append(f"hl={cfg['hl_mask']}")
@@ -319,8 +322,8 @@ def _format_mask_params(params: dict) -> str:
 
 
 def _map_points_visible(
-    lats: np.ndarray, lons: np.ndarray, mask: np.ndarray, healpix_level: int
-) -> np.ndarray:
+    lats: npt.NDArray, lons: npt.NDArray, mask: npt.NDArray, healpix_level: int
+) -> npt.NDArray:
     """Determine which data points are visible given a HEALPix cell mask.
 
     Maps each (lat, lon) coordinate to its corresponding HEALPix cell and
@@ -381,7 +384,9 @@ def _resolve_var_idx(
         return channels.index(var_name), var_name
     if strict:
         raise ValueError(f"{label} variable '{var_name}' not found. Available: {channels}")
-    logger.warning("%s variable '%s' not found. Falling back to '%s'.", label, var_name, channels[0])
+    logger.warning(
+        "%s variable '%s' not found. Falling back to '%s'.", label, var_name, channels[0]
+    )
     return 0, channels[0]
 
 
@@ -398,7 +403,7 @@ def _masked_points_from_source_view(
     step: int,
     var_idx: int,
     denorm: bool,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """Extract visible data points from a source sample after tokenization and masking.
 
     This function replicates the training pipeline's tokenization and masking logic
@@ -468,7 +473,7 @@ def _full_points_from_source(
     step: int,
     var_idx: int,
     denorm: bool,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """Extract all data points from a source sample (no masking applied).
 
     Parameters
@@ -511,7 +516,7 @@ def _masked_points_from_target_values(
     step: int,
     var_idx: int,
     denorm: bool,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """Extract visible data points from a target sample using target tokens.
 
     Uses the pre-computed target_tokens and target_coords_raw which contain
@@ -556,11 +561,11 @@ def _masked_points_from_target_values(
 
 def _downsample(
     rng: np.random.Generator,
-    lats: np.ndarray,
-    lons: np.ndarray,
-    vals: np.ndarray,
+    lats: npt.NDArray,
+    lons: npt.NDArray,
+    vals: npt.NDArray,
     max_points: int | None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """Randomly downsample points if they exceed the maximum limit.
 
     Parameters
@@ -585,17 +590,17 @@ def _downsample(
 
 
 def _plot_cartopy_three_panel(
-    lats_full: np.ndarray,
-    lons_full: np.ndarray,
-    vals_full: np.ndarray,
-    src_visible: np.ndarray,
-    tgt_visible: np.ndarray,
-    lats_src: np.ndarray,
-    lons_src: np.ndarray,
-    vals_src: np.ndarray,
-    lats_tgt: np.ndarray,
-    lons_tgt: np.ndarray,
-    vals_tgt: np.ndarray,
+    lats_full: npt.NDArray,
+    lons_full: npt.NDArray,
+    vals_full: npt.NDArray,
+    src_visible: npt.NDArray,
+    tgt_visible: npt.NDArray,
+    lats_src: npt.NDArray,
+    lons_src: npt.NDArray,
+    vals_src: npt.NDArray,
+    lats_tgt: npt.NDArray,
+    lons_tgt: npt.NDArray,
+    vals_tgt: npt.NDArray,
     title: str,
     src_label: str,
     tgt_label: str,
@@ -767,8 +772,6 @@ def _plot_cartopy_three_panel(
     plt.close(fig)
 
 
-
-
 def main(args=None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -860,23 +863,22 @@ def main(args=None) -> int:
             logger.error("Stream data missing for stream '%s'.", stream_name)
             return 1
 
-        if parsed.source_step >= len(source_stream_data.source_raw):
-            raise ValueError(
-                f"source-step {parsed.source_step} out of range [0, {len(source_stream_data.source_raw)})."
-            )
-        if parsed.target_step >= len(target_stream_data.target_tokens):
-            raise ValueError(
-                f"target-step {parsed.target_step} out of range [0, {len(target_stream_data.target_tokens)})."
-            )
+        n_src = len(source_stream_data.source_raw)
+        if parsed.source_step >= n_src:
+            raise ValueError(f"source-step {parsed.source_step} out of range [0, {n_src}).")
+        n_tgt = len(target_stream_data.target_tokens)
+        if parsed.target_step >= n_tgt:
+            raise ValueError(f"target-step {parsed.target_step} out of range [0, {n_tgt}).")
 
         source_meta = source_sample.meta_info[stream_name]
         target_meta = target_sample.meta_info[stream_name]
 
         # Decide target view: use target values if available, else network input view.
         target_view = "target_values"
-        if len(target_stream_data.target_tokens) == 0 or target_stream_data.target_tokens[
-            parsed.target_step
-        ].numel() == 0:
+        if (
+            len(target_stream_data.target_tokens) == 0
+            or target_stream_data.target_tokens[parsed.target_step].numel() == 0
+        ):
             target_view = "network_input"
 
         if target_view == "target_values":
@@ -950,12 +952,8 @@ def main(args=None) -> int:
             rng, lats_tgt, lons_tgt, vals_tgt, parsed.max_points
         )
 
-        src_visible = _map_points_visible(
-            lats_full, lons_full, source_meta.mask, cf.healpix_level
-        )
-        tgt_visible = _map_points_visible(
-            lats_full, lons_full, target_meta.mask, cf.healpix_level
-        )
+        src_visible = _map_points_visible(lats_full, lons_full, source_meta.mask, cf.healpix_level)
+        tgt_visible = _map_points_visible(lats_full, lons_full, target_meta.mask, cf.healpix_level)
 
         src_label = (
             f"Source ({source_var_name})\n{_format_mask_params(_to_dict(source_meta.params))}\n"
@@ -1107,15 +1105,15 @@ def _to_serializable(obj):
         return OmegaConf.to_container(obj, resolve=True)
     if isinstance(obj, dict):
         return {k: _to_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, list | tuple):
         return [_to_serializable(v) for v in obj]
-    if isinstance(obj, np.ndarray):
+    if type(obj).__name__ == "ndarray" and type(obj).__module__ == "numpy":
         return obj.tolist()
-    if isinstance(obj, (np.integer,)):
+    if isinstance(obj, np.integer):
         return int(obj)
-    if isinstance(obj, (np.floating,)):
+    if isinstance(obj, np.floating):
         return float(obj)
-    if isinstance(obj, (np.bool_,)):
+    if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, torch.Tensor):
         return obj.detach().cpu().tolist()
