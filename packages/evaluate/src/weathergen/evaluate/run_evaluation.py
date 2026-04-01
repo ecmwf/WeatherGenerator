@@ -235,7 +235,9 @@ def _process_stream(
         available_data = reader.check_availability(stream, mode="evaluation")
 
         # Use fast raw zarr I/O when available (bypasses ZarrIO/dask for ~20× speedup)
-        use_fast_io = hasattr(reader, "get_data_raw") and getattr(reader, "_fast_io", False)
+        use_fast_io = (
+            hasattr(reader, "get_data_raw") and hasattr(reader, "_fast_io") and reader._fast_io
+        )
 
         if use_fast_io:
             _logger.info(f"RUN {run_id} - {stream}: Using fast raw zarr I/O path.")
