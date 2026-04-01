@@ -13,6 +13,8 @@ import numpy as np
 import omegaconf as oc
 import seaborn as sns
 import xarray as xr
+from astropy_healpix import HEALPix as HEALPixGrid
+from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
@@ -454,6 +456,14 @@ class Plotter:
         vmax = map_kwargs_save.pop("vmax", None)
         cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
 
+        # Healpix grid configuration
+        add_healpix_grid = map_kwargs_save.pop("add_healpix_grid", False)
+        healpix_nside = map_kwargs_save.pop("healpix_nside", 4)
+        healpix_color = map_kwargs_save.pop("healpix_color", "black")
+        healpix_linewidth = map_kwargs_save.pop("healpix_linewidth", 0.2)
+        healpix_step = map_kwargs_save.pop("healpix_step", 64)
+        healpix_linestyle = map_kwargs_save.pop("healpix_linestyle", "-")
+
         if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
             norm = mpl.colors.BoundaryNorm(
                 map_kwargs_save.pop("levels", None), cmap.N, extend="both"
@@ -502,6 +512,15 @@ class Plotter:
             **map_kwargs_save,
         )
 
+        # Add Healpix grid (optimized with LineCollection)
+        if add_healpix_grid:
+            lc = self.healpixlines(
+                healpix_nside, healpix_color, healpix_linewidth, healpix_step, healpix_linestyle
+            )
+            ax.add_collection(lc)
+        else:
+            ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=0.2)
+
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
         plt.title(title, fontsize=9.5)
         if regionname == "global":
@@ -514,7 +533,6 @@ class Plotter:
                 data["lat"].max().item(),
             ]
             ax.set_extent(region_extent, crs=ccrs.PlateCarree())
-        ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
 
         # TODO: make this nicer
         parts = ["map", self.run_id, tag]
@@ -550,6 +568,28 @@ class Plotter:
         plt.close()
 
         return name
+
+    def healpixlines(
+        self, healpix_nside, healpix_color, healpix_linewidth, healpix_step, healpix_linestyle
+    ):
+        hp_grid = HEALPixGrid(nside=healpix_nside, order="ring")
+        lon_all, lat_all = hp_grid.boundaries_lonlat(np.arange(hp_grid.npix), step=healpix_step)
+        # Ensure closure of polygons
+        lon_closed = np.concatenate([lon_all.deg, lon_all.deg[:, 0:1]], axis=1)
+        lat_closed = np.concatenate([lat_all.deg, lat_all.deg[:, 0:1]], axis=1)
+        # Stack as (N_polys, N_points, 2)
+        segments = np.stack([lon_closed, lat_closed], axis=-1)
+        # (cartopy handles transform for LineCollection via set_transform)
+        lc = LineCollection(
+            segments,
+            colors=healpix_color,
+            linewidths=healpix_linewidth,
+            linestyles=healpix_linestyle,
+            alpha=0.5,
+            zorder=10,
+        )
+        lc.set_transform(ccrs.PlateCarree())
+        return lc
 
     def animation(self, samples, fsteps, variables, select, tag) -> list[str]:
         """
