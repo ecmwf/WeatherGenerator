@@ -73,7 +73,7 @@ if not working_dir.endswith("/"):
 logger.info(f"Working directory: {working_dir}")
 
 # Create all the links
-for d in ["logs", "models", "output", "plots", "results"]:
+for d in ["logs", "models", "plots", "results"]:
     target = working_dir + d
     # Check if something exists at this path (including broken symlinks)
     if os.path.islink(d):
