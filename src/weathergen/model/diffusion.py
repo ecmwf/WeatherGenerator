@@ -111,19 +111,19 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         else:
             #NOTE: temporary for analysing denoising
-            return self.training_forward(
-                tokens=tokens,
-                fstep=fstep,
-                meta_info=meta_info,
-                coords=coords,
-            )
-            # if fstep is None:
-            #     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
-            # return self.inference_forward(
+            # return self.training_forward(
+            #     tokens=tokens,
             #     fstep=fstep,
-            #     num_steps=num_steps,
             #     meta_info=meta_info,
+            #     coords=coords,
             # )
+            if fstep is None:
+                raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
+            return self.inference_forward(
+                fstep=fstep,
+                num_steps=num_steps,
+                meta_info=meta_info,
+            )
 
     def training_forward(
         self,
@@ -162,7 +162,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self._noised_tokens = y + n
 
-        logger.info(f"Conditioning on date: {c}")
+        
 
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
@@ -172,6 +172,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
         noise level sigma.
         """
+
         # Compute scaling conditionings
         c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
         c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
@@ -227,8 +228,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
         ) ** self.rho
         t_steps = torch.cat(
-            [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+            [t_steps, torch.zeros_like(t_steps[:1])]
         )  # t_N = 0
+        # t_steps = torch.cat(
+        #     [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+        # )  # t_N = 0
 
         # Main sampling loop.
         x_next = x * t_steps[0]
@@ -286,12 +290,16 @@ class NoiseEmbedder(torch.nn.Module):
     def timestep_embedding(self, t: float, max_period: int = 10000):
         """
         Create sinusoidal timestep embeddings.
-        :param t: a 1-D Tensor of N indices, one per batch element.
+        :param t: a scalar or 1-D Tensor of N indices, one per batch element.
                           These may be fractional.
         :param dim: the dimension of the output.
         :param max_period: controls the minimum frequency of the embeddings.
         :return: an (N, D) Tensor of positional embeddings.
         """
+        # Ensure t is at least 1D
+        if t.dim() == 0:
+            t = t.unsqueeze(0)
+        
         half = self.frequency_embedding_dim // 2
         freqs = torch.exp(
             -math.log(max_period) * torch.arange(start=0, end=half, dtype=self.dtype) / half
