@@ -18,8 +18,8 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
-
 from weathergen.common.config import _load_private_conf
+
 from weathergen.evaluate.plotting.plot_utils import (
     DefaultMarkerSize,
 )
@@ -519,7 +519,7 @@ class Plotter:
             )
             ax.add_collection(lc)
         else:
-            ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
+            ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=0.2)
 
         plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
         plt.title(title, fontsize=9.5)
