@@ -46,7 +46,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting/"
+streams_directory: "./config/streams/era5_1deg/"
 # streams_directory: "./config/streams/era5_synop_finetuning/"
 streams: ???
 
