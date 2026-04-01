@@ -510,7 +510,7 @@ def plot_loss_per_stream(
 
             legend = plt.legend(
                 legend_str,
-                loc='center left',
+                loc="center left",
                 bbox_to_anchor=(1, 0.5),
                 borderaxespad=0,
                 fontsize=LEGEND_FONT_SIZE,
@@ -550,7 +550,11 @@ def plot_loss_per_stream(
                     f"Shortening it to 200 characters by cutting out the middle."
                 )
                 half_len = (200 - len(plt_fname.suffix)) // 2
-                plt_fname = plt_fname.parent / (plt_fname.name[:half_len] + "..." + plt_fname.name[-half_len - len(plt_fname.suffix):])
+                plt_fname = plt_fname.parent / (
+                    plt_fname.name[:half_len]
+                    + "..."
+                    + plt_fname.name[-half_len - len(plt_fname.suffix) :]
+                )
             _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
             plt.savefig(plt_fname)
             plt.close()
