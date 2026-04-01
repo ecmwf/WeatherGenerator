@@ -60,10 +60,30 @@ class RMSNorm(torch.nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
+def modulate(x, shift, scale):
+    return x * (1 + scale) + shift
+
+
+class SwiGLU(nn.Module):
+    def __init__(self):
+        super(SwiGLU, self).__init__()
+
+    def forward(self, x):
+        x1, x2 = x.chunk(2, dim=-1)
+        return x2 * F.silu(x1)
+
 
 class AdaLayerNorm(torch.nn.Module):
     """
-    AdaLayerNorm for embedding auxiliary information
+    AdaLayerNorm for embedding auxiliary information as done in DiT (Peebles & Xie) with zero
+    initialisation https://arxiv.org/pdf/2212.09748
+
+    This module thus wraps a layer (e.g. self-attention or feedforward nn) and applies LayerNorm
+    followed by scale and shift before the layer and a final scaling after the layer as well as the
+    final residual layer.
+
+    layer is a function that takes 2 arguments the first the latent and the second is the
+    conditioning signal
     """
 
     def __init__(
@@ -114,6 +134,63 @@ class AdaLayerNormFinal(torch.nn.Module):
         x = self.norm(x) * (1 + scale)
 
         return x
+    
+class AdaLayerNormLayer(torch.nn.Module):
+    """
+    AdaLayerNorm for embedding auxiliary information as done in DiT (Peebles & Xie) with zero
+    initialisation https://arxiv.org/pdf/2212.09748
+
+    This module thus wraps a layer (e.g. self-attention or feedforward nn) and applies LayerNorm
+    followed by scale and shift before the layer and a final scaling after the layer as well as the
+    final residual layer.
+
+    layer is a function that takes 2 arguments the first the latent and the second is the
+    conditioning signal
+    """
+
+    def __init__(
+        self,
+        dim,
+        dim_aux,
+        layer,
+        norm_eps: float = 1e-6,
+        dropout_rate: float = 0.0,
+    ):
+        super().__init__()
+
+        self.dim = dim
+        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(dim_aux, 3 * dim, bias=True))
+
+        self.ln = nn.LayerNorm(dim, elementwise_affine=False, eps=norm_eps)
+        self.layer = layer
+
+        # Initialize weights to zero for modulation and gating layers
+        self.initialise_weights()
+
+    def initialise_weights(self):
+        nn.init.zeros_(self.adaLN_modulation[-1].weight)
+        nn.init.zeros_(self.adaLN_modulation[-1].bias)
+
+    def forward(self, x: torch.Tensor, c: torch.Tensor, x_lens, **kwargs) -> torch.Tensor:
+        # the -1 in torch.repeat_interleave(..) is because x_lens is designed for use with flash
+        # attention and thus has a spurious 0 at the beginning to satisfy the flash attention api
+        shift, scale, gate = self.adaLN_modulation(c)[torch.repeat_interleave(x_lens) - 1].chunk(
+            3, dim=1
+        )
+        kwargs["x_lens"] = x_lens
+        return (
+            gate
+            * self.layer(
+                modulate(
+                    self.ln(x),
+                    shift,
+                    scale,
+                ),
+                **kwargs,
+            )
+            + x
+        )
+
     
 # NOTE: Inspired by GenCast/DiT.
 class LinearNormConditioning(torch.nn.Module):
