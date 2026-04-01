@@ -60,30 +60,10 @@ class RMSNorm(torch.nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
-def modulate(x, shift, scale):
-    return x * (1 + scale) + shift
-
-
-class SwiGLU(nn.Module):
-    def __init__(self):
-        super(SwiGLU, self).__init__()
-
-    def forward(self, x):
-        x1, x2 = x.chunk(2, dim=-1)
-        return x2 * F.silu(x1)
-
 
 class AdaLayerNorm(torch.nn.Module):
     """
-    AdaLayerNorm for embedding auxiliary information as done in DiT (Peebles & Xie) with zero
-    initialisation https://arxiv.org/pdf/2212.09748
-
-    This module thus wraps a layer (e.g. self-attention or feedforward nn) and applies LayerNorm
-    followed by scale and shift before the layer and a final scaling after the layer as well as the
-    final residual layer.
-
-    layer is a function that takes 2 arguments the first the latent and the second is the
-    conditioning signal
+    AdaLayerNorm for embedding auxiliary information
     """
 
     def __init__(
@@ -134,6 +114,19 @@ class AdaLayerNormFinal(torch.nn.Module):
         x = self.norm(x) * (1 + scale)
 
         return x
+    
+def modulate(x, shift, scale):
+    return x * (1 + scale) + shift
+
+
+class SwiGLU(nn.Module):
+    def __init__(self):
+        super(SwiGLU, self).__init__()
+
+    def forward(self, x):
+        x1, x2 = x.chunk(2, dim=-1)
+        return x2 * F.silu(x1)
+
     
 class AdaLayerNormLayer(torch.nn.Module):
     """
