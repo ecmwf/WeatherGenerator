@@ -449,6 +449,7 @@ class ForecastingEngine(torch.nn.Module):
                         self.cf.ae_global_dim_embed,
                         self.cf.ae_global_dim_embed,
                         with_residual=True,
+                        post_layer_norm=cf.fe_diffusion_model_conditioning in ["date_time"],
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,

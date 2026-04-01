@@ -280,6 +280,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             assert emb is not None, "Need noise embedding if using noise conditioning"
             x, gate = self.noise_conditioning(x, emb)
 
+
         # project onto heads
         s = [x.shape[0], x.shape[1], self.num_heads, -1]
         qs = self.lnorm_q(self.proj_heads_q(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
@@ -592,6 +593,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         if self.noise_conditioning:
             assert emb is not None, "Need noise embedding if using noise conditioning"
             x, gate = self.noise_conditioning(x, emb)
+
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention
