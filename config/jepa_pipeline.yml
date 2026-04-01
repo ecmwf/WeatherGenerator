@@ -24,8 +24,8 @@ stages:
   # Stage 1: JEPA pre-training with EMA teacher + deep SSL
   - name: pretrain
     command: train
-    base-config: ./config/config_jepa_deep_ssl.yml
-    config: ./config/config_jepa_deep_ssl.yml
+    base-config: ./config/config_jepa_deep_ssl_n320.yml
+    config: ./config/config_jepa_deep_ssl_n320.yml
     options: []
     chain: 1
     nodes: 1
@@ -34,12 +34,12 @@ stages:
   - name: finetune
     command: train-continue
     from: pretrain
-    config: ./config/config_jepa_finetuning.yml
+    config: ./config/config_jepa_finetuning_n320.yml
     chain: 1
 
   # Stage 3: Forecasting finetuning (freezes encoder)
   - name: finetune-forecast
     command: train-continue
     from: pretrain
-    config: ./config/config_jepa_forecasting_finetuning.yml
+    config: ./config/config_jepa_forecasting_finetuning_n320.yml
     chain: 1
