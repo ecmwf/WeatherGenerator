@@ -9,6 +9,8 @@
 #    marker_size: 2
 #    scale_marker_size: 1
 #    marker: "o"
+#    add_healpix_grid: false
+#    healpix_nside: 4
 #    # alpha: 0.5
 #    2t: 
 #      vmin: 250
