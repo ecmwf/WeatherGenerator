@@ -63,7 +63,8 @@ class RMSNorm(torch.nn.Module):
 
 class AdaLayerNorm(torch.nn.Module):
     """
-    AdaLayerNorm for embedding auxiliary information
+    AdaLayerNorm for embedding auxiliary information.
+    Produces scale and shift for adaptive layer norm.
     """
 
     def __init__(
@@ -71,26 +72,26 @@ class AdaLayerNorm(torch.nn.Module):
     ):
         super().__init__()
 
-        # simple 2-layer MLP for embedding auxiliary information
-        self.embed_aux = torch.nn.ModuleList()
-        self.embed_aux.append(torch.nn.Linear(dim_aux, 4 * dim_aux))
-        self.embed_aux.append(torch.nn.SiLU())
-        self.embed_aux.append(torch.nn.Linear(4 * dim_aux, 2 * dim_embed_x))
-
+        # MLP for embedding auxiliary information (matches DiT style)
         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(dim_aux, 2 * dim_embed_x, bias=True)
+        )
+        
+        # Initialize weights to zero for stable training (DiT style)
+        nn.init.zeros_(self.adaLN_modulation[-1].weight)
+        nn.init.zeros_(self.adaLN_modulation[-1].bias)
 
     def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
-        for block in self.embed_aux:
-            aux = block(aux)
-        scale, shift = aux.split(aux.shape[-1] // 2, dim=-1)
+        shift, scale = self.adaLN_modulation(aux).chunk(2, dim=-1)
+        return modulate(self.norm(x), shift, scale)
 
-        x = self.norm(x) * (1 + scale) + shift
-
-        return x
     
 class AdaLayerNormFinal(torch.nn.Module):
     """
-    AdaLayerNorm from DiT for the final output gate only, i.e. only scale
+    AdaLayerNorm for gating only (scale only, no shift).
+    Used for final output gating as in DiT.
     """
     
     def __init__(
@@ -98,22 +99,19 @@ class AdaLayerNormFinal(torch.nn.Module):
     ):
         super().__init__()
 
-        # simple 2-layer MLP for embedding auxiliary information
-        self.embed_aux = torch.nn.ModuleList()
-        self.embed_aux.append(torch.nn.Linear(dim_aux, 4 * dim_aux))
-        self.embed_aux.append(torch.nn.SiLU())
-        self.embed_aux.append(torch.nn.Linear(4 * dim_aux, dim_embed_x))
-
         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(dim_aux, dim_embed_x, bias=True)
+        )
+        
+        # Initialize weights to zero for stable training (DiT style)
+        nn.init.zeros_(self.adaLN_modulation[-1].weight)
+        nn.init.zeros_(self.adaLN_modulation[-1].bias)
 
     def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
-        for block in self.embed_aux:
-            aux = block(aux)
-        scale = aux
-
-        x = self.norm(x) * (1 + scale)
-
-        return x
+        scale = self.adaLN_modulation(aux)
+        return modulate(self.norm(x), shift=0, scale=scale)
     
 def modulate(x, shift, scale):
     return x * (1 + scale) + shift

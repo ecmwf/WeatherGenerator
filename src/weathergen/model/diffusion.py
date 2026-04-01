@@ -65,6 +65,68 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def forward(
         self,
+        tokens: torch.Tensor = None,
+        fstep: int = None,
+        meta_info: dict[str, SampleMetaData] = None,
+        coords: torch.Tensor = None,
+        num_steps: int = 30,
+    ) -> torch.Tensor:
+        """
+        Forward pass that routes to training_forward or inference_forward based on model status.
+
+        During training:
+            - calls training_forward with tokens, fstep, meta_info, coords
+            - extracts datetime conditioning from meta_info and passes through datetime embedder
+            - adds noise to target and returns denoised prediction
+
+        During inference:
+            - calls inference_forward with fstep, num_steps, and meta_info
+            - generates samples via iterative diffusion steps with conditional temporal modulation
+
+        Args:
+            tokens: Training tensor of shape (B, H, D) - required during training
+            fstep: Forecast step index - required for both modes
+            meta_info: Sample metadata dict containing timestamps - required for both modes
+            coords: Optional coordinate tensor
+            num_steps: Number of diffusion steps for inference (default: 30)
+
+        Returns:
+            torch.Tensor: Model output (denoised prediction during training,
+                         or generated sample during inference)
+
+        Raises:
+            ValueError: If required arguments are missing for current mode
+        """
+        if self.training:
+            if tokens is None or fstep is None or meta_info is None:
+                raise ValueError(
+                    f"During training, tokens, fstep, and meta_info are required. "
+                    f"Got tokens={tokens is not None}, fstep={fstep}, meta_info={meta_info is not None}"
+                )
+            return self.training_forward(
+                tokens=tokens,
+                fstep=fstep,
+                meta_info=meta_info,
+                coords=coords,
+            )
+        else:
+            #NOTE: temporary for analysing denoising
+            return self.training_forward(
+                tokens=tokens,
+                fstep=fstep,
+                meta_info=meta_info,
+                coords=coords,
+            )
+            # if fstep is None:
+            #     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
+            # return self.inference_forward(
+            #     fstep=fstep,
+            #     num_steps=num_steps,
+            #     meta_info=meta_info,
+            # )
+
+    def training_forward(
+        self,
         tokens: torch.Tensor,
         fstep: int,
         meta_info: dict[str, SampleMetaData],
@@ -127,13 +189,31 @@ class DiffusionForecastEngine(torch.nn.Module):
             c_in * x, fstep=fstep, noise_emb=noise_emb, ada_ln_aux=c
         )  # Eq. (7) in EDM paper
 
-    def inference(
+    def inference_forward(
         self,
         fstep: int,
         num_steps: int = 30,
+        meta_info: dict[str, SampleMetaData] = None,
     ) -> torch.Tensor:
-        # Forward pass of the diffusion model during inference
-        # https://github.com/NVlabs/edm/blob/main/generate.py
+        """
+        Forward pass of the diffusion model during inference.
+        
+        Iteratively denoises a random sample using the learned score function,
+        with optional temporal conditioning extracted from meta_info.
+        https://github.com/NVlabs/edm/blob/main/generate.py
+        
+        Args:
+            fstep: Forecast step index for the network
+            num_steps: Number of diffusion denoising steps (default: 30)
+            meta_info: Optional sample metadata dict containing timestamps for temporal conditioning
+        
+        Returns:
+            torch.Tensor: Generated sample of shape (1, num_healpix_cells, ae_global_dim_embed)
+        """
+        # Extract conditioning from meta_info (same as training_forward)
+        c = None
+        if meta_info is not None:
+            c = meta_info["ERA5"].params["timestamp"]
 
         # Sample noise (assuming single batch element for now)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
@@ -165,13 +245,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_hat = t_cur
 
             # Euler step.
-            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep)  # c to be discussed
+            denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.denoise(x=x_next, c=None, sigma=t_next, fstep=fstep)
+                denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
