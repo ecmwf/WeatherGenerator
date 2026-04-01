@@ -747,7 +747,7 @@ class Trainer(TrainerBase):
             config.save(self.cf, mini_epoch)
 
     def _get_ema_teacher(self) -> EMATeacher | None:
-        """Return the EMATeacher calculator if one exists, else None."""
+        """Return the training EMATeacher calculator if one exists, else None."""
         if self.target_and_aux_calculators is None:
             return None
         for calc in self.target_and_aux_calculators.values():
@@ -755,10 +755,19 @@ class Trainer(TrainerBase):
                 return calc
         return None
 
+    @staticmethod
+    def _get_ema_teachers_from(calculators) -> list[EMATeacher]:
+        """Return all EMATeacher instances in *calculators*."""
+        if calculators is None:
+            return []
+        return [c for c in calculators.values() if isinstance(c, EMATeacher)]
+
     def _load_ema_teacher_state(self, run_id: str, mini_epoch):
-        """Load EMA teacher weights and centering buffers from checkpoint if available."""
-        ema_teacher = self._get_ema_teacher()
-        if ema_teacher is None:
+        """Load EMA teacher weights into both training and validation teachers."""
+        all_teachers = self._get_ema_teachers_from(
+            self.target_and_aux_calculators
+        ) + self._get_ema_teachers_from(self.target_and_aux_calculators_val)
+        if not all_teachers:
             return
 
         path_run = config.get_path_model(run_id=run_id)
@@ -779,23 +788,24 @@ class Trainer(TrainerBase):
             ema_file, map_location=torch.device("cpu"), weights_only=True
         )
 
-        # Restore EMA model weights
-        mkeys, ukeys = ema_teacher.ema_model.ema_model.load_state_dict(
-            state["ema_model"], strict=False
-        )
-        if is_root():
-            if mkeys:
-                logger.warning(f"Missing keys in EMA teacher model: {mkeys}")
-            if ukeys:
-                logger.warning(f"Unused keys in EMA teacher model: {ukeys}")
+        for ema_teacher in all_teachers:
+            # Restore EMA model weights
+            mkeys, ukeys = ema_teacher.ema_model.ema_model.load_state_dict(
+                state["ema_model"], strict=False
+            )
+            if is_root():
+                if mkeys:
+                    logger.warning(f"Missing keys in EMA teacher model: {mkeys}")
+                if ukeys:
+                    logger.warning(f"Unused keys in EMA teacher model: {ukeys}")
 
-        # Restore postprocessing state (e.g. DINO/iBOT centering buffers)
-        for name, module in ema_teacher.postprocess_targets.items():
-            if name in state.get("postprocess_targets", {}):
-                module.load_state_dict(state["postprocess_targets"][name], strict=False)
+            # Restore postprocessing state (e.g. DINO/iBOT centering buffers)
+            for name, module in ema_teacher.postprocess_targets.items():
+                if name in state.get("postprocess_targets", {}):
+                    module.load_state_dict(state["postprocess_targets"][name], strict=False)
 
         if is_root():
-            logger.info("EMA teacher state restored.")
+            logger.info(f"EMA teacher state restored into {len(all_teachers)} teacher(s).")
 
     def _load_optimizer_state(self, run_id: str, mini_epoch):
         """Load optimizer state from checkpoint if available.
