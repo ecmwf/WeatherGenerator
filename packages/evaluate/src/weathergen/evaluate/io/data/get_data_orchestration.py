@@ -75,21 +75,31 @@ def _dispatch_reads(
                 "initargs": (fname_zarr,),
             }
             submit_args = lambda s, f: (  # noqa: E731
-                _load_single_sample_own_context, fname_zarr, s, stream, f, ensemble, is_gridded
+                _load_single_sample_own_context,
+                fname_zarr,
+                s,
+                stream,
+                f,
+                ensemble,
+                is_gridded,
             )
         else:
             pool_cls = ThreadPoolExecutor
             pool_kwargs = {"max_workers": effective_threads}
             submit_args = lambda s, f: (  # noqa: E731
-                _load_single_sample, zio, s, stream, f, ensemble, is_gridded
+                _load_single_sample,
+                zio,
+                s,
+                stream,
+                f,
+                ensemble,
+                is_gridded,
             )
 
         try:
             with pool_cls(**pool_kwargs) as executor:
                 futures = {
-                    executor.submit(*submit_args(s, f)): (f, s)
-                    for f in fsteps
-                    for s in samples
+                    executor.submit(*submit_args(s, f)): (f, s) for f in fsteps for s in samples
                 }
                 for future in tqdm(
                     as_completed(futures),
@@ -150,8 +160,7 @@ def _reassemble_fsteps(
         fsteps_final.append(valid_times_fs if valid_times_fs else fstep)
 
         _logger.debug(
-            f"Concatenating targets and predictions for stream {stream}, "
-            f"forecast_step {fstep}..."
+            f"Concatenating targets and predictions for stream {stream}, forecast_step {fstep}..."
         )
 
         if is_gridded:
@@ -159,9 +168,7 @@ def _reassemble_fsteps(
             da_tars_fs = _split_by_valid_time(da_tars_fs)
         else:
             da_tars_fs = xr.concat(da_tars_fs, dim="ipoint", coords="different", compat="equals")
-            da_preds_fs = xr.concat(
-                da_preds_fs, dim="ipoint", coords="different", compat="equals"
-            )
+            da_preds_fs = xr.concat(da_preds_fs, dim="ipoint", coords="different", compat="equals")
 
         da_tars.append(da_tars_fs)
         da_preds.append(da_preds_fs)

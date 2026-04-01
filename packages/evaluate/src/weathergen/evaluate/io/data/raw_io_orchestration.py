@@ -16,6 +16,9 @@ focused on the public API and caching.
 
 import contextlib
 import logging
+import os
+import resource
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -78,6 +81,72 @@ class RawIOState:
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def resolve_num_io_workers(requested: int) -> int:
+    """Determine safe number of parallel I/O workers.
+
+    Parameters
+    ----------
+    requested : int
+        Value from config (``num_io_workers``).
+        0 (the default) means *auto-detect*: use parallel workers only
+        when the system has enough headroom.
+
+    On HPC systems the per-user process/thread limit (``ulimit -u``) is
+    often shared across all jobs on the node.  Spawning loky workers when
+    the limit is almost reached causes "can't start new thread" errors
+    that cascade into the fallback path and deadlock it.
+
+    Auto-detection (``requested == 0``):
+    * Read ``/proc/self/status`` → current thread count.
+    * Read ``ulimit -u`` via ``resource.getrlimit``.
+    * If fewer than ``min_headroom`` slots remain → sequential (1).
+    * Otherwise cap at ``min(available // 4, cpu_count, 48)``.
+    """
+    if requested > 0:
+        return min(requested, os.cpu_count() or 16)
+
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("Threads:"):
+                    break
+
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
+        if soft_limit == resource.RLIM_INFINITY:
+            soft_limit = 65536
+
+        result = subprocess.run(
+            ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "pid"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        user_procs = len(result.stdout.strip().splitlines()) if result.returncode == 0 else 0
+
+        available = soft_limit - user_procs
+        min_headroom = 64
+
+        if available < min_headroom:
+            _logger.info(
+                f"Auto-detected low process headroom "
+                f"({available}/{soft_limit} slots free). "
+                f"Using sequential I/O (num_io_workers=1)."
+            )
+            return 1
+
+        n = min(available // 4, os.cpu_count() or 48, 48)
+        n = max(n, 1)
+        _logger.info(
+            f"Auto-detected process headroom: {available}/{soft_limit} free. "
+            f"Using num_io_workers={n}."
+        )
+        return n
+
+    except Exception as e:
+        _logger.debug(f"Could not auto-detect process limits ({e}). Defaulting to sequential.")
+        return 1
 
 
 def _build_raw_io_state(
@@ -208,7 +277,12 @@ def _assemble_substep(
             state.all_ens,
         )
     else:
-        per_sample_coords = [results[i][3].get("coords", None) for i in range(len(state.samples))]
+        # meta["coords"] is a list[NDArray | None] with one entry per fstep.
+        # Extract the coords for the current fstep_idx from each sample's result.
+        all_coords_lists = [results[i][3].get("coords", []) for i in range(len(state.samples))]
+        per_sample_coords = [
+            (cl[fstep_idx] if cl and fstep_idx < len(cl) else None) for cl in all_coords_lists
+        ]
         per_sample_obs_times = [results[i][2][fstep_idx] for i in range(len(state.samples))]
         da_tar, da_pred = build_scatter_dataarrays(
             tars_list,
@@ -238,9 +312,7 @@ def _assemble_substep(
     return da_tar, da_pred
 
 
-def _collect_substep_valid_times(
-    results: list, n_sub: int, sub_idx: int, fstep_idx: int
-) -> list:
+def _collect_substep_valid_times(results: list, n_sub: int, sub_idx: int, fstep_idx: int) -> list:
     """Extract per-sample valid_times for one sub-step."""
     per_sample_valid_times = []
     for i in range(len(results)):
@@ -337,8 +409,14 @@ def get_data_raw_impl(state: RawIOState) -> ReaderOutput:
 
             fs_val = fs if n_sub == 1 else fstep_counter
             da_tar, da_pred = _assemble_substep(
-                state, results, tars_list, preds_list,
-                per_sample_valid_times, source_interval_starts, fs_val, 0
+                state,
+                results,
+                tars_list,
+                preds_list,
+                per_sample_valid_times,
+                source_interval_starts,
+                fs_val,
+                0,
             )
             del tars_list, preds_list
             fstep_counter = _store_substep(
@@ -414,8 +492,14 @@ def get_data_raw_zip_impl(state: RawIOState) -> ReaderOutput:
 
             fs_val = fs if n_sub == 1 else fstep_counter
             da_tar, da_pred = _assemble_substep(
-                state, results, tars_list, preds_list,
-                per_sample_valid_times, source_interval_starts, fs_val, fi
+                state,
+                results,
+                tars_list,
+                preds_list,
+                per_sample_valid_times,
+                source_interval_starts,
+                fs_val,
+                fi,
             )
             del tars_list, preds_list
             fstep_counter = _store_substep(

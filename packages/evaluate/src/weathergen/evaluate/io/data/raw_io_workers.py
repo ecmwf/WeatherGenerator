@@ -234,7 +234,8 @@ def _read_sample_raw(
         Per-fstep time arrays (unique times per entry).
     meta : dict
         Metadata: {"source_interval": ..., "n_substeps": list[int],
-                    "coords": np.ndarray | None}.
+                    "coords": list[np.ndarray | None]} where coords has
+                    one entry per fstep (each may be None or shape (n_ip, 2)).
     """
     if is_zip:
         store = zarr.storage.ZipStore(zarr_path, mode="r")
@@ -267,9 +268,7 @@ def _read_sample_raw(
         # Select channels by index
         if channel_idxs is not None:
             pred_data = (
-                pred_data[:, channel_idxs]
-                if pred_data.ndim == 2
-                else pred_data[:, channel_idxs, :]
+                pred_data[:, channel_idxs] if pred_data.ndim == 2 else pred_data[:, channel_idxs, :]
             )
             target_data = target_data[:, channel_idxs]
 
@@ -299,14 +298,19 @@ def _read_sample_raw(
                 times_all.append(unique_times)
             n_substeps.append(1)
 
-    # Optionally read per-sample coordinates (for scatter / non-gridded data)
-    sample_coords = None
+    # Optionally read per-fstep coordinates (for scatter / non-gridded data).
+    # Each fstep can have a different number of observations, so we read
+    # the coordinate array for every fstep rather than just the first one.
+    per_fstep_coords: list[NDArray | None] = []
     if read_coords and fsteps:
-        try:
-            base0 = f"{sample}/{stream}/{fsteps[0]}"
-            sample_coords = np.asarray(ds[f"{base0}/prediction/coords"])
-        except (KeyError, AttributeError):
-            pass
+        for fs in fsteps:
+            try:
+                base_c = f"{sample}/{stream}/{fs}"
+                per_fstep_coords.append(np.asarray(ds[f"{base_c}/prediction/coords"]))
+            except (KeyError, AttributeError):
+                per_fstep_coords.append(None)
+    else:
+        per_fstep_coords = [None] * len(fsteps)
 
     with contextlib.suppress(Exception):
         store.close()
@@ -314,7 +318,7 @@ def _read_sample_raw(
     meta = {
         "source_interval": source_interval,
         "n_substeps": n_substeps,
-        "coords": sample_coords,
+        "coords": per_fstep_coords,
     }
     return preds_all, targets_all, times_all, meta
 

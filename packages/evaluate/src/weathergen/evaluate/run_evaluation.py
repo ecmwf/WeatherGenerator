@@ -224,9 +224,9 @@ def _process_stream(
         _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
         return run_id, stream, {}
 
-    # -----------------------------------------------------------------
-    # Load data ONCE and share between plotting and scoring (B3 fix)
-    # -----------------------------------------------------------------
+    # -----------------------------------------------------
+    # Load data ONCE and share between plotting and scoring
+    # -----------------------------------------------------
     needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
     needs_scoring = stream_dict.get("evaluation", False)
 
@@ -302,7 +302,6 @@ def _process_stream(
     return run_id, stream, scores_dict
 
 
-# Weird typing error from python: mp.Queue is seen as a method with a "|" operator => this fai
 def evaluate_from_config(
     cfg: dict, mlflow_client: MlflowClient | None, log_queue: "mp.Queue | None"
 ) -> None:

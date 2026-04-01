@@ -11,9 +11,6 @@
 import contextlib
 import json
 import logging
-import os
-import resource
-import subprocess
 from collections import defaultdict
 from pathlib import Path
 
@@ -39,6 +36,7 @@ from weathergen.evaluate.io.data.raw_io_orchestration import (
     _build_raw_io_state,
     get_data_raw_impl,
     get_data_raw_zip_impl,
+    resolve_num_io_workers,
 )
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
@@ -387,82 +385,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         self._num_io_threads: int = int(eval_cfg.get("num_io_threads", 8))
 
         # Fast raw I/O config (direct zarr access, bypasses ZarrIO/dask)
-        self._num_io_workers: int = self._resolve_num_io_workers(
-            int(eval_cfg.get("num_io_workers", 0))
-        )
-
-    @staticmethod
-    def _resolve_num_io_workers(requested: int) -> int:
-        """Determine safe number of parallel I/O workers.
-
-        Parameters
-        ----------
-        requested : int
-            Value from config (``num_io_workers``).
-            0 (the default) means *auto-detect*: use parallel workers only
-            when the system has enough headroom.
-
-        On HPC systems the per-user process/thread limit (``ulimit -u``) is
-        often shared across all jobs on the node.  Spawning loky workers when
-        the limit is almost reached causes "can't start new thread" errors
-        that cascade into the fallback path and deadlock it.
-
-        Auto-detection (``requested == 0``):
-        * Read ``/proc/self/status`` → current thread count.
-        * Read ``ulimit -u`` via ``resource.getrlimit``.
-        * If fewer than ``min_headroom`` slots remain → sequential (1).
-        * Otherwise cap at ``min(available // 4, cpu_count, 16)``.
-        """
-
-        if requested > 0:
-            return min(requested, os.cpu_count() or 16)
-
-        # Auto-detect safe parallelism
-        try:
-            # Current threads for this process tree
-            with open("/proc/self/status") as f:
-                for line in f:
-                    if line.startswith("Threads:"):
-                        break
-                else:
-                    pass
-
-            # System-wide nproc limit for this user
-            soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
-            if soft_limit == resource.RLIM_INFINITY:
-                soft_limit = 65536
-
-            # Count user processes (rough estimate via /proc)
-            result = subprocess.run(
-                ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "pid"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            user_procs = len(result.stdout.strip().splitlines()) if result.returncode == 0 else 0
-
-            available = soft_limit - user_procs
-            min_headroom = 64  # keep at least this many slots free
-
-            if available < min_headroom:
-                _logger.info(
-                    f"Auto-detected low process headroom "
-                    f"({available}/{soft_limit} slots free). "
-                    f"Using sequential I/O (num_io_workers=1)."
-                )
-                return 1
-
-            n = min(available // 4, os.cpu_count() or 48, 48)
-            n = max(n, 1)
-            _logger.info(
-                f"Auto-detected process headroom: {available}/{soft_limit} free. "
-                f"Using num_io_workers={n}."
-            )
-            return n
-
-        except Exception as e:
-            _logger.debug(f"Could not auto-detect process limits ({e}). Defaulting to sequential.")
-            return 1
+        self._num_io_workers: int = resolve_num_io_workers(int(eval_cfg.get("num_io_workers", 0)))
 
     def get_data(
         self,
@@ -492,8 +415,15 @@ class WeatherGenZarrReader(WeatherGenReader):
         with zarrio_reader(self.fname_zarr) as zio:
             effective_threads = min(self._num_io_threads, len(samples) * len(fsteps))
             results_by_fstep, _ = _dispatch_reads(
-                zio, self.fname_zarr, samples, fsteps, ensemble, is_gridded,
-                effective_threads, self.run_id, stream,
+                zio,
+                self.fname_zarr,
+                samples,
+                fsteps,
+                ensemble,
+                is_gridded,
+                effective_threads,
+                self.run_id,
+                stream,
             )
 
         fsteps_final, da_tars, da_preds = _reassemble_fsteps(
@@ -503,7 +433,6 @@ class WeatherGenZarrReader(WeatherGenReader):
             fsteps_final, da_tars, da_preds, stream, channels, stream_cfg, is_gridded
         )
 
-
     def get_data_raw(
         self,
         stream: str,
@@ -512,110 +441,55 @@ class WeatherGenZarrReader(WeatherGenReader):
         channels: list[str] | None = None,
         ensemble: list[str] | None = None,
     ) -> ReaderOutput:
-        """
-        Fast-path data loading using direct zarr array access and joblib parallelism.
+        """Fast-path data loading using direct zarr array access and joblib parallelism.
 
-        Bypasses the ZarrIO → OutputDataset → as_xarray → dask pipeline for ~20× speedup
-        per (sample, fstep) read.  Produces identical ReaderOutput to get_data().
+        Bypasses the ZarrIO → OutputDataset → as_xarray → dask pipeline for
+        ~20× speedup per (sample, fstep) read.  Produces identical
+        ReaderOutput to get_data().
 
-        Falls back to get_data() on any error (unexpected zarr layout, missing
-        attributes, shape mismatch, etc.).
+        Falls back to get_data() on any error.
 
         Parameters
         ----------
         stream : str
             Stream name to retrieve data for.
-        samples : list[int] | None
-            Sample indices. If None, all samples are retrieved.
-        fsteps : list[int] | None
-            Forecast steps. If None, all forecast steps are retrieved.
-        channels : list[str] | None
-            Channel names to retrieve. If None, all channels are retrieved.
-        ensemble : list[str] | None
-            Ensemble members to select, or ["mean"] to average. If None, all.
+        samples, fsteps, channels, ensemble
+            Optional filters; ``None`` means "all".
 
         Returns
         -------
         ReaderOutput
             Identical structure to get_data() output.
         """
-        # Choose implementation based on store type.
-        # ZipStore benefits from dispatching all samples at once (each
-        # reading all fsteps in a single _read_sample_raw call) because
-        # opening a ZipStore requires parsing the central-directory – a
-        # cost that is amortised over all fsteps inside a single call.
-        is_zip = str(self.fname_zarr).endswith(".zip")
-
         try:
-            if is_zip:
-                return self._get_data_raw_zip_impl(
-                    stream,
-                    samples,
-                    fsteps,
-                    channels,
-                    ensemble,
-                )
-            return self._get_data_raw_impl(stream, samples, fsteps, channels, ensemble)
+            resolved_ensemble = to_list(ensemble or self.get_ensemble(stream))
+            state = _build_raw_io_state(
+                self.run_id,
+                self.fname_zarr,
+                stream,
+                self.get_stream(stream),
+                self.get_channels(stream),
+                self.is_gridded_data(stream),
+                sorted(int(f) for f in (fsteps or self.get_forecast_steps())),
+                sorted(int(s) for s in (samples or self.get_samples())),
+                to_list(
+                    channels or self.get_stream(stream).get("channels", self.get_channels(stream))
+                ),
+                resolved_ensemble,
+                self._num_io_workers,
+                self.get_ensemble(stream) if resolved_ensemble != ["mean"] else None,
+            )
+            if state.is_zip:
+                return get_data_raw_zip_impl(state)
+            return get_data_raw_impl(state)
         except Exception as e:
             _logger.warning(
                 f"Fast I/O failed for {self.run_id} - {stream}: {e}. "
                 f"Falling back to standard get_data()."
             )
-            # Ensure the loky reusable executor is fully shut down before
-            # the fallback tries to create its own process/thread pools.
-            # Without this, stale loky workers can exhaust the OS
-            # process/thread limit and deadlock the fallback path.
             with contextlib.suppress(Exception):
                 get_reusable_executor().shutdown(wait=True)
             return self.get_data(stream, samples, fsteps, channels, ensemble)
-
-    def _get_data_raw_impl(
-        self,
-        stream: str,
-        samples: list[int] | None,
-        fsteps: list[int] | None,
-        channels: list[str] | None,
-        ensemble: list[str] | None,
-    ) -> ReaderOutput:
-        """LocalStore fast-path: fstep-serial, samples-parallel (delegates to orchestration)."""
-        state = _build_raw_io_state(
-            self.run_id, self.fname_zarr, stream,
-            self.get_stream(stream), self.get_channels(stream),
-            self.is_gridded_data(stream),
-            sorted(int(f) for f in (fsteps or self.get_forecast_steps())),
-            sorted(int(s) for s in (samples or self.get_samples())),
-            to_list(channels or self.get_stream(stream).get("channels", self.get_channels(stream))),
-            to_list(ensemble or self.get_ensemble(stream)),
-            self._num_io_workers,
-            self.get_ensemble(stream) if to_list(
-                ensemble or self.get_ensemble(stream)
-            ) != ["mean"] else None,
-        )
-        return get_data_raw_impl(state)
-
-    def _get_data_raw_zip_impl(
-        self,
-        stream: str,
-        samples: list[int] | None,
-        fsteps: list[int] | None,
-        channels: list[str] | None,
-        ensemble: list[str] | None,
-    ) -> ReaderOutput:
-        """ZipStore fast-path: all fsteps per sample (delegates to orchestration)."""
-        state = _build_raw_io_state(
-            self.run_id, self.fname_zarr, stream,
-            self.get_stream(stream), self.get_channels(stream),
-            self.is_gridded_data(stream),
-            sorted(int(f) for f in (fsteps or self.get_forecast_steps())),
-            sorted(int(s) for s in (samples or self.get_samples())),
-            to_list(channels or self.get_stream(stream).get("channels", self.get_channels(stream))),
-            to_list(ensemble or self.get_ensemble(stream)),
-            self._num_io_workers,
-            self.get_ensemble(stream) if to_list(
-                ensemble or self.get_ensemble(stream)
-            ) != ["mean"] else None,
-        )
-        return get_data_raw_zip_impl(state)
 
     ######## reader utils ########
 
@@ -730,5 +604,3 @@ class WeatherGenZarrReader(WeatherGenReader):
         else:
             _logger.debug("Latitude and longitude coordinates are regularly spaced.")
             return True
-
-

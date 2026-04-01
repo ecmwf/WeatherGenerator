@@ -479,9 +479,7 @@ def plot_data(
 
     plot_fstep_set = set(available_data.fsteps) if available_data.fsteps is not None else None
     plot_sample_set = set(available_data.samples) if available_data.samples is not None else None
-    plot_channel_set = (
-        set(available_data.channels) if available_data.channels is not None else None
-    )
+    plot_channel_set = set(available_data.channels) if available_data.channels is not None else None
 
     output_fstep_keys = set(da_tars.keys())
     if plot_fstep_set is not None and output_fstep_keys - plot_fstep_set:

@@ -208,7 +208,12 @@ def calc_scores_per_stream(
         for fstep in fsteps:
             tars_fs = da_tars[fstep]
             preds_fs = da_preds[fstep]
-            preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+            # froct/troct need next-step data but only work on gridded data
+            # (scatter data has different ipoints per fstep so groupby fails)
+            if is_gridded_data:
+                preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+            else:
+                preds_next, tars_next = None, None
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
             fstep_tasks.append((fstep, tars_fs, preds_fs, preds_next, tars_next, climatology))
 
