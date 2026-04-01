@@ -271,6 +271,7 @@ training_config:
     time_step: 00:00:00
     num_steps: 0
     policy: null
+    offset: 0
 
 
 # validation config; full validation config is merge of training and validation config
