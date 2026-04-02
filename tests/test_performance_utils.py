@@ -10,202 +10,30 @@
 """Unit tests for weathergen.utils.performance.
 
 Self-contained: no WeatherGenerator data structures required.
-Runs on CPU with small synthetic models.
+Runs on CPU with small synthetic tensors.
 """
+
+import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-import torch.nn as nn
-from torch.utils.checkpoint import checkpoint
 
 from weathergen.utils.performance import (
-    build_performance_metrics,
-    compute_hfu,
-    compute_mfu,
+    ThroughputTracker,
     compute_source_bytes,
-    compute_utilisation_metrics,
-    measure_model_flops,
 )
 
 
-class TwoLayerLinear(nn.Module):
-    """Two linear layers, no activation checkpointing."""
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-    def __init__(self, dim: int = 16):
-        super().__init__()
-        self.a = nn.Linear(dim, dim, bias=False)
-        self.b = nn.Linear(dim, dim, bias=False)
-
-    def forward(self, x):
-        return self.b(self.a(x))
-
-
-class TwoLayerLinearCheckpointed(nn.Module):
-    """Same two linear layers but with activation checkpointing on the first."""
-
-    def __init__(self, dim: int = 16):
-        super().__init__()
-        self.a = nn.Linear(dim, dim, bias=False)
-        self.b = nn.Linear(dim, dim, bias=False)
-
-    def forward(self, x):
-        x = checkpoint(self.a, x, use_reentrant=False)
-        return self.b(x)
-
-
-def test_measure_model_flops_returns_positive_ints():
-    model = TwoLayerLinear()
-    x = torch.randn(1, 16)
-    flops_fwd, flops_total = measure_model_flops(model, lambda: model(x), lambda y: y.sum())
-
-    assert flops_fwd is not None and flops_fwd > 0
-    assert flops_total is not None and flops_total > 0
-
-
-def test_total_flops_exceed_forward_flops():
-    """Backward pass adds FLOPs, so total > forward."""
-    model = TwoLayerLinear()
-    x = torch.randn(1, 16)
-    flops_fwd, flops_total = measure_model_flops(model, lambda: model(x), lambda y: y.sum())
-
-    assert flops_total > flops_fwd
-
-
-def test_forward_flops_independent_of_loss():
-    """flops_fwd should be the same whether loss_fn is provided or not."""
-    model = TwoLayerLinear()
-    x = torch.randn(1, 16)
-    flops_fwd, _ = measure_model_flops(model, lambda: model(x), lambda y: y.sum())
-    flops_fwd_only, _ = measure_model_flops(model, lambda: model(x), lambda y: y.sum())
-
-    assert flops_fwd == flops_fwd_only
-
-
-def test_total_flops_roughly_proportional_to_forward():
-    """backward adds substantial FLOPs; total is between 1.5× and 3.5× of forward.
-
-    Note: PyTorch's FlopCounterMode measures matmul-like ops.  The exact ratio
-    depends on batch size and which specific backward ops are dispatched through
-    the counted kernels. For small linear models the measured ratio is ≈ 2.5×
-    (not exactly 3×), because some weight-gradient ops may use kernels that
-    FlopCounterMode does not track.
-    """
-    model = TwoLayerLinear()
-    x = torch.randn(1, 16)
-    flops_fwd, flops_total = measure_model_flops(model, lambda: model(x), lambda y: y.sum())
-
-    ratio = flops_total / flops_fwd
-    assert 1.5 <= ratio <= 3.5, f"Expected backward to add substantial FLOPs, got ratio {ratio:.3f}"
-
-
-def test_forward_flops_identical_with_and_without_checkpointing():
-    """Activation checkpointing does not change the number of forward FLOPs."""
-    dim = 16
-    model_plain = TwoLayerLinear(dim)
-    model_ckpt = TwoLayerLinearCheckpointed(dim)
-    model_ckpt.a.weight.data = model_plain.a.weight.data.clone()
-    model_ckpt.b.weight.data = model_plain.b.weight.data.clone()
-
-    x = torch.randn(1, dim)
-    fwd_plain, _ = measure_model_flops(model_plain, lambda: model_plain(x), lambda y: y.sum())
-    fwd_ckpt, _ = measure_model_flops(model_ckpt, lambda: model_ckpt(x), lambda y: y.sum())
-
-    assert fwd_plain == fwd_ckpt
-
-
-def test_flop_counter_does_not_count_checkpoint_recompute():
-    """FlopCounterMode does not capture activation-checkpoint recomputation.
-
-    With use_reentrant=False, the recomputed forward during backward is not tracked
-    by PyTorch's FlopCounterMode. Consequently total FLOPs measured with and without
-    checkpointing are equal. This means our measured HFU is a lower bound of true
-    hardware utilisation (it excludes recompute overhead).
-    """
-    dim = 16
-    model_plain = TwoLayerLinear(dim)
-    model_ckpt = TwoLayerLinearCheckpointed(dim)
-    model_ckpt.a.weight.data = model_plain.a.weight.data.clone()
-    model_ckpt.b.weight.data = model_plain.b.weight.data.clone()
-
-    x = torch.randn(1, dim)
-    _, total_plain = measure_model_flops(model_plain, lambda: model_plain(x), lambda y: y.sum())
-    _, total_ckpt = measure_model_flops(model_ckpt, lambda: model_ckpt(x), lambda y: y.sum())
-
-    assert total_plain == total_ckpt, (
-        "Expected FlopCounterMode to report the same total FLOPs regardless of checkpointing "
-        "(recomputed activations are not counted by FlopCounterMode with use_reentrant=False)"
-    )
-
-
-def test_measure_model_flops_handles_failure(monkeypatch):
-    """Returns (None, None) gracefully when measurement raises."""
-    from weathergen.utils import performance
-
-    def _bad_measure(model, forward_fn, loss_fn=None):
-        raise RuntimeError("simulated failure")
-
-    monkeypatch.setattr(performance, "measure_flops", _bad_measure)
-
-    model = TwoLayerLinear()
-    x = torch.randn(1, 16)
-    flops_fwd, flops_total = measure_model_flops(model, lambda: model(x), lambda y: y.sum())
-
-    assert flops_fwd is None
-    assert flops_total is None
-
-
-def test_compute_mfu_formula():
-    flops_fwd = 1_000_000
-    steps_per_sec = 10.0
-    available_flops = 1e12
-
-    result = compute_mfu(flops_fwd, steps_per_sec, available_flops)
-    expected = 3 * flops_fwd * steps_per_sec / available_flops
-
-    assert result == pytest.approx(expected)
-
-
-def test_compute_hfu_formula():
-    flops_total = 4_000_000
-    steps_per_sec = 10.0
-    available_flops = 1e12
-
-    result = compute_hfu(flops_total, steps_per_sec, available_flops)
-    expected = flops_total * steps_per_sec / available_flops
-
-    assert result == pytest.approx(expected)
-
-
-def test_hfu_exceeds_mfu_when_total_exceeds_3x_forward():
-    """HFU > MFU when total_flops > 3 × fwd_flops (recompute overhead present).
-
-    For full per-layer checkpointing total_flops ≈ 4 × fwd_flops, so HFU ≈ (4/3) × MFU.
-    Note: FlopCounterMode does NOT measure recompute, so in practice flops_total passed
-    to compute_hfu would be an estimate (e.g. model_flops × recompute_factor).
-    """
-    fwd = 1_000_000
-    total = 4 * fwd  # full per-layer checkpointing: 4 × fwd instead of 3 ×
-    steps_per_sec = 5.0
-    available = 1e12
-
-    mfu = compute_mfu(fwd, steps_per_sec, available)
-    hfu = compute_hfu(total, steps_per_sec, available)
-
-    assert hfu > mfu
-    assert hfu == pytest.approx((4 / 3) * mfu)
-
-
-def test_mfu_hfu_equal_without_recomputation():
-    """When total_flops == 3 × fwd_flops (no recompute), MFU == HFU."""
-    fwd = 1_000_000
-    total = 3 * fwd
-    steps_per_sec = 5.0
-    available = 1e12
-
-    mfu = compute_mfu(fwd, steps_per_sec, available)
-    hfu = compute_hfu(total, steps_per_sec, available)
-
-    assert mfu == pytest.approx(hfu)
+@pytest.fixture(autouse=True)
+def _no_cuda_sync():
+    """Disable cuda.synchronize globally — tests run on CPU."""
+    with patch("weathergen.utils.performance.torch.cuda.synchronize"):
+        yield
 
 
 def _make_mock_source_samples(tensor_shapes: list[list[tuple]]):
@@ -233,6 +61,18 @@ def _make_mock_source_samples(tensor_shapes: list[list[tuple]]):
     return SourceSamples([Sample(shapes) for shapes in tensor_shapes])
 
 
+def _make_mock_batch(source_samples):
+    """Create a mock batch whose get_source_samples() returns *source_samples*."""
+    batch = MagicMock()
+    batch.get_source_samples.return_value = source_samples
+    return batch
+
+
+# ---------------------------------------------------------------------------
+# compute_source_bytes
+# ---------------------------------------------------------------------------
+
+
 def test_compute_source_bytes_single_stream():
     # 1 sample, 1 stream, 1 tensor shape (4, 8) float32 → 4×8×4 = 128 bytes
     source = _make_mock_source_samples([[[(4, 8)]]])
@@ -251,108 +91,118 @@ def test_compute_source_bytes_empty():
     assert compute_source_bytes(source) == 0
 
 
-def test_compute_utilisation_metrics_both_present():
-    fwd, total = 1_000_000, 3_000_000
-    metrics = compute_utilisation_metrics(fwd, total, steps_per_sec=10.0, available_flops=1e12)
-    assert "device.mfu" in metrics
-    assert "device.hfu" in metrics
-    assert metrics["device.mfu"] == pytest.approx(compute_mfu(fwd, 10.0, 1e12))
-    assert metrics["device.hfu"] == pytest.approx(
-        compute_hfu(total, 10.0, 1e12, recompute_factor=4 / 3)
-    )
+# ---------------------------------------------------------------------------
+# ThroughputTracker
+# ---------------------------------------------------------------------------
 
 
-def test_compute_utilisation_metrics_missing_flops():
-    """Returns empty dict when FLOPs are unavailable."""
-    assert compute_utilisation_metrics(None, None, 10.0, 1e12) == {}
+@pytest.fixture()
+def tracker():
+    """A tracker with warmup_steps=2 on CPU."""
+    return ThroughputTracker(device=torch.device("cpu"), world_size=1, warmup_steps=2)
 
 
-def test_compute_utilisation_metrics_zero_steps():
-    """Returns empty dict when steps_per_sec is zero."""
-    assert compute_utilisation_metrics(1_000_000, 3_000_000, 0.0, 1e12) == {}
+def test_no_metrics_before_warmup(tracker):
+    """compute_metrics returns None during the warmup phase."""
+    tracker.update(batch_size_per_gpu=4, istep=0, source_mb=1.0)
+    assert tracker.compute_metrics() is None
 
 
-def test_compute_utilisation_metrics_no_available_flops():
-    """Returns empty dict when peak FLOP/s is unknown."""
-    assert compute_utilisation_metrics(1_000_000, 3_000_000, 10.0, None) == {}
+def test_metrics_available_after_warmup(tracker):
+    """After warmup_steps, metrics become available."""
+    tracker.update(batch_size_per_gpu=4, istep=1, source_mb=1.0)
+    tracker.update(batch_size_per_gpu=4, istep=2, source_mb=1.0)
+    tracker._sync()
+    metrics = tracker.compute_metrics()
+    assert metrics is not None
 
 
-def test_build_performance_metrics_keys():
-    """All expected keys are present and prefixed correctly."""
-    lightning = {"device/batches_per_second": 5.0, "device/samples_per_second": 40.0}
-    metrics = build_performance_metrics(
-        lightning_metrics=lightning,
-        elapsed=10.0,
-        total_batches=50,
-        total_mb=100.0,
-        flops_fwd=1_000_000,
-        flops_total=3_000_000,
-        available_flops=1e12,
-    )
-    assert "performance.throughput.device.batches_per_second" in metrics
-    assert "performance.throughput.device.mb_per_sec" in metrics
-    assert "performance.throughput.mb_per_sec" in metrics
-    assert "performance.utilization.device.mfu" in metrics
-    assert "performance.utilization.device.hfu" in metrics
+def test_metrics_keys(tracker):
+    """All expected metric keys are present."""
+    tracker.update(batch_size_per_gpu=4, istep=1, source_mb=1.0)
+    tracker.update(batch_size_per_gpu=4, istep=2, source_mb=2.0)
+    tracker._sync()
+    metrics = tracker.compute_metrics()
+
+    expected_keys = [
+        "performance.throughput.device.batches_per_sec",
+        "performance.throughput.device.samples_per_sec",
+        "performance.throughput.device.mb_per_sec",
+        "performance.throughput.global.batches_per_sec",
+        "performance.throughput.global.samples_per_sec",
+        "performance.throughput.global.mb_per_sec",
+    ]
+    for key in expected_keys:
+        assert key in metrics, f"Missing metric key: {key}"
 
 
-def test_build_performance_metrics_drops_lightning_mfu():
-    """Lightning's own mfu label is excluded (we recompute it explicitly)."""
-    lightning = {"device/mfu": 0.99, "mfu": 0.99, "device/batches_per_second": 5.0}
-    metrics = build_performance_metrics(
-        lightning_metrics=lightning,
-        elapsed=10.0,
-        total_batches=50,
-        total_mb=0.0,
-        flops_fwd=1_000_000,
-        flops_total=3_000_000,
-        available_flops=1e12,
-    )
-    assert "performance.utilization.device.mfu" in metrics  # our recomputed value
-    assert "performance.throughput.mfu" not in metrics  # Lightning's dropped label
+def test_accumulates_batches_and_samples(tracker):
+    """Counters accumulate correctly after warmup."""
+    tracker.update(batch_size_per_gpu=4, istep=1, source_mb=0.5)
+    tracker.update(batch_size_per_gpu=4, istep=2, source_mb=1.0)
+    tracker.update(batch_size_per_gpu=4, istep=3, source_mb=1.5)
+
+    assert tracker._total_batches == 2
+    assert tracker._total_samples == 8
+    assert tracker._total_mb == pytest.approx(2.5)
 
 
-def test_build_performance_metrics_mb_per_sec_single_rank():
-    """With world_size=1 (default), device and global MB/s are equal."""
-    metrics = build_performance_metrics(
-        lightning_metrics={},
-        elapsed=4.0,
-        total_batches=20,
-        total_mb=200.0,
-        flops_fwd=None,
-        flops_total=None,
-        available_flops=None,
-    )
-    assert metrics["performance.throughput.device.mb_per_sec"] == pytest.approx(50.0)
-    assert metrics["performance.throughput.mb_per_sec"] == pytest.approx(50.0)
+def test_warmup_steps_not_counted():
+    """Steps during warmup do not contribute to totals."""
+    tracker = ThroughputTracker(device=torch.device("cpu"), world_size=1, warmup_steps=3)
+    for istep in range(3):
+        tracker.update(batch_size_per_gpu=4, istep=istep, source_mb=1.0)
+
+    assert tracker._total_batches == 0
+    assert tracker._total_samples == 0
 
 
-def test_build_performance_metrics_mb_per_sec_multi_rank():
-    """Global MB/s = device MB/s × world_size."""
-    metrics = build_performance_metrics(
-        lightning_metrics={},
-        elapsed=4.0,
-        total_batches=20,
-        total_mb=200.0,
-        flops_fwd=None,
-        flops_total=None,
-        available_flops=None,
-        world_size=8,
-    )
-    assert metrics["performance.throughput.device.mb_per_sec"] == pytest.approx(50.0)
-    assert metrics["performance.throughput.mb_per_sec"] == pytest.approx(400.0)
+def test_throughput_values_positive(tracker):
+    """Throughput values are positive after real steps elapse."""
+    tracker.update(batch_size_per_gpu=4, istep=1, source_mb=1.0)
+    tracker._t0 = time.time() - 0.1
+    tracker.update(batch_size_per_gpu=4, istep=2, source_mb=1.0)
+    tracker._sync()
+    metrics = tracker.compute_metrics()
+
+    assert metrics is not None
+    assert metrics["performance.throughput.device.batches_per_sec"] > 0
+    assert metrics["performance.throughput.device.samples_per_sec"] > 0
+    assert metrics["performance.throughput.device.mb_per_sec"] > 0
 
 
-def test_build_performance_metrics_no_flops_no_utilisation():
-    """MFU/HFU keys absent when FLOPs or available_flops are unavailable."""
-    metrics = build_performance_metrics(
-        lightning_metrics={},
-        elapsed=4.0,
-        total_batches=20,
-        total_mb=0.0,
-        flops_fwd=None,
-        flops_total=None,
-        available_flops=None,
-    )
-    assert "performance.utilization.device.mfu" not in metrics
-    assert "performance.utilization.device.hfu" not in metrics
+def test_step_calls_log_fn_on_root(tracker):
+    """step() invokes log_fn with metrics on the root rank after warmup."""
+    source = _make_mock_source_samples([[[(2, 2)]]])
+    batch = _make_mock_batch(source)
+
+    logged = {}
+
+    def log_fn(m):
+        logged.update(m)
+
+    tracker.step(batch, batch_size_per_gpu=4, istep=1, log_fn=log_fn)
+    assert logged == {}
+
+    tracker._t0 = time.time() - 0.1
+
+    with patch("weathergen.utils.performance.is_root", return_value=True):
+        tracker.step(batch, batch_size_per_gpu=4, istep=2, log_fn=log_fn)
+
+    assert "performance.throughput.device.batches_per_sec" in logged
+
+
+def test_step_does_not_log_on_non_root(tracker):
+    """step() does not invoke log_fn on non-root ranks."""
+    source = _make_mock_source_samples([[[(2, 2)]]])
+    batch = _make_mock_batch(source)
+
+    logged = {}
+
+    tracker.step(batch, batch_size_per_gpu=4, istep=1, log_fn=lambda m: logged.update(m))
+    tracker._t0 = time.time() - 0.1
+
+    with patch("weathergen.utils.performance.is_root", return_value=False):
+        tracker.step(batch, batch_size_per_gpu=4, istep=2, log_fn=lambda m: logged.update(m))
+
+    assert logged == {}
