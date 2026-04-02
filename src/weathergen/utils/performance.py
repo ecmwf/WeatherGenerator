@@ -42,7 +42,6 @@ class ThroughputTracker:
         self._total_samples: int = 0
         self._total_mb: float = 0.0
         self._world_size = world_size
-        # Cached results from the last _sync() call (set on all ranks, read on root).
         self._synced_elapsed: float | None = None
         self._synced_global_batches: int = 0
         self._synced_global_samples: int = 0
