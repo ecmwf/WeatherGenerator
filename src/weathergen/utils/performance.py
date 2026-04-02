@@ -30,7 +30,6 @@ class ThroughputTracker:
     def __init__(
         self,
         device: torch.device,
-        world_size: int,
         warmup_steps: int,
     ) -> None:
         self._device = device
@@ -40,7 +39,6 @@ class ThroughputTracker:
         self._total_batches: int = 0
         self._total_samples: int = 0
         self._total_mb: float = 0.0
-        self._world_size = world_size
         self._synced_elapsed: float | None = None
         self._synced_global_batches: int = 0
         self._synced_global_samples: int = 0

@@ -162,8 +162,7 @@ class Trainer(TrainerBase):
 
         if cf.train_logging.get("track_performance_metrics"):
             self.perf_tracker = ThroughputTracker(
-                device=torch.device(self.devices[0]),  # Assuming same device type!
-                world_size=self.world_size_original,
+                device=torch.device(self.devices[0]),
                 warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
             )
 
