@@ -161,12 +161,6 @@ class NullThroughputTracker:
     training loop need no ``if`` guards.
     """
 
-    def step_context(self):
-        return nullcontext()
-
-    def forward_context(self):
-        return nullcontext()
-
     def step(self, batch, batch_size_per_gpu: int, istep: int, log_fn=None) -> None:
         pass
 
