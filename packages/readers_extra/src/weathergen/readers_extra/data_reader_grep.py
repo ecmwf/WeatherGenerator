@@ -380,7 +380,8 @@ class DataReaderGREP(DataReaderTimestep):
                 continue
 
             # (n_points, n_channels)
-            # TODO remove try/except: should be able to just use time or time_centered depending on dataset, without needing to guess per-timestep.
+            # TODO remove try/except: should be able to just use time or time_centered
+            # depending on dataset, without needing to guess per-timestep.
             try:
                 timestep_data = np.stack(
                     [
