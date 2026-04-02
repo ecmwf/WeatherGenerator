@@ -506,7 +506,7 @@ class NetcdfParser(CfParser):
             xarray Dataset with CF conventions added to attributes.
         """
         # ds = ds.copy()
-        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id} using stream {self.stream}"
+        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id}"
         ds.attrs["institution"] = "WeatherGenerator Project"
         ds.attrs["source"] = "WeatherGenerator v0.0"
         ds.attrs["history"] = (
@@ -514,8 +514,7 @@ class NetcdfParser(CfParser):
             + np.datetime_as_string(np.datetime64("now"), unit="s")
         )
         ds.attrs["Conventions"] = "CF-1.12"
-        # drop stream now it's in title
-        ds = ds.drop_vars("stream")
+
         return ds
 
     def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
