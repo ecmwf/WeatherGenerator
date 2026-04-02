@@ -103,7 +103,6 @@ coordinates:
         valid_time: valid_time
         lat: latitude
         lon: longitude
-        stream: stream
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
@@ -112,7 +111,6 @@ coordinates:
         valid_time: valid_time
         lat: latitude
         lon: longitude
-        stream: stream
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
@@ -141,9 +139,6 @@ dimensions:
       std: forecast_period
       long: time since forecast_reference_time
       std_unit: hours
-    stream:
-      wg: stream
-      std: stream
     ncells:
       wg: ncells
       std: ncells
