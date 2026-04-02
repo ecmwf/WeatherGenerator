@@ -440,83 +440,58 @@ class Trainer(TrainerBase):
 
             batch.to_device(self.device)
 
-            with self.perf_tracker.step_context():
-                with torch.autocast(
-                    device_type=f"cuda:{cf.local_rank}",
-                    dtype=self.mixed_precision_dtype,
-                    enabled=cf.with_mixed_precision,
-                ):
-                    with self.perf_tracker.forward_context():
-                        preds = self.model(
-                            self.model_params,
-                            batch.get_source_samples(),
-                        )
-
-                    targets_and_auxs = {}
-                    for loss_name, target_aux in self.target_and_aux_calculators.items():
-                        # find targets for this target-aux calculator
-                        target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
-                        # apply target-aux calculator
-                        targets_and_auxs[loss_name] = target_aux.compute(
-                            self.cf.general.istep,
-                            batch.get_target_samples(target_idxs),
-                            self.model_params,
-                            self.model,
-                        )
-
-                loss = self.loss_calculator.compute_loss(
-                    preds=preds,
-                    targets_and_aux=targets_and_auxs,
-                    metadata=extract_batch_metadata(batch),
+            with torch.autocast(
+                device_type=f"cuda:{cf.local_rank}",
+                dtype=self.mixed_precision_dtype,
+                enabled=cf.with_mixed_precision,
+            ):
+                preds = self.model(
+                    self.model_params,
+                    batch.get_source_samples(),
                 )
 
-                # TODO re-enable this, need to think on how to make it compatible with
-                # student-teacher training
-                # if cf.latent_noise_kl_weight > 0.0:
-                #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
-                #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
+                targets_and_auxs = {}
+                for loss_name, target_aux in self.target_and_aux_calculators.items():
+                    # find targets for this target-aux calculator
+                    target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                    # apply target-aux calculator
+                    targets_and_auxs[loss_name] = target_aux.compute(
+                        self.cf.general.istep,
+                        batch.get_target_samples(target_idxs),
+                        self.model_params,
+                        self.model,
+                    )
 
-                [
-                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators.items()
-                ]
-                [
-                    target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators_val.items()
-                ]
+            loss = self.loss_calculator.compute_loss(
+                preds=preds,
+                targets_and_aux=targets_and_auxs,
+                metadata=extract_batch_metadata(batch),
+            )
 
-                # backward pass
-                self.optimizer.zero_grad()
-                self.grad_scaler.scale(loss).backward()
+            # TODO re-enable this, need to think on how to make it compatible with
+            # student-teacher training
+            # if cf.latent_noise_kl_weight > 0.0:
+            #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
+            #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
-                # gradient clipping
-                self.grad_scaler.unscale_(self.optimizer)
-                total_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
-                )
+            [
+                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators.items()
+            ]
+            [
+                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators_val.items()
+            ]
 
-                # optimizer step
-                self.grad_scaler.step(self.optimizer)
-                self.grad_scaler.update()
+            # backward pass
+            self.optimizer.zero_grad()
+            self.grad_scaler.scale(loss).backward()
 
-                # update learning rate
-                self.lr_scheduler.step()
-
-                batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-                step = batch_size_total * self.cf.general.istep
-
-                [
-                    target_aux.update_state_post_opt_step(step, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators.items()
-                ]
-                [
-                    target_aux.update_state_post_opt_step(step, batch, self.model)
-                    for _, target_aux in self.target_and_aux_calculators_val.items()
-                ]
-
-                # EMA update
-                if self.validate_with_ema:
-                    self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
+            # gradient clipping
+            self.grad_scaler.unscale_(self.optimizer)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
+            )
 
             # log gradient norms
             if self.log_grad_norms:
@@ -524,6 +499,29 @@ class Trainer(TrainerBase):
                     self.last_grad_norm = self._get_tensor_item(total_norm)
                 if bidx % self.train_logging.metrics == 0:
                     self._log_instant_grad_norms(TRAIN)
+
+            # optimizer step
+            self.grad_scaler.step(self.optimizer)
+            self.grad_scaler.update()
+
+            # update learning rate
+            self.lr_scheduler.step()
+
+            batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
+            step = batch_size_total * self.cf.general.istep
+
+            [
+                target_aux.update_state_post_opt_step(step, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators.items()
+            ]
+            [
+                target_aux.update_state_post_opt_step(step, batch, self.model)
+                for _, target_aux in self.target_and_aux_calculators_val.items()
+            ]
+
+            # EMA update
+            if self.validate_with_ema:
+                self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
             self.perf_tracker.step(
                 batch,

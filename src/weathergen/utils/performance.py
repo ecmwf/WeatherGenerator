@@ -48,12 +48,6 @@ class ThroughputTracker:
         self._synced_global_samples: int = 0
         self._synced_global_mb: float = 0.0
 
-    def step_context(self):
-        return nullcontext()
-
-    def forward_context(self):
-        return nullcontext()
-
     def step(
         self,
         batch,
