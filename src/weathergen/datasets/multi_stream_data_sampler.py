@@ -161,6 +161,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.mode_cfg.end_date - self.mode_cfg.start_date - forecast_win
         ) // self.step_timedelta
 
+        assert available_samples>0, "There is an insufficient date range to accomodate any number of samples or forecast steps"
+
         # choose correct num samples
         if not self.repeat_data and self.samples_per_mini_epoch:
             if self.samples_per_mini_epoch >= available_samples:
