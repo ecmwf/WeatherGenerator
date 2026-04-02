@@ -71,12 +71,6 @@ def infer(run_id):
     main(
         [
             "inference",
-            "-start",
-            "2021-10-10",
-            "-end",
-            "2022-10-11",
-            "--samples",
-            "10",
             "--mini-epoch",
             "0",
             "--from-run-id",
