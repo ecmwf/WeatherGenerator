@@ -12,7 +12,6 @@
 import logging
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
 
 import torch
 
@@ -146,9 +145,15 @@ class ThroughputTracker:
 
         # Global throughput: use values already reduced across all ranks by _sync().
         synced_elapsed = self._synced_elapsed
-        metrics["performance.throughput.global.batches_per_sec"] = self._synced_global_batches / synced_elapsed
-        metrics["performance.throughput.global.samples_per_sec"] = self._synced_global_samples / synced_elapsed
-        metrics["performance.throughput.global.mb_per_sec"] = self._synced_global_mb / synced_elapsed
+        metrics["performance.throughput.global.batches_per_sec"] = (
+            self._synced_global_batches / synced_elapsed
+        )
+        metrics["performance.throughput.global.samples_per_sec"] = (
+            self._synced_global_samples / synced_elapsed
+        )
+        metrics["performance.throughput.global.mb_per_sec"] = (
+            self._synced_global_mb / synced_elapsed
+        )
 
         return metrics
 
