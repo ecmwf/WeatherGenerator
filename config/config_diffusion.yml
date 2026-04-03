@@ -75,8 +75,12 @@ rho: 7
 p_mean: -1.2
 p_std: 1.2
 
-
 healpix_level: 5
+
+# Use 2D RoPE instead of traditional global positional encoding
+# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
+# When False: uses traditional pe_global positional encoding
+rope_2D: True
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -225,8 +229,8 @@ validation_config:
   # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
   # Each value produces a separate validation pass with independently logged metrics.
   # validation_noise_levels: [0.3, 0.5, 0.75, 1.0, 1.5]
-  validation_noise_levels: [2.0, 3.0, 3.2, 3.5, 4.0, 5.0]
-  # validation_noise_levels: [1.0, 2.0, 4.0, 8.0, 16.0]
+  # validation_noise_levels: [2.0, 3.0, 3.2, 3.5, 4.0, 5.0]
+  validation_noise_levels: [1.0, 2.0, 3.0, 4.0]
 
   samples_per_mini_epoch: 16
   shuffle: False

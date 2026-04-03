@@ -60,7 +60,7 @@ class MLP(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         name: str | None = None,
-        with_noise_conditioning=False,
+        with_noise_conditioning=False
     ):
         """Constructor"""
 
@@ -114,11 +114,14 @@ class MLP(torch.nn.Module):
 
         gate = None
         for i, layer in enumerate(self.layers):
-            x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
-            # Apply noise conditioning after layer norm (first layer), mirroring
-            # the AdaLN-Zero pattern used in MultiSelfAttentionHead
-            if i == 0 and self.with_noise_conditioning:
-                x, gate = self.noise_conditioning(x, noise_emb)
+            if i == 0 and self.with_aux:
+                x = layer(x, aux)
+                if i == 0 and self.with_noise_conditioning:
+                    x, gate = self.noise_conditioning(x, noise_emb)
+            else:
+                if i == 0 and self.with_noise_conditioning:
+                    x, gate = self.noise_conditioning(x, noise_emb)
+                x = layer(x)
 
         if self.with_residual:
             if gate is not None:

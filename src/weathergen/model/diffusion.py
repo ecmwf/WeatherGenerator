@@ -99,11 +99,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         self.cur_token = tokens.detach()
 
-        # return tokens
-
-        # print("input tokens statistics")
-        # print("mean", tokens.mean(), "std", tokens.std(), "max", tokens.max(), "min", tokens.min())
-        # return self.inference(fstep=fstep, num_steps=100)
+        # return self.inference(fstep=fstep, num_steps=50, coords=coords)
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
@@ -121,12 +117,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self._noised_tokens = (y + n).detach()
 
-        # return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
-        n = torch.ones_like(y)
-        # if self._noise is None:
-        #     self._noise = torch.randn_like(y)
-        # n = self._noise
-        return self.denoise(x=n, c=c, sigma=sigma, fstep=fstep, coords=coords)
+        return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep, coords=coords)
 
     def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int, coords: torch.Tensor = None) -> torch.Tensor:
         """
@@ -134,10 +125,10 @@ class DiffusionForecastEngine(torch.nn.Module):
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
         noise level sigma.
         """
-        # # Compute scaling conditionings (EDM Eq. 7 — disabled for direct prediction)
-        # c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
-        # c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
-        # c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
+        # Compute scaling conditionings (EDM Eq. 7 — disabled for direct prediction)
+        c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
+        c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
+        c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
         c_noise = sigma.log() / 4
 
         # Embed noise level
@@ -147,15 +138,16 @@ class DiffusionForecastEngine(torch.nn.Module):
         x = self.preconditioner.precondition(x, c)
 
         # Direct prediction: network outputs denoised estimate directly
-        return self.net(x, fstep=fstep, coords=coords, noise_emb=noise_emb)
-        # return c_skip * x + c_out * self.net(
-        #     c_in * x, fstep=fstep, noise_emb=noise_emb
-        # )  # Eq. (7) in EDM paper
+        # return self.net(x, fstep=fstep, coords=coords, noise_emb=noise_emb)
+        return c_skip * x + c_out * self.net(
+            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb
+        )  # Eq. (7) in EDM paper
 
     def inference(
         self,
         fstep: int,
         num_steps: int = 30,
+        coords: torch.Tensor = None,
     ) -> torch.Tensor:
         # Forward pass of the diffusion model during inference
         # https://github.com/NVlabs/edm/blob/main/generate.py
@@ -207,13 +199,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_hat = t_cur
 
             # Euler step.
-            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep)  # c to be discussed
+            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep, coords=coords)  # c to be discussed
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.denoise(x=x_next, c=None, sigma=t_next, fstep=fstep)
+                denoised = self.denoise(x=x_next, c=None, sigma=t_next, fstep=fstep, coords=coords)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 

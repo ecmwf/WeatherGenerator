@@ -264,7 +264,8 @@ def write_output(
     plotter = Plotter({"image_format": "png", "dpi_val": 150}, base_plot_dir)
     # headline_channels = {"2t", "z500", "q850", "10u", "10v"}
     # headline_channels = {"2t", "q850"}
-    headline_channels = {"z500"}
+    # headline_channels = {"z500"}
+    headline_channels = {"2t", "z500"}
 
     t_idx = 0
     for stream_idx, stream_info in enumerate(cf.streams):

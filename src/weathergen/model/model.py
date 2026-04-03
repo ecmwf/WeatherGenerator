@@ -737,11 +737,6 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        tokens = torch.ones_like(tokens)
-        # if self._noise is None:
-        #     self._noise = torch.randn_like(tokens)
-        # tokens = self._noise
-
         # Normalize tokens
         # TODO: REMOVE THIS LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
         # t_mean = tokens.mean()
