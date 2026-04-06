@@ -55,7 +55,7 @@ num_register_tokens: 7
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 2
+fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -185,6 +185,7 @@ training_config:
   forecast :
       time_step: 06:00:00
       num_steps: 2
+      offset: 1
       policy: "fixed" 
       offset: 1
 
@@ -203,6 +204,10 @@ validation_config:
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
+  output:
+    num_samples: 0
+
 test_config:
+
   output:
     num_samples: 2
