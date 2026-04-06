@@ -112,6 +112,8 @@ class EncoderModule(torch.nn.Module):
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
+        # self.ln = torch.nn.LayerNorm(cf.ae_global_dim_embed, elementwise_affine=False)
+
     def forward(self, model_params, batch):
         """
         Encoder forward
@@ -131,6 +133,8 @@ class EncoderModule(torch.nn.Module):
             coords=model_params.rope_coords,
             use_reentrant=False,
         )
+
+        # tokens_global = self.ln(tokens_global)
 
         return tokens_global, posteriors
 
