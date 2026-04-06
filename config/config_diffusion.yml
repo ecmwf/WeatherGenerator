@@ -70,7 +70,7 @@ frequency_embedding_dim: 256
 embedding_dim: 512
 sigma_min: 0.002
 sigma_max: 80  # 170
-sigma_data: 0.5  # 1.7
+sigma_data: 0.5  # 1.7, 157.38
 rho: 7
 p_mean: -1.2
 p_std: 1.2
@@ -99,13 +99,15 @@ latent_noise_deterministic_latents: True
 
 
 freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
-load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}
+# load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}
+load_chkpt: {'run_id': 'dcl584vo', 'epoch': -1}
 
 norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
+# streams_directory: "./config/streams/era5_1deg/"
+streams_directory: "./config/streams/era5_1deg_forecasting_z500/"
 streams: ???
 
 # type of zarr_store
