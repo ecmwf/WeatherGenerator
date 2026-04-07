@@ -99,7 +99,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         self.cur_token = tokens.detach()
 
-        # return self.inference(fstep=fstep, num_steps=50, coords=coords)
+        # return self.inference(fstep=fstep, num_steps=10, coords=coords)
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
@@ -161,7 +161,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # n = torch.randn_like(x).to(device="cuda") * sigma
         # x = self.cur_token + n
 
-        # x = self.cur_token * 0.01 + x
+        x = self.cur_token * 0.05 + x
         # breakpoint()
 
         

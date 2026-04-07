@@ -148,7 +148,7 @@ latent_noise_deterministic_latents: True
 
 freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 # load_chkpt: {'run_id': 'lgrasnq6', 'epoch': -1}  # z500 small
-load_chkpt: {'run_id': 'hhz27wy0', 'epoch': -1}  # multi-var small
+load_chkpt: {'run_id': 'hhz27wy0', 'epoch': -1}  # multi-var small, sigma_data=0.7855
 
 norm_type: "LayerNorm"
 
