@@ -30,6 +30,7 @@ from weathergen.train.teacher_utils import (
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
 
 class EncoderTeacher(TargetAndAuxModuleBase):
     """Base class for SSL teacher models.
@@ -80,7 +81,6 @@ class EncoderTeacher(TargetAndAuxModuleBase):
     def get_current_beta(self, cur_step: int) -> float:
         beta = self.ema_model.get_current_beta(cur_step)
         return beta
-
 
 class EMATeacher(EncoderTeacher):
     """SSL teacher using exponential moving average of student weights."""

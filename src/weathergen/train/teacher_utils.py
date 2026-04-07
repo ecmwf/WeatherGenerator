@@ -15,7 +15,10 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
+<<<<<<< HEAD
 from weathergen.common.config import get_path_model
+=======
+>>>>>>> d6d51daf (Write first solution with Claude)
 from weathergen.model.engines import (
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
@@ -25,9 +28,13 @@ from weathergen.model.engines import (
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< HEAD
 def _create_teacher_heads(
     name: str, head_type: str, dim_embed: int, loss_conf, cf=None
 ) -> nn.Module:
+=======
+def _create_head(name: str, head_type: str, dim_embed: int, loss_conf, cf=None) -> nn.Module:
+>>>>>>> d6d51daf (Write first solution with Claude)
     """Create a latent prediction head for a given SSL loss type.
 
     Mirrors Model._create_latent_pred_head() logic with per-loss-type token settings:
@@ -39,7 +46,11 @@ def _create_teacher_heads(
     elif name == "DINO":
         use_class_token, use_patch_token = True, False
     else:
+<<<<<<< HEAD
         raise ValueError(f"_create_teacher_heads does not support loss type {name!r}")
+=======
+        raise ValueError(f"_create_head does not support loss type {name!r}")
+>>>>>>> d6d51daf (Write first solution with Claude)
 
     if head_type == "mlp":
         return LatentPredictionHeadMLP(
@@ -57,7 +68,11 @@ def _create_teacher_heads(
         raise ValueError(f"Unknown latent prediction head type {head_type!r}")
 
 
+<<<<<<< HEAD
 def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> None:
+=======
+def prepare_encoder_teacher(model: nn.Module, training_cfg, teacher_dim_embed: int) -> None:
+>>>>>>> d6d51daf (Write first solution with Claude)
     """Strip a model to encoder-only and create fresh SSL latent heads.
 
     Modifies model in-place:
@@ -66,7 +81,10 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
     3. Creates fresh latent_heads based on the student's SSL loss config
     """
     # Strip non-encoder components
+<<<<<<< HEAD
     teacher_dim_embed = override_cfg.ae_global_dim_embed
+=======
+>>>>>>> d6d51daf (Write first solution with Claude)
     model.forecast_engine = None
     model.embed_target_coords = nn.ModuleDict()
     model.target_token_engines = nn.ModuleDict()
@@ -87,9 +105,13 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
                 model.latent_heads[name] = LatentPredictionHeadIdentity()
             elif name in ("iBOT", "DINO"):
                 head_type = conf.get("head", "mlp").lower()
+<<<<<<< HEAD
                 model.latent_heads[name] = _create_teacher_heads(
                     name, head_type, teacher_dim_embed, conf
                 )
+=======
+                model.latent_heads[name] = _create_head(name, head_type, teacher_dim_embed, conf)
+>>>>>>> d6d51daf (Write first solution with Claude)
             else:
                 logger.warning(f"Unknown SSL loss type {name!r} in teacher setup, skipping.")
 
@@ -106,7 +128,11 @@ def load_encoder_from_checkpoint(
     Filters checkpoint to encoder.* and latent_pre_norm* keys only, then loads with
     strict=False. Moves the model to the given device afterwards.
     """
+<<<<<<< HEAD
     path_run = Path(cf.get("model_path", get_path_model(run_id=teacher_run_id))) / teacher_run_id
+=======
+    path_run = Path(cf.model_path) / teacher_run_id
+>>>>>>> d6d51daf (Write first solution with Claude)
     mini_epoch_id = (
         f"chkpt{teacher_mini_epoch:05d}"
         if teacher_mini_epoch is not None and teacher_mini_epoch != -1
@@ -124,6 +150,7 @@ def load_encoder_from_checkpoint(
     mkeys, ukeys = model.load_state_dict(encoder_params, strict=False)
     model.to(device)
 
+<<<<<<< HEAD
     logging.info(f"Teacher: Loaded encoder weights from checkpoint {filename}")
     if mkeys is not None:
         logger.info(f"Number of missing keys: {len(mkeys)}")
@@ -133,3 +160,10 @@ def load_encoder_from_checkpoint(
         logger.debug(f"Unused keys: {ukeys}")
     if mkeys is None and ukeys is None:
         logger.info("All keys in checkpoint matched successfully.")
+=======
+    if mkeys:
+        logger.info(f"Encoder checkpoint load - expected missing (non-encoder) keys: {len(mkeys)}")
+        logger.debug(f"Missing keys: {mkeys}")
+    if ukeys:
+        logger.warning(f"Unused keys when loading encoder checkpoint: {ukeys}")
+>>>>>>> d6d51daf (Write first solution with Claude)
