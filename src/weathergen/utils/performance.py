@@ -140,8 +140,6 @@ class ThroughputTracker:
         metrics["performance.throughput.device.batches_per_sec"] = self._total_batches / elapsed
         metrics["performance.throughput.device.samples_per_sec"] = self._total_samples / elapsed
         metrics["performance.throughput.device.mb_per_sec"] = self._total_mb / elapsed
-        metrics["performance.throughput.device.mb_per_step"] = self._total_mb / self._total_batches
-        metrics["performance.throughput.device.sec_per_step"] = elapsed / self._total_batches
 
         # Global throughput: use values already reduced across all ranks by _sync().
         synced_elapsed = self._synced_elapsed
@@ -153,9 +151,6 @@ class ThroughputTracker:
         )
         metrics["performance.throughput.global.mb_per_sec"] = (
             self._synced_global_mb / synced_elapsed
-        )
-        metrics["performance.throughput.global.mb_per_step"] = (
-            self._synced_global_mb / self._synced_global_batches
         )
 
         return metrics
