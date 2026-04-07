@@ -87,7 +87,8 @@ class QuaverParser(CfParser):
             if result is None:
                 continue
 
-            result = result.as_xarray().squeeze()
+            if not isinstance(result, xr.DataArray):
+                result = result.as_xarray().squeeze()
             result = result.sel(channel=self.channels)
             da_fs = self.assign_coords(result)
 
