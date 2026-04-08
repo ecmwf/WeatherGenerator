@@ -99,7 +99,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         self.cur_token = tokens.detach()
 
-        # return self.inference(fstep=fstep, num_steps=10, coords=coords)
+        return self.inference(fstep=fstep, num_steps=10, coords=coords)
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
@@ -155,7 +155,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Sample pure noise (assuming single batch element for now)
         torch.manual_seed(42)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
-        # x = self.cur_token * 1.0 + x * 0.1
+        # x = self.cur_token * 0.025 + x
 
         # --- Training-aligned sigma bounds ---
         # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
@@ -244,6 +244,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         track["x"].append(self.cur_token.cpu())
 
         self._plot_sampling_diagnostics(track, num_steps)
+        # self._plot_sampling_process(track, num_steps)
         return x_next
 
     def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
@@ -304,6 +305,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         plt.close(fig)
         logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
 
+    def _plot_sampling_process(self, track: dict, num_steps: int) -> None:
         vmin, vmax = track["x"][-1].min().item(), track["x"][-1].max().item()
         for s_idx, x in enumerate(track["x"]):
             fig, axes2 = plt.subplots(1, 2, figsize=(12, 5))
