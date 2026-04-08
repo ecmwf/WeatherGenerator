@@ -26,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 2
+ae_global_num_blocks: 5
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 8
+ae_aggregation_num_blocks: 5
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -177,7 +177,7 @@ training_config:
     tap_after:                     # named tap points (final output always included implicitly)
       - local2global               # after local-to-global adapter, before global attention
       - "global:0"                 # after 1st global layer (0-indexed)
-      - "global:1"                 # after 2nd global layer
+      - "global:2"                 # after 2nd global layer
     fusion_hidden_factor: 2        # MLP hidden dim = factor * dim_embed
     level_weights: [0.25, 0.25, 0.25, 0.25]  # per-level loss weights (len = num taps + 1)
 
@@ -213,8 +213,8 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 1.0
-    weight_decay: 0.1
+    grad_clip: 0.5
+    weight_decay: 0.05
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.975
@@ -236,7 +236,7 @@ training_config:
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 900000,
+            ema_halflife_in_thousands: 700000,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
@@ -261,9 +261,9 @@ training_config:
 
   target_input: {
     "random_easy_target" : {
-      masking_strategy: "healpix",
+      masking_strategy: "cropping_healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+      masking_strategy_config : { rate : 0.8, hl_mask: 3, rate_sampling: False },
     },
   }
 

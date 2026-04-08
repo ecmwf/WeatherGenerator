@@ -259,7 +259,7 @@ def plot_loss_avg(
     runs_data,
     runs_active,
     stage=TRAIN,
-    x_scale_log=False,
+    x_scale_log=True,
     legend_outside: bool = False,
 ):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
@@ -320,7 +320,7 @@ def plot_loss_per_stream(
     x_type: str = "step",
     x_lim: list[float] | None = None,
     y_lim: list[float] | None = None,
-    x_scale_log: bool = False,
+    x_scale_log: bool = True,
     legend_outside: bool = False,
 ):
     """
@@ -496,7 +496,7 @@ def plot_loss_per_run(
     plot_dir: Path,
     errs: list[str] | None = None,
     x_axis: str = "samples",
-    x_scale_log: bool = False,
+    x_scale_log: bool = True,
     legend_outside: bool = False,
 ):
     """
@@ -812,7 +812,7 @@ def plot_train(args=None):
         np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
     ]
 
-    x_scale_log = False
+    x_scale_log = True
 
     legend_outside = args.legend_outside
 

@@ -67,8 +67,12 @@ default_streams:
       
 run_ids :
   mbs927cp:
+    type: "json"
     label: "jepa 2.1 ema pretrained model "
     results_base_dir : "./results/mbs927cp"
+  veui98yd:
+    label: "jepa 2.1 w/ bug fix ema pretrained model "
+    results_base_dir : "./results/veui98yd"
   aev90iny:
     type: "json"
     label: "256 epochs pre-trained v1"

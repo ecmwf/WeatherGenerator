@@ -1,0 +1,39 @@
+# Plot config for JEPA finetuning runs (auto-generated)
+train:
+  plot:
+    li6xvdgb-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=3e-05 num_blocks=2 inter_dim=256 num_heads=4"
+    q78rqdo4-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=7e-05 num_blocks=2 inter_dim=256 num_heads=4"
+    wmtgbumf-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=1e-04 num_blocks=2 inter_dim=256 num_heads=4"
+    4uptffwd-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=3e-05 num_blocks=4 inter_dim=512 num_heads=8"
+    8woga1kt-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=7e-05 num_blocks=4 inter_dim=512 num_heads=8"
+    oq3j34tv-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=1e-04 num_blocks=4 inter_dim=512 num_heads=8"
+    yz1w9mbh-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=3e-05 num_blocks=6 inter_dim=768 num_heads=12"
+    iz5upkzp-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=7e-05 num_blocks=6 inter_dim=768 num_heads=12"
+    j0hvb1zn-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=1e-04 num_blocks=6 inter_dim=768 num_heads=12"
+    eu12lhmv-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=3e-05 num_blocks=8 inter_dim=1024 num_heads=16"
+    8sja6jcg-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=7e-05 num_blocks=8 inter_dim=1024 num_heads=16"
+    j2lak362-stage2:
+      slurm_id: 0
+      description: "JEPA frozen MTM lr_max=1e-04 num_blocks=8 inter_dim=1024 num_heads=16"
