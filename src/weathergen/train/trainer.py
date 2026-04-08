@@ -28,6 +28,7 @@ from weathergen.model.model_interface import (
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
+from weathergen.train.adana import ADana
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
@@ -89,6 +90,87 @@ class Trainer(TrainerBase):
         Get total, effective batch size across all DDP ranks
         """
         return self.world_size_original * batch_size_per_gpu
+
+    def _compute_lr_peak(self) -> float:
+        """
+        Compute the peak learning rate after parallel scaling, matching the
+        LearningRateScheduler logic. Used as the reference LR for ADana's
+        schedule_factor so that weight decay stays properly bounded.
+        """
+        lr_cfg = self.training_cfg.learning_rate_scheduling
+        if lr_cfg.parallel_scaling_policy == "const":
+            scale = 1.0
+        elif lr_cfg.parallel_scaling_policy == "sqrt":
+            scale = np.sqrt(self.batch_size_per_gpu * self.cf.world_size)
+        elif lr_cfg.parallel_scaling_policy == "linear":
+            scale = self.batch_size_per_gpu * self.cf.world_size
+        else:
+            scale = 1.0
+        return scale * lr_cfg.lr_max
+
+    def _compute_default_wd_ts(self) -> float:
+        """
+        Compute default wd_ts for ADana as total_iterations / 10.
+        This means weight decay ramps down over roughly the first 10% of training.
+        """
+        len_ds = len(self.dataset)
+        total_iterations = int(
+            (len_ds * self.training_cfg.num_mini_epochs) / self.batch_size_per_gpu
+        )
+        wd_ts = total_iterations / 10.0
+        logger.info(f"ADana: wd_ts not set, defaulting to total_iterations/10 = {wd_ts:.1f}")
+        return wd_ts
+
+    def _create_optimizer(self) -> torch.optim.Optimizer:
+        """
+        Create optimizer based on the config. Selects between AdamW and ADana
+        based on which sub-key is present under training_config.optimizer.
+        """
+        opt_cfg = self.training_cfg.optimizer
+        lr_start = self.training_cfg.learning_rate_scheduling.lr_start
+        weight_decay = opt_cfg.weight_decay
+
+        if opt_cfg.get("adana") is not None:
+            adana_cfg = opt_cfg.adana
+            wd_ts = adana_cfg.get("wd_ts", None)
+            if wd_ts is None:
+                wd_ts = self._compute_default_wd_ts()
+            omega = adana_cfg.get("omega", 4.0)
+            adana_weight_decay = omega / wd_ts
+            lr_peak = self._compute_lr_peak()
+            logger.info(f"ADana: omega={omega}, wd_ts={wd_ts}, weight_decay={adana_weight_decay}")
+            return ADana(
+                self.model.parameters(),
+                lr=lr_start,
+                lr_peak=lr_peak,
+                delta=adana_cfg.get("delta", 8.0),
+                kappa=adana_cfg.get("kappa", 0.85),
+                epsilon=adana_cfg.get("epsilon", 1e-8),
+                weight_decay=adana_weight_decay,
+                clipsnr=adana_cfg.get("clipsnr", None),
+                wd_decaying=adana_cfg.get("wd_decaying", True),
+                wd_ts=wd_ts,
+                gamma_3_factor=adana_cfg.get("gamma_3_factor", 1.0),
+            )
+
+        # Default: AdamW with batch-size-dependent beta/eps scaling
+        # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
+        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
+        # https://arxiv.org/pdf/2111.06377
+        kappa = self.get_batch_size_total(self.batch_size_per_gpu)
+        # aiming for beta1 = 0.9 at one node, ie kappa=B=4
+        beta1 = max(0.5, 1.0 - kappa * (1.0 - opt_cfg.adamw.beta1))
+        # aiming for beta2 = 0.95 at one node, ie B=4
+        beta2 = 1.0 - kappa * (1.0 - opt_cfg.adamw.beta2)
+        eps = opt_cfg.adamw.get("eps", 2e-08) / np.sqrt(kappa)
+
+        return torch.optim.AdamW(
+            self.model.parameters(),
+            lr=lr_start,
+            weight_decay=weight_decay,
+            betas=(beta1, beta2),
+            eps=eps,
+        )
 
     def init(self, cf: Config, devices):
         # pylint: disable=attribute-defined-outside-init
@@ -302,23 +384,7 @@ class Trainer(TrainerBase):
             if not cf.with_ddp:
                 self.model.print_num_parameters()
 
-        # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
-        # https://arxiv.org/pdf/2111.06377
-        kappa = self.get_batch_size_total(self.batch_size_per_gpu)
-        # aiming for beta1 = 0.9 at one node, ie kappa=B=4
-        beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
-        # aiming for beta2 = 0.95 at one node, ie B=4
-        beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
-        eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
-
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=self.training_cfg.learning_rate_scheduling.lr_start,
-            weight_decay=self.training_cfg.optimizer.weight_decay,
-            betas=(beta1, beta2),
-            eps=eps,
-        )
+        self.optimizer = self._create_optimizer()
         self.grad_scaler = torch.amp.GradScaler("cuda")
 
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"

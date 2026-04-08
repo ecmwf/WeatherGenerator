@@ -102,6 +102,9 @@ class LearningRateScheduler:
         elif self.policy_warmup == "cosine":
             n_steps = self.n_steps_warmup + self.n_steps_decay + 1
             pct_start = self.n_steps_warmup / n_steps
+            # OneCycleLR requires momentum/betas support; disable cycling for optimizers
+            # that don't have them (e.g. ADana)
+            has_momentum = "momentum" in optimizer.defaults or "betas" in optimizer.defaults
             self.scheduler_warmup = OneCycleLR(
                 optimizer,
                 max_lr=self.lr_max_scaled,
@@ -109,6 +112,7 @@ class LearningRateScheduler:
                 pct_start=pct_start,
                 div_factor=self.lr_max_scaled / lr_cfg.lr_start,
                 final_div_factor=lr_final_decay_scaled / lr_cfg.lr_start,
+                cycle_momentum=has_momentum,
             )
         else:
             if self.n_steps_warmup > 0:
