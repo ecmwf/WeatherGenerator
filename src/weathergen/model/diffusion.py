@@ -99,7 +99,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         self.cur_token = tokens.detach()
 
-        return self.inference(fstep=fstep, num_steps=10, coords=coords)
+        # return self.inference(fstep=fstep, num_steps=10, coords=coords)
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
@@ -155,7 +155,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Sample pure noise (assuming single batch element for now)
         torch.manual_seed(42)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
-        # x = self.cur_token * 0.025 + x
+        # x = self.cur_token * 0.05 + x
 
         # --- Training-aligned sigma bounds ---
         # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
@@ -234,17 +234,11 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["denoised_std"].append(denoised.std().item())
                 track["x"].append(x_next.cpu())
                 if self.cur_token is not None:
-                    # flat_d = denoised.reshape(-1).float()
-                    # flat_t = self.cur_token.reshape(-1).float()
-                    # track["l2_to_target"].append((flat_d - flat_t).norm().item())
-                    # track["cosine_to_target"].append(
-                    #     torch.nn.functional.cosine_similarity(flat_d.unsqueeze(0), flat_t.unsqueeze(0)).item()
-                    # )
                     track["l2_to_target"].append((x_next - self.cur_token).norm().item())
         track["x"].append(self.cur_token.cpu())
 
         self._plot_sampling_diagnostics(track, num_steps)
-        # self._plot_sampling_process(track, num_steps)
+        self._plot_sampling_process(track, num_steps)
         return x_next
 
     def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
@@ -271,7 +265,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         axes[0].legend(fontsize=8)
         axes[0].grid(True, alpha=0.3)
 
-        # 3) Std of x_next and denoised estimate
+        # 2) Std of x_next and denoised estimate
         axes[1].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
         axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
         if self.cur_token is not None:
@@ -282,17 +276,10 @@ class DiffusionForecastEngine(torch.nn.Module):
         axes[1].grid(True, alpha=0.3)
 
         if has_target:
-            # 4) L2 error to target
+            # 3) L2 error to target
             axes[2].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
             axes[2].set_ylabel("L2 error to target")
             axes[2].grid(True, alpha=0.3)
-
-            # # 5) Cosine similarity to target
-            # axes[4].plot(steps, track["cosine_to_target"], "o-", markersize=3, color="tab:green")
-            # axes[4].set_ylabel("cosine sim to target")
-            # axes[4].set_ylim(-1.05, 1.05)
-            # axes[4].axhline(1.0, color="grey", ls="--", lw=0.8)
-            # axes[4].grid(True, alpha=0.3)
 
         axes[-1].set_xlabel("sampling step")
         fig.tight_layout()
@@ -306,6 +293,16 @@ class DiffusionForecastEngine(torch.nn.Module):
         logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
 
     def _plot_sampling_process(self, track: dict, num_steps: int) -> None:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
+        
+        out_dir = get_path_run(self.cf)
+        out_dir.mkdir(exist_ok=True, parents=True)
+        out_path_base = out_dir / "plots" / "validation" / "plots"
+        out_path_base.mkdir(exist_ok=True, parents=True)
+        
         vmin, vmax = track["x"][-1].min().item(), track["x"][-1].max().item()
         for s_idx, x in enumerate(track["x"]):
             fig, axes2 = plt.subplots(1, 2, figsize=(12, 5))
