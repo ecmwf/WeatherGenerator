@@ -432,15 +432,15 @@ def get_latent_output(batch, model_output):
                 if isinstance(lval, LatentState):
                     fields = {
                         "": lval.z_pre_norm,
-                        "patch_tokens": lval.patch_tokens,
                         "register_tokens": lval.register_tokens,
                         "class_token": lval.class_token,
                     }
                     for field_name, tensor in fields.items():
                         if tensor is not None:
+                            sample_tensor = tensor[i_sample]
                             output_name = lname if field_name == "" else f"{lname}_{field_name}"
                             per_sample[output_name] = (
-                                tensor[i_sample].detach().to(fp32).cpu().numpy()
+                                sample_tensor.detach().to(fp32).cpu().numpy()
                             )
                 else:
                     per_sample[lname] = lval[i_sample].detach().to(fp32).cpu().numpy()
