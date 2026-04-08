@@ -123,7 +123,7 @@ rho: 7
 p_mean: -1.2
 p_std: 1.2
 
-healpix_level: 3
+healpix_level: 5
 
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
@@ -154,8 +154,8 @@ norm_type: "LayerNorm"
 
 #####################################
 
-# streams_directory: "./config/streams/era5_1deg_diffusion_tiny/"  # z500 small
-streams_directory: "./config/streams/era5_1deg_forecasting/"  # multi-var small
+streams_directory: "./config/streams/era5_1deg_diffusion_tiny/"  # z500 small
+# streams_directory: "./config/streams/era5_1deg_forecasting/"  # multi-var small
 streams: ???
 
 # type of zarr_store
