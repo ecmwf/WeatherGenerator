@@ -28,7 +28,7 @@ import math
 
 import torch
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, get_path_run
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
@@ -99,7 +99,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         self.cur_token = tokens.detach()
 
-        # return self.inference(fstep=fstep, num_steps=10, coords=coords)
+        return self.inference(fstep=fstep, num_steps=15, coords=coords)
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
@@ -146,38 +146,56 @@ class DiffusionForecastEngine(torch.nn.Module):
     def inference(
         self,
         fstep: int,
-        num_steps: int = 30,
+        num_steps: int = 50,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
-        # Forward pass of the diffusion model during inference
+        # Forward pass of the diffusion model during inference (Heun sampler)
         # https://github.com/NVlabs/edm/blob/main/generate.py
 
-        # Sample noise (assuming single batch element for now)
-        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda") * 1.0
+        # Sample pure noise (assuming single batch element for now)
+        torch.manual_seed(42)
+        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+        x = self.cur_token * 1.0 + x * 0.1
 
-        # eta = torch.tensor([1.0], device="cuda").float() # 1.0 (good), 2.0 (okay), 2.2 (max), 2.5 (hard)
-        # sigma = (eta * self.p_std + self.p_mean).exp()
-        # print("sigma", sigma)
-        # n = torch.randn_like(x).to(device="cuda") * sigma
-        # x = self.cur_token + n
+        # --- Training-aligned sigma bounds ---
+        # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
+        # The network only learns to denoise reliably within the training distribution.
+        #   - sigma_max_eff: cap at 99.7th percentile = exp(p_mean + 3*p_std)
+        #     Beyond this, the denoiser is in untrained territory → garbage predictions
+        #     that poison the entire ODE trajectory.
+        #   - sigma_min_eff: floor at a level where the network still contributes.
+        #     With EDM preconditioning, c_skip = sigma_data^2/(sigma^2+sigma_data^2).
+        #     At sigma << sigma_data, c_skip → 1, meaning the output ≈ input (skip
+        #     connection dominates) and the network can no longer correct errors.
+        #     We stop at sigma_min = max(config value, sigma_data * 0.01), which gives
+        #     c_skip ≈ 0.9999 — still some network contribution, and avoids the
+        #     numerical instability of dividing by near-zero sigma in the ODE.
+        sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
+        sigma_max_eff = min(self.sigma_max, sigma_max_train)
+        sigma_min_eff = max(self.sigma_min, self.sigma_data * 0.01)
+        logger.info(
+            f"Inference sigma schedule: "
+            f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train 3σ={sigma_max_train:.4f}), "
+            f"sigma_min_eff={sigma_min_eff:.4f} (config={self.sigma_min}), "
+            f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
+        )
 
-        x = self.cur_token * 0.05 + x
-        # breakpoint()
-
-        
-        # return self.denoise(x=x, c=None, sigma=sigma, fstep=fstep)
-        # print("initial noise statistics")
-        # print("mean", x.mean(), "std", x.std(), "max", x.max(), "min", x.min())
-
-        # Time step discretization.
+        # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
         t_steps = (
-            self.sigma_max ** (1 / self.rho)
+            sigma_max_eff ** (1 / self.rho)
             + step_indices
             / (num_steps - 1)
-            * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
+            * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
         ) ** self.rho
         t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
+
+        # --- Per-step tracking for diagnostics ---
+        track = {
+            "sigma": [], "x_std": [], "denoised_std": [],
+            "l2_to_target": [], "cosine_to_target": [],
+            "c_skip": [], "x": [x.cpu()]
+        }
 
         # Main sampling loop.
         x_next = x * t_steps[0]
@@ -186,8 +204,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         ):  # 0, ..., N-1
             t_cur = torch.tensor([t_cur], device="cuda").float()
             t_next = torch.tensor([t_next], device="cuda").float()
-
-            print(i, t_cur.item())
 
             x_cur = x_next
 
@@ -199,7 +215,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_hat = t_cur
 
             # Euler step.
-            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep, coords=coords)  # c to be discussed
+            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep, coords=coords)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
@@ -209,7 +225,168 @@ class DiffusionForecastEngine(torch.nn.Module):
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
+            # --- Record diagnostics ---
+            with torch.no_grad():
+                s = t_cur.item()
+                track["sigma"].append(s)
+                track["c_skip"].append(self.sigma_data**2 / (s**2 + self.sigma_data**2))
+                track["x_std"].append(x_next.std().item())
+                track["denoised_std"].append(denoised.std().item())
+                track["x"].append(x_next.cpu())
+                if self.cur_token is not None:
+                    flat_d = denoised.reshape(-1).float()
+                    flat_t = self.cur_token.reshape(-1).float()
+                    track["l2_to_target"].append((flat_d - flat_t).norm().item())
+                    track["cosine_to_target"].append(
+                        torch.nn.functional.cosine_similarity(flat_d.unsqueeze(0), flat_t.unsqueeze(0)).item()
+                    )
+        track["x"].append(self.cur_token.cpu())
+
+        self._plot_sampling_diagnostics(track, num_steps)
         return x_next
+
+    def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
+        """Save a diagnostic plot of the sampling trajectory."""
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        steps = list(range(len(track["sigma"])))
+        has_target = len(track["l2_to_target"]) > 0
+        n_plots = 5 if has_target else 3
+
+        fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
+
+        # 1) Sigma schedule
+        axes[0].semilogy(steps, track["sigma"], "o-", markersize=3)
+        axes[0].set_ylabel("sigma (noise level)")
+        axes[0].set_title(
+            f"Sampling diagnostics  |  sigma_max_eff={track['sigma'][0]:.2f}, "
+            f"sigma_data={self.sigma_data}, steps={num_steps}"
+        )
+        axes[0].axhline(self.sigma_data, color="grey", ls="--", lw=0.8, label=f"sigma_data={self.sigma_data}")
+        axes[0].legend(fontsize=8)
+        axes[0].grid(True, alpha=0.3)
+
+        # 2) c_skip — skip connection weight (EDM preconditioning)
+        axes[1].plot(steps, track["c_skip"], "o-", markersize=3, color="tab:orange")
+        axes[1].set_ylabel("c_skip")
+        axes[1].set_title("c_skip = σ_data² / (σ² + σ_data²)  — 1.0 means output ≈ input (no correction)")
+        axes[1].axhline(0.5, color="grey", ls="--", lw=0.8, label="c_skip=0.5 (σ=σ_data)")
+        axes[1].set_ylim(-0.05, 1.05)
+        axes[1].legend(fontsize=8)
+        axes[1].grid(True, alpha=0.3)
+
+        # 3) Std of x_next and denoised estimate
+        axes[2].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
+        axes[2].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
+        if self.cur_token is not None:
+            target_std = self.cur_token.std().item()
+            axes[2].axhline(target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}")
+        axes[2].set_ylabel("std")
+        axes[2].legend(fontsize=8)
+        axes[2].grid(True, alpha=0.3)
+
+        if has_target:
+            # 4) L2 error to target
+            axes[3].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
+            axes[3].set_ylabel("L2 error to target")
+            axes[3].grid(True, alpha=0.3)
+
+            # 5) Cosine similarity to target
+            axes[4].plot(steps, track["cosine_to_target"], "o-", markersize=3, color="tab:green")
+            axes[4].set_ylabel("cosine sim to target")
+            axes[4].set_ylim(-1.05, 1.05)
+            axes[4].axhline(1.0, color="grey", ls="--", lw=0.8)
+            axes[4].grid(True, alpha=0.3)
+
+        axes[-1].set_xlabel("sampling step")
+        fig.tight_layout()
+
+        out_dir = get_path_run(self.cf)
+        out_dir.mkdir(exist_ok=True, parents=True)
+        out_path_base = out_dir / "plots" / "validation" / "plots"
+        out_path_base.mkdir(exist_ok=True, parents=True)
+        fig.savefig(out_path_base / "sampling_diagnostics.png", dpi=150)
+        plt.close(fig)
+        logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
+
+        vmin, vmax = track["x"][-1].min().item(), track["x"][-1].max().item()
+        for s_idx, x in enumerate(track["x"]):
+            fig, axes2 = plt.subplots(1, 2, figsize=(12, 5))
+
+            im0 = axes2[0].imshow(x[0].t().cpu(), aspect="auto", vmin=vmin, vmax=vmax, cmap="seismic")
+            plt.colorbar(im0, ax=axes2[0])
+            axes2[0].set_title(f"Sample at step {s_idx}")
+            axes2[0].set_xlabel("embedding dim")
+            axes2[0].set_ylabel("healpix cell")
+
+            diff = (x[0].cpu() - track["x"][-1][0].cpu()).t()
+            im1 = axes2[1].imshow(diff, aspect="auto", cmap="bwr")
+            plt.colorbar(im1, ax=axes2[1])
+            axes2[1].set_title("Difference to target")
+            axes2[1].set_xlabel("embedding dim")
+
+            fig.tight_layout()
+            plt.savefig(out_path_base / f"sample_{s_idx:05d}.png", dpi=100)
+            plt.close(fig)
+            logger.info(f"Saved sample visualization to {out_path_base / f'sample_{s_idx:05d}.png'}")
+
+
+    # # --- OLD inference (before training-aligned sigma & diagnostics) ---
+    # def inference(
+    #     self,
+    #     fstep: int,
+    #     num_steps: int = 30,
+    #     coords: torch.Tensor = None,
+    # ) -> torch.Tensor:
+    #     # Forward pass of the diffusion model during inference
+    #     # https://github.com/NVlabs/edm/blob/main/generate.py
+    #
+    #     # Sample noise (assuming single batch element for now)
+    #     torch.manual_seed(42)
+    #     x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda") * 1.0
+    #
+    #     x = self.cur_token * 0.0 + x
+    #
+    #     # Time step discretization.
+    #     step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
+    #     t_steps = (
+    #         self.sigma_max ** (1 / self.rho)
+    #         + step_indices
+    #         / (num_steps - 1)
+    #         * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
+    #     ) ** self.rho
+    #     t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
+    #
+    #     # Main sampling loop.
+    #     x_next = x * t_steps[0]
+    #     for i, (t_cur, t_next) in enumerate(
+    #         zip(t_steps[:-1], t_steps[1:], strict=False)
+    #     ):  # 0, ..., N-1
+    #         t_cur = torch.tensor([t_cur], device="cuda").float()
+    #         t_next = torch.tensor([t_next], device="cuda").float()
+    #
+    #         print(i, t_cur.item())
+    #
+    #         x_cur = x_next
+    #
+    #         x_hat = x_cur
+    #         t_hat = t_cur
+    #
+    #         # Euler step.
+    #         denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep, coords=coords)
+    #         d_cur = (x_hat - denoised) / t_hat
+    #         x_next = x_hat + (t_next - t_hat) * d_cur
+    #
+    #         # Apply 2nd order correction.
+    #         if i < num_steps - 1:
+    #             denoised = self.denoise(x=x_next, c=None, sigma=t_next, fstep=fstep, coords=coords)
+    #             d_prime = (x_next - denoised) / t_next
+    #             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+    #
+    #     return x_next
+    # # --- END OLD inference ---
 
 
 class Preconditioner:
