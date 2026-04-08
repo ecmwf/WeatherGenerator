@@ -227,7 +227,7 @@ validation_config:
   # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
   # Each value produces a separate validation pass with independently logged metrics.
   # validation_noise_levels: [0.3, 0.5, 0.75, 1.0, 1.5]
-  validation_noise_levels: [0.3, 1.5]
+  validation_noise_levels: [0.3, 1.5, 3.0]
 
   samples_per_mini_epoch: 1
   shuffle: True  # TODO: Set back to False
