@@ -14,17 +14,15 @@ import numpy as np
 import omegaconf as oc
 import seaborn as sns
 import xarray as xr
-from cartopy.io import DownloadWarning
 from astropy_healpix import HEALPix as HEALPixGrid
+from cartopy.io import DownloadWarning
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from PIL import Image
 from scipy.stats import wilcoxon
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plotting.plot_utils import (
-    DefaultMarkerSize,
-)
+from weathergen.evaluate.plotting.plot_utils import DefaultMarkerSize
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
