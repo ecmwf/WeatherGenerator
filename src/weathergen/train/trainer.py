@@ -21,7 +21,7 @@ from omegaconf import OmegaConf
 from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
-from weathergen.common.mutable_config import MutableConfig
+from weathergen.common.run_state import RunState
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
@@ -91,7 +91,7 @@ class Trainer(TrainerBase):
         """
         return self.world_size_original * batch_size_per_gpu
 
-    def init(self, cf: Config, mcf: MutableConfig, devices):
+    def init(self, cf: Config, runstate: RunState, devices):
         # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
@@ -106,7 +106,7 @@ class Trainer(TrainerBase):
             cf,
         )
         cf = self.cf
-        self.mcf = mcf
+        self.runstate = runstate
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
@@ -144,14 +144,14 @@ class Trainer(TrainerBase):
 
         # Get world_size of previous, to be continued run before
         # world_size gets overwritten by current setting during init_ddp()
-        if self.mcf.world_size_original:
-            self.world_size_original = mcf.world_size_original
-        elif self.mcf.world_size:
-            self.world_size_original = mcf.world_size
+        if self.runstate.world_size_original:
+            self.world_size_original = runstate.world_size_original
+        elif self.runstate.world_size:
+            self.world_size_original = runstate.world_size
         else:
             self.world_size_original = None
 
-        self.mcf.world_size_original = self.world_size_original
+        self.runstate.world_size_original = self.world_size_original
 
         self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 
@@ -177,25 +177,25 @@ class Trainer(TrainerBase):
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
-                self.cf, loss_cfg, self.dataset, self.model, self.device, self.mcf.with_ddp, batch_size
+                self.cf, loss_cfg, self.dataset, self.model, self.device, self.runstate.with_ddp, batch_size
             ).to_device(self.device)
 
         return target_and_aux_calculators
 
-    def inference(self, cf, mcf, devices, run_id_contd, mini_epoch_contd):
+    def inference(self, cf, runstate, devices, run_id_contd, mini_epoch_contd):
         # general initalization
-        self.init(cf, mcf, devices)
+        self.init(cf, runstate, devices)
 
         cf = self.cf
         device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{self.mcf.local_rank}")
+        self.device = torch.device(f"{device_type}:{self.runstate.local_rank}")
         self.ema_model = None
 
         # create data loader
         # only one needed since we only run the validation code path
         self.dataset = MultiStreamDataSampler(
             cf,
-            mcf,
+            runstate,
             self.test_cfg,
             stage=VAL,
         )
@@ -215,7 +215,7 @@ class Trainer(TrainerBase):
 
         self.model, self.model_params = init_model_and_shard(
             cf,
-            self.mcf,
+            self.runstate,
             self.dataset,
             run_id_contd,
             mini_epoch_contd,
@@ -238,20 +238,20 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(self, cf, mcf, devices, run_id_contd=None, mini_epoch_contd=None):
+    def run(self, cf, runstate, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
-        self.init(cf, mcf, devices)
+        self.init(cf, runstate, devices)
         cf = self.cf
 
         device_type = torch.accelerator.current_accelerator()
-        self.device = torch.device(f"{device_type}:{self.mcf.local_rank}")
+        self.device = torch.device(f"{device_type}:{self.runstate.local_rank}")
 
         # Update collapse monitor device
         self.collapse_monitor.device = self.device
 
         # create data loaders
-        self.dataset = MultiStreamDataSampler(cf, mcf, self.training_cfg, stage=TRAIN)
-        self.dataset_val = MultiStreamDataSampler(cf, mcf, self.validation_cfg, stage=VAL)
+        self.dataset = MultiStreamDataSampler(cf, runstate, self.training_cfg, stage=TRAIN)
+        self.dataset_val = MultiStreamDataSampler(cf, runstate, self.validation_cfg, stage=VAL)
 
         loader_params = {
             "batch_size": None,
@@ -266,7 +266,7 @@ class Trainer(TrainerBase):
 
         self.model, self.model_params = init_model_and_shard(
             cf,
-            self.mcf,
+            self.runstate,
             self.dataset,
             run_id_contd,
             mini_epoch_contd,
@@ -285,7 +285,7 @@ class Trainer(TrainerBase):
         if self.validate_with_ema:
             meta_ema_model, _ = init_model_and_shard(
                 cf,
-                self.mcf,
+                self.runstate,
                 self.dataset,
                 run_id_contd,
                 mini_epoch_contd,
@@ -298,7 +298,7 @@ class Trainer(TrainerBase):
                 meta_ema_model,
                 halflife_steps=validate_with_ema_cfg.get("ema_halflife_in_thousands", 1e-3),
                 rampup_ratio=validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
-                is_model_sharded=(self.mcf.with_ddp and cf.with_fsdp),
+                is_model_sharded=(self.runstate.with_ddp and cf.with_fsdp),
             )
 
         # get target_aux calculators for different loss terms
@@ -308,7 +308,7 @@ class Trainer(TrainerBase):
         # if with_fsdp then parameter count is unreliable
         if is_root():
             # ddp-wrapped model does not expose this function
-            if not self.mcf.with_ddp:
+            if not self.runstate.with_ddp:
                 self.model.print_num_parameters()
 
         # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
@@ -339,7 +339,7 @@ class Trainer(TrainerBase):
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             self.batch_size_per_gpu,
-            self.mcf.world_size,
+            self.runstate.world_size,
             cf.general.istep,
             lr_steps,
             self.training_cfg.learning_rate_scheduling,
@@ -441,7 +441,7 @@ class Trainer(TrainerBase):
             batch.to_device(self.device)
 
             with torch.autocast(
-                device_type=f"cuda:{self.mcf.local_rank}",
+                device_type=f"cuda:{self.runstate.local_rank}",
                 dtype=self.mixed_precision_dtype,
                 enabled=cf.with_mixed_precision,
             ):
@@ -563,7 +563,7 @@ class Trainer(TrainerBase):
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.mcf.with_ddp
+                total=len(self.data_loader_validation), disable=self.runstate.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
@@ -574,7 +574,7 @@ class Trainer(TrainerBase):
 
                     # evaluate model
                     with torch.autocast(
-                        device_type=f"cuda:{self.mcf.local_rank}",
+                        device_type=f"cuda:{self.runstate.local_rank}",
                         dtype=self.mixed_precision_dtype,
                         enabled=cf.with_mixed_precision,
                     ):
@@ -641,7 +641,7 @@ class Trainer(TrainerBase):
         maybe_sharded_sd = (
             self.model.state_dict() if self.ema_model is None else self.ema_model.state_dict()
         )
-        if self.mcf.with_ddp and self.cf.with_fsdp:
+        if self.runstate.with_ddp and self.cf.with_fsdp:
             cpu_state_dict = {}
             for param_name, sharded_param in maybe_sharded_sd.items():
                 full_param = sharded_param.full_tensor()

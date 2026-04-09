@@ -19,7 +19,7 @@ import time
 import traceback
 from pathlib import Path
 
-from weathergen.common.mutable_config import MutableConfig
+from weathergen.common.run_state import RunState
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
@@ -98,23 +98,23 @@ def run_inference(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    mcf = MutableConfig()
+    runstate = RunState()
     devices = Trainer.init_torch()
-    cf, mcf = Trainer.init_ddp(cf, mcf)
+    cf, runstate = Trainer.init_ddp(cf, runstate)
 
     init_loggers(cf.general.run_id)
 
-    logger.info(f"DDP initialization: rank={mcf.rank}, world_size={mcf.world_size}")
+    logger.info(f"DDP initialization: rank={runstate.rank}, world_size={runstate.world_size}")
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
     trainer = Trainer(cf.train_logging)
     try:
-        trainer.inference(cf, mcf, devices, args.from_run_id, args.mini_epoch)
+        trainer.inference(cf, runstate, devices, args.from_run_id, args.mini_epoch)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if mcf.world_size == 1:
+        if runstate.world_size == 1:
             pdb.post_mortem(tb)
 
 
@@ -139,10 +139,10 @@ def run_continue(args):
     
 
 
-    mcf = MutableConfig()
+    runstate = RunState()
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
-    cf, mcf = Trainer.init_ddp(cf, mcf)
+    cf, runstate = Trainer.init_ddp(cf, runstate)
 
     init_loggers(cf.general.run_id)
 
@@ -152,11 +152,11 @@ def run_continue(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, mcf, devices, args.from_run_id, args.mini_epoch)
+        trainer.run(cf, runstate, devices, args.from_run_id, args.mini_epoch)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if mcf.world_size == 1:
+        if runstate.world_size == 1:
             pdb.post_mortem(tb)
 
 
@@ -174,17 +174,17 @@ def run_train(args):
     )
     cf = config.set_run_id(cf, args.run_id, False)
 
-    mcf = MutableConfig()
+    runstate = RunState()
     cf.data_loading.rng_seed = int(time.time())
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
-    cf, mcf = Trainer.init_ddp(cf, mcf)
+    cf, runstate = Trainer.init_ddp(cf, runstate)
 
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
     init_loggers(cf.general.run_id)
 
-    logger.info(f"DDP initialization: rank={mcf.rank}, world_size={mcf.world_size}")
+    logger.info(f"DDP initialization: rank={runstate.rank}, world_size={runstate.world_size}")
 
     cf.streams = config.load_streams(Path(cf.streams_directory))
 
@@ -194,11 +194,11 @@ def run_train(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, mcf, devices)
+        trainer.run(cf, runstate, devices)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if mcf.world_size == 1:
+        if runstate.world_size == 1:
             pdb.post_mortem(tb)
 
 

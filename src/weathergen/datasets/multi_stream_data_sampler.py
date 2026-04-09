@@ -13,7 +13,7 @@ import pathlib
 import numpy as np
 import torch
 
-from weathergen.common.mutable_config import MutableConfig
+from weathergen.common.run_state import RunState
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
@@ -81,7 +81,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def __init__(
         self,
         cf: Config,
-        mcf: MutableConfig,
+        runstate: RunState,
         mode_cfg: dict,
         stage: Stage,
     ):
@@ -91,8 +91,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self._stage = stage
 
         self.streams = cf.streams
-        self.rank = mcf.rank
-        self.world_size = mcf.world_size
+        self.rank = runstate.rank
+        self.world_size = runstate.world_size
 
         self.healpix_level: int = cf.healpix_level
         self.num_healpix_cells: int = 12 * 4**self.healpix_level
@@ -221,7 +221,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.len = self.samples_per_mini_epoch
 
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((self.len // mcf.world_size) // self.batch_size) * self.batch_size
+        len_chunk = ((self.len // self.world_size) // self.batch_size) * self.batch_size
         self.len = min(self.len, len_chunk)
 
         n_duplicates = self.len - perms_len

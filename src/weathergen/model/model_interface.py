@@ -42,7 +42,7 @@ type TrainingMode = str
 
 def init_model_and_shard(
     cf,
-    mcf,
+    runstate,
     dataset,
     run_id_contd,
     mini_epoch_contd,
@@ -51,7 +51,7 @@ def init_model_and_shard(
     with_fsdp,
     overrides={},
 ):
-    model_creation_device = "meta" if mcf.with_ddp and with_fsdp else "cuda"
+    model_creation_device = "meta" if runstate.with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
@@ -62,7 +62,7 @@ def init_model_and_shard(
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
 
-    if mcf.with_ddp and not with_fsdp:
+    if runstate.with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
         model = torch.nn.parallel.DistributedDataParallel(
             model,
@@ -72,7 +72,7 @@ def init_model_and_shard(
             bucket_cap_mb=512,
         )
 
-    elif mcf.with_ddp and with_fsdp:
+    elif runstate.with_ddp and with_fsdp:
         # with DDP *and() FSDP
         fsdp_kwargs = {
             "mp_policy": (
@@ -128,7 +128,7 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
-    if mcf.with_ddp and with_fsdp:
+    if runstate.with_ddp and with_fsdp:
         fully_shard(model)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
@@ -146,15 +146,15 @@ def init_model_and_shard(
     if run_id_contd is not None:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
-        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd, mcf.with_ddp)
+        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd, runstate.with_ddp)
     elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
         mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
             logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
-        model = load_model(cf, model, device, run_id, mini_epoch, mcf.with_ddp)
+        model = load_model(cf, model, device, run_id, mini_epoch, runstate.with_ddp)
     else:
-        if mcf.with_ddp and with_fsdp:
+        if runstate.with_ddp and with_fsdp:
             model.to_empty(device="cuda")
             if with_fsdp:
                 model.reset_parameters()
@@ -162,7 +162,7 @@ def init_model_and_shard(
     # model params
     model_params = ModelParams(cf).create(cf)
     model_params.reset_parameters(cf)
-    model_params = model_params.to(f"cuda:{mcf.local_rank}")
+    model_params = model_params.to(f"cuda:{runstate.local_rank}")
 
     return model, model_params
 
