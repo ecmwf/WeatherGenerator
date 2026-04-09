@@ -211,6 +211,9 @@ class WeatherGenReader(Reader):
                         local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(
                             stream, {}
                         )[self.run_id] = score
+                    else:
+                        # JSON exists but doesn't cover the requested data — recompute.
+                        missing_metrics.setdefault(region, {}).update({metric: parameters})
 
         recomputable_missing_metrics = self.get_recomputable_metrics(missing_metrics)
         return local_scores, recomputable_missing_metrics
