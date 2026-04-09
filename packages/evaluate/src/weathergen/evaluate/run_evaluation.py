@@ -134,6 +134,25 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
         action="store_true",
         help="(optional) Upload scores to MLFlow.",
     )
+    parser.add_argument(
+        "--options",
+        nargs="+",
+        default=[],
+        help=(
+            "Overwrite individual config options."
+            " Individual items should be of the form: parent_obj.nested_obj=value."
+            " NOTE: cannot be used for run_ids (use --run-ids instead)."
+        ),
+    )
+    parser.add_argument(
+        "--run-ids",
+        nargs="+",
+        default=None,
+        help=(
+            "Filter run_ids from the config to only these."
+            " E.g. --run-ids wu4wy9os fy6fgscn so67dku1"
+        ),
+    )
 
     args = parser.parse_args(argl)
     if args.config:
@@ -155,6 +174,28 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
 
     cf = OmegaConf.load(config)
     assert isinstance(cf, DictConfig)
+
+    # Disable struct flag so that --options and --run-ids can freely modify keys.
+    OmegaConf.set_struct(cf, False)
+
+    if args.options:
+        # Filter out any run_ids= items — those must use --run-ids instead.
+        cli_items = [item for item in args.options if not item.startswith("run_ids=")]
+        if len(cli_items) != len(args.options):
+            _logger.warning(
+                "run_ids= in --options is not supported (it's a dict, not a list). "
+                "Use --run-ids instead. Ignoring run_ids= items."
+            )
+        if cli_items:
+            cli_overwrite = OmegaConf.from_cli(cli_items)
+            cf = OmegaConf.merge(cf, cli_overwrite)
+            _logger.info(f"Applied --options overwrites: {cli_items}")
+
+    if args.run_ids:
+        existing = cf.get("run_ids", {})
+        cf.run_ids = {k: existing.get(k, {}) for k in args.run_ids}
+        _logger.info(f"Overwritten run_ids to: {args.run_ids}")
+
     evaluate_from_config(cf, mlflow_client, log_queue)
 
 
@@ -240,19 +281,20 @@ def _process_stream(
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
+    if recomputable_metrics:
+        metrics_to_compute = recomputable_metrics
+        regions_to_compute = list(set(recomputable_metrics.keys()))
+    elif plot_score_maps and type_ == "zarr":
+        metrics_to_compute = {r: metrics for r in regions}
+        regions_to_compute = regions
+    else:
+        return run_id, stream, scores_dict
 
-    if recomputable_metrics or (plot_score_maps and type_ == "zarr"):
-        regions_to_compute = (
-            list(set(recomputable_metrics.keys())) if recomputable_metrics else regions
-        )
-        metrics_to_compute = recomputable_metrics if recomputable_metrics else metrics
-
-        stream_computed_scores = calc_scores_per_stream(
-            reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
-        )
-        metric_list_to_json(reader, stream, stream_computed_scores, regions)
-        scores_dict = merge(stream_loaded_scores, stream_computed_scores)
-
+    stream_computed_scores = calc_scores_per_stream(
+        reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
+    )
+    metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
+    scores_dict = merge(stream_loaded_scores, stream_computed_scores)
     return run_id, stream, scores_dict
 
 
