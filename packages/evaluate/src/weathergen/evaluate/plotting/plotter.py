@@ -2,6 +2,8 @@ import datetime
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import warnings
 from pathlib import Path
 
 import cartopy
@@ -13,15 +15,17 @@ import omegaconf as oc
 import seaborn as sns
 import xarray as xr
 from astropy_healpix import HEALPix as HEALPixGrid
+from cartopy.io import DownloadWarning
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from scipy.stats import wilcoxon
 
 from weathergen.common.config import _load_private_conf
-from weathergen.evaluate.plotting.plot_utils import (
-    DefaultMarkerSize,
-)
+from weathergen.evaluate.plotting.plot_utils import DefaultMarkerSize
 from weathergen.evaluate.utils.regions import RegionBoundingBox
+
+_logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
 
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
@@ -29,12 +33,24 @@ cartopy.config["data_dir"] = str(work_dir)
 cartopy.config["pre_existing_data_dir"] = str(work_dir)
 os.environ["CARTOPY_DATA_DIR"] = str(work_dir)
 
+# Route Cartopy DownloadWarnings through the logging system so they are visible in logs.
+logging.captureWarnings(True)
+warnings.filterwarnings("always", category=DownloadWarning)
+
+
+def _download_cartopy_off(enabled: bool) -> None:
+    """Enable/disable blocking Cartopy downloads by elevating DownloadWarning to error."""
+    if enabled:
+        warnings.filterwarnings("error", category=DownloadWarning)
+        _logger.info(
+            "Auto-downloads are blocked for cartopy; only local cartopy data will be used."
+        )
+    else:
+        warnings.filterwarnings("default", category=DownloadWarning)
+
 np.seterr(divide="ignore", invalid="ignore")
 
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
-
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
 
 _logger.debug(f"Taking cartopy paths from {work_dir}")
 
@@ -72,6 +88,7 @@ class Plotter:
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
         self.regions = plotter_cfg.get("regions")
+        _download_cartopy_off(enabled=True)
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately
@@ -492,7 +509,10 @@ class Plotter:
             proj = ccrs.Robinson()
 
         ax = fig.add_subplot(1, 1, 1, projection=proj)
-        ax.coastlines()
+        try:
+            ax.coastlines()
+        except Exception:
+            _logger.warning("Could not add coastlines to plot; continuing without them.")
 
         data = data.squeeze()
 
