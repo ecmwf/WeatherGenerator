@@ -19,7 +19,6 @@
 #    10u:
 #      vmin: -40
 #      vmax: 40
-#  cartopy_offline: true # set true to force local Cartopy data only (no auto-download)
 
 evaluation:
   metrics  : ["rmse", "mae"]

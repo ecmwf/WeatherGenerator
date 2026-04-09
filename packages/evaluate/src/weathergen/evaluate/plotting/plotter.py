@@ -39,7 +39,7 @@ logging.captureWarnings(True)
 warnings.filterwarnings("always", category=DownloadWarning)
 
 
-def _set_cartopy_offline_mode(enabled: bool) -> None:
+def _download_cartopy_off(enabled: bool) -> None:
     """Enable/disable blocking Cartopy downloads by elevating DownloadWarning to error."""
     if enabled:
         warnings.filterwarnings("error", category=DownloadWarning)
@@ -90,8 +90,7 @@ class Plotter:
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
         self.regions = plotter_cfg.get("regions")
-        self.cartopy_offline = bool(plotter_cfg.get("cartopy_offline", False))
-        _set_cartopy_offline_mode(self.cartopy_offline)
+        _download_cartopy_off(enabled=True)
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
         )  # True if plots are created for each valid time separately

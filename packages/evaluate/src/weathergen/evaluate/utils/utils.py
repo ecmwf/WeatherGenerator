@@ -348,7 +348,6 @@ def _plot_score_maps_per_stream(
             "image_format": cfg.get("image_format", "png"),
             "dpi_val": cfg.get("dpi_val", 300),
             "fig_size": cfg.get("fig_size", (8, 10)),
-            "cartopy_offline": cfg.get("cartopy_offline", True),
         },
         reader.runplot_dir,
         stream,
@@ -430,7 +429,6 @@ def plot_data(reader: Reader, stream: str, global_plotting_opts: dict) -> None:
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
         "fps": global_plotting_opts.get("fps", 2),
         "regions": global_plotting_opts.get("regions", ["global"]),
-        "cartopy_offline": global_plotting_opts.get("cartopy_offline", True),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
         | plot_settings.get("plot_subtimesteps", False),
     }
