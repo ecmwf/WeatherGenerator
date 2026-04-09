@@ -28,34 +28,15 @@ from weathergen.evaluate.utils.regions import RegionBoundingBox
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
-_CARTOPY_WARNING_HOOK_INSTALLED = False
-_ORIGINAL_SHOWWARNING = warnings.showwarning
-
 work_dir = Path(_load_private_conf(None)["path_shared_working_dir"]) / "assets/cartopy"
 
 cartopy.config["data_dir"] = str(work_dir)
 cartopy.config["pre_existing_data_dir"] = str(work_dir)
 os.environ["CARTOPY_DATA_DIR"] = str(work_dir)
 
-def _install_cartopy_download_warning_hook() -> None:
-    """Log Cartopy download attempts when Cartopy emits DownloadWarning."""
-
-    global _CARTOPY_WARNING_HOOK_INSTALLED
-    if _CARTOPY_WARNING_HOOK_INSTALLED:
-        return
-
-    def _showwarning(message, category, filename, lineno, file=None, line=None):
-        if issubclass(category, DownloadWarning):
-            msg = (
-                "Cartopy attempted to download external map data. "
-                f"Details: {message}"
-            )
-            _logger.warning(msg)
-            return
-        _ORIGINAL_SHOWWARNING(message, category, filename, lineno, file=file, line=line)
-
-    warnings.showwarning = _showwarning
-    _CARTOPY_WARNING_HOOK_INSTALLED = True
+# Route Cartopy DownloadWarnings through the logging system so they are visible in logs.
+logging.captureWarnings(True)
+warnings.filterwarnings("always", category=DownloadWarning)
 
 
 def _set_cartopy_offline_mode(enabled: bool) -> None:
@@ -68,8 +49,6 @@ def _set_cartopy_offline_mode(enabled: bool) -> None:
         )
     else:
         warnings.filterwarnings("default", category=DownloadWarning)
-
-_install_cartopy_download_warning_hook()
 
 np.seterr(divide="ignore", invalid="ignore")
 
