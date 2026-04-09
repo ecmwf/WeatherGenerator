@@ -21,7 +21,7 @@ stages:
 
   - name: stage2.2
     command: train-continue
-    config: ./config/config_jepa_forecast_finetuning.yml
+    config: ./config/config_jepa_forecasting_finetuning.yml
     from: stage1
 
   - name: inference.1
