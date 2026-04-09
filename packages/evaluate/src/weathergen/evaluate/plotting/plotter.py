@@ -1,9 +1,7 @@
 import datetime
-import glob
 import logging
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import cartopy
@@ -17,7 +15,7 @@ import xarray as xr
 from astropy_healpix import HEALPix as HEALPixGrid
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
-from PIL import Image
+
 from scipy.stats import wilcoxon
 from tqdm import tqdm
 
@@ -598,74 +596,16 @@ class Plotter:
         return lc
 
     def animation(self, samples, fsteps, variables, select, tag) -> list[str]:
+        """Return the task descriptors for building GIF animations.
+
+        .. deprecated::
+            Parallel dispatch has moved to
+            :func:`~weathergen.evaluate.plotting.plot_orchestration._dispatch_animations`.
+            This thin wrapper is kept only for backwards compatibility.
         """
-        Plot 2D animations for a dataset
+        from weathergen.evaluate.plotting.plot_orchestration import _dispatch_animations
 
-        Parameters
-        ----------
-        samples: list
-            List of the samples to be plotted
-        fsteps: list
-            List of the forecast steps to be plotted
-        variables: list
-            List of variables to be plotted
-        select: dict
-            Selection to be applied to the DataArray
-        tag: str
-            Any tag you want to add to the plot
-
-        Returns
-        -------
-            List of plot names for the saved animations.
-
-        """
-
-        self.update_data_selection(select)
-        map_output_dir = self.get_map_output_dir(tag)
-
-        # Convert FPS to duration in milliseconds
-        duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
-
-        # Build one task per (region, sample, variable) — each GIF is independent.
-        tasks = [
-            {
-                "map_output_dir": map_output_dir,
-                "run_id": self.run_id,
-                "tag": tag,
-                "stream": self.stream,
-                "region": region,
-                "var": var,
-                "sa": sa,
-                "fsteps": list(fsteps),
-                "image_format": self.image_format,
-                "duration_ms": duration_ms,
-            }
-            for region in self.regions
-            for sa in samples
-            for var in variables
-        ]
-
-        n_workers = min(8, len(tasks))
-        all_image_paths: list[str] = []
-
-        if n_workers > 1 and len(tasks) > 1:
-            with ThreadPoolExecutor(max_workers=n_workers) as executor:
-                futures = {executor.submit(_build_single_animation, **t): t for t in tasks}
-                for future in tqdm(
-                    as_completed(futures),
-                    total=len(futures),
-                    desc=f"Creating animations {self.stream} {tag}",
-                ):
-                    result = future.result()
-                    if result:
-                        all_image_paths.extend(result)
-        else:
-            for t in tqdm(tasks, desc=f"Creating animations {self.stream} {tag}"):
-                result = _build_single_animation(**t)
-                if result:
-                    all_image_paths.extend(result)
-
-        return all_image_paths
+        return _dispatch_animations(self, samples, fsteps, variables, select, tag)
 
     def get_map_output_dir(self, tag):
         return self.out_plot_basedir / self.stream / "maps" / tag
@@ -685,66 +625,6 @@ class Plotter:
                 title += f" ({format_datetime(valid_time_start)})"
 
         return title
-
-
-def _build_single_animation(
-    map_output_dir: Path,
-    run_id: str,
-    tag: str,
-    stream: str,
-    region: str,
-    var: str,
-    sa: object,
-    fsteps: list,
-    image_format: str,
-    duration_ms: int,
-) -> list[str]:
-    """Build one GIF for a single (region, sample, variable) combination.
-
-    Module-level so it can be called from a ThreadPoolExecutor without pickling
-    issues.  All work is I/O + Pillow — no matplotlib state involved.
-
-    Returns the list of source frame paths that were assembled into the GIF
-    (empty list if no frames were found).
-    """
-    image_paths: list[str] = []
-    for fstep in fsteps:
-        parts = [
-            "map",
-            run_id,
-            tag,
-            str(sa),
-            "*",
-            stream,
-            region,
-            var,
-            "fstep",
-            str(fstep).zfill(3),
-        ]
-        name = "_".join(filter(None, parts))
-        fname = f"{map_output_dir.joinpath(name)}.{image_format}"
-        image_paths += glob.glob(fname)
-
-    if not image_paths:
-        _logger.warning(f"No images found for animation {var} sample {sa} region {region}")
-        return []
-
-    image_paths = sorted(image_paths)
-    images = [Image.open(p) for p in image_paths]
-    out_path = f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.gif"
-    images[0].save(
-        out_path,
-        save_all=True,
-        append_images=images[1:],
-        duration=duration_ms,
-        loop=0,
-    )
-    # Close frames to free file handles
-    for img in images:
-        img.close()
-
-    _logger.debug(f"Saved animation → {out_path}")
-    return image_paths
 
 
 class LinePlots:
@@ -1553,9 +1433,9 @@ class ScoreCards:
         for run_index in range(1, n_runs):
             skill_model = 0.0
             data0_channels = [str(x) for x in np.atleast_1d(data[0].channel.values)]
-            datai_channels = [str(x) for x in np.atleast_1d(data[run_index].channel.values)]
+            data_idx_channels = [str(x) for x in np.atleast_1d(data[run_index].channel.values)]
             for var_index, var in enumerate(common_channels):
-                if var not in data0_channels or var not in datai_channels:
+                if var not in data0_channels or var not in data_idx_channels:
                     continue
                 diff, avg_diff, avg_skill = self.compare_models(
                     data, baseline, run_index, var, metric
@@ -1646,9 +1526,9 @@ class ScoreCards:
         common_channels = []
         for run_index in range(1, n_runs):
             data0_channels = [str(x) for x in np.atleast_1d(data[0].channel.values)]
-            datai_channels = [str(x) for x in np.atleast_1d(data[run_index].channel.values)]
+            data_idx_channels = [str(x) for x in np.atleast_1d(data[run_index].channel.values)]
             for var in channels:
-                if var not in data0_channels or var not in datai_channels:
+                if var not in data0_channels or var not in data_idx_channels:
                     continue
                 common_channels.append(var)
         common_channels = list(set(common_channels))

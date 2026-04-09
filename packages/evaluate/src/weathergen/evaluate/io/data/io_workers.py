@@ -18,117 +18,10 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import xarray as xr
 import zarr
 from numpy.typing import NDArray
 
-from weathergen.common.io import zarrio_reader
-
 _logger = logging.getLogger(__name__)
-
-
-def _process_sample_result(
-    out,
-    sample: int,
-    fstep: int,
-    ensemble: list[str],
-    is_gridded: bool,
-) -> tuple[int, int, xr.DataArray, xr.DataArray, list | None] | None:
-    """Post-process a single ZarrIO.get_data() result.
-
-    Shared logic used by both _load_single_sample (shared context) and
-    _load_single_sample_own_context (per-thread context).
-    """
-    if out.target is None or out.prediction is None:
-        return None
-
-    target = out.target.as_xarray()
-    pred = out.prediction.as_xarray()
-
-    if len(target.ipoint) == 0:
-        return None
-
-    if ensemble == ["mean"]:
-        pred = pred.mean("ens", keepdims=True)
-    else:
-        pred = pred.sel(ens=ensemble)
-
-    pred = pred.squeeze()
-    target = target.squeeze()
-
-    # Force materialisation inside this thread — .load() converts dask→numpy
-    # while keeping xarray metadata (dims, coords, attrs).  This is the key
-    # difference vs .persist() which only schedules the compute and can end
-    # up serialising I/O on the main-thread dask scheduler.
-    target = target.load()
-    pred = pred.load()
-
-    valid_times = None
-    if is_gridded:
-        vt_list = np.unique(target.valid_time.values).tolist()
-        if len(vt_list) > 1:
-            valid_times = vt_list
-
-    return fstep, sample, target, pred, valid_times
-
-
-def _load_single_sample(
-    zio,
-    sample: int,
-    stream: str,
-    fstep: int,
-    ensemble: list[str],
-    is_gridded: bool,
-) -> tuple[int, int, xr.DataArray, xr.DataArray, list | None] | None:
-    """
-    Load and preprocess one (sample, fstep) from a *shared* ZarrIO context.
-
-    Thread-safe for LocalStore backends. The zio object's data_root
-    (a zarr.Group) supports concurrent read-only path lookups.
-    NOT safe for ZipStore — use _load_single_sample_own_context instead.
-
-    Returns (fstep, sample_idx, target, prediction, valid_times) or None
-    if empty/missing.
-    """
-    out = zio.get_data(sample, stream, fstep)
-    return _process_sample_result(out, sample, fstep, ensemble, is_gridded)
-
-
-def _load_single_sample_own_context(
-    fname_zarr: Path,
-    sample: int,
-    stream: str,
-    fstep: int,
-    ensemble: list[str],
-    is_gridded: bool,
-) -> tuple[int, int, xr.DataArray, xr.DataArray, list | None] | None:
-    """
-    Load and preprocess one (sample, fstep) using the **worker-global** ZarrIO.
-
-    Used with ProcessPoolExecutor for ZipStore backends.  Each worker
-    process keeps a single persistent ZarrIO handle (initialised by
-    ``_init_worker_zio``) so the zip central directory is parsed only
-    once per process, not once per item.
-
-    Returns (fstep, sample_idx, target, prediction, valid_times) or None
-    if empty/missing.
-    """
-    global _worker_zio  # noqa: PLW0602
-    if _worker_zio is None:
-        # Lazy open — should not normally happen if initializer ran
-        _worker_zio = zarrio_reader(fname_zarr).__enter__()
-    out = _worker_zio.get_data(sample, stream, fstep)
-    return _process_sample_result(out, sample, fstep, ensemble, is_gridded)
-
-
-# Worker-global ZarrIO handle for ProcessPoolExecutor workers
-_worker_zio = None
-
-
-def _init_worker_zio(fname_zarr: Path) -> None:
-    """ProcessPoolExecutor initializer: open a persistent ZarrIO per worker."""
-    global _worker_zio  # noqa: PLW0603
-    _worker_zio = zarrio_reader(fname_zarr).__enter__()
 
 
 def _compute_early_channel_selection(
@@ -136,7 +29,7 @@ def _compute_early_channel_selection(
     requested_channels: list[str],
     stream_cfg: dict,
 ) -> tuple[list[int] | None, list[str]]:
-    """Compute channel indices for early selection in _read_sample_raw.
+    """Compute channel indices for early selection in _read_sample.
 
     When the stream does NOT use derived channels, we can select only the
     requested channels at the numpy level inside each worker, avoiding
@@ -184,7 +77,7 @@ def _compute_early_channel_selection(
     return idxs, effective
 
 
-def _read_sample_raw(
+def _read_sample(
     zarr_path: str,
     sample: int,
     stream: str,

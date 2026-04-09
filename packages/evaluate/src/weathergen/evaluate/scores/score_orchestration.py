@@ -7,16 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Score computation helpers: per-fstep scoring, stream aggregation, and JSON output."""
+"""Score orchestration: per-fstep scoring, stream aggregation, and JSON output."""
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import xarray as xr
+from joblib import delayed
 from tqdm import tqdm
 
+from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, resolve_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import scalar_coord_to_dim
@@ -217,65 +218,23 @@ def calc_scores_per_stream(
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
             fstep_tasks.append((fstep, tars_fs, preds_fs, preds_next, tars_next, climatology))
 
-        num_scoring_threads = int(reader.eval_cfg.get("num_scoring_threads", 12))
-        effective_threads = min(num_scoring_threads, len(fstep_tasks))
-
-        if effective_threads > 1 and len(fstep_tasks) > 2:
-            with ThreadPoolExecutor(max_workers=effective_threads) as executor:
-                futures = {
-                    executor.submit(
-                        _score_single_fstep,
-                        fstep,
-                        tars_fs,
-                        preds_fs,
-                        preds_next,
-                        tars_next,
-                        climatology,
-                        bbox,
-                        metrics,
-                        group_by_coord,
-                    ): fstep
-                    for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks
-                }
-                fstep_results = []
-                for i, future in enumerate(as_completed(futures), 1):
-                    fs = futures[future]
-                    result = future.result()
-                    if result is not None:
-                        fstep_results.append(result)
-                    _logger.info(
-                        f"RUN {reader.run_id} - {stream}: Scored fstep {fs} for region"
-                        f" {region} ({i}/{len(fstep_tasks)})."
-                    )
-        else:
-            fstep_results = []
-            for i, (fstep, tars_fs, preds_fs, preds_next, tars_next, climatology) in enumerate(
-                tqdm(
-                    fstep_tasks,
-                    desc=(
-                        f"Computing scores for {reader.run_id}"
-                        f" - stream {stream} and region {region}"
-                    ),
-                ),
-                1,
-            ):
-                result = _score_single_fstep(
-                    fstep,
-                    tars_fs,
-                    preds_fs,
-                    preds_next,
-                    tars_next,
-                    climatology,
-                    bbox,
-                    metrics,
-                    group_by_coord,
-                )
-                if result is not None:
-                    fstep_results.append(result)
-                _logger.info(
-                    f"RUN {reader.run_id} - {stream}: Scored fstep {fstep} for region"
-                    f" {region} ({i}/{len(fstep_tasks)})."
-                )
+        calls = [
+            delayed(_score_single_fstep)(
+                fstep, tars_fs, preds_fs, preds_next, tars_next, climatology,
+                bbox, metrics, group_by_coord,
+            )
+            for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks
+        ]
+        n_workers = resolve_num_workers(
+            int(reader.eval_cfg.get("num_scoring_threads", 0))
+        )
+        all_results = dispatch_parallel(
+            calls,
+            n_workers=n_workers,
+            backend="threading",
+            desc=f"Scoring {reader.run_id} - {stream} {region}",
+        )
+        fstep_results = [r for r in all_results if r is not None]
 
         fstep_results.sort(key=lambda r: r[0])
 

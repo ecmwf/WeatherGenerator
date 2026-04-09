@@ -12,10 +12,8 @@
 # Standard library
 import argparse
 import logging
-import multiprocessing as mp
 import sys
 from collections import defaultdict
-from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
 # Third-party
@@ -36,8 +34,8 @@ from weathergen.evaluate.io.wegen_reader import (
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
-from weathergen.evaluate.utils.plotting import plot_data, plot_score_maps_per_stream, plot_summary
-from weathergen.evaluate.utils.scoring import calc_scores_per_stream, metric_list_to_json
+from weathergen.evaluate.plotting.plot_orchestration import plot_data, plot_score_maps_per_stream, plot_summary
+from weathergen.evaluate.scores.score_orchestration import calc_scores_per_stream, metric_list_to_json
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
     get_or_create_mlflow_parent_run,
@@ -51,60 +49,15 @@ _logger = logging.getLogger(__name__)
 _platform_env = get_platform_env()
 
 
-def setup_main_logger(log_file: str | None, log_queue: mp.Queue) -> QueueListener:
-    """Set up main process logger with QueueListener
-
-    Parameters
-    ----------
-        log_file: str
-            Name of
-    """
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
-    )
-
-    handlers: list[logging.Handler] = [console_handler]
-    if log_file:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
-        )
-        handlers.append(file_handler)
-
-    listener = QueueListener(log_queue, *handlers)
-    listener.start()
-    return listener
-
-
-def setup_worker_logger(log_queue: mp.Queue) -> logging.Logger:
-    """"""
-    qh = QueueHandler(log_queue)
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.handlers.clear()
-    logger.addHandler(qh)
-    return logger
-
-
 #################################################################
 
 
 def evaluate() -> None:
     """entry point for evaluation script."""
-    # By default, arguments from the command line are read.
-    log_queue: mp.Queue = mp.Queue()
-    listener = setup_main_logger("evaluation.log", log_queue)
-    try:
-        evaluate_from_args(sys.argv[1:], log_queue)
-    finally:
-        listener.stop()
-        log_queue.close()
-        log_queue.join_thread()
+    evaluate_from_args(sys.argv[1:])
 
 
-def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
+def evaluate_from_args(argl: list[str]) -> None:
     """
     Wrapper of evaluate_from_config.
 
@@ -190,7 +143,7 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
         cf.run_ids = {k: existing.get(k, {}) for k in args.run_ids}
         _logger.info(f"Overwritten run_ids to: {args.run_ids}")
 
-    evaluate_from_config(cf, mlflow_client, log_queue)
+    evaluate_from_config(cf, mlflow_client)
 
 
 def get_reader(
@@ -216,12 +169,6 @@ def get_reader(
     else:
         raise ValueError(f"Unknown reader type: {reader_type}")
     return reader
-
-
-def _process_stream_wrapper(
-    args: dict[str, object],
-) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
-    return _process_stream(**args)
 
 
 def _process_stream(
@@ -265,9 +212,6 @@ def _process_stream(
         _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
         return run_id, stream, {}
 
-    # -----------------------------------------------------
-    # Load data ONCE and share between plotting and scoring
-    # -----------------------------------------------------
     needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
     needs_scoring = stream_dict.get("evaluation", False)
 
@@ -275,28 +219,13 @@ def _process_stream(
     if (needs_plotting or needs_scoring) and type_ == "zarr":
         available_data = reader.check_availability(stream, mode="evaluation")
 
-        # Use fast raw zarr I/O when available (bypasses ZarrIO/dask for ~20× speedup)
-        use_fast_io = (
-            hasattr(reader, "get_data_raw") and hasattr(reader, "_fast_io") and reader._fast_io
+        output_data = reader.get_data(
+            stream,
+            fsteps=available_data.fsteps,
+            samples=available_data.samples,
+            channels=available_data.channels,
+            ensemble=available_data.ensemble,
         )
-
-        if use_fast_io:
-            _logger.info(f"RUN {run_id} - {stream}: Using fast raw zarr I/O path.")
-            output_data = reader.get_data_raw(
-                stream,
-                fsteps=available_data.fsteps,
-                samples=available_data.samples,
-                channels=available_data.channels,
-                ensemble=available_data.ensemble,
-            )
-        else:
-            output_data = reader.get_data(
-                stream,
-                fsteps=available_data.fsteps,
-                samples=available_data.samples,
-                channels=available_data.channels,
-                ensemble=available_data.ensemble,
-            )
 
         _logger.info(
             f"RUN {run_id} - {stream}: Data loaded once — sharing between plotting and scoring."
@@ -346,7 +275,7 @@ def _process_stream(
 
 
 def evaluate_from_config(
-    cfg: dict, mlflow_client: MlflowClient | None, log_queue: "mp.Queue | None"
+    cfg: dict, mlflow_client: MlflowClient | None
 ) -> None:
     """
     Main function that controls evaluation plotting and scoring.
@@ -354,6 +283,8 @@ def evaluate_from_config(
     ----------
     cfg:
         Configuration input stored as dictionary.
+    mlflow_client:
+        Optional MLFlow client for uploading scores.
     """
     with open_dict(cfg):
         cfg.evaluation.metrics = parse_metric_params(cfg.evaluation.metrics)
@@ -365,26 +296,8 @@ def evaluate_from_config(
     regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
-    use_parallel = cfg.evaluation.get("num_processes", 0)
     default_streams = cfg.get("default_streams", {})
 
-    if use_parallel == "auto":
-        num_processes = mp.cpu_count()
-    elif isinstance(use_parallel, int):
-        if use_parallel > 0:
-            num_processes = min(use_parallel, mp.cpu_count())
-        else:
-            # Using the main process only
-            num_processes = 0
-    else:
-        raise ValueError("parallel option must be 'auto' or an non-negative integer")
-
-    if num_processes > 1:
-        _logger.info("Using %d processes for evaluation", num_processes)
-    else:
-        _logger.info("Using main process for evaluation")
-
-    scores_dict = defaultdict(triple_nested_dict)  # metric -> region -> stream -> run
     tasks = []
 
     # Build tasks per stream
@@ -411,20 +324,7 @@ def evaluate_from_config(
             )
 
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    if num_processes == 0:
-        if log_queue is not None:
-            setup_worker_logger(log_queue)
-        results = [_process_stream(**task) for task in tasks]
-    else:
-        with mp.Pool(
-            processes=num_processes,
-            initializer=setup_worker_logger,
-            initargs=(log_queue,),
-        ) as pool:
-            results = pool.map(
-                _process_stream_wrapper,
-                tasks,
-            )
+    results = [_process_stream(**task) for task in tasks]
 
     for _, stream, stream_scores in results:
         for metric, regions_dict in stream_scores.items():

@@ -7,24 +7,21 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Plotting helpers: per-sample maps, score maps, and summary plots."""
+"""Plotting orchestration: parallel dispatch of per-sample maps, score maps, and summary plots."""
 
-import contextlib
+import glob
 import logging
-import os
-import resource
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import matplotlib
 import numpy as np
 import omegaconf as oc
 import xarray as xr
-from joblib import Parallel, delayed
-from joblib.externals.loky import get_reusable_executor
+from joblib import delayed
+from PIL import Image
 from tqdm import tqdm
 
+from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, resolve_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
@@ -45,61 +42,9 @@ from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
-from weathergen.evaluate.utils.scoring import get_next_data
+from weathergen.evaluate.scores.score_orchestration import get_next_data
 
 _logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Process headroom helper
-# ---------------------------------------------------------------------------
-
-
-def _resolve_num_plot_workers(requested: int = 0) -> int:
-    """Return a safe number of parallel plot workers.
-
-    Parameters
-    ----------
-    requested : int
-        Value from config (``num_plot_workers``). ``0`` means auto-detect.
-    """
-    if requested > 0:
-        return min(requested, os.cpu_count() or 12)
-
-    try:
-        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
-        if soft_limit == resource.RLIM_INFINITY:
-            soft_limit = 65536
-
-        result = subprocess.run(
-            ["ps", "-u", str(os.getuid()), "--no-headers", "-o", "pid"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        user_procs = len(result.stdout.strip().splitlines()) if result.returncode == 0 else 0
-
-        available = soft_limit - user_procs
-        if available < 64:
-            _logger.info(
-                f"Parallel plotting: low process headroom "
-                f"({available}/{soft_limit} slots free). Using sequential plotting."
-            )
-            return 1
-
-        n = min(available // 8, os.cpu_count() or 12, 12)
-        n = max(n, 1)
-        _logger.info(
-            f"Parallel plotting: process headroom {available}/{soft_limit} free. "
-            f"Using num_plot_workers={n}."
-        )
-        return n
-
-    except Exception as e:
-        _logger.debug(
-            f"Could not auto-detect process limits for plotting ({e}). Defaulting to sequential."
-        )
-        return 1
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +80,7 @@ def plot_score_maps_per_stream(
 
     map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
     map_dir.mkdir(parents=True, exist_ok=True)
-    _logger.info(f"RUN {reader.run_id} - {stream}: Plotting score maps → {map_dir}")
+    _logger.info(f"RUN {reader.run_id} - {stream}: Plotting score maps to {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
     fsteps = available_data.fsteps
@@ -153,7 +98,9 @@ def plot_score_maps_per_stream(
     fsteps = sorted(da_preds.keys())
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
-    n_plot_workers = _resolve_num_plot_workers(int(reader.eval_cfg.get("num_plot_workers", 0)))
+    n_plot_workers = resolve_num_workers(
+        int(reader.eval_cfg.get("num_plot_workers", 0)), check_process_headroom=True
+    )
 
     cfg = reader.global_plotting_options
     plotter_cfg = {
@@ -192,58 +139,14 @@ def plot_score_maps_per_stream(
                 }
             )
 
-    n_tasks = len(fstep_tasks)
-    effective = min(n_plot_workers, n_tasks)
     _logger.info(
-        f"RUN {run_id} - {stream}: Plotting {n_tasks} score-map tasks "
+        f"RUN {run_id} - {stream}: Plotting {len(fstep_tasks)} score-map tasks "
         f"({len(regions)} region(s) × {len(fsteps)} fstep(s)) "
-        f"with {effective} worker(s)."
+        f"with up to {n_plot_workers} worker(s)."
     )
 
-    if effective > 1 and n_tasks > 1:
-        try:
-            Parallel(n_jobs=effective, backend="loky", verbose=2)(
-                delayed(_score_map_fstep_worker)(**t) for t in fstep_tasks
-            )
-            with contextlib.suppress(Exception):
-                get_reusable_executor().shutdown(wait=True)
-        except Exception as exc:
-            _logger.warning(
-                f"Parallel score-map fstep dispatch failed "
-                f"({type(exc).__name__}: {exc}). Falling back to sequential."
-            )
-            with contextlib.suppress(Exception):
-                get_reusable_executor().shutdown(wait=True)
-            for t in tqdm(fstep_tasks, desc=f"Score maps {stream} (sequential)"):
-                _score_map_fstep_worker(**t)
-    else:
-        for t in tqdm(fstep_tasks, desc=f"Score maps {stream}"):
-            _score_map_fstep_worker(**t)
-
-
-def _score_map_fstep_worker(
-    plotter_cfg: dict,
-    output_basedir: str,
-    map_dir: str,
-    stream: str,
-    region: str,
-    score_data: "VerifiedData",
-    metrics: dict,
-    fstep: int,
-    run_id: str,
-) -> None:
-    """Module-level loky worker: compute scores + plot maps for one (region, fstep)."""
-    _plot_score_maps_per_stream(
-        plotter_cfg=plotter_cfg,
-        output_basedir=output_basedir,
-        map_dir=map_dir,
-        stream=stream,
-        region=region,
-        score_data=score_data,
-        metrics=metrics,
-        fstep=fstep,
-        run_id=run_id,
-    )
+    calls = [delayed(_plot_score_maps_per_stream)(**t) for t in fstep_tasks]
+    dispatch_parallel(calls, n_workers=n_plot_workers, backend="loky", desc=f"Score maps {stream}")
 
 
 def _plot_score_maps_per_stream(
@@ -260,16 +163,13 @@ def _plot_score_maps_per_stream(
     """Plot 2D score maps for all metrics/channels for one (region, fstep)."""
     preds = score_data.prediction
 
+
     metric_names = list(metrics.keys())
     metric_params = list(metrics.values())
-    score_results: list[xr.DataArray | None] = [None] * len(metric_names)
-    with ThreadPoolExecutor(max_workers=min(12, len(metric_names))) as executor:
-        future_to_idx = {
-            executor.submit(get_score, score_data, m, agg_dims="sample", parameters=p): i
-            for i, (m, p) in enumerate(zip(metric_names, metric_params, strict=False))
-        }
-        for future in as_completed(future_to_idx):
-            score_results[future_to_idx[future]] = future.result()
+    score_results: list[xr.DataArray | None] = [
+        get_score(score_data, m, agg_dims="sample", parameters=p)
+        for m, p in zip(metric_names, metric_params, strict=False)
+    ]
 
     valid = [(m, r) for m, r in zip(metric_names, score_results, strict=False) if r is not None]
     if not valid:
@@ -343,6 +243,125 @@ def _scatter_plot_single(
 
 
 # ---------------------------------------------------------------------------
+# Animations
+# ---------------------------------------------------------------------------
+
+
+def _build_single_animation(
+    map_output_dir: Path,
+    run_id: str,
+    tag: str,
+    stream: str,
+    region: str,
+    var: str,
+    sa: object,
+    fsteps: list,
+    image_format: str,
+    duration_ms: int,
+) -> list[str]:
+    """Build one GIF for a single (region, sample, variable) combination.
+
+    All work is I/O + Pillow — no matplotlib state involved.
+
+    Returns the list of source frame paths that were assembled into the GIF
+    (empty list if no frames were found).
+    """
+    image_paths: list[str] = []
+    for fstep in fsteps:
+        parts = [
+            "map",
+            run_id,
+            tag,
+            str(sa),
+            "*",
+            stream,
+            region,
+            var,
+            "fstep",
+            str(fstep).zfill(3),
+        ]
+        name = "_".join(filter(None, parts))
+        fname = f"{map_output_dir.joinpath(name)}.{image_format}"
+        image_paths += glob.glob(fname)
+
+    if not image_paths:
+        _logger.warning(f"No images found for animation {var} sample {sa} region {region}")
+        return []
+
+    image_paths = sorted(image_paths)
+    images = [Image.open(p) for p in image_paths]
+    out_path = f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.gif"
+    images[0].save(
+        out_path,
+        save_all=True,
+        append_images=images[1:],
+        duration=duration_ms,
+        loop=0,
+    )
+
+    for img in images:
+        img.close()
+
+    _logger.debug(f"Saved animation to {out_path}")
+    return image_paths
+
+
+def _dispatch_animations(
+    plotter: "Plotter",
+    samples: list,
+    fsteps,
+    variables: list[str],
+    select: dict,
+    tag: str,
+) -> list[str]:
+    """Build GIF animations in parallel for all (region, sample, variable) combinations.
+
+    Parameters
+    ----------
+    plotter : Plotter
+        Plotter instance (used only for config: regions, fps, image_format, run_id, stream).
+    samples, fsteps, variables, select, tag
+        Same arguments that ``Plotter.animation`` used to accept.
+
+    Returns
+    -------
+    list[str]
+        Paths of all source frames that were assembled into GIFs.
+    """
+    plotter.update_data_selection(select)
+    map_output_dir = plotter.get_map_output_dir(tag)
+
+    duration_ms = int(1000 / plotter.fps) if plotter.fps > 0 else 400
+
+    tasks = [
+        {
+            "map_output_dir": map_output_dir,
+            "run_id": plotter.run_id,
+            "tag": tag,
+            "stream": plotter.stream,
+            "region": region,
+            "var": var,
+            "sa": sa,
+            "fsteps": list(fsteps),
+            "image_format": plotter.image_format,
+            "duration_ms": duration_ms,
+        }
+        for region in plotter.regions
+        for sa in samples
+        for var in variables
+    ]
+
+    calls = [
+        delayed(_build_single_animation)(**t)
+        for t in tqdm(tasks, desc=f"Creating animations {plotter.stream} {tag}")
+    ]
+    results = dispatch_parallel(
+        calls, n_workers=resolve_num_workers(), backend="threading", desc="Animations"
+    )
+    return [p for r in results if r for p in r]
+
+
+# ---------------------------------------------------------------------------
 # Per-sample map / histogram plots
 # ---------------------------------------------------------------------------
 
@@ -378,16 +397,27 @@ def _plot_single_sample(
         if plot_target:
             plotter.create_maps_per_sample(tars, plot_chs, data_selection, "targets", maps_cfg)
 
-        if plot_bias and bias_data is not None:
+        # Plot bias once if it doesn't carry an ensemble dimension,
+        # otherwise it will be sliced per member inside the loop below.
+        bias_has_ens = bias_data is not None and "ens" in bias_data.dims
+        if plot_bias and bias_data is not None and not bias_has_ens:
             plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
         for ens in ensemble:
-            preds_ens = preds.sel(ens=ens) if "ens" in preds.dims and ens != "mean" else preds
+            has_ens = "ens" in preds.dims and ens != "mean"
+            preds_ens = preds.sel(ens=ens) if has_ens else preds
             preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
             preds_name = "_".join(filter(None, ["preds", preds_tag]))
             plotter.create_maps_per_sample(
                 preds_ens, plot_chs, data_selection, preds_name, maps_cfg
             )
+
+            if plot_bias and bias_has_ens:
+                bias_ens = bias_data.sel(ens=ens) if ens != "mean" else bias_data
+                bias_tag = "_".join(filter(None, ["bias", preds_tag]))
+                plotter.create_maps_per_sample(
+                    bias_ens, plot_chs, data_selection, bias_tag, bias_cfg
+                )
 
             if plot_histograms:
                 plotter.create_histograms_per_sample(
@@ -513,7 +543,9 @@ def plot_data(
     bias_config_dict = oc.OmegaConf.to_container(bias_config, resolve=True)
     output_basedir = str(reader.runplot_dir)
 
-    num_plot_workers = _resolve_num_plot_workers(int(reader.eval_cfg.get("num_plot_workers", 0)))
+    num_plot_workers = resolve_num_workers(
+        int(reader.eval_cfg.get("num_plot_workers", 0)), check_process_headroom=True
+    )
 
     tasks: list[dict] = []
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
@@ -559,31 +591,14 @@ def plot_data(
                 }
             )
 
-    effective_workers = min(num_plot_workers, len(tasks))
-
-    if effective_workers > 1 and len(tasks) > 1:
-        _logger.info(
-            f"Parallel plotting: dispatching {len(tasks)} (fstep, sample) tasks "
-            f"across {effective_workers} loky workers."
-        )
-        try:
-            Parallel(n_jobs=effective_workers, backend="loky", verbose=2)(
-                delayed(_plot_single_sample)(**task) for task in tasks
-            )
-            with contextlib.suppress(Exception):
-                get_reusable_executor().shutdown(wait=True)
-        except Exception as exc:
-            _logger.warning(
-                f"Parallel plotting failed ({type(exc).__name__}: {exc}). "
-                f"Falling back to sequential plotting."
-            )
-            with contextlib.suppress(Exception):
-                get_reusable_executor().shutdown(wait=True)
-            for task in tqdm(tasks, desc=f"Plotting {run_id} - {stream} (sequential fallback)"):
-                _plot_single_sample(**task)
-    else:
-        for task in tqdm(tasks, desc=f"Plotting {run_id} - {stream}"):
-            _plot_single_sample(**task)
+    _logger.info(
+        f"Parallel plotting: dispatching {len(tasks)} (fstep, sample) tasks "
+        f"across up to {num_plot_workers} loky workers."
+    )
+    calls = [delayed(_plot_single_sample)(**task) for task in tasks]
+    dispatch_parallel(
+        calls, n_workers=num_plot_workers, backend="loky", desc=f"Plotting {run_id} - {stream}"
+    )
 
     if plot_animations:
         plotter = Plotter(plotter_cfg, reader.runplot_dir)
@@ -610,11 +625,11 @@ def plot_data(
         }
         for ens in available_data.ensemble:
             preds_name = "preds" if "ens" not in last_preds.dims else f"preds_ens_{ens}"
-            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
+            _dispatch_animations(plotter, plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
         if plot_target:
-            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
+            _dispatch_animations(plotter, plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
         if plot_bias:
-            plotter.animation(plot_samples, plot_fsteps, plot_chs, data_selection, "bias")
+            _dispatch_animations(plotter, plot_samples, plot_fsteps, plot_chs, data_selection, "bias")
 
 
 # ---------------------------------------------------------------------------

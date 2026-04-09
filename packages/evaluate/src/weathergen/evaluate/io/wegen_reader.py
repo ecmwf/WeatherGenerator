@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 # Standard library
-import contextlib
 import json
 import logging
 from collections import defaultdict
@@ -18,7 +17,6 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
-from joblib.externals.loky import get_reusable_executor
 
 # Local application / package
 from weathergen.common.config import (
@@ -27,23 +25,15 @@ from weathergen.common.config import (
     load_run_config,
 )
 from weathergen.common.io import zarrio_reader
-from weathergen.evaluate.io.data.get_data_orchestration import (
-    _apply_postprocessing,
-    _dispatch_reads,
-    _reassemble_fsteps,
-)
-from weathergen.evaluate.io.data.raw_io_orchestration import (
-    _build_raw_io_state,
-    get_data_raw_impl,
-    get_data_raw_zip_impl,
-    resolve_num_io_workers,
+from weathergen.evaluate.io.data.dataarray_builders import EnsembleSelect
+from weathergen.evaluate.io.data.io_orchestration import (
+    _build_io_state,
+    get_data_impl,
+    get_data_zip_impl,
+    resolve_num_workers,
 )
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
-
-_logger = logging.getLogger(__name__)
-_logger.setLevel(logging.INFO)
-
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -383,60 +373,10 @@ class WeatherGenZarrReader(WeatherGenReader):
         self._cached_ensemble: dict[str, list[str]] = {}
         self._cached_is_gridded: dict[str, bool] = {}
 
-        # I/O threading config
-        self._fast_io = eval_cfg.get("fast_io", True)
-        self._num_io_threads: int = int(eval_cfg.get("num_io_threads", 8))
-
-        # Fast raw I/O config (direct zarr access, bypasses ZarrIO/dask)
-        self._num_io_workers: int = resolve_num_io_workers(int(eval_cfg.get("num_io_workers", 0)))
+        # Raw I/O worker config (direct zarr access)
+        self._num_io_workers: int = resolve_num_workers(int(eval_cfg.get("num_io_workers", 0)))
 
     def get_data(
-        self,
-        stream: str,
-        samples: list[int] | None = None,
-        fsteps: list[str] | None = None,
-        channels: list[str] | None = None,
-        ensemble: list[str] | None = None,
-    ) -> ReaderOutput:
-        """Retrieve prediction and target data from the Zarr store via ZarrIO.
-
-        Returns
-        -------
-        ReaderOutput
-            target/prediction dicts of xarray DataArrays keyed by forecast step.
-        """
-        stream_cfg = self.get_stream(stream)
-        all_channels = self.get_channels(stream)
-        _logger.info(f"RUN {self.run_id}: Processing stream {stream}...")
-
-        fsteps = sorted(int(f) for f in (fsteps or self.get_forecast_steps()))
-        samples = samples or sorted(int(s) for s in self.get_samples())
-        channels = to_list(channels or stream_cfg.get("channels", all_channels))
-        ensemble = to_list(ensemble or self.get_ensemble(stream))
-        is_gridded = self.is_gridded_data(stream)
-
-        with zarrio_reader(self.fname_zarr) as zio:
-            effective_threads = min(self._num_io_threads, len(samples) * len(fsteps))
-            results_by_fstep, _ = _dispatch_reads(
-                zio,
-                self.fname_zarr,
-                samples,
-                fsteps,
-                ensemble,
-                is_gridded,
-                effective_threads,
-                self.run_id,
-                stream,
-            )
-
-        fsteps_final, da_tars, da_preds = _reassemble_fsteps(
-            results_by_fstep, fsteps, is_gridded, self.run_id, stream
-        )
-        return _apply_postprocessing(
-            fsteps_final, da_tars, da_preds, stream, channels, stream_cfg, is_gridded
-        )
-
-    def get_data_raw(
         self,
         stream: str,
         samples: list[int] | None = None,
@@ -444,13 +384,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         channels: list[str] | None = None,
         ensemble: list[str] | None = None,
     ) -> ReaderOutput:
-        """Fast-path data loading using direct zarr array access and joblib parallelism.
-
-        Bypasses the ZarrIO → OutputDataset → as_xarray → dask pipeline for
-        ~20× speedup per (sample, fstep) read.  Produces identical
-        ReaderOutput to get_data().
-
-        Falls back to get_data() on any error.
+        """Load prediction and target data via direct zarr array access.
 
         Parameters
         ----------
@@ -462,39 +396,30 @@ class WeatherGenZarrReader(WeatherGenReader):
         Returns
         -------
         ReaderOutput
-            Identical structure to get_data() output.
+            target/prediction dicts of xarray DataArrays keyed by forecast step.
         """
-        try:
-            resolved_ensemble = to_list(ensemble or self.get_ensemble(stream))
-            state = _build_raw_io_state(
-                self.run_id,
-                self.fname_zarr,
-                stream,
-                self.get_stream(stream),
-                self.get_channels(stream),
-                self.is_gridded_data(stream),
-                sorted(int(f) for f in (fsteps or self.get_forecast_steps())),
-                sorted(int(s) for s in (samples or self.get_samples())),
-                to_list(
-                    channels or self.get_stream(stream).get("channels", self.get_channels(stream))
-                ),
-                resolved_ensemble,
-                self._num_io_workers,
-                self.get_ensemble(stream) if resolved_ensemble != ["mean"] else None,
-            )
-            if state.is_zip:
-                return get_data_raw_zip_impl(state)
-            return get_data_raw_impl(state)
-        except Exception as e:
-            _logger.warning(
-                f"Fast I/O failed for {self.run_id} - {stream}: {e}. "
-                f"Falling back to standard get_data()."
-            )
-            with contextlib.suppress(Exception):
-                get_reusable_executor().shutdown(wait=True)
-            return self.get_data(stream, samples, fsteps, channels, ensemble)
+        resolved_ensemble = to_list(ensemble or self.get_ensemble(stream))
+        ens_select = EnsembleSelect.from_names(resolved_ensemble, self.get_ensemble(stream))
+        state = _build_io_state(
+            self.run_id,
+            self.fname_zarr,
+            stream,
+            self.get_stream(stream),
+            self.get_channels(stream),
+            self.is_gridded_data(stream),
+            sorted(int(f) for f in (fsteps or self.get_forecast_steps())),
+            sorted(int(s) for s in (samples or self.get_samples())),
+            to_list(
+                channels or self.get_stream(stream).get("channels", self.get_channels(stream))
+            ),
+            resolved_ensemble,
+            self._num_io_workers,
+            ens_select,
+        )
+        if state.is_zip:
+            return get_data_zip_impl(state)
+        return get_data_impl(state)
 
-    ######## reader utils ########
 
     def get_stream(self, stream: str):
         """

@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Orchestration logic for the fast raw-zarr I/O path.
+"""Orchestration logic for the zarr I/O path.
 
 The two implementations (LocalStore fstep-serial, ZipStore all-fsteps-at-once)
 and all their shared sub-routines live here so that WeatherGenZarrReader stays
@@ -29,13 +29,14 @@ from joblib.externals.loky import get_reusable_executor
 from numpy.typing import NDArray
 
 from weathergen.evaluate.io.data.dataarray_builders import (
+    EnsembleSelect,
     build_gridded_dataarrays,
     build_scatter_dataarrays,
 )
-from weathergen.evaluate.io.data.raw_io_workers import (
+from weathergen.evaluate.io.data.io_workers import (
     _compute_early_channel_selection,
     _read_coords_and_meta,
-    _read_sample_raw,
+    _read_sample,
 )
 from weathergen.evaluate.io.data.xarray_utils import (
     _add_lead_time_coord,
@@ -55,8 +56,8 @@ _logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
-class RawIOState:
-    """Resolved I/O parameters for one get_data_raw call."""
+class IOState:
+    """Resolved I/O parameters for one get_data call."""
 
     run_id: str
     zarr_path: str
@@ -67,11 +68,11 @@ class RawIOState:
     samples: list[int]
     channels: list[str]
     ensemble: list[str]
-    all_ens: list[str] | None
+    ens_select: EnsembleSelect
     is_gridded: bool
     channel_idxs: list[int] | None
     read_channels: list[str]
-    coords_raw: NDArray
+    coords: NDArray
     lat: NDArray
     lon: NDArray
     n_workers: int
@@ -83,36 +84,67 @@ class RawIOState:
 # ---------------------------------------------------------------------------
 
 
-def resolve_num_io_workers(requested: int) -> int:
-    """Determine safe number of parallel I/O workers.
+def resolve_num_workers(requested: int = 0, *, check_process_headroom: bool = False) -> int:
+    """Determine safe number of parallel workers.
 
     Parameters
     ----------
     requested : int
-        Value from config (``num_io_workers``).
-        0 (the default) means *auto-detect*: use parallel workers only
-        when the system has enough headroom.
-
-    On HPC systems the per-user process/thread limit (``ulimit -u``) is
-    often shared across all jobs on the node.  Spawning loky workers when
-    the limit is almost reached causes "can't start new thread" errors
-    that cascade into the fallback path and deadlock it.
+        Value from config (``num_io_workers``, ``num_plot_workers``, …).
+        0 (the default) means *auto-detect*.
+    check_process_headroom : bool
+        When *True* (useful for ``loky`` / process-based backends), also
+        verify that the user has enough ``RLIMIT_NPROC`` headroom before
+        returning > 1.  If headroom is dangerously low the function
+        returns 1 regardless of the CPU-based estimate.
 
     Auto-detection (``requested == 0``):
-    * Read ``/proc/self/status`` → current thread count.
-    * Read ``ulimit -u`` via ``resource.getrlimit``.
-    * If fewer than ``min_headroom`` slots remain → sequential (1).
-    * Otherwise cap at ``min(available // 4, cpu_count, 48)``.
+    1. ``$SLURM_CPUS_PER_TASK`` — CPUs allocated to this task (preferred).
+    2. ``$SLURM_CPUS_ON_NODE`` — CPUs available on the node.
+    3. ``os.cpu_count()`` — fallback outside Slurm.
+
+    The detected CPU count is halved (workers share the node with the
+    main evaluation work) and capped at 48.
     """
+    _MAX_WORKERS = 48
+
     if requested > 0:
-        return min(requested, os.cpu_count() or 16)
+        n = min(requested, os.cpu_count() or 16)
+    else:
+        # Prefer Slurm-aware CPU counts — they reflect the actual allocation,
+        # not the full node (which os.cpu_count() returns).
+        slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get(
+            "SLURM_CPUS_ON_NODE"
+        )
+        if slurm_cpus is not None:
+            try:
+                n = max(1, int(slurm_cpus) // 2)
+                n = min(n, _MAX_WORKERS)
+                _logger.info(
+                    f"Auto-detected {slurm_cpus} Slurm CPUs. "
+                    f"Using n_workers={n}."
+                )
+            except ValueError:
+                slurm_cpus = None  # fall through
 
+        if slurm_cpus is None:
+            cpu_count = os.cpu_count() or 16
+            n = max(1, min(cpu_count // 2, _MAX_WORKERS))
+            _logger.info(
+                f"No Slurm environment detected (cpu_count={cpu_count}). "
+                f"Using n_workers={n}."
+            )
+
+    # --- Optional process-headroom guard (for loky / process backends) ---
+    if check_process_headroom and n > 1:
+        n = _apply_process_headroom(n)
+
+    return n
+
+
+def _apply_process_headroom(n: int) -> int:
+    """Reduce *n* to 1 when the user's RLIMIT_NPROC headroom is dangerously low."""
     try:
-        with open("/proc/self/status") as f:
-            for line in f:
-                if line.startswith("Threads:"):
-                    break
-
         soft_limit, _ = resource.getrlimit(resource.RLIMIT_NPROC)
         if soft_limit == resource.RLIM_INFINITY:
             soft_limit = 65536
@@ -126,30 +158,97 @@ def resolve_num_io_workers(requested: int) -> int:
         user_procs = len(result.stdout.strip().splitlines()) if result.returncode == 0 else 0
 
         available = soft_limit - user_procs
-        min_headroom = 64
-
-        if available < min_headroom:
+        if available < 64:
             _logger.info(
-                f"Auto-detected low process headroom "
-                f"({available}/{soft_limit} slots free). "
-                f"Using sequential I/O (num_io_workers=1)."
+                f"Low process headroom ({available}/{soft_limit} slots free). "
+                f"Forcing n_workers=1."
             )
             return 1
 
-        n = min(available // 4, os.cpu_count() or 48, 48)
-        n = max(n, 1)
-        _logger.info(
-            f"Auto-detected process headroom: {available}/{soft_limit} free. "
-            f"Using num_io_workers={n}."
-        )
+        capped = min(n, available // 8)
+        if capped < n:
+            _logger.info(
+                f"Process headroom {available}/{soft_limit} free. "
+                f"Capping n_workers from {n} to {capped}."
+            )
+        return max(1, capped)
+
+    except Exception as exc:
+        _logger.debug(f"Could not check process headroom ({exc}). Keeping n_workers={n}.")
         return n
 
-    except Exception as e:
-        _logger.debug(f"Could not auto-detect process limits ({e}). Defaulting to sequential.")
-        return 1
+
+# Generic parallel dispatch with fallback
+
+def dispatch_parallel(
+    calls: list,
+    *,
+    n_workers: int,
+    backend: str = "loky",
+    desc: str = "",
+    verbose: int = 2,
+) -> list:
+    """Run *calls* with ``joblib.Parallel``, falling back to sequential on error.
+
+    Parameters
+    ----------
+    calls
+        Pre-built ``delayed(fn)(*args, **kwargs)`` objects.
+    n_workers
+        Requested parallelism.  Automatically capped to ``len(calls)``.
+    backend
+        Joblib backend (``"loky"``, ``"threading"``, …).
+    desc
+        Description shown in the ``tqdm`` progress bar when running sequentially.
+    verbose
+        Joblib verbosity level (only used when ``n_workers > 1``).
+
+    Returns
+    -------
+    list
+        Collected results, one per call, in the same order as *calls*.
+
+    Notes
+    -----
+    * ``Parallel(n_jobs=1)`` already runs sequentially, so the only reason we
+      keep a try/except path is that **loky** can fail at pool creation time
+      (RLIMIT_NPROC exhausted, sandbox issues, etc.).  For the ``"threading"``
+      backend no such failure mode exists, so we skip the try/except entirely.
+    * When *n_workers* ≤ 1 **and** the backend is ``"loky"`` we also skip the
+      ``Parallel`` call to avoid any pool-creation overhead.
+    """
+    n_tasks = len(calls)
+    if n_tasks == 0:
+        return []
+
+    effective = min(n_workers, n_tasks)
+
+    # --- fast path: skip Parallel entirely when sequential ----------------
+    if effective <= 1 and backend == "loky":
+        return [c[0](*c[1], **c[2]) for c in calls]
+
+    # --- threading or loky-with-multiple-workers --------------------------
+    if backend != "loky":
+        # Threading never fails at pool creation — no fallback needed.
+        return Parallel(n_jobs=effective, backend=backend, verbose=verbose)(calls)
+
+    # loky with effective > 1: try, then fall back to sequential.
+    try:
+        results = Parallel(n_jobs=effective, backend=backend, verbose=verbose)(calls)
+        with contextlib.suppress(Exception):
+            get_reusable_executor().shutdown(wait=True)
+        return results
+    except Exception as exc:
+        _logger.warning(
+            f"{desc}: parallel pool failed ({type(exc).__name__}: {exc}). "
+            f"Falling back to sequential."
+        )
+        with contextlib.suppress(Exception):
+            get_reusable_executor().shutdown(wait=True)
+        return [c[0](*c[1], **c[2]) for c in calls]
 
 
-def _build_raw_io_state(
+def _build_io_state(
     run_id: str,
     fname_zarr: Path,
     stream: str,
@@ -161,14 +260,14 @@ def _build_raw_io_state(
     channels: list[str],
     ensemble: list[str],
     n_io_workers: int,
-    all_ens: list[str] | None,
-) -> RawIOState:
+    ens_select: EnsembleSelect,
+) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
     is_zip = zarr_path.endswith(".zip")
 
     # ---- Read coordinates and channel names from zarr (once) ----
-    coords_raw, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
+    coords, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
     read_channels: list[str] = zarr_channels if zarr_channels else all_channels
     channel_idxs: list[int] | None = None if zarr_channels else list(range(len(all_channels)))
 
@@ -177,11 +276,11 @@ def _build_raw_io_state(
         read_channels, channels, stream_cfg
     )
 
-    lat = coords_raw[:, 0].astype(np.float64)
-    lon = coords_raw[:, 1].astype(np.float64)
+    lat = coords[:, 0]
+    lon = coords[:, 1]
     n_workers = min(n_io_workers, len(samples))
 
-    return RawIOState(
+    return IOState(
         run_id=run_id,
         zarr_path=zarr_path,
         is_zip=is_zip,
@@ -191,11 +290,11 @@ def _build_raw_io_state(
         samples=samples,
         channels=channels,
         ensemble=ensemble,
-        all_ens=all_ens,
+        ens_select=ens_select,
         is_gridded=is_gridded,
         channel_idxs=channel_idxs,
         read_channels=read_channels,
-        coords_raw=coords_raw,
+        coords=coords,
         lat=lat,
         lon=lon,
         n_workers=n_workers,
@@ -215,7 +314,7 @@ def _parallel_read(
     backend: str,
     label: str,
 ) -> list:
-    """Dispatch _read_sample_raw over samples, with parallel→sequential fallback."""
+    """Dispatch _read_sample over samples, with parallel→sequential fallback."""
     kwargs = dict(
         zarr_path=zarr_path,
         stream=stream,
@@ -226,17 +325,8 @@ def _parallel_read(
         is_gridded=is_gridded,
     )
 
-    if n_workers > 1:
-        try:
-            return Parallel(n_jobs=n_workers, backend=backend, verbose=5)(
-                delayed(_read_sample_raw)(sample=s, **kwargs) for s in samples
-            )
-        except (RuntimeError, OSError) as err:
-            _logger.warning(f"{label}: parallel pool failed ({err}). Falling back to sequential.")
-            with contextlib.suppress(Exception):
-                get_reusable_executor().shutdown(wait=True)
-
-    return [_read_sample_raw(sample=s, **kwargs) for s in samples]
+    calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
+    return dispatch_parallel(calls, n_workers=n_workers, backend=backend, desc=label, verbose=5)
 
 
 def _extract_source_interval_starts(results: list, samples: list[int]) -> NDArray:
@@ -252,7 +342,7 @@ def _extract_source_interval_starts(results: list, samples: list[int]) -> NDArra
 
 
 def _assemble_substep(
-    state: RawIOState,
+    state: IOState,
     results: list,
     tars_list: list[NDArray],
     preds_list: list[NDArray],
@@ -273,8 +363,7 @@ def _assemble_substep(
             per_sample_valid_times,
             source_interval_starts,
             forecast_step_val,
-            state.ensemble,
-            state.all_ens,
+            state.ens_select,
         )
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
@@ -292,10 +381,9 @@ def _assemble_substep(
             per_sample_valid_times,
             source_interval_starts,
             forecast_step_val,
-            state.ensemble,
-            state.all_ens,
+            state.ens_select,
             per_sample_coords,
-            state.coords_raw,
+            state.coords,
             per_sample_obs_times=per_sample_obs_times,
         )
 
@@ -353,7 +441,7 @@ def _store_substep(
 # ---------------------------------------------------------------------------
 
 
-def get_data_raw_impl(state: RawIOState) -> ReaderOutput:
+def get_data_impl(state: IOState) -> ReaderOutput:
     """LocalStore fast-path: one fstep at a time, all samples in parallel.
 
     Processes one forecast step at a time to keep peak memory bounded at
@@ -361,7 +449,7 @@ def get_data_raw_impl(state: RawIOState) -> ReaderOutput:
     """
     _logger.info(
         f"RUN {state.run_id} - {state.stream}: Loading {len(state.samples)} samples × "
-        f"{len(state.fsteps)} fsteps via raw zarr I/O "
+        f"{len(state.fsteps)} fsteps via zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
 
@@ -429,7 +517,7 @@ def get_data_raw_impl(state: RawIOState) -> ReaderOutput:
         get_reusable_executor().shutdown(wait=True)
 
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: Raw I/O complete. "
+        f"RUN {state.run_id} - {state.stream}: I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
     return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
@@ -440,7 +528,7 @@ def get_data_raw_impl(state: RawIOState) -> ReaderOutput:
 # ---------------------------------------------------------------------------
 
 
-def get_data_raw_zip_impl(state: RawIOState) -> ReaderOutput:
+def get_data_zip_impl(state: IOState) -> ReaderOutput:
     """ZipStore fast-path: all fsteps per sample dispatched in one Parallel call.
 
     Amortises the ZipStore central-directory parse cost across all fsteps
@@ -448,7 +536,7 @@ def get_data_raw_zip_impl(state: RawIOState) -> ReaderOutput:
     """
     _logger.info(
         f"RUN {state.run_id} - {state.stream}: Loading {len(state.samples)} samples × "
-        f"{len(state.fsteps)} fsteps via ZipStore-parallel raw zarr I/O "
+        f"{len(state.fsteps)} fsteps via ZipStore-parallel zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
 
@@ -512,7 +600,7 @@ def get_data_raw_zip_impl(state: RawIOState) -> ReaderOutput:
         get_reusable_executor().shutdown(wait=True)
 
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: ZipStore-parallel raw I/O complete. "
+        f"RUN {state.run_id} - {state.stream}: ZipStore-parallel I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
     return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)

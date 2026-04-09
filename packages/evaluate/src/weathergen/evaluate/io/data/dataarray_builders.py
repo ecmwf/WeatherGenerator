@@ -7,15 +7,67 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""DataArray construction helpers for WeatherGenZarrReader.get_data_raw.
+"""DataArray construction helpers for WeatherGenZarrReader.get_data.
 
 These functions were formerly @staticmethod methods on WeatherGenZarrReader.
 Extracted here so that the reader module stays focused on I/O orchestration.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 import numpy as np
 import xarray as xr
 from numpy.typing import NDArray
+
+
+@dataclass(frozen=True, slots=True)
+class EnsembleSelect:
+    """Pre-resolved ensemble selection.
+
+    Use :meth:`mean` for the ensemble-mean sentinel, or :meth:`from_names`
+    to resolve requested member names against the full list stored in zarr.
+    """
+
+    labels: list[str]
+    indices: list[int]
+    is_mean: bool = False
+
+    # ------ factories ------
+
+    @classmethod
+    def mean(cls) -> EnsembleSelect:
+        """Sentinel: average over the ensemble axis and drop it."""
+        return cls(labels=[], indices=[], is_mean=True)
+
+    @classmethod
+    def from_names(
+        cls,
+        requested: list[str],
+        all_ens: list[str] | None,
+    ) -> EnsembleSelect:
+        """Resolve *requested* member names into concrete indices.
+
+        Parameters
+        ----------
+        requested : list[str]
+            Requested ensemble members (e.g. ``["ens0", "ens2"]``).
+            Pass ``["mean"]`` to get the mean sentinel.
+        all_ens : list[str] | None
+            All ensemble member names from the zarr store.
+
+        Returns
+        -------
+        EnsembleSelect
+        """
+        if requested == ["mean"]:
+            return cls.mean()
+        if all_ens is not None:
+            indices = [all_ens.index(e) for e in requested]
+        else:
+            indices = list(range(len(requested)))
+        return cls(labels=requested, indices=indices)
 
 
 def build_gridded_dataarrays(
@@ -28,8 +80,7 @@ def build_gridded_dataarrays(
     per_sample_valid_times: list[np.datetime64],
     source_interval_starts: NDArray,
     forecast_step_val: int,
-    ensemble: list[str],
-    all_ens: list[str] | None,
+    ens_select: EnsembleSelect,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Build DataArrays for gridded data by stacking samples along a new axis.
 
@@ -57,10 +108,9 @@ def build_gridded_dataarrays(
         Per-sample source interval start times, shape (n_samples,).
     forecast_step_val : int
         Forecast step value to assign as coordinate.
-    ensemble : list[str]
-        Requested ensemble members or ["mean"].
-    all_ens : list[str] | None
-        All ensemble member names from zarr (needed for index mapping).
+    ens_select : EnsembleSelect
+        Pre-resolved ensemble selection (from :meth:`EnsembleSelect.from_names`).
+        ``EnsembleSelect.mean()`` → mean; otherwise selects members.
 
     Returns
     -------
@@ -97,17 +147,12 @@ def build_gridded_dataarrays(
         "forecast_step": forecast_step_val,
     }
 
-    da_tar = xr.DataArray(
-        tars_stacked,
-        dims=["sample", "ipoint", "channel"],
-        coords=base_coords,
-    )
+    da_tar = _build_dataarray(tars_stacked, base_coords)
 
-    da_pred = build_pred_dataarray(
+    da_pred = _build_dataarray(
         preds_stacked,
         base_coords,
-        ensemble,
-        all_ens,
+        ens_select,
     )
 
     return da_tar, da_pred
@@ -121,8 +166,7 @@ def build_scatter_dataarrays(
     per_sample_valid_times: list[np.datetime64],
     source_interval_starts: NDArray,
     forecast_step_val: int,
-    ensemble: list[str],
-    all_ens: list[str] | None,
+    ens_select: EnsembleSelect,
     per_sample_coords: list[NDArray | None],
     coords_fallback: NDArray,
     per_sample_obs_times: list[NDArray] | None = None,
@@ -149,10 +193,9 @@ def build_scatter_dataarrays(
         Per-sample source interval start times.
     forecast_step_val : int
         Forecast step value to assign as coordinate.
-    ensemble : list[str]
-        Requested ensemble members or ["mean"].
-    all_ens : list[str] | None
-        All ensemble member names from zarr (needed for index mapping).
+    ens_select : EnsembleSelect
+        Pre-resolved ensemble selection (from :meth:`EnsembleSelect.from_names`).
+        ``EnsembleSelect.mean()`` → mean; otherwise selects members.
     per_sample_coords : list[np.ndarray | None]
         Per-sample coordinate arrays read from zarr (shape (n_ip, 2) each).
         Falls back to coords_fallback when None.
@@ -178,11 +221,11 @@ def build_scatter_dataarrays(
         # Use per-sample coords if available, otherwise fall back to reference
         sc = per_sample_coords[si] if si < len(per_sample_coords) else None
         if sc is not None and len(sc) >= n_ip:
-            sample_lat = sc[:n_ip, 0].astype(np.float64)
-            sample_lon = sc[:n_ip, 1].astype(np.float64)
+            sample_lat = sc[:n_ip, 0]
+            sample_lon = sc[:n_ip, 1]
         elif coords_fallback is not None and n_ip <= len(coords_fallback):
-            sample_lat = coords_fallback[:n_ip, 0].astype(np.float64)
-            sample_lon = coords_fallback[:n_ip, 1].astype(np.float64)
+            sample_lat = coords_fallback[:n_ip, 0]
+            sample_lon = coords_fallback[:n_ip, 1]
         else:
             sample_lat = np.full(n_ip, np.nan)
             sample_lon = np.full(n_ip, np.nan)
@@ -205,43 +248,18 @@ def build_scatter_dataarrays(
             "sample": sample,
         }
 
-        da_t = xr.DataArray(
-            tar_data,
-            dims=["ipoint", "channel"],
-            coords=sample_coords,
+        scatter_dims = ["ipoint", "channel"]
+
+        da_t = _build_dataarray(
+            tar_data, sample_coords,
+            base_dims=scatter_dims,
         )
         per_sample_tars.append(da_t)
 
-        # Handle ensemble for predictions
-        if pred_data.ndim == 3:
-            if ensemble == ["mean"]:
-                pred_data = pred_data.mean(axis=-1)
-                pred_coords = dict(sample_coords)
-                da_p = xr.DataArray(
-                    pred_data,
-                    dims=["ipoint", "channel"],
-                    coords=pred_coords,
-                )
-            else:
-                ens_idxs = (
-                    [all_ens.index(e) for e in ensemble]
-                    if all_ens
-                    else list(range(pred_data.shape[-1]))
-                )
-                pred_data = pred_data[:, :, ens_idxs]
-                pred_coords = dict(sample_coords)
-                pred_coords["ens"] = ensemble
-                da_p = xr.DataArray(
-                    pred_data,
-                    dims=["ipoint", "channel", "ens"],
-                    coords=pred_coords,
-                )
-        else:
-            da_p = xr.DataArray(
-                pred_data,
-                dims=["ipoint", "channel"],
-                coords=sample_coords,
-            )
+        da_p = _build_dataarray(
+            pred_data, sample_coords, ens_select,
+            base_dims=scatter_dims,
+        )
         per_sample_preds.append(da_p)
 
     # Concatenate along ipoint (like get_data() does for non-gridded)
@@ -251,51 +269,50 @@ def build_scatter_dataarrays(
     return da_tar, da_pred
 
 
-def build_pred_dataarray(
-    preds_stacked: NDArray,
+def _build_dataarray(
+    data: NDArray,
     base_coords: dict,
-    ensemble: list[str],
-    all_ens: list[str] | None,
+    ens_select: EnsembleSelect | None = None,
+    base_dims: list[str] | None = None,
 ) -> xr.DataArray:
-    """Build prediction DataArray, handling ensemble dimension.
+    """Build a DataArray, resolving an optional ensemble dimension.
+
+    Works for both targets (no ensemble) and predictions (with or without
+    ensemble).  When the trailing axis is not an ensemble dimension the
+    *ens_select* argument is harmlessly ignored, so callers can omit it
+    for targets.
 
     Parameters
     ----------
-    preds_stacked : np.ndarray
-        Shape (n_samples, n_ipoints, n_channels[, n_ens]).
+    data : np.ndarray
+        Array whose last axis is optionally an ensemble dimension.
+        Typical shapes: ``(n_samples, n_ipoints, n_channels[, n_ens])``
+        for gridded data or ``(n_ipoints, n_channels[, n_ens])`` for a
+        single scatter sample.
     base_coords : dict
-        Coordinate dict (without ens).
-    ensemble : list[str]
-        Requested ensemble members or ["mean"].
-    all_ens : list[str] | None
-        All ensemble member names from zarr (needed for index mapping).
+        Coordinate dict (without ``ens``).
+    ens_select : EnsembleSelect | None
+        ``None`` or ``EnsembleSelect.mean()`` → average over the ensemble
+        axis.  ``EnsembleSelect.from_names(...)`` → select members.
+    base_dims : list[str] | None
+        Dimension names for the non-ensemble axes.  Defaults to
+        ``["sample", "ipoint", "channel"]`` (gridded / stacked case).
     """
-    if preds_stacked.ndim == 4:
-        if ensemble == ["mean"]:
+    if base_dims is None:
+        base_dims = ["sample", "ipoint", "channel"]
+
+    dims = list(base_dims)
+    coords = dict(base_coords)
+    n_base = len(base_dims)
+
+    if data.ndim == n_base + 1:
+        if ens_select is None or ens_select.is_mean:
             # Average over ensemble axis, drop ens coordinate
-            # (matches get_data() which does .mean("ens").squeeze())
-            preds_stacked = preds_stacked.mean(axis=-1)
-            return xr.DataArray(
-                preds_stacked,
-                dims=["sample", "ipoint", "channel"],
-                coords=base_coords,
-            )
+            data = data.mean(axis=-1)
         else:
-            # Select requested ensemble members by index
-            if all_ens is not None:
-                ens_idxs = [all_ens.index(e) for e in ensemble]
-                preds_stacked = preds_stacked[:, :, :, ens_idxs]
-            pred_coords = dict(base_coords)
-            pred_coords["ens"] = ensemble
-            return xr.DataArray(
-                preds_stacked,
-                dims=["sample", "ipoint", "channel", "ens"],
-                coords=pred_coords,
-            )
-    else:
-        # No ensemble dim
-        return xr.DataArray(
-            preds_stacked,
-            dims=["sample", "ipoint", "channel"],
-            coords=base_coords,
-        )
+            idx = tuple([slice(None)] * n_base + [ens_select.indices])
+            data = data[idx]
+            dims.append("ens")
+            coords["ens"] = ens_select.labels
+
+    return xr.DataArray(data, dims=dims, coords=coords)

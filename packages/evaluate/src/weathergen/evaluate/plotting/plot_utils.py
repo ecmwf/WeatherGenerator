@@ -17,6 +17,50 @@ from numpy.typing import NDArray
 _logger = logging.getLogger(__name__)
 
 
+class DefaultMarkerSize:
+    """
+    Utility class for managing default configuration values, such as marker sizes
+    for various data streams.
+    """
+
+    _marker_size_stream = {
+        "era5": 2.5,
+        "imerg": 0.25,
+        "cerra": 0.1,
+    }
+
+    _default_marker_size = 0.5
+
+    @classmethod
+    def get_marker_size(cls, stream_name: str) -> float:
+        """
+        Get the default marker size for a given stream name.
+
+        Parameters
+        ----------
+        stream_name : str
+            The name of the stream.
+
+        Returns
+        -------
+        float
+            The default marker size for the stream.
+        """
+        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
+
+    @classmethod
+    def list_streams(cls):
+        """
+        List all streams with defined marker sizes.
+
+        Returns
+        -------
+        list[str]
+            List of stream names.
+        """
+        return list(cls._marker_size_stream.keys())
+
+
 def _flatten_or_average(arr: NDArray) -> NDArray:
     """Flatten array or average across non-quantile dimensions.
 
@@ -399,50 +443,6 @@ def bar_plot_metric_region(
             _logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
-
-
-class DefaultMarkerSize:
-    """
-    Utility class for managing default configuration values, such as marker sizes
-    for various data streams.
-    """
-
-    _marker_size_stream = {
-        "era5": 2.5,
-        "imerg": 0.25,
-        "cerra": 0.1,
-    }
-
-    _default_marker_size = 0.5
-
-    @classmethod
-    def get_marker_size(cls, stream_name: str) -> float:
-        """
-        Get the default marker size for a given stream name.
-
-        Parameters
-        ----------
-        stream_name : str
-            The name of the stream.
-
-        Returns
-        -------
-        float
-            The default marker size for the stream.
-        """
-        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
-
-    @classmethod
-    def list_streams(cls):
-        """
-        List all streams with defined marker sizes.
-
-        Returns
-        -------
-        list[str]
-            List of stream names.
-        """
-        return list(cls._marker_size_stream.keys())
 
 
 def quantile_plot_metric_region(
