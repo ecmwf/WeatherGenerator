@@ -51,8 +51,12 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     coords_arr = np.asarray(ds_group["coords"])  # (npoints, 2)
     times_arr = np.asarray(ds_group["times"]).astype("datetime64[ns]")  # (npoints,)
     channels = list(ds_group.attrs["channels"])
-    source_interval_start = np.asarray(ds_group.attrs["source_interval"]["start"]).astype("datetime64[ns]")
-    source_interval_end = np.asarray(ds_group.attrs["source_interval"]["end"]).astype("datetime64[ns]")
+    source_interval_start = np.asarray(ds_group.attrs["source_interval"]["start"]).astype(
+        "datetime64[ns]"
+    )
+    source_interval_end = np.asarray(ds_group.attrs["source_interval"]["end"]).astype(
+        "datetime64[ns]"
+    )
 
     # Build a lightweight xarray DataArray with the same structure
     # that process_sample / assign_coords expects:
@@ -75,7 +79,7 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
             "lat": ("ipoint", coords_arr[:, 0]),
             "lon": ("ipoint", coords_arr[:, 1]),
             "source_interval_start": source_interval_start,
-            "source_interval_end": source_interval_end
+            "source_interval_end": source_interval_end,
         },
     )
 
@@ -318,7 +322,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                 sample_to_batch_idx = {s: i for i, s in enumerate(batch_samples)}
 
                 batch_tasks = [
-                    (sample, fstep, stream, data_type) for sample in batch_samples for fstep in fsteps
+                    (sample, fstep, stream, data_type)
+                    for sample in batch_samples
+                    for fstep in fsteps
                 ]
 
                 _logger.info(
@@ -336,7 +342,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                     total=len(batch_tasks),
                     desc=f"  Batch {batch_idx + 1}/{n_batches}",
                 )
-                
+
                 processed_samples = []
 
                 for sample, _fstep, data in pool.imap_unordered(
@@ -356,7 +362,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                         # Free memory immediately.
                         del sample_results[sample]
                         batch_written += 1
-                        
+
                 # Only save here if need to merge samples, otherwise saved in process_sample
                 if processed_samples[0] is not None:
                     parser.save(processed_samples)

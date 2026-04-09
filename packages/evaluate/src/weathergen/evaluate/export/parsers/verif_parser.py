@@ -196,7 +196,7 @@ class VerifParser(CfParser):
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
                     dims=["ipoint", "pressure_level"],
-                    coords={"pressure_level":pls},
+                    coords={"pressure_level": pls},
                 )
             else:
                 data_vars[new_var] = xr.DataArray(
