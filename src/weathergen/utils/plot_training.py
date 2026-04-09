@@ -425,7 +425,7 @@ def plot_loss_per_stream(
                     continue
 
                 legend = plt.legend(
-                    legend_str, loc="upper right" if not x_scale_log else "lower left"
+                    legend_str, loc="upper right"
                 )
                 for line in legend.get_lines():
                     line.set(alpha=1.0)
@@ -781,7 +781,7 @@ def plot_train(args=None):
         np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
     ]
 
-    x_scale_log = False
+    x_scale_log = True
 
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir)

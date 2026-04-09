@@ -163,9 +163,9 @@ training_config:
     weight_decay: 0.1
     log_grad_norms: False
     adana:
-      omega: 4.0
+      omega: 0.5
       delta: 8.0
-      kappa: 0.85
+      kappa: 0.9
       epsilon: 1e-8
       clipsnr: null
       wd_decaying: True
