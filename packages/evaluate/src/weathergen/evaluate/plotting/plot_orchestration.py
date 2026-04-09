@@ -39,10 +39,10 @@ from weathergen.evaluate.plotting.plotter import (
     ScoreCards,
 )
 from weathergen.evaluate.scores.score import VerifiedData, get_score
+from weathergen.evaluate.scores.score_orchestration import get_next_data
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
-from weathergen.evaluate.scores.score_orchestration import get_next_data
 
 _logger = logging.getLogger(__name__)
 
@@ -162,7 +162,6 @@ def _plot_score_maps_per_stream(
 ) -> None:
     """Plot 2D score maps for all metrics/channels for one (region, fstep)."""
     preds = score_data.prediction
-
 
     metric_names = list(metrics.keys())
     metric_params = list(metrics.values())
@@ -625,11 +624,17 @@ def plot_data(
         }
         for ens in available_data.ensemble:
             preds_name = "preds" if "ens" not in last_preds.dims else f"preds_ens_{ens}"
-            _dispatch_animations(plotter, plot_samples, plot_fsteps, plot_chs, data_selection, preds_name)
+            _dispatch_animations(
+                plotter, plot_samples, plot_fsteps, plot_chs, data_selection, preds_name
+            )
         if plot_target:
-            _dispatch_animations(plotter, plot_samples, plot_fsteps, plot_chs, data_selection, "targets")
+            _dispatch_animations(
+                plotter, plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
+            )
         if plot_bias:
-            _dispatch_animations(plotter, plot_samples, plot_fsteps, plot_chs, data_selection, "bias")
+            _dispatch_animations(
+                plotter, plot_samples, plot_fsteps, plot_chs, data_selection, "bias"
+            )
 
 
 # ---------------------------------------------------------------------------

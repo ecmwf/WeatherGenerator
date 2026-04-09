@@ -15,7 +15,6 @@ import logging
 import numpy as np
 import xarray as xr
 from joblib import delayed
-from tqdm import tqdm
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, resolve_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
@@ -220,14 +219,19 @@ def calc_scores_per_stream(
 
         calls = [
             delayed(_score_single_fstep)(
-                fstep, tars_fs, preds_fs, preds_next, tars_next, climatology,
-                bbox, metrics, group_by_coord,
+                fstep,
+                tars_fs,
+                preds_fs,
+                preds_next,
+                tars_next,
+                climatology,
+                bbox,
+                metrics,
+                group_by_coord,
             )
             for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks
         ]
-        n_workers = resolve_num_workers(
-            int(reader.eval_cfg.get("num_scoring_threads", 0))
-        )
+        n_workers = resolve_num_workers(int(reader.eval_cfg.get("num_scoring_threads", 0)))
         all_results = dispatch_parallel(
             calls,
             n_workers=n_workers,

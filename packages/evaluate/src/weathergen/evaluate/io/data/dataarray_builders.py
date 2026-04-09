@@ -251,13 +251,16 @@ def build_scatter_dataarrays(
         scatter_dims = ["ipoint", "channel"]
 
         da_t = _build_dataarray(
-            tar_data, sample_coords,
+            tar_data,
+            sample_coords,
             base_dims=scatter_dims,
         )
         per_sample_tars.append(da_t)
 
         da_p = _build_dataarray(
-            pred_data, sample_coords, ens_select,
+            pred_data,
+            sample_coords,
+            ens_select,
             base_dims=scatter_dims,
         )
         per_sample_preds.append(da_p)

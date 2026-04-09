@@ -409,9 +409,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             self.is_gridded_data(stream),
             sorted(int(f) for f in (fsteps or self.get_forecast_steps())),
             sorted(int(s) for s in (samples or self.get_samples())),
-            to_list(
-                channels or self.get_stream(stream).get("channels", self.get_channels(stream))
-            ),
+            to_list(channels or self.get_stream(stream).get("channels", self.get_channels(stream))),
             resolved_ensemble,
             self._num_io_workers,
             ens_select,
@@ -419,7 +417,6 @@ class WeatherGenZarrReader(WeatherGenReader):
         if state.is_zip:
             return get_data_zip_impl(state)
         return get_data_impl(state)
-
 
     def get_stream(self, stream: str):
         """

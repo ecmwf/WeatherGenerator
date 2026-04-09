@@ -106,33 +106,27 @@ def resolve_num_workers(requested: int = 0, *, check_process_headroom: bool = Fa
     The detected CPU count is halved (workers share the node with the
     main evaluation work) and capped at 48.
     """
-    _MAX_WORKERS = 48
+    _max_workers = 48
 
     if requested > 0:
         n = min(requested, os.cpu_count() or 16)
     else:
         # Prefer Slurm-aware CPU counts — they reflect the actual allocation,
         # not the full node (which os.cpu_count() returns).
-        slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get(
-            "SLURM_CPUS_ON_NODE"
-        )
+        slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("SLURM_CPUS_ON_NODE")
         if slurm_cpus is not None:
             try:
                 n = max(1, int(slurm_cpus) // 2)
-                n = min(n, _MAX_WORKERS)
-                _logger.info(
-                    f"Auto-detected {slurm_cpus} Slurm CPUs. "
-                    f"Using n_workers={n}."
-                )
+                n = min(n, _max_workers)
+                _logger.info(f"Auto-detected {slurm_cpus} Slurm CPUs. Using n_workers={n}.")
             except ValueError:
                 slurm_cpus = None  # fall through
 
         if slurm_cpus is None:
             cpu_count = os.cpu_count() or 16
-            n = max(1, min(cpu_count // 2, _MAX_WORKERS))
+            n = max(1, min(cpu_count // 2, _max_workers))
             _logger.info(
-                f"No Slurm environment detected (cpu_count={cpu_count}). "
-                f"Using n_workers={n}."
+                f"No Slurm environment detected (cpu_count={cpu_count}). Using n_workers={n}."
             )
 
     # --- Optional process-headroom guard (for loky / process backends) ---
@@ -160,8 +154,7 @@ def _apply_process_headroom(n: int) -> int:
         available = soft_limit - user_procs
         if available < 64:
             _logger.info(
-                f"Low process headroom ({available}/{soft_limit} slots free). "
-                f"Forcing n_workers=1."
+                f"Low process headroom ({available}/{soft_limit} slots free). Forcing n_workers=1."
             )
             return 1
 
@@ -179,6 +172,7 @@ def _apply_process_headroom(n: int) -> int:
 
 
 # Generic parallel dispatch with fallback
+
 
 def dispatch_parallel(
     calls: list,

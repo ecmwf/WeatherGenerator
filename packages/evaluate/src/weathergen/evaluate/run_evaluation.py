@@ -32,10 +32,17 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenReader,
     WeatherGenZarrReader,
 )
+from weathergen.evaluate.plotting.plot_orchestration import (
+    plot_data,
+    plot_score_maps_per_stream,
+    plot_summary,
+)
 from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.scores.score_orchestration import (
+    calc_scores_per_stream,
+    metric_list_to_json,
+)
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
-from weathergen.evaluate.plotting.plot_orchestration import plot_data, plot_score_maps_per_stream, plot_summary
-from weathergen.evaluate.scores.score_orchestration import calc_scores_per_stream, metric_list_to_json
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
     get_or_create_mlflow_parent_run,
@@ -274,9 +281,7 @@ def _process_stream(
     return run_id, stream, scores_dict
 
 
-def evaluate_from_config(
-    cfg: dict, mlflow_client: MlflowClient | None
-) -> None:
+def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     """
     Main function that controls evaluation plotting and scoring.
     Parameters

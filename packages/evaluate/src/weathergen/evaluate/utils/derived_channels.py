@@ -8,6 +8,7 @@ import xarray as xr
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+
 def is_derivable_channel(name: str) -> bool:
     """Return ``True`` if *name* matches a known derivable-channel pattern (e.g. ``10ff``)."""
     return re.fullmatch(r"\d+ff", name) is not None

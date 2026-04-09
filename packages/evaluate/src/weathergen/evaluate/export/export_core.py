@@ -47,9 +47,7 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     ds_group = _CACHED_ZIO.data_root.get(group_path)
 
     if ds_group is None:
-        raise FileNotFoundError(
-            f"Zarr group '{group_path}' not found in {_CACHED_FNAME_ZARR}"
-        )
+        raise FileNotFoundError(f"Zarr group '{group_path}' not found in {_CACHED_FNAME_ZARR}")
 
     # Read raw arrays as numpy — no dask, no chunking overhead.
     data_arr = np.asarray(ds_group["data"])  # (npoints, nchannels) or (npoints, nchannels, nens)

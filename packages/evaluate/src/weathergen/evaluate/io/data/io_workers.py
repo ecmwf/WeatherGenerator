@@ -15,7 +15,6 @@ dispatched to loky / ProcessPoolExecutor workers.
 
 import contextlib
 import logging
-from pathlib import Path
 
 import numpy as np
 import zarr
