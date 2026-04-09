@@ -111,19 +111,21 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         else:
             # NOTE: temporary for analysing denoising
-            return self.training_forward(
-                tokens=tokens,
-                fstep=fstep,
-                meta_info=meta_info,
-                coords=coords,
-            )
-            # if fstep is None:
-            #     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
-            # return self.inference_forward(
+            # return self.training_forward(
+            #     tokens=tokens,
             #     fstep=fstep,
-            #     num_steps=num_steps,
             #     meta_info=meta_info,
+            #     coords=coords,
             # )
+            if fstep is None:
+                raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
+            
+            return self.inference_forward(
+                tokens=tokens,  # TODO: remove after single sample experiments
+                fstep=fstep,
+                num_steps=num_steps,
+                meta_info=meta_info,
+            )
 
     def training_forward(
         self,
@@ -192,6 +194,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def inference_forward(
         self,
+        tokens,
         fstep: int,
         num_steps: int = 30,
         meta_info: dict[str, SampleMetaData] = None,
@@ -211,6 +214,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         Returns:
             torch.Tensor: Generated sample of shape (1, num_healpix_cells, ae_global_dim_embed)
         """
+
         # Extract conditioning from meta_info (same as training_forward)
         c = None
         if meta_info is not None:
@@ -218,6 +222,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Sample noise (assuming single batch element for now)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+
+        x = tokens * 0.66 + x * 0.33 #NOTE: for debugging only!
 
         # Time step discretization.
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -240,6 +246,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             zip(t_steps[:-1], t_steps[1:], strict=False)
         ):  # 0, ..., N-1
             x_cur = x_next
+            print(f"Step {i+1}/{num_steps}: t_cur={t_cur.item():.4f}, t_next={t_next.item():.4f}")
 
             # Increase noise temporarily. (Stochastic sampling; not used for now)
             # gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
