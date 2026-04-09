@@ -1,0 +1,27 @@
+# Test pipeline for YAML-driven multi-stage Slurm launcher
+# Global defaults
+nodes: 1
+register: true
+cleanup-scripts: yes
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  - name: stage1
+    command: train
+    base-config: ./config/config_forecasting_adana.yml
+    config: ./config/config_forecasting.yml
+    chain: 4
+    nodes: 2
+
+  - name: stage2
+    command: train-continue
+    config: ./config/config_forecasting_finetuning.yml
+    chain: 2
+    nodes: 2
+
+  - name: inference
+    command: inference
+    start-date: "202310010000"
+    end-date: "202312300000"
+    samples: 16
