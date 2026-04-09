@@ -82,33 +82,6 @@ def _select_channels(
     return da_tar, da_pred
 
 
-def _scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:
-    """
-    Check scale all channels.
-
-    Parameters
-    ----------
-    data :
-        Input dataset
-    stream :
-        Stream name.
-    Returns
-    -------
-        Returns a Dataset where channels have been scaled if needed
-    """
-    if stream is None or not str(stream).startswith("ERA5"):
-        return data
-
-    channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
-    factor = 9.80665
-
-    if channels_z:
-        channels = data.channel.astype(str)
-        mask = channels.str.startswith("z_")
-        data = data.where(~mask, data / factor)
-    return data
-
-
 def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     """
     Add lead_time coordinate computed as:

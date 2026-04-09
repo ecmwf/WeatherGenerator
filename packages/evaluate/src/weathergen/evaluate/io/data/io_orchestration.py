@@ -40,10 +40,10 @@ from weathergen.evaluate.io.data.io_workers import (
 )
 from weathergen.evaluate.io.data.xarray_utils import (
     _add_lead_time_coord,
-    _scale_z_channels,
     _select_channels,
 )
 from weathergen.evaluate.io.io_reader import ReaderOutput
+from weathergen.evaluate.utils.derived_channels import scale_z_channels
 
 _logger = logging.getLogger(__name__)
 
@@ -394,8 +394,8 @@ def _assemble_substep(
     if state.is_gridded:
         da_tar = _add_lead_time_coord(da_tar)
         da_pred = _add_lead_time_coord(da_pred)
-        da_pred = _scale_z_channels(da_pred, state.stream)
-        da_tar = _scale_z_channels(da_tar, state.stream)
+        da_pred = scale_z_channels(da_pred, state.stream)
+        da_tar = scale_z_channels(da_tar, state.stream)
 
     return da_tar, da_pred
 

@@ -153,3 +153,31 @@ class DeriveChannels:
                     "in the available channels..."
                 )
         return data_tars, data_preds, self.channels
+
+
+def scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:
+    """
+    Scale geopotential (z_*) channels from m²/s² to geopotential height (m).
+
+    Parameters
+    ----------
+    data :
+        Input DataArray.
+    stream :
+        Stream name.  Scaling is only applied to ERA5-family streams.
+
+    Returns
+    -------
+        DataArray with z_* channels divided by *g* (9.80665 m/s²).
+    """
+    if stream is None or not str(stream).startswith("ERA5"):
+        return data
+
+    channels_z = [ch for ch in np.atleast_1d(data.channel.values) if str(ch).startswith("z_")]
+    factor = 9.80665
+
+    if channels_z:
+        channels = data.channel.astype(str)
+        mask = channels.str.startswith("z_")
+        data = data.where(~mask, data / factor)
+    return data
