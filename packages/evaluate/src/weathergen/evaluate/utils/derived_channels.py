@@ -8,6 +8,10 @@ import xarray as xr
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+def is_derivable_channel(name: str) -> bool:
+    """Return ``True`` if *name* matches a known derivable-channel pattern (e.g. ``10ff``)."""
+    return re.fullmatch(r"\d+ff", name) is not None
+
 
 @dataclass
 class DeriveChannels:
@@ -121,25 +125,41 @@ class DeriveChannels:
         data_preds: xr.DataArray,
     ) -> tuple[xr.DataArray, xr.DataArray, list]:
         """
-        Function to derive channels from available channels in the data
+        Derive channels from available channels in the data.
 
-        Parameters:
-        -----------
-        - data_tars: Target dataset
-        - data_preds: Prediction dataset
+        Channels to derive are collected from two sources:
 
-        Returns:
-        --------
-        - data_tars: Updated target dataset (if channel can be added)
-        - data_preds:  Updated prediction dataset (if channel can be added)
-        - self.channels: all the channels of interest
+        1. The ``derive_channels`` key in the stream config (explicit).
+        2. Any channel in ``self.channels`` that is absent from
+           ``self.available_channels`` and whose name matches a known
+           derivable pattern (e.g. ``10ff`` — wind speed from u/v).
 
+        Parameters
+        ----------
+        data_tars : xr.DataArray
+            Target dataset.
+        data_preds : xr.DataArray
+            Prediction dataset.
+
+        Returns
+        -------
+        tuple[xr.DataArray, xr.DataArray, list]
+            Updated targets, predictions and the (possibly extended) channel list.
         """
+        # Collect explicit tags from config …
+        tags_to_derive: list[str] = list(self.stream_cfg.get("derive_channels", []))
 
-        if "derive_channels" not in self.stream_cfg:
+        # … and auto-detect derivable channels requested by the user that are
+        # not already present in the data.
+        for ch in self.channels:
+            if ch not in self.available_channels and ch not in tags_to_derive:
+                if is_derivable_channel(ch):
+                    tags_to_derive.append(ch)
+
+        if not tags_to_derive:
             return data_tars, data_preds, self.channels
 
-        for tag in self.stream_cfg["derive_channels"]:
+        for tag in tags_to_derive:
             if tag not in self.available_channels:
                 match = re.search(r"(\d+)", tag)
                 level = match.group() if match else None
