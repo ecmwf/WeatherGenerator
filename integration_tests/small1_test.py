@@ -10,23 +10,15 @@ uv run pytest  ./integration_tests/small1.py
 import json
 import logging
 import os
-import glob
 import shutil
 from pathlib import Path
-import xarray as xr
-import numpy as np
 
 import omegaconf
 import pytest
 
 from weathergen.evaluate.run_evaluation import evaluate_from_config
-from weathergen.evaluate.export.export_inference import export_from_args
 from weathergen.run_train import main
 from weathergen.utils.metrics import get_train_metrics_path
-from weathergen.common.config import get_model_results
-from weathergen.common.io import zarrio_reader
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +63,6 @@ def test_train(setup, test_run_id):
     assert_missing_metrics_file(test_run_id)
     assert_train_loss_below_threshold(test_run_id)
     assert_val_loss_below_threshold(test_run_id)
-    export_inference(test_run_id)
-    check_export(test_run_id)
     logger.info("end test_train")
 
 
@@ -192,40 +182,3 @@ def assert_val_loss_below_threshold(run_id):
     # Check that the loss does not explode in a single mini_epoch
     # This is meant to be a quick test, not a convergence test
     assert loss_metric < 0.2, f"'{loss_avg_name}' is {loss_metric}, expected to be below 0.2"
-
-
-def export_inference(run_id):
-    logger.info("export to netcdf")
-    export_from_args(
-        ["--run-id", run_id,
-         "--stream", "ERA5",
-         "--output-dir", f"{WEATHERGEN_HOME}/results/{run_id}",
-         "--format", "netcdf",
-         "--samples", "0", "1",
-         "--fsteps", "1" ,"2"]
-    )
-
-def check_export(run_id):
-    fname_zarr = get_model_results(run_id, mini_epoch = 0, rank = 0)
-    nc_folder = Path(WEATHERGEN_HOME / "results" / run_id)
-
-    with zarrio_reader(fname_zarr) as zio:
-        for sample in [0,1]:
-            #find timestamp for sample
-            out = zio.get_data(sample, "ERA5", 1)
-            zarr_ds = out.prediction.as_xarray()
-            min_timestamp = np.min(zarr_ds["valid_time"]) - np.timedelta64(6, "h")
-            frt = np.datetime_as_string(min_timestamp, unit="h")
-
-            #open correct nc file
-            nc_path = glob.glob(f"{str(nc_folder)}/prediction_{frt}*.nc")
-            nc_ds = xr.open_dataset(nc_path[0])
-
-            for fstep in [1,2]:
-                # extract and compare per sample/fstep
-                out = zio.get_data(sample, "ERA5", fstep)
-                zarr_ds = out.prediction.as_xarray()
-                zarr_values = zarr_ds.sel({"channel" :"t_850"}).values
-                nc_values = nc_ds.sel({"forecast_period" : np.timedelta64(6, "h") * fstep,"pressure": 850})["t"].values
-                
-                assert np.array_equal(np.squeeze(zarr_values),np.squeeze(nc_values)), "exporting data failed"

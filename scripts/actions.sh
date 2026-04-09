@@ -106,6 +106,12 @@ case "$1" in
       uv sync --offline --all-packages --extra gpu
       uv run --offline pytest ./integration_tests/small_multi_stream_test.py --verbose -s
     );;
+    integration-test-export)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv sync --offline --all-packages --extra gpu
+      uv run --offline pytest ./integration_tests/export_test.py --verbose -s
+    );;
     integration-test-all)
     (
       cd "$SCRIPT_DIR" || exit 1
