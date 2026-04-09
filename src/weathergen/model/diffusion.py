@@ -63,6 +63,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         self._noised_tokens: torch.Tensor | None = None
         self._fixed_noise_level: float | None = None
 
+        self._noise = None
+
     def forward(
         self,
         tokens: torch.Tensor = None,
@@ -162,20 +164,20 @@ class DiffusionForecastEngine(torch.nn.Module):
         sigma = (eta * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
 
+        self._noised_tokens = (y + n).detach()
         self._noised_tokens = y + n
 
         
 
-        return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
+        return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep, coords=coords)
 
-    def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int) -> torch.Tensor:
+    def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int, coords: torch.Tensor = None) -> torch.Tensor:
         """
         The actual diffusion step, where the model removes noise from the input x under
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
         noise level sigma.
         """
-
-        # Compute scaling conditionings
+        # Compute scaling conditionings (EDM Eq. 7 — disabled for direct prediction)
         c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
         c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
         c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
@@ -189,7 +191,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         c = self.datetime_embedder(c).to(x.device)
     
         return c_skip * x + c_out * self.net(
-            c_in * x, fstep=fstep, noise_emb=noise_emb, ada_ln_aux=c
+            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=c
         )  # Eq. (7) in EDM paper
 
     def inference_forward(
@@ -197,6 +199,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         tokens,
         fstep: int,
         num_steps: int = 30,
+        coords: torch.Tensor = None,
         meta_info: dict[str, SampleMetaData] = None,
     ) -> torch.Tensor:
         """
@@ -221,9 +224,21 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = meta_info["ERA5"].params["timestamp"]
 
         # Sample noise (assuming single batch element for now)
-        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda") * 1.0
 
-        x = tokens * 0.66 + x * 0.33 #NOTE: for debugging only!
+        # eta = torch.tensor([1.0], device="cuda").float() # 1.0 (good), 2.0 (okay), 2.2 (max), 2.5 (hard)
+        # sigma = (eta * self.p_std + self.p_mean).exp()
+        # print("sigma", sigma)
+        # n = torch.randn_like(x).to(device="cuda") * sigma
+        # x = self.cur_token + n
+
+        x = self.cur_token * 0.05 + x
+        # breakpoint()
+
+        
+        # return self.denoise(x=x, c=None, sigma=sigma, fstep=fstep)
+        # print("initial noise statistics")
+        # print("mean", x.mean(), "std", x.std(), "max", x.max(), "min", x.min())
 
         # Time step discretization.
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -245,6 +260,11 @@ class DiffusionForecastEngine(torch.nn.Module):
         for i, (t_cur, t_next) in enumerate(
             zip(t_steps[:-1], t_steps[1:], strict=False)
         ):  # 0, ..., N-1
+            t_cur = torch.tensor([t_cur], device="cuda").float()
+            t_next = torch.tensor([t_next], device="cuda").float()
+
+            print(i, t_cur.item())
+
             x_cur = x_next
             print(f"Step {i+1}/{num_steps}: t_cur={t_cur.item():.4f}, t_next={t_next.item():.4f}")
 
@@ -256,13 +276,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_hat = t_cur
 
             # Euler step.
-            denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep)
+            denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep, coords=coords)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep)
+                denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 

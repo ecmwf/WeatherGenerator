@@ -56,6 +56,8 @@ class LossLatentDiffusion(LossModuleBase):
             for name, params in loss_fcts.items()
         ]
 
+        self.random_target = None
+
     def _get_noise_weight(self, eta):
         sigma = (eta * self.p_std + self.p_mean).exp()
         return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2

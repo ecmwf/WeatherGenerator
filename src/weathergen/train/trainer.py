@@ -26,13 +26,13 @@ from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
-    get_target_aux_calculator,
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
@@ -167,8 +167,6 @@ class Trainer(TrainerBase):
         batch_size = get_batch_size_from_config(mode_cfg)
 
         # get target_aux calculators for different loss terms
-        # del self.cf.training_config.losses["student-teacher"]["loss_fcts"]["JEPA"]
-        # del mode_cfg.losses["student-teacher"]["loss_fcts"]["JEPA"]
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
@@ -687,14 +685,16 @@ class Trainer(TrainerBase):
             noise_level: The eta value (standard normal space) to fix for validation.
                          sigma = exp(eta * p_std + p_mean). None resets to default (0.0).
         """
+        # Unwrap DDP/FSDP to access the underlying model
+        base_model = getattr(self.model, "module", self.model)
         # Set on the base model
-        if hasattr(self.model, "forecast_engine") and hasattr(
-            self.model.forecast_engine, "_fixed_noise_level"
+        if hasattr(base_model, "forecast_engine") and hasattr(
+            base_model.forecast_engine, "_fixed_noise_level"
         ):
-            self.model.forecast_engine._fixed_noise_level = noise_level
+            base_model.forecast_engine._fixed_noise_level = noise_level
         # Also set on the EMA model (separate model copy used during validation)
         if self.ema_model is not None:
-            ema_net = self.ema_model.ema_model
+            ema_net = getattr(self.ema_model.ema_model, "module", self.ema_model.ema_model)
             if hasattr(ema_net, "forecast_engine") and hasattr(
                 ema_net.forecast_engine, "_fixed_noise_level"
             ):

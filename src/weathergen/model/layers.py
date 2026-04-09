@@ -61,7 +61,7 @@ class MLP(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         name: str | None = None,
-        with_noise_conditioning=False,
+        with_noise_conditioning=False
     ):
         """Constructor"""
 
@@ -121,7 +121,9 @@ class MLP(torch.nn.Module):
         elif len(args) > 2:
             aux = args[-1]
             noise_emb = args[2] if self.with_noise_conditioning else None
+            noise_emb = args[2] if self.with_noise_conditioning else None
 
+        gate = None
         gate = None
         for i, layer in enumerate(self.layers):
             if i == 0 and self.with_aux:
@@ -138,6 +140,8 @@ class MLP(torch.nn.Module):
                     x = layer(x)
 
         if self.with_residual:
+            if gate is not None:
+                x = x * gate
             if gate is not None:
                 x = x * gate
             if x.shape[-1] == x_in.shape[-1]:

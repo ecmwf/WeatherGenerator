@@ -386,7 +386,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
     def forward(self, tokens, coords=None):
         aux_info = None
         for block in self.ae_global_blocks:
-            tokens = block(tokens, coords, aux_info)
+            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -405,11 +405,13 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
+        # self.position_layer = torch.nn.Linear(2, self.cf.ae_global_dim_embed)
+
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
-                if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
+                if (i % global_rate == 0) or i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
                         MultiSelfAttentionHead(
                             self.cf.ae_global_dim_embed,
@@ -448,13 +450,14 @@ class ForecastingEngine(torch.nn.Module):
                     MLP(
                         self.cf.ae_global_dim_embed,
                         self.cf.ae_global_dim_embed,
+                        num_layers=2,
                         with_residual=True,
                         post_layer_norm=cf.fe_diffusion_model_conditioning in ["date_time"],
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
-                        with_noise_conditioning=self.cf.fe_diffusion_model,
+                        with_noise_conditioning=self.cf.fe_diffusion_model
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -467,12 +470,14 @@ class ForecastingEngine(torch.nn.Module):
         #     MLP(
         #         self.cf.ae_global_dim_embed,
         #         self.cf.ae_global_dim_embed,
-        #         with_residual=False,
+        #         num_layers=12,
+        #         with_residual=True,
+        #         pre_layer_norm=True, # TODO: REMOVE AGAIN
         #         dropout_rate=self.cf.fe_dropout_rate,
         #         norm_type=self.cf.norm_type,
         #         dim_aux=dim_aux,
         #         norm_eps=self.cf.mlp_norm_eps,
-        #         with_noise_conditioning=False,
+        #         with_noise_conditioning=True, # TODO: SWITCH BACK TO TRUE
         #     )
         # )
         def init_weights_final(m):
@@ -480,6 +485,11 @@ class ForecastingEngine(torch.nn.Module):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.001)
                 if m.bias is not None:
                     torch.nn.init.normal_(m.bias, mean=0, std=0.001)
+        # def init_weights_final(m):
+        #     if isinstance(m, torch.nn.Linear):
+        #         torch.nn.init.normal_(m.weight, mean=0, std=0.1)
+        #         if m.bias is not None:
+        #             torch.nn.init.normal_(m.bias, mean=0, std=0.1)
 
         for block in self.fe_blocks:
             block.apply(init_weights_final)
@@ -512,9 +522,13 @@ class ForecastingEngine(torch.nn.Module):
             )
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
-                    tokens = block(tokens)
+                    tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
-                    tokens = block(tokens, coords, noise_emb, ada_ln_aux)
+                    # if isinstance(block, MLP):
+                    #     # tokens = torch.concat([tokens, coords], dim=-1) if coords is not None else tokens
+                    #     # TODO: REMOVE
+                    #     tokens = tokens + self.position_layer(coords)  # Assuming args[1] contains positional information
+                    tokens = checkpoint(block, tokens, coords, noise_emb, ada_ln_aux, use_reentrant=False)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
@@ -589,7 +603,7 @@ class TargetPredictionEngineClassic(nn.Module):
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
         softcap,
-        stream_name: str,
+        stream_config: dict,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -602,7 +616,7 @@ class TargetPredictionEngineClassic(nn.Module):
         :param softcap: Softcap value for the attention layers.
         """
         super(TargetPredictionEngineClassic, self).__init__()
-        self.name = f"TargetPredictionEngine_{stream_name}"
+        self.name = f"TargetPredictionEngine_{stream_config['name']}"
 
         self.cf = cf
         self.dims_embed = dims_embed
@@ -618,7 +632,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 MultiCrossAttentionHeadVarlen(
                     dim_embed_q=self.dims_embed[i],
                     dim_embed_kv=self.cf.ae_global_dim_embed,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    num_heads=stream_config["target_readout"]["num_heads"],
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
@@ -637,7 +651,7 @@ class TargetPredictionEngineClassic(nn.Module):
                 self.tte.append(
                     MultiSelfAttentionHeadVarlen(
                         dim_embed=self.dims_embed[i],
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=stream_config["target_readout"]["num_heads"],
                         dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
@@ -671,14 +685,16 @@ class TargetPredictionEngineClassic(nn.Module):
 
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = block(tc_tokens, tcs_lens, tcs_aux)
+                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
             else:
-                tc_tokens = block(
+                tc_tokens = checkpoint(
+                    block,
                     tc_tokens,
                     tokens_stream,
                     tcs_lens,
                     tokens_lens,
                     tcs_aux,
+                    use_reentrant=False,
                 )
         return tc_tokens
 
