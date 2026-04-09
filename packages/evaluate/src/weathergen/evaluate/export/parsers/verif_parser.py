@@ -99,8 +99,9 @@ class VerifParser(CfParser):
         for result in fstep_iterator_results:
             if result is None:
                 continue
-
-            result = result.as_xarray().squeeze()
+            # result is already a materialized xarray DataArray (built in the worker).
+            if not isinstance(result, xr.DataArray):
+                result = result.as_xarray().squeeze()
             result = result.sel(channel=self.channels)
             result = self.preprocess(result)
             result = self.reshape(result)
@@ -128,7 +129,6 @@ class VerifParser(CfParser):
                 merged = self.merge(da_var, obs_result)
                 merged = self.add_metadata(merged, verif_var)
                 vars_to_merge[verif_var] = merged
-
         return vars_to_merge
 
     def get_zarr_dt(self, ds: xr.Dataset) -> np.timedelta64:

@@ -7,6 +7,52 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+embed_orientation: "channels"
+embed_unembed_mode: "block"
+embed_dropout_rate: 0.1
+
+ae_local_dim_embed: 2048
+ae_local_num_blocks: 4
+ae_local_num_heads: 16
+ae_local_dropout_rate: 0.1
+ae_local_with_qk_lnorm: True
+
+ae_local_num_queries: 1
+ae_local_queries_per_cell: False
+ae_adapter_num_heads: 16
+ae_adapter_embed: 128
+ae_adapter_with_qk_lnorm: True
+ae_adapter_with_residual: True
+ae_adapter_dropout_rate: 0.1
+
+ae_global_dim_embed: 2048
+ae_global_num_blocks: 4
+ae_global_num_heads: 32
+ae_global_dropout_rate: 0.1
+ae_global_with_qk_lnorm: True
+# TODO: switching to < 1 triggers triton-related issues.
+# See https://github.com/ecmwf/WeatherGenerator/issues/1050
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: False
+
+ae_aggregation_num_blocks: 8
+ae_aggregation_num_heads: 32
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: True
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
+decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
+pred_adapter_kv: False
+pred_self_attention: True
+pred_dyadic_dims: False
+pred_mlp_adaln: True
+num_class_tokens: 0
+num_register_tokens: 0
+
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
 fe_num_blocks: 16
@@ -14,18 +60,18 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0.0  # 1e-4
+fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
 healpix_level: 5
 
-# performance
+rope_2D: False
+
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
-with_fsdp: False
-ddp_find_unused_parameters: False #True
+with_fsdp: True
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -35,20 +81,20 @@ latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
 latent_noise_saturate_encodings: 5 
 latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True
+latent_noise_deterministic_latents: True 
 
-freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
+freeze_modules: ""
+load_chkpt: {}
 
 norm_type: "LayerNorm"
 
-# type of zarr_store
-zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
-
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_synop_finetuning/"
+streams_directory: "./config/streams/eerie_native/"
 streams: ???
+
+# type of zarr_store
+zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 general:
 
@@ -63,7 +109,7 @@ general:
   # model_path, 
   # run_path, 
   # path_shared_
-
+  
   multiprocessing_method: "fork"
 
   desc: ""
@@ -75,7 +121,6 @@ train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
-  log_grad_norms: False
 
 # parameters for data loading
 data_loading :
@@ -84,28 +129,22 @@ data_loading :
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
-  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
-  # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
-  # If this happens, you can disable the flag, but performance will drop on GH200.
-  memory_pinning: True
-
 
 # config for training
 training_config:
   
   # training_mode: "masking", "student_teacher", "latent_loss"
-  # training_mode: ["student_teacher"]
   training_mode: ["masking"]
 
-  num_mini_epochs: 32
+  num_mini_epochs: 64
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 1979-01-01T00:00
-  end_date: 2022-12-31T00:00
+  start_date: 1950-01-01T00:00
+  end_date: 2004-12-31T00:00
 
-  time_window_step: 06:00:00
-  time_window_len: 06:00:00
+  time_window_step: 24:00:00
+  time_window_len: 24:00:00
   
   learning_rate_scheduling :
     lr_start: 1e-6
@@ -125,15 +164,11 @@ training_config:
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.98125
-      beta2 : 0.9875
+      beta1 : 0.98125 # == 0.85 on 2 nodes x 4 gpus
+      beta2 : 0.9875  # == 0.90 on 2 nodes x 4 gpus
       eps : 2e-08
 
   losses : {
-    "student-teacher": {
-        enabled: False,
-        type: Disabled,
-        },
     "physical": {
         type: LossPhysical,
         loss_fcts: { "mse": { }, },
@@ -141,26 +176,16 @@ training_config:
     }
   
   model_input: {
-    "random_easy" : {
-      enabled: False,
-      num_samples: 0,
-      },
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       },
     }
 
-  target_input: {
-    "random_easy_target" : {
-      enabled: False,
-      },
-    }
-
   forecast :
-      time_step: 06:00:00
-      num_steps: 3
+      time_step: 24:00:00
       offset: 1
+      num_steps: 3
       policy: "fixed"
 
 
@@ -170,8 +195,8 @@ validation_config:
   samples_per_mini_epoch: 256
   shuffle: False
 
-  start_date: 2023-10-01T00:00
-  end_date: 2023-12-31T00:00
+  start_date: 2004-01-01T00:00
+  end_date: 2009-12-31T00:00
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
@@ -187,11 +212,12 @@ validation_config:
     normalized_samples: False,
     # output streams to write; default all
     streams: null,
-  }
+    }
 
   # run validation before training starts (mainly for model development)
   validate_before_training: False
-  
+
+
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
 

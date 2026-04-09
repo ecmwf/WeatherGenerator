@@ -76,7 +76,6 @@ coordinates:
     sfc:
         lat: latitude
         lon: longitude
-        stream: stream
         forecast_step: leadtime
         forecast_reference_time: time
         ncells: ncells
@@ -85,7 +84,6 @@ coordinates:
         pressure_level: pressure
         lat: latitude
         lon: longitude
-        stream: stream
         forecast_step: leadtime
         forecast_reference_time: time
         ncells: ncells
@@ -111,9 +109,6 @@ dimensions:
       std: forecast_period
       long: time since forecast_reference_time
       verif_unit: hour
-    stream:
-      verif: stream
-      std: stream
     ncells:
       verif: ncells
       std: ncells
