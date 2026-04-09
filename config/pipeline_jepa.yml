@@ -23,6 +23,7 @@ stages:
     command: train-continue
     config: ./config/config_jepa_forecasting_finetuning.yml
     from: stage1
+    chain: 2
 
   - name: inference.1
     command: inference
