@@ -44,8 +44,7 @@ def _download_cartopy_off(enabled: bool) -> None:
     if enabled:
         warnings.filterwarnings("error", category=DownloadWarning)
         _logger.info(
-            "Cartopy offline mode enabled from plotting config. "
-            "Auto-downloads are blocked; only local cartopy data will be used."
+            "Auto-downloads are blocked for cartopy; only local cartopy data will be used."
         )
     else:
         warnings.filterwarnings("default", category=DownloadWarning)
@@ -509,12 +508,10 @@ class Plotter:
             proj = ccrs.Robinson()
 
         ax = fig.add_subplot(1, 1, 1, projection=proj)
-        if self.cartopy_offline:
-            _logger.info(
-                "Skipping coastlines in Cartopy offline mode to avoid triggering downloads."
-            )
-        else:
+        try:
             ax.coastlines()
+        except Exception:
+            _logger.warning("Could not add coastlines to plot; continuing without them.")
 
         assert data["lon"].shape == data["lat"].shape == data.shape, (
             f"Scatter plot:: Data shape do not match. Shapes: "
