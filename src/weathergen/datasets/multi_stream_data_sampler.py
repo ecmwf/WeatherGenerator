@@ -134,7 +134,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # teacher_time_offset: number of time windows to shift the teacher's input
         # relative to the student's. When > 0 the teacher sees a future time window.
-        self.teacher_time_offset = mode_cfg.get("teacher_time_offset", 0)
+        # Only active when student_teacher mode is used; ignored in masking mode to
+        # prevent stale offsets from JEPA pretraining leaking into forecasting
+        # finetuning/inference (where it would shift all target times by one window).
+        training_mode = mode_cfg.get("training_mode", [])
+        if "student_teacher" in training_mode:
+            self.teacher_time_offset = mode_cfg.get("teacher_time_offset", 0)
+        else:
+            configured_offset = mode_cfg.get("teacher_time_offset", 0)
+            if configured_offset != 0:
+                logger.warning(
+                    f"teacher_time_offset={configured_offset} is set but training_mode="
+                    f"{training_mode} does not include 'student_teacher'. "
+                    "Ignoring teacher_time_offset (setting to 0)."
+                )
+            self.teacher_time_offset = 0
 
         fsm = self.list_num_forecast_steps[0]
         forecast_len = (self.time_step * (fsm + 1)) // self.step_timedelta
