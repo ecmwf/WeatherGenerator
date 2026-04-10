@@ -128,7 +128,7 @@ healpix_level: 5
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
-rope_2D: True
+rope_2D: False
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -148,7 +148,10 @@ latent_noise_deterministic_latents: True
 
 freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 # load_chkpt: {'run_id': 'lgrasnq6', 'epoch': -1}  # z500 small
-load_chkpt: {'run_id': 'hhz27wy0', 'epoch': -1}  # multi-var small, sigma_data=0.7855
+# load_chkpt: {'run_id': 'hhz27wy0', 'epoch': -1}  # multi-var small, sigma_data=0.7855
+# load_chkpt: {'run_id': 'xpwjhaf4', 'epoch': -1}  # z500 d128 hl5 enc-lnorm, sigma_data=1.0
+# load_chkpt: {'run_id': 'ml89b5r6', 'epoch': -1}  # multi-var d128 hl5, sigma_data=0.2415
+load_chkpt: {'run_id': 'a3n1pdkl', 'epoch': -1}  # multi-var d128 hl5, nopos, sigma_data=0.2507
 
 norm_type: "LayerNorm"
 

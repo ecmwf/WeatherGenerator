@@ -99,23 +99,28 @@ latent_noise_deterministic_latents: True
 
 
 freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
-# load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.7
+load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.7
 # load_chkpt: {'run_id': 'dcl584vo', 'epoch': -1}  # z500 d2048 hl5, sigma_data=159.08
 # load_chkpt: {'run_id': 'tvkicam9', 'epoch': -1}  # z500 d2048 hl3 enc-lnorm, sigma_data=1.0
 # load_chkpt: {'run_id': 'q9grso75', 'epoch': -1}  # z500 d2048 hl3, sigma_data=39.2936
 # load_chkpt: {'run_id': 'qxivdyqz', 'epoch': -1}  # z500 d2048 hl5 enc-lnorm, sigma_data=1.0
-load_chkpt: {'run_id': 'h8x1qgz3', 'epoch': -1}  # z500 d128 hl5, sigma_data=12.93
+# load_chkpt: {'run_id': 'h8x1qgz3', 'epoch': -1}  # z500 d128 hl5, sigma_data=12.93
 # load_chkpt: {'run_id': '', 'epoch': -1}  # z500 d128 hl5 enc-lnorm, sigma_data=1.0
 # load_chkpt: {'run_id': 'wvpb76ai', 'epoch': -1}  # multi-var d2048 hl3 enc-lnorm, sigma_data=1.0
-# load_chkpt: {'run_id': 'ae4wlc5m', 'epoch': -1}  # multi-var d2048 hl3, sigma_data=
+# load_chkpt: {'run_id': 'ae4wlc5m', 'epoch': -1}  # multi-var d2048 hl3, sigma_data=2.7047
+# load_chkpt: {'run_id': 'r45iwyns', 'epoch': -1}  # multi-var d512 hl3, sigma_data=1.1785
+# load_chkpt: {'run_id': 'ydka6uql', 'epoch': -1}  # multi-var d512 hl4, sigma_data=0.827
+# load_chkpt: {'run_id': 'qf9yoimd', 'epoch': -1}  # multi-var d512 hl5, sigma_data=0.5789
+# load_chkpt: {'run_id': 'v8kd6xc1', 'epoch': -1}  # multi-var d512 hl5 nopos, sigma_data=0.6481
+# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d2512 hl5 enc-lnorm, sigma_data=1.0
 
 
 norm_type: "LayerNorm"
 
 #####################################
 
-# streams_directory: "./config/streams/era5_1deg_forecasting/"
-streams_directory: "./config/streams/era5_1deg_forecasting_z500/"
+streams_directory: "./config/streams/era5_1deg_forecasting/"
+# streams_directory: "./config/streams/era5_1deg_forecasting_z500/"
 streams: ???
 
 # type of zarr_store
