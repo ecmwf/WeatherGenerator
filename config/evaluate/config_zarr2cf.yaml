@@ -36,7 +36,7 @@ variables:
     wg_unit: m**2 s**-2
     std_unit: m2 s-2
     level_type: pl
-    scale_factor: 1/9.80665
+    scale_factor: 1.0 #0.10197 #1/9.80665
   10u:
     var: u10
     long: u_wind_at_10m
@@ -103,7 +103,6 @@ coordinates:
         valid_time: valid_time
         lat: latitude
         lon: longitude
-        stream: stream
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
@@ -112,7 +111,6 @@ coordinates:
         valid_time: valid_time
         lat: latitude
         lon: longitude
-        stream: stream
         forecast_step: forecast_period
         forecast_reference_time: forecast_reference_time
         ncells: ncells
@@ -141,9 +139,6 @@ dimensions:
       std: forecast_period
       long: time since forecast_reference_time
       std_unit: hours
-    stream:
-      wg: stream
-      std: stream
     ncells:
       wg: ncells
       std: ncells

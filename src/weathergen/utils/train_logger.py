@@ -31,8 +31,6 @@ from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
 _weathergen_time = "weathergen.time"
-_performance_gpu = "perf.gpu"
-_performance_memory = "perf.memory"
 
 _logger = logging.getLogger(__name__)
 
@@ -102,8 +100,6 @@ class TrainLogger:
         stddev_all: dict,
         avg_loss: list[float] = None,
         lr: float = None,
-        perf_gpu: float = 0.0,
-        perf_mem: float = 0.0,
     ) -> None:
         """
         Log training or validation data
@@ -114,8 +110,6 @@ class TrainLogger:
             metrics["loss_avg_mean"] = np.nanmean(avg_loss)
             metrics["learning_rate"] = lr
             metrics["num_samples"] = int(samples)
-            metrics[_performance_gpu] = perf_gpu
-            metrics[_performance_memory] = perf_mem
 
         for key, value in losses_all.items():
             metrics[key] = np.nanmean(value)
