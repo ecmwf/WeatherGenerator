@@ -647,11 +647,6 @@ def load_streams(streams_directory: Path) -> list[Config]:
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
-    if config is not None and config.get("results_path", None):
-        base = Path(config.results_path)
-        if not base.is_absolute():
-            base = (Path.cwd() / base).resolve()
-        return base / get_run_id_from_config(config)
     return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
 
 
@@ -714,10 +709,12 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     if len(forecast_cfg) == 0:
         return
 
-    if "fstep_chunk_size" in forecast_cfg:
-        fstep_chunk_size = forecast_cfg.get("fstep_chunk_size")
-        if not isinstance(fstep_chunk_size, int) or fstep_chunk_size <= 0:
-            raise TypeError(f"'{mode}.forecast.fstep_chunk_size' must be a positive integer.")
+    forecast_cfg.num_steps = forecast_cfg.get("num_steps", 1)
+    forecast_cfg.chunk_size = forecast_cfg.get("chunk_size", forecast_cfg.num_steps)
+    assert (
+        isinstance(forecast_cfg.chunk_size, int) and forecast_cfg.chunk_size <= 0,
+        f"'{mode}.forecast.fstep_chunk_size' must be a positive integer."
+    )
 
     provide_forecast_policy = (
         f"'{mode}.forecast.policy' must be specified when '{mode}.forecast.num_steps' is not zero "

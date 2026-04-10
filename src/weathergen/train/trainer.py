@@ -575,6 +575,8 @@ class Trainer(TrainerBase):
         dataset_val_iter = iter(self.data_loader_validation)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+        compute_loss = mode_cfg.get("compute_loss", True)
+        needs_targets_and_aux = compute_loss or num_samples_write > 0
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
@@ -599,18 +601,20 @@ class Trainer(TrainerBase):
                         total_steps = batch.get_output_len()
                         preds_full = (
                             ModelOutput(total_steps, batch=batch.get_source_samples())
-                            if total_steps > 0
+                            if compute_loss and total_steps > 0
                             else None
                         )
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
-                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
-                            targets_and_auxs[loss_name] = target_aux.compute(
-                                self.cf.general.istep,
-                                batch.get_target_samples(target_idxs),
-                                self.model_params,
-                                self.model,
-                            )
+                        if needs_targets_and_aux:
+                            for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                                target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
+                                targets_and_auxs[loss_name] = target_aux.compute(
+                                    self.cf.general.istep,
+                                    batch.get_target_samples(target_idxs),
+                                    self.model_params,
+                                    self.model,
+                                )
+
                         for chunk_idx, chunk_size in enumerate(chunks):
                             if self.ema_model is None:
                                 x = self.model(
@@ -631,12 +635,17 @@ class Trainer(TrainerBase):
                                     if mode_cfg.get("output", {}).get("normalized_samples", False)
                                     else self.dataset_val.denormalize_target_channels
                                 )
-                                chunk_step_offset = x.step_offset
-                                timestep_idxs = [
-                                    step
-                                    for step in batch.get_output_idxs()
-                                    if chunk_step_offset <= step < chunk_step_offset + chunk_size
-                                ]
+                                if not targets_and_auxs:
+                                    raise ValueError(
+                                        "Writing validation output requires targets. "
+                                        "Configure validation losses or set output.num_samples=0."
+                                    )
+                                output_idxs = batch.get_output_idxs()
+                                forecast_step_offset = output_idxs[0] if len(output_idxs) > 0 else 0
+                                chunk_step_offset = forecast_step_offset + x.step_offset
+                                timestep_idxs = list(
+                                    range(chunk_step_offset, chunk_step_offset + chunk_size)
+                                )
                                 write_output(
                                     self.cf,
                                     mode_cfg,
@@ -650,12 +659,15 @@ class Trainer(TrainerBase):
                                     timestep_idxs=timestep_idxs,
                                     fstep_offset=chunk_step_offset,
                                 )
-                            if preds_full is not None:
+                            if compute_loss and preds_full is not None:
+                                output_idxs = batch.get_output_idxs()
+                                forecast_step_offset = output_idxs[0] if len(output_idxs) > 0 else 0
+                                chunk_step_offset = forecast_step_offset + x.step_offset
                                 for step_idx in range(chunk_size):
-                                    preds_full.physical[x.step_offset + step_idx].update(
+                                    preds_full.physical[chunk_step_offset + step_idx].update(
                                         x.physical[step_idx]
                                     )
-                                    preds_full.latent[x.step_offset + step_idx].update(
+                                    preds_full.latent[chunk_step_offset + step_idx].update(
                                         x.latent[step_idx]
                                     )
                             if chunk_size and chunk_idx < len(chunks) - 1:
@@ -664,7 +676,7 @@ class Trainer(TrainerBase):
                                         "Missing latent_state for chunked forecast continuation."
                                     )
 
-                    if preds_full is not None:
+                    if compute_loss and preds_full is not None:
                         _ = self.loss_calculator_val.compute_loss(
                             preds=preds_full,
                             targets_and_aux=targets_and_auxs,
@@ -829,10 +841,18 @@ class Trainer(TrainerBase):
 
             if is_root():
                 if stage == VAL:
-                    logger.info(
-                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
-                        {np.nanmean(avg_loss)}"""
-                    )
+                    if len(avg_loss) == 0:
+                        logger.info(
+                            (
+                                f"validation ({self.cf.general.run_id}) : {mini_epoch:03d} : "
+                                "loss disabled"
+                            )
+                        )
+                    else:
+                        logger.info(
+                            f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
+                            {np.nanmean(avg_loss)}"""
+                        )
 
                 elif stage == TRAIN:
                     # samples per sec
