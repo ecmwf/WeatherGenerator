@@ -600,4 +600,4 @@ def create_filename(
             f"to keep length <= {max_len}."
         )
 
-    return sep.join(pref + truncated_middle + suf)
+    return sep.join(prefix + truncated_middle + suffix)
