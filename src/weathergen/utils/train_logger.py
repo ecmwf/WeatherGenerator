@@ -140,7 +140,7 @@ class TrainLogger:
             )
         run_id = cf.general.run_id
 
-        result_dir_base = config.get_path_run(cf)
+        result_dir_base = config.get_path_run(cf).parent
         result_dir = result_dir_base / run_id
         fname_log_train = result_dir / f"{run_id}_train_log.txt"
         fname_log_val = result_dir / f"{run_id}_val_log.txt"

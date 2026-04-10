@@ -27,6 +27,7 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 MAX_FILENAME_LEN = 255
+DEFAULT_SHARED_PATH = config._get_shared_wg_path()
 
 
 ####################################################################################################
@@ -154,7 +155,7 @@ def clean_plot_folder(plot_dir: Path):
 
 
 ####################################################################################################
-def get_stream_names(run_id: str, model_path: Path | None = "./model"):
+def get_stream_names(run_id: str, model_path: Path | None = "./models") -> list[str]:
     """
     Get the stream names from the model configuration file.
 
@@ -511,7 +512,7 @@ def plot_loss_per_run(
     if errs is None:
         errs = ["mse"]
 
-    plot_dir = Path(plot_dir)
+    plot_dir = DEFAULT_SHARED_PATH / "plots"
 
     modes = [modes] if type(modes) is not list else modes
     # repeat colors when train and val is plotted simultaneously
@@ -731,7 +732,13 @@ def plot_train(args=None):
     # parse the command line arguments
     args = parser.parse_args(args)
 
-    model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
+    model_base_dir = DEFAULT_SHARED_PATH / "models"
+    if model_base_dir != Path(args.model_base_dir):
+        _logger.warning(
+            f"Model base directory specified in args ({args.model_base_dir}) "
+            f"is different from the default shared path ({model_base_dir}). "
+            f"Using the model base directory from args: {model_base_dir}"
+        )
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
     x_types_valid = ["step"]  # TODO: add "reltime" support when fix available

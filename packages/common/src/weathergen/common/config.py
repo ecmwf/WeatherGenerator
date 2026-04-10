@@ -230,7 +230,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         if model_path is None:
             path = get_path_model(run_id=run_id)
         else:
-            path = Path(model_path) / run_id
+            path = _get_shared_wg_path() / "models" / run_id
 
         config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
         config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
@@ -644,6 +644,16 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
     return _get_shared_wg_path() / "models" / run_id
+
+
+def get_path_output(config: Config | None = None, run_id: str | None = None) -> Path:
+    """Get the current runs output path for storing output files."""
+    if config or run_id:
+        run_id = run_id if run_id else get_run_id_from_config(config)
+    else:
+        msg = f"Missing run_id and cannot infer it from config: {config}"
+        raise ValueError(msg)
+    return _get_shared_wg_path() / "output" / run_id
 
 
 def get_path_results(config: Config, mini_epoch: int) -> Path:
