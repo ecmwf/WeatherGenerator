@@ -107,7 +107,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
         # happens for predictions in the model
         for stream_name in stream_names:
             # collect targets for all forecast steps
-            for idx_step, step in enumerate(output_idxs):
+            for step in output_idxs:
                 targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
                 is_spoof, idxs_inv = [], []
                 for sample in batch.samples:
@@ -116,7 +116,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                     target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[step]]
                     idxs_inv += [sample.streams_data[stream_name].idxs_inv[step]]
                     meta_data += [sample.meta_info]
-                    is_spoof += [sample.streams_data[stream_name].is_spoof(idx_step)]
+                    is_spoof += [sample.streams_data[stream_name].is_spoof(step)]
 
                 targets_step = {
                     "target": targets_cur,
