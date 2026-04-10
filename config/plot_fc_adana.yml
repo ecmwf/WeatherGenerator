@@ -1,0 +1,23 @@
+train:
+  plot:
+    qyq57i2m-stage1:
+      slurm_id: 0
+      description: "Baseline run"
+    c5hvg6z8-stage1:
+      slurm_id: 0
+      description: "SwiGLU + XSA"
+    #rz4vukr9-stage1:
+    #  slurm_id: 0
+    #  description: "Adana (no swiglu or xsa)"
+    #wzs5obxp-stage1:
+    #  slurm_id: 0
+    #  description: "Adana (no swiglu or xsa)"
+    g9s0jh4a-stage1:
+      slurm_id: 0
+      description: "Adana (no swiglu or xsa)"
+    jfghpao2-stage1:
+      slurm_id: 0
+      description: "Adana higher lr (no swiglu or xsa)"
+    gq2gs37f-stage1:
+      slurm_id: 0
+      description: "Adana lower omega higher lr (no swiglu or xsa)"

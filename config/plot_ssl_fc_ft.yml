@@ -1,0 +1,23 @@
+train:
+  plot:
+    l5mdil6s-stage2:
+      slurm_id: 0
+      description: "Previous Temporal JEPA"
+    nbx7stv2-stage2:
+      slurm_id: 0
+      description: "Best of Seb April 9th"
+    nbx7stv2-stage2-stage1:
+      slurm_id: 0
+      description: "Best of Seb April 9th"
+    ju4t5mo9-finetune-forecast:
+      slurm_id: 0
+      description: "New arch with noise at forecasting"
+    ju4t5mo9-finetune-forecast-stage1:
+      slurm_id: 0
+      description: "New arch with noise at forecasting"
+    o1gchykd-finetune-forecast:
+      slurm_id: 0
+      description: "New arch without noise at forecasting"
+    o1gchykd-finetune-forecast-stage1:
+      slurm_id: 0
+      description: "New arch without noise at forecasting"
