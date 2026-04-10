@@ -117,8 +117,10 @@ class EmbeddingEngine(torch.nn.Module):
 
         # per cell indices into positional encoding
         tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
-        pe_idxs = torch.cat([torch.arange(c) for c in tok_counts])
-
+        rows = torch.arange( tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+        rows = rows.expand(tok_counts.shape[0], -1)
+        pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
+        
         # actual scatter operation
         tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
 

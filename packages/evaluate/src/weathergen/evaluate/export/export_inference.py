@@ -270,7 +270,8 @@ def export_from_args(args: list) -> None:
     ----------
         args : List of command line arguments.
     """
-    args = parse_args(sys.argv[1:])
+    args = parse_args(args)
+
     # Load configuration
     if args.output_format == "verif":
         config_file = Path(_REPO_ROOT, "config/evaluate/config_zarr2verif.yaml")
@@ -285,7 +286,6 @@ def export_from_args(args: list) -> None:
 
     if kwargs.get("expver") == "NEW":
         kwargs["expver"] = generate_new_expver()
-
     _logger.info(kwargs)
 
     # Ensure output directory exists
