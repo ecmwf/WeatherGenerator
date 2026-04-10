@@ -118,8 +118,10 @@ class EmbeddingEngine(torch.nn.Module):
 
         # per cell indices into positional encoding
         tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
-        pe_idxs = torch.cat([torch.arange(c) for c in tok_counts])
-
+        rows = torch.arange( tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+        rows = rows.expand(tok_counts.shape[0], -1)
+        pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
+        
         # actual scatter operation
         tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
 
@@ -148,6 +150,7 @@ class LocalAssimilationEngine(torch.nn.Module):
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
+                    qk_norm_type=self.cf.qk_norm_type,
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
@@ -194,6 +197,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 dropout_rate=self.cf.ae_adapter_dropout_rate,
                 with_flash=self.cf.with_flash_attention,
                 norm_type=self.cf.norm_type,
+                qk_norm_type=self.cf.qk_norm_type,
                 norm_eps=self.cf.norm_eps,
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
@@ -223,6 +227,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_adapter_dropout_rate,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
+                    qk_norm_type=self.cf.qk_norm_type,
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
@@ -237,6 +242,63 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 cell_lens_c,
             )
         return tokens_global_c
+
+
+class Local2GlobalSumEngine(torch.nn.Module):
+    """Alternative to Local2GlobalAssimilationEngine.
+
+    Instead of cross-attention (Q=learnable query, KV=local tokens), this engine
+    sums local tokens per cell and projects to global dim. Masked cells are filled
+    externally by the encoder using the learnable query + pe_global (unchanged).
+
+    Forward signature matches Local2GlobalAssimilationEngine; tokens_global_c and
+    q_cells_lens_c are unused (masked-cell filling happens in the encoder).
+    """
+
+    name: "Local2GlobalSumEngine"
+
+    def __init__(self, cf: Config) -> None:
+        super(Local2GlobalSumEngine, self).__init__()
+        self.cf = cf
+        self.proj = torch.nn.Linear(cf.ae_local_dim_embed, cf.ae_global_dim_embed, bias=False)
+        ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
+        self.mlp_blocks = torch.nn.ModuleList()
+        for _ in range(ae_adapter_num_blocks - 1):
+            self.mlp_blocks.append(
+                MLP(
+                    cf.ae_global_dim_embed,
+                    cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=cf.ae_adapter_dropout_rate,
+                    norm_type=cf.norm_type,
+                    norm_eps=cf.mlp_norm_eps,
+                )
+            )
+
+    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
+        # tokens_c:        (total_local_tokens, local_dim)
+        # tokens_global_c: (num_unmasked_cells, num_queries, global_dim) — unused
+        # cell_lens_c:     (num_unmasked_cells + 1,) with 0 at index 0
+        num_cells = cell_lens_c.shape[0] - 1
+        cell_counts = cell_lens_c[1:]
+
+        # scatter-sum local tokens into per-cell summaries
+        cell_idx = torch.repeat_interleave(
+            torch.arange(num_cells, device=tokens_c.device, dtype=torch.long), cell_counts
+        )
+        cell_sums = torch.zeros(
+            num_cells, tokens_c.shape[-1], device=tokens_c.device, dtype=tokens_c.dtype
+        )
+        cell_sums.scatter_add_(0, cell_idx.unsqueeze(1).expand_as(tokens_c), tokens_c)
+
+        # project to global dim and match (num_cells, num_queries, global_dim)
+        num_queries = tokens_global_c.shape[1]
+        out = self.proj(cell_sums).unsqueeze(1).expand(-1, num_queries, -1)
+
+        for blk in self.mlp_blocks:
+            out = blk(out)
+
+        return out
 
 
 class QueryAggregationEngine(torch.nn.Module):
@@ -272,6 +334,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.qk_norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -289,6 +352,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.qk_norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                     )
@@ -346,6 +410,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.qk_norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -362,6 +427,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.qk_norm_type,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -419,6 +485,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
+                            qk_norm_type=self.cf.qk_norm_type,
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
@@ -436,6 +503,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
+                            qk_norm_type=self.cf.qk_norm_type,
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
@@ -585,6 +653,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
+                    qk_norm_type=self.cf.qk_norm_type,
                     softcap=self.softcap,
                     dim_aux=self.dim_coord_in,
                     norm_eps=self.cf.norm_eps,
@@ -602,6 +671,7 @@ class TargetPredictionEngineClassic(nn.Module):
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.qk_norm_type,
                         dim_aux=self.dim_coord_in,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
@@ -697,6 +767,7 @@ class TargetPredictionEngine(nn.Module):
             "dropout_rate": 0.1,  # Assuming dropout_rate is 0.1
             "with_flash": self.cf.with_flash_attention,
             "norm_type": self.cf.norm_type,
+            "qk_norm_type": self.cf.qk_norm_type,
             "softcap": self.softcap,
             "dim_aux": self.dim_coord_in,
             "norm_eps": self.cf.norm_eps,
@@ -880,6 +951,7 @@ class LatentPredictionHeadTransformer(nn.Module):
                     with_qk_lnorm=with_qk_lnorm,
                     with_flash=self.global_cf.with_flash_attention,
                     norm_type=self.global_cf.norm_type,
+                    qk_norm_type=self.global_cf.qk_norm_type,
                     # dim_aux=dim_aux,
                     norm_eps=self.global_cf.norm_eps,
                     attention_dtype=get_dtype(self.global_cf.attention_dtype),
