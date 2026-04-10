@@ -176,7 +176,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        weight: 0.5,
+        weight: 0.1,
         loss_fcts: {
           "mse": {
             weight: 0.8,
