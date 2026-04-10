@@ -324,7 +324,7 @@ def _clean_stream_name(stream_name: str) -> str:
 
 def _key_loss(st_name: str, lf_name: str) -> str:
     st_name = clean_name(st_name)
-    return f"stream.{st_name}.stddev_avg"
+    return f"LossPhysical.{st_name}.{lf_name}.avg"
 
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
@@ -334,7 +334,7 @@ def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
 
 def _key_stddev(st_name: str) -> str:
     st_name = clean_name(st_name)
-    return "LossPhysical.loss_avg"
+    return f"stream.{st_name}.stddev_avg"
 
 
 def prepare_losses_for_logging(
