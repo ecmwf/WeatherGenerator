@@ -33,6 +33,7 @@ from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
@@ -298,6 +299,10 @@ class Trainer(TrainerBase):
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
+
+        # Restore EMA teacher weights when continuing from a checkpoint
+        if run_id_contd is not None:
+            self._load_ema_teacher_state(run_id_contd, mini_epoch_contd)
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
@@ -720,8 +725,85 @@ class Trainer(TrainerBase):
                 optim_tmp.replace(optim_out)
                 logger.info(f"Saved optimizer state to {optim_out}")
 
+            # save EMA teacher state (weights + centering buffers) if present
+            ema_teacher = self._get_ema_teacher()
+            if ema_teacher is not None:
+                ema_state = {
+                    "ema_model": ema_teacher.ema_model.ema_model.state_dict(),
+                    "postprocess_targets": {
+                        name: module.state_dict()
+                        for name, module in ema_teacher.postprocess_targets.items()
+                    },
+                }
+                ema_out = base_path / (filename + ".ema_teacher")
+                ema_tmp = base_path / (filename + "_tmp.ema_teacher")
+                torch.save(ema_state, ema_tmp)
+                ema_tmp.replace(ema_out)
+                logger.info(f"Saved EMA teacher state to {ema_out}")
+
             # save config
             config.save(self.cf, mini_epoch)
+
+    def _get_ema_teacher(self) -> EMATeacher | None:
+        """Return the training EMATeacher calculator if one exists, else None."""
+        if self.target_and_aux_calculators is None:
+            return None
+        for calc in self.target_and_aux_calculators.values():
+            if isinstance(calc, EMATeacher):
+                return calc
+        return None
+
+    @staticmethod
+    def _get_ema_teachers_from(calculators) -> list[EMATeacher]:
+        """Return all EMATeacher instances in *calculators*."""
+        if calculators is None:
+            return []
+        return [c for c in calculators.values() if isinstance(c, EMATeacher)]
+
+    def _load_ema_teacher_state(self, run_id: str, mini_epoch):
+        """Load EMA teacher weights into both training and validation teachers."""
+        all_teachers = self._get_ema_teachers_from(
+            self.target_and_aux_calculators
+        ) + self._get_ema_teachers_from(self.target_and_aux_calculators_val)
+        if not all_teachers:
+            return
+
+        path_run = config.get_path_model(run_id=run_id)
+        mini_epoch_id = (
+            f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
+        )
+        ema_file = path_run / f"{run_id}_{mini_epoch_id}.ema_teacher"
+
+        if not ema_file.exists():
+            if is_root():
+                logger.info(f"No EMA teacher state at {ema_file}, using reset from student.")
+            return
+
+        if is_root():
+            logger.info(f"Loading EMA teacher state from {ema_file}")
+
+        state = torch.load(
+            ema_file, map_location=torch.device("cpu"), weights_only=True
+        )
+
+        for ema_teacher in all_teachers:
+            # Restore EMA model weights
+            mkeys, ukeys = ema_teacher.ema_model.ema_model.load_state_dict(
+                state["ema_model"], strict=False
+            )
+            if is_root():
+                if mkeys:
+                    logger.warning(f"Missing keys in EMA teacher model: {mkeys}")
+                if ukeys:
+                    logger.warning(f"Unused keys in EMA teacher model: {ukeys}")
+
+            # Restore postprocessing state (e.g. DINO/iBOT centering buffers)
+            for name, module in ema_teacher.postprocess_targets.items():
+                if name in state.get("postprocess_targets", {}):
+                    module.load_state_dict(state["postprocess_targets"][name], strict=False)
+
+        if is_root():
+            logger.info(f"EMA teacher state restored into {len(all_teachers)} teacher(s).")
 
     def _load_optimizer_state(self, run_id: str, mini_epoch):
         """Load optimizer state from checkpoint if available.
