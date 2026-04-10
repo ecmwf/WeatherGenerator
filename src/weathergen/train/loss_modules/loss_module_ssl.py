@@ -292,20 +292,30 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             )
 
 
-def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, teacher_masks):
+def jepa_loss(
+    student_patches_masked, student_masks, teacher_patches_masked, teacher_masks, temporal=False
+):
     # TODO remove as we deal with batch dimension
     assert teacher_masks.shape[0] == 1 or teacher_masks.shape[0] == student_masks.shape[0]
     student_masks = student_masks.squeeze(dim=1)
     teacher_masks = teacher_masks.squeeze(dim=1)
-    masks_weight = (
-        (1 / student_masks.sum(-1).clamp(min=1.0))
-        .unsqueeze(-1)
-        .expand_as(student_masks)  # [student_masks_flat]
-    )
 
-    mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+    if temporal:
+        # Temporal JEPA: predict teacher's representation at ALL teacher-visible cells
+        # (no spatial masking exclusion since the prediction task is across time, not space)
+        mask = teacher_masks
+    else:
+        # Standard JEPA: predict only at cells the teacher sees but the student doesn't
+        mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+
     if mask.sum() == 0:
-        logger.warning("jepa_loss mask is all true, likely incorrect masking config.")
+        logger.warning("jepa_loss mask is all zeros, likely incorrect masking config.")
+
+    masks_weight = (
+        (1 / mask.sum(-1).clamp(min=1.0))
+        .unsqueeze(-1)
+        .expand_as(mask)
+    )
 
     assert mask.shape[0] == student_patches_masked.shape[0], (
         "mask.shape[0], batch dimension, has to match batch dimension for student_patches_masked."
