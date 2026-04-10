@@ -550,7 +550,7 @@ def plot_loss_per_stream(
                 half_len = (200 - len(plt_fname.suffix)) // 2
                 plt_fname = plt_fname.parent / (
                     plt_fname.name[:half_len]
-                    + "..."
+                    + "_"
                     + plt_fname.name[-half_len - len(plt_fname.suffix) :]
                 )
             _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
