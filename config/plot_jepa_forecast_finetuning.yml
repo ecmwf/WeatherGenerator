@@ -1,6 +1,0 @@
-# Plot config for JEPA finetuning runs (auto-generated)
-train:
-  plot:
-    u2fapj0c-stage2.2:
-      slurm_id: 0
-      description: "JEPA 2.1"

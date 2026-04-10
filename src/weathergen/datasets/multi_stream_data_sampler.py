@@ -744,7 +744,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     input_mask=target_mask,
                 )
 
-
                 target_metadata = target_masks.metadata[tidx]
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask

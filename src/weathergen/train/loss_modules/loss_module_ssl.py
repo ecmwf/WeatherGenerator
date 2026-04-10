@@ -311,11 +311,7 @@ def jepa_loss(
     if mask.sum() == 0:
         logger.warning("jepa_loss mask is all zeros, likely incorrect masking config.")
 
-    masks_weight = (
-        (1 / mask.sum(-1).clamp(min=1.0))
-        .unsqueeze(-1)
-        .expand_as(mask)
-    )
+    masks_weight = (1 / mask.sum(-1).clamp(min=1.0)).unsqueeze(-1).expand_as(mask)
 
     assert mask.shape[0] == student_patches_masked.shape[0], (
         "mask.shape[0], batch dimension, has to match batch dimension for student_patches_masked."
