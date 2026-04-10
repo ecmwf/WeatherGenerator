@@ -30,6 +30,7 @@ from weathergen.train.teacher_utils import (
 
 logger = logging.getLogger(__name__)
 
+
 class EncoderTeacher(TargetAndAuxModuleBase):
     """Base class for SSL teacher models.
 
@@ -54,7 +55,8 @@ class EncoderTeacher(TargetAndAuxModuleBase):
 
     def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
         with torch.no_grad():
-            outputs = self.forward_teacher(model_params, batch).get_latent_prediction(0)
+            teacher_output = self.forward_teacher(model_params, batch)
+            outputs = teacher_output.get_latent_prediction(0)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])

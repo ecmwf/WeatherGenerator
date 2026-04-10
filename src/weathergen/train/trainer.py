@@ -32,6 +32,7 @@ from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
@@ -768,9 +769,7 @@ class Trainer(TrainerBase):
             return
 
         path_run = config.get_path_model(run_id=run_id)
-        mini_epoch_id = (
-            f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
-        )
+        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
         ema_file = path_run / f"{run_id}_{mini_epoch_id}.ema_teacher"
 
         if not ema_file.exists():
@@ -781,9 +780,7 @@ class Trainer(TrainerBase):
         if is_root():
             logger.info(f"Loading EMA teacher state from {ema_file}")
 
-        state = torch.load(
-            ema_file, map_location=torch.device("cpu"), weights_only=True
-        )
+        state = torch.load(ema_file, map_location=torch.device("cpu"), weights_only=True)
 
         for ema_teacher in all_teachers:
             # Restore EMA model weights
@@ -811,9 +808,7 @@ class Trainer(TrainerBase):
         resumes smoothly when chaining jobs via train_continue.
         """
         path_run = config.get_path_model(run_id=run_id)
-        mini_epoch_id = (
-            f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
-        )
+        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
         optim_file = path_run / f"{run_id}_{mini_epoch_id}.optim"
 
         if not optim_file.exists():
@@ -837,9 +832,7 @@ class Trainer(TrainerBase):
             new_entry = {}
             for key, val in entry.items():
                 if isinstance(val, torch.Tensor) and val.dim() > 0 and is_model_sharded:
-                    new_entry[key] = distribute_tensor(
-                        val, param.device_mesh, param.placements
-                    )
+                    new_entry[key] = distribute_tensor(val, param.device_mesh, param.placements)
                 elif isinstance(val, torch.Tensor):
                     new_entry[key] = val.to(device=param.device)
                 else:

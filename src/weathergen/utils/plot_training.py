@@ -299,7 +299,9 @@ def plot_loss_avg(
     plt.ylabel("loss")
     plt.xlabel("step")
     plt.tight_layout()
-    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"], max_len=128)
+    plt_fname = plot_dir / create_filename(
+        middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"], max_len=128
+    )
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
@@ -440,7 +442,9 @@ def plot_loss_per_stream(
                     continue
 
                 legend = plt.legend(
-                    legend_str, loc="upper right" if not x_scale_log else "lower left", fontsize="x-small"
+                    legend_str,
+                    loc="upper right" if not x_scale_log else "lower left",
+                    fontsize="x-small",
                 )
                 for line in legend.get_lines():
                     line.set(alpha=1.0)
@@ -478,7 +482,9 @@ def plot_loss_per_stream(
                     run_ids_str = run_ids_str[: -(len(fname_tail) + 1)]
 
                 # save the plot
-                plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{fname_tail}"], max_len=128)
+                plt_fname = plot_dir / create_filename(
+                    middle=runs_ids.keys(), suffix=[f"{fname_tail}"], max_len=128
+                )
 
                 _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
                 plt.savefig(plt_fname)
