@@ -439,7 +439,7 @@ class StreamData:
         return any(self.source_is_spoof) or self.target_is_spoof[step]
 
 
-def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:
+def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderData:
     """
     Spoof an instance from data_reader_base.ReaderData instance.
     other should be such an instance.
@@ -454,7 +454,8 @@ def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderD
     coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
     geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
 
-    data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(coords.shape[0], axis=0)
+    # data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(coords.shape[0], axis=0)
+    data = np.zeros((coords.shape[0], num_channels), dtype=np.float32)
     datetimes = np.array(datetime).repeat(coords.shape[0])
 
     n_datapoints = len(data)

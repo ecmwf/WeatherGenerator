@@ -542,7 +542,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
-                    stream_ds[0].mean[stream_ds[0].source_idx],
+                    len(stream_ds[0].mean[stream_ds[0].source_idx]),
                 )
                 rdata.is_spoof = True
 
@@ -564,7 +564,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
-                    stream_ds[0].mean[stream_ds[0].target_idx],
+                    len(stream_ds[0].mean[stream_ds[0].target_idx]),
                 )
                 rdata.is_spoof = True
 
