@@ -559,7 +559,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(timestep_idx)
+                time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
                     self.healpix_level,
                     time_win.start,
