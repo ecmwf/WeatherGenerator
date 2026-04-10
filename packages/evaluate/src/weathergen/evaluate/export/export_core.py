@@ -46,6 +46,9 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     group_path = f"{sample}/{stream}/{fstep}/{dtype}"
     ds_group = _CACHED_ZIO.data_root.get(group_path)
 
+    if ds_group is None:
+        raise FileNotFoundError(f"Zarr group '{group_path}' not found in {_CACHED_FNAME_ZARR}")
+
     # Read raw arrays as numpy — no dask, no chunking overhead.
     data_arr = np.asarray(ds_group["data"])  # (npoints, nchannels) or (npoints, nchannels, nens)
     coords_arr = np.asarray(ds_group["coords"])  # (npoints, 2)
@@ -92,12 +95,33 @@ def get_fsteps(fsteps, fname_zarr: str):
             Path to the Zarr store.
     Returns
     -------
-        list[str]
+        list[int]
             List of forecast steps to be used for data retrieval.
     """
     with zarrio_reader(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
-    return zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
+
+    if fsteps is None:
+        return zio_forecast_steps
+
+    requested = sorted([int(fstep) for fstep in fsteps])
+    available_set = set(zio_forecast_steps)
+    valid = [f for f in requested if f in available_set]
+    missing = [f for f in requested if f not in available_set]
+
+    if missing:
+        _logger.warning(
+            f"Requested forecast steps {missing} are not available in the zarr store "
+            f"(available: {zio_forecast_steps}). They will be skipped."
+        )
+
+    if not valid:
+        raise ValueError(
+            f"None of the requested forecast steps {requested} exist in the zarr store. "
+            f"Available forecast steps: {zio_forecast_steps}"
+        )
+
+    return valid
 
 
 def get_samples(samples, fname_zarr: str):
@@ -112,17 +136,33 @@ def get_samples(samples, fname_zarr: str):
             Path to the Zarr store.
     Returns
     -------
-        list[str]
+        list[int]
             List of samples to be used for data retrieval.
     """
     with zarrio_reader(fname_zarr) as zio:
         zio_samples = sorted([int(sample) for sample in zio.samples])
-    samples = (
-        zio_samples
-        if samples is None
-        else sorted([int(sample) for sample in samples if sample in samples])
-    )
-    return samples
+
+    if samples is None:
+        return zio_samples
+
+    requested = sorted([int(sample) for sample in samples])
+    available_set = set(zio_samples)
+    valid = [s for s in requested if s in available_set]
+    missing = [s for s in requested if s not in available_set]
+
+    if missing:
+        _logger.warning(
+            f"Requested samples {missing} are not available in the zarr store "
+            f"(available range: {zio_samples[0]}–{zio_samples[-1]}). They will be skipped."
+        )
+
+    if not valid:
+        raise ValueError(
+            f"None of the requested samples {requested} exist in the zarr store. "
+            f"Available samples: {zio_samples}"
+        )
+
+    return valid
 
 
 def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
