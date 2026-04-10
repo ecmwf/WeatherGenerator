@@ -717,6 +717,13 @@ def plot_train(args=None):
         choices=["step", "reltime"],
         help="Type of x-axis used in plots. Options: 'step' or 'reltime'",
     )
+    parser.add_argument(
+        "--log-x",
+        dest="log_x",
+        default=False,
+        action="store_true",
+        help="Use log scale for the x-axis (produces log-log plots)",
+    )
 
     parser.add_argument(
         "--legend-outside",
@@ -812,7 +819,7 @@ def plot_train(args=None):
         np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
     ]
 
-    x_scale_log = False
+    x_scale_log = args.log_x
 
     legend_outside = args.legend_outside
 

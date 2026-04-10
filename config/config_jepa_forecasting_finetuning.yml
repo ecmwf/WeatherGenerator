@@ -14,7 +14,7 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 1e-4
+fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
@@ -121,7 +121,7 @@ training_config:
     lr_max: 5e-5
     lr_final_decay: 2e-6
     lr_final: 0.0
-    num_steps_warmup: 512
+    num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
@@ -184,14 +184,14 @@ validation_config:
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
-    enabled : False
+    enabled : True
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 8,
+    num_samples: 0,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all

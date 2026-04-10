@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import dataclasses
+import math
 
 import torch
 import torch.nn as nn
@@ -117,8 +118,10 @@ class EmbeddingEngine(torch.nn.Module):
 
         # per cell indices into positional encoding
         tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
-        pe_idxs = torch.cat([torch.arange(c) for c in tok_counts])
-
+        rows = torch.arange( tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+        rows = rows.expand(tok_counts.shape[0], -1)
+        pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
+        
         # actual scatter operation
         tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
 
@@ -1058,13 +1061,31 @@ class LatentPredictionHeadMLP(nn.Module):
         return torch.cat(outputs, dim=1)
 
 
+class EfficientBilinear(torch.nn.Module):
+    def __init__(self, in_dim_lhs, in_dim_rhs, out, bias=False):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(out, in_dim_lhs, in_dim_rhs))
+        self.bias = nn.Parameter(torch.zeros(out)) if bias else 0.0
+        self.total_in = in_dim_lhs * in_dim_rhs
+
+    def forward(self, x_lhs, x_rhs):
+        return torch.einsum("bi,oij,bj->bo", x_lhs, self.weight, x_rhs) + self.bias
+
+    def reset_parameters(self):
+        if isinstance(self.weight, nn.Parameter):
+            bound = math.sqrt(2.0 / self.total_in)
+            nn.init.uniform_(self.weight, -bound, bound)
+        if isinstance(self.bias, nn.Parameter):
+            nn.init.zeros_(self.bias)
+
+
 class BilinearDecoder(nn.Module):
     def __init__(self, stream_name, coord_dim, latent_dim, out_dim):
         super().__init__()
 
         self.name = f"BilinearDecoder_{stream_name}"
         self.latent_dim = latent_dim
-        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
+        self.bilin = EfficientBilinear(coord_dim, latent_dim, out_dim)
 
     def forward(self, coords_md, latent_nd, tcs_lens_n1):
         """
