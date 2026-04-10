@@ -50,8 +50,8 @@ pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
-num_class_tokens: 1
-num_register_tokens: 7
+num_class_tokens: 0
+num_register_tokens: 64
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
@@ -186,9 +186,9 @@ training_config:
   context_loss:
     enabled: true
     weight: 0.2
-    warmup_steps: 10000             # linear warmup from 0 to weight over this many steps
+    warmup_steps: 6000             # linear warmup from 0 to weight over this many steps
 
-  num_mini_epochs: 32
+  num_mini_epochs: 64
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -206,7 +206,7 @@ training_config:
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 512
-    num_steps_cooldown: 512
+    num_steps_cooldown: 1024
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
@@ -236,7 +236,7 @@ training_config:
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 700000,
+            ema_halflife_in_thousands: 600000,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
