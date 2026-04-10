@@ -714,8 +714,16 @@ def plot_train(args=None):
                             """
     )
 
+
+
     parser.add_argument(
         "-o", "--output_dir", default="./plots/", type=Path, help="Directory where plots are saved"
+    )
+    parser.add_argument(
+        "--legend-outside",
+        default=False,
+        action="store_true",
+        help="Legend outside of the plot",
     )
     parser.add_argument(
         "-m",
