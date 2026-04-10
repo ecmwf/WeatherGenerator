@@ -1,10 +1,10 @@
 """
 Small test for the Weather Generator.
 This test must run on a GPU machine.
-It performs a training and inference of the Weather Generator model.
+It performs (training, inference - if necessary) and export of the Weather Generator model.
 
 Command:
-uv run pytest  ./integration_tests/small1.py
+uv run pytest  ./integration_tests/export_test.py
 """
 
 import json
