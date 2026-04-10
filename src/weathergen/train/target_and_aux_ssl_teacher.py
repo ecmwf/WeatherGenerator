@@ -77,7 +77,7 @@ class EncoderTeacher(TargetAndAuxModuleBase):
             aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
 
             targets_out = TargetAuxOutput(batch.get_output_len(), batch.get_output_idxs())
-            targets_out.latent = targets
+            targets_out.latent[0] = targets
             targets_out.latent_deep = deep_targets
             targets_out.aux_outputs = aux_outputs
 
@@ -90,10 +90,6 @@ class EncoderTeacher(TargetAndAuxModuleBase):
         for _, module in self.postprocess_targets.items():
             module.to(device)
         return self
-
-    def get_current_beta(self, cur_step: int) -> float:
-        beta = self.ema_model.get_current_beta(cur_step)
-        return beta
 
 
 class EMATeacher(EncoderTeacher):

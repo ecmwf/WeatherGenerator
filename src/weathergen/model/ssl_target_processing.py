@@ -15,10 +15,25 @@
 # This source code is licensed under the Apache License, Version 2.0
 # found in the LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
+import dataclasses
+from typing import Any
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+@dataclasses.dataclass
+class _LevelState:
+    """Mutable, non-persistent state for one deep-SSL level."""
+
+    updated: bool = True
+    reduce_handle: Any = None
+    len_teacher: int | None = None
+    async_batch_center: torch.Tensor | None = None
 
 
 def lossfunc(t, s, temp):
@@ -57,14 +72,11 @@ class iBOTPatchTargetProcessing(nn.Module):
 
         # Per-level centers for deep SSL
         self.num_deep_ssl_levels = num_deep_ssl_levels
+        self._level_states: list[_LevelState] = []
         for lvl in range(num_deep_ssl_levels):
             self.register_buffer(f"center_L{lvl}", torch.zeros(1, 1, patch_out_dim))
-            setattr(self, f"updated_L{lvl}", True)
-            setattr(self, f"reduce_handle_L{lvl}", None)
-            setattr(self, f"len_teacher_patch_tokens_L{lvl}", None)
-            setattr(self, f"async_batch_center_L{lvl}", None)
+            self._level_states.append(_LevelState())
 
-        # self.center cannot be initialised with None then the code breaks hence the disabled pylint
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
@@ -151,28 +163,25 @@ class iBOTPatchTargetProcessing(nn.Module):
 
     @torch.no_grad()
     def _update_center_level(self, teacher_patch_tokens, level_idx):
-        setattr(self, f"updated_L{level_idx}", False)
-        setattr(self, f"len_teacher_patch_tokens_L{level_idx}", len(teacher_patch_tokens))
-        async_center = torch.sum(teacher_patch_tokens.mean(1), dim=0, keepdim=True)
+        ls = self._level_states[level_idx]
+        ls.updated = False
+        ls.len_teacher = len(teacher_patch_tokens)
+        ls.async_batch_center = torch.sum(teacher_patch_tokens.mean(1), dim=0, keepdim=True)
         if dist.is_initialized():
-            handle = dist.all_reduce(async_center, async_op=True)
-            setattr(self, f"reduce_handle_L{level_idx}", handle)
-        setattr(self, f"async_batch_center_L{level_idx}", async_center)
+            ls.reduce_handle = dist.all_reduce(ls.async_batch_center, async_op=True)
 
     @torch.no_grad()
     def _apply_center_update_level(self, level_idx):
-        if getattr(self, f"updated_L{level_idx}") is False:
+        ls = self._level_states[level_idx]
+        if ls.updated is False:
             world_size = dist.get_world_size() if dist.is_initialized() else 1
-            handle = getattr(self, f"reduce_handle_L{level_idx}")
-            if handle is not None:
-                handle.wait()
-            async_center = getattr(self, f"async_batch_center_L{level_idx}")
-            length = getattr(self, f"len_teacher_patch_tokens_L{level_idx}")
-            _t = async_center / (length * world_size)
+            if ls.reduce_handle is not None:
+                ls.reduce_handle.wait()
+            _t = ls.async_batch_center / (ls.len_teacher * world_size)
             center = getattr(self, f"center_L{level_idx}")
             new_center = center * self.center_momentum + _t * (1 - self.center_momentum)
             setattr(self, f"center_L{level_idx}", new_center)
-            setattr(self, f"updated_L{level_idx}", True)
+            ls.updated = True
 
     @torch.no_grad()
     def update_center(self, teacher_patch_tokens):
@@ -232,14 +241,11 @@ class DINOTargetProcessing(nn.Module):
 
         # Per-level centers for deep SSL
         self.num_deep_ssl_levels = num_deep_ssl_levels
+        self._level_states: list[_LevelState] = []
         for lvl in range(num_deep_ssl_levels):
             self.register_buffer(f"center_L{lvl}", torch.zeros(1, out_dim))
-            setattr(self, f"updated_L{lvl}", True)
-            setattr(self, f"reduce_handle_L{lvl}", None)
-            setattr(self, f"len_teacher_output_L{lvl}", None)
-            setattr(self, f"async_batch_center_L{lvl}", None)
+            self._level_states.append(_LevelState())
 
-        # self.center cannot be initialised with None then the code breaks hence the disabled pylint
         assert teacher_style in ["softmax_center", "sinkhorn_knopp"], f"{teacher_style} is unknown"
 
     @torch.no_grad()
@@ -314,28 +320,25 @@ class DINOTargetProcessing(nn.Module):
 
     @torch.no_grad()
     def _update_center_level(self, teacher_output, level_idx):
-        setattr(self, f"updated_L{level_idx}", False)
-        setattr(self, f"len_teacher_output_L{level_idx}", len(teacher_output))
-        async_center = torch.sum(teacher_output, dim=0, keepdim=True)
+        ls = self._level_states[level_idx]
+        ls.updated = False
+        ls.len_teacher = len(teacher_output)
+        ls.async_batch_center = torch.sum(teacher_output, dim=0, keepdim=True)
         if dist.is_initialized():
-            handle = dist.all_reduce(async_center, async_op=True)
-            setattr(self, f"reduce_handle_L{level_idx}", handle)
-        setattr(self, f"async_batch_center_L{level_idx}", async_center)
+            ls.reduce_handle = dist.all_reduce(ls.async_batch_center, async_op=True)
 
     @torch.no_grad()
     def _apply_center_update_level(self, level_idx):
-        if getattr(self, f"updated_L{level_idx}") is False:
+        ls = self._level_states[level_idx]
+        if ls.updated is False:
             world_size = dist.get_world_size() if dist.is_initialized() else 1
-            handle = getattr(self, f"reduce_handle_L{level_idx}")
-            if handle is not None:
-                handle.wait()
-            async_center = getattr(self, f"async_batch_center_L{level_idx}")
-            length = getattr(self, f"len_teacher_output_L{level_idx}")
-            _t = async_center / (length * world_size)
+            if ls.reduce_handle is not None:
+                ls.reduce_handle.wait()
+            _t = ls.async_batch_center / (ls.len_teacher * world_size)
             center = getattr(self, f"center_L{level_idx}")
             new_center = center * self.center_momentum + _t * (1 - self.center_momentum)
             setattr(self, f"center_L{level_idx}", new_center)
-            setattr(self, f"updated_L{level_idx}", True)
+            ls.updated = True
 
     @torch.no_grad()
     def update_center(self, teacher_output):

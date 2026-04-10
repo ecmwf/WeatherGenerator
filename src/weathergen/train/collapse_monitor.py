@@ -659,11 +659,7 @@ class CollapseMonitor:
             if not hasattr(target_aux, "latent") or not target_aux.latent:
                 continue
 
-            # Handle both list[dict] and dict formats
-            if isinstance(target_aux.latent, list):
-                target_latent_dict = target_aux.latent[0] if target_aux.latent else {}
-            else:
-                target_latent_dict = target_aux.latent
+            target_latent_dict = target_aux.latent[0] if target_aux.latent else {}
 
             # Try SSL-specific keys first
             for ssl_type in ["JEPA", "DINO", "iBOT"]:

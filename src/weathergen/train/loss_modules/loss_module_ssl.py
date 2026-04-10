@@ -84,7 +84,7 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
         deep_targets = targets.latent_deep
         preds_latent = preds.latent[0]  # [0] because we always want the first fstep
         target_info = targets.aux_outputs
-        targets_latent = targets.latent
+        targets_latent = targets.latent[0]  # [0] because we always want the first fstep
 
         has_deep_ssl = (
             self.level_weights is not None and deep_preds is not None and deep_targets is not None
