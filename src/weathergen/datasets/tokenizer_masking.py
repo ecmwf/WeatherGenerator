@@ -11,7 +11,7 @@
 import numpy as np
 import torch
 
-from weathergen.common.io import IOReaderData
+from weathergen.common.io import ReaderData
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.tokenizer import Tokenizer
@@ -25,7 +25,7 @@ from weathergen.datasets.tokenizer_utils import (
 )
 
 
-def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
+def readerdata_to_torch(rdata: ReaderData) -> ReaderData:
     """
     Convert data, coords, and geoinfos to torch tensor
     """
@@ -121,7 +121,7 @@ class TokenizerMasking(Tokenizer):
     def get_source(
         self,
         stream_info: dict,
-        rdata: IOReaderData,
+        rdata: ReaderData,
         idxs_cells_data,
         time_win: tuple,
         cell_mask: torch.Tensor,
@@ -152,7 +152,7 @@ class TokenizerMasking(Tokenizer):
     def get_target_coords(
         self,
         stream_info: dict,
-        rdata: IOReaderData,
+        rdata: ReaderData,
         token_data,
         time_win: tuple,
         cell_mask,
@@ -185,7 +185,7 @@ class TokenizerMasking(Tokenizer):
     def get_target_values(
         self,
         stream_info: dict,
-        rdata: IOReaderData,
+        rdata: ReaderData,
         token_data,
         time_win: tuple,
         cell_mask,

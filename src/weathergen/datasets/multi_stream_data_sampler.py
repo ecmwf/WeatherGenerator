@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from weathergen.common.config import Config
-from weathergen.common.io import IOReaderData
+from weathergen.common.data import ReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
@@ -40,7 +40,7 @@ type StreamName = str
 logger = logging.getLogger(__name__)
 
 
-def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
+def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> ReaderData:
     """
     Utility function to collect all sources / targets from streams list
 
@@ -73,7 +73,7 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
         rdata.geoinfos = ds.normalize_geoinfos(rdata.geoinfos)
         rdatas += [rdata]
 
-    return IOReaderData.combine(rdatas)
+    return ReaderData.combine(rdatas)
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
