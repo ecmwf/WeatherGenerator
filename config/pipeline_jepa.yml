@@ -9,10 +9,8 @@ mini-epoch: -1
 stages:
   - name: stage1
     command: train
-    base-config: ./config/config_jepa_frozen_mtm_sweep_2drope.yml
-    config: ./config/config_jepa_frozen_mtm_sweep_2drope.yml
-    options:
-      - train_logging.log_grad_norms=True
+    base-config: ./config/config_jepa_deep_ssl.yml
+    config: ./config/config_jepa_deep_ssl.yml
     chain: 1
     nodes: 1
 
@@ -23,10 +21,9 @@ stages:
 
   - name: stage2.2
     command: train-continue
-    config: ./config/config_jepa_finetuning.yml
-    options:
-      - streams_directory="./config/streams/era5_synop_finetuning"
+    config: ./config/config_jepa_forecasting_finetuning.yml
     from: stage1
+    chain: 2
 
   - name: inference.1
     command: inference
