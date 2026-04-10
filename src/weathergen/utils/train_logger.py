@@ -297,8 +297,6 @@ def clean_df(df, columns: list[str] | None):
             idcs = [i for i in range(len(columns)) if columns[i] == "loss_avg_mean"]
             if len(idcs) > 0:
                 columns[idcs[0]] = "loss_avg_0_mean"
-        for key in list(df.columns):
-            _logger.info(key)
         df = df.select(columns)
         # Remove all rows where all columns are null
         df = df.filter(~pl.all_horizontal(pl.col(c).is_null() for c in columns))
@@ -326,12 +324,12 @@ def _clean_stream_name(stream_name: str) -> str:
 
 def _key_loss(st_name: str, lf_name: str) -> str:
     st_name = clean_name(st_name)
-    return f"LossPhysical.{st_name}.{lf_name}.avg"
+    return f"stream.{st_name}.stddev_avg"
 
 
 def _key_loss_chn(st_name: str, lf_name: str, ch_name: str) -> str:
     st_name = clean_name(st_name)
-    return f"LossPhysical.{st_name}.{lf_name}.{ch_name}"  # LossPhysical.ERA5.mse.t_500.1
+    return f"stream.{st_name}.loss_{lf_name}.loss_{ch_name}"
 
 
 def _key_stddev(st_name: str) -> str:
