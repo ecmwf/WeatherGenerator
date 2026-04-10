@@ -20,6 +20,8 @@ import numpy as np
 import zarr
 from numpy.typing import NDArray
 
+from weathergen.evaluate.utils.derived_channels import is_derivable_channel
+
 _logger = logging.getLogger(__name__)
 
 
@@ -50,9 +52,13 @@ def _compute_early_channel_selection(
     effective_channels : list[str]
         Channel names that will be returned (subset or full list).
     """
-    # If derived channels are configured, we must keep ALL channels so that
-    # the derivation logic in _select_channels has its source data.
+    # If derived channels are configured, or any requested channel is
+    # auto-derivable (e.g. 10ff), we must keep ALL channels so that the
+    # derivation logic in _select_channels has its source data.
     if "derive_channels" in stream_cfg:
+        return None, read_channels
+
+    if any(is_derivable_channel(ch) for ch in requested_channels):
         return None, read_channels
 
     # Find the intersection: requested channels that exist in the zarr store

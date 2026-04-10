@@ -305,16 +305,13 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
 
     tasks = []
 
-    # Build tasks per stream
+    # Build tasks per stream — avoid constructing heavyweight readers here;
+    # _process_stream will create its own reader when it actually needs one.
     for run_id, run in runs.items():
-        type_ = run.get("type", "zarr")
-
         if "streams" not in run:
             run["streams"] = default_streams
 
-        reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
-
-        for stream in reader.streams:
+        for stream in run.get("streams", {}):
             tasks.append(
                 {
                     "run_id": run_id,

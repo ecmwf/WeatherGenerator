@@ -103,10 +103,9 @@ def resolve_num_workers(requested: int = 0, *, check_process_headroom: bool = Fa
     2. ``$SLURM_CPUS_ON_NODE`` — CPUs available on the node.
     3. ``os.cpu_count()`` — fallback outside Slurm.
 
-    The detected CPU count is halved (workers share the node with the
-    main evaluation work) and capped at 48.
+    The detected CPU count is capped at 64.
     """
-    _max_workers = 48
+    _max_workers = 64
 
     if requested > 0:
         n = min(requested, os.cpu_count() or 16)
@@ -116,7 +115,7 @@ def resolve_num_workers(requested: int = 0, *, check_process_headroom: bool = Fa
         slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("SLURM_CPUS_ON_NODE")
         if slurm_cpus is not None:
             try:
-                n = max(1, int(slurm_cpus) // 2)
+                n = max(1, int(slurm_cpus))
                 n = min(n, _max_workers)
                 _logger.info(f"Auto-detected {slurm_cpus} Slurm CPUs. Using n_workers={n}.")
             except ValueError:
@@ -124,7 +123,7 @@ def resolve_num_workers(requested: int = 0, *, check_process_headroom: bool = Fa
 
         if slurm_cpus is None:
             cpu_count = os.cpu_count() or 16
-            n = max(1, min(cpu_count // 2, _max_workers))
+            n = max(1, min(cpu_count, _max_workers))
             _logger.info(
                 f"No Slurm environment detected (cpu_count={cpu_count}). Using n_workers={n}."
             )
@@ -272,7 +271,6 @@ def _build_io_state(
 
     lat = coords[:, 0]
     lon = coords[:, 1]
-    n_workers = min(n_io_workers, len(samples))
 
     return IOState(
         run_id=run_id,
@@ -291,7 +289,7 @@ def _build_io_state(
         coords=coords,
         lat=lat,
         lon=lon,
-        n_workers=n_workers,
+        n_workers=n_io_workers,
     )
 
 
@@ -523,72 +521,97 @@ def get_data_impl(state: IOState) -> ReaderOutput:
 
 
 def get_data_zip_impl(state: IOState) -> ReaderOutput:
-    """ZipStore fast-path: all fsteps per sample dispatched in one Parallel call.
+    """ZipStore fast-path: dispatch *all* (sample, fstep) pairs in parallel.
 
-    Amortises the ZipStore central-directory parse cost across all fsteps
-    per sample by reading them all inside a single worker call.
+    Each worker opens its own ZipStore handle, so the zip central-directory
+    is parsed once per worker (not once per task) thanks to loky worker
+    reuse.  With ``samples × fsteps`` tasks the pool utilises all available
+    workers instead of being capped at ``len(samples)``.
     """
+    n_total = len(state.samples) * len(state.fsteps)
     _logger.info(
         f"RUN {state.run_id} - {state.stream}: Loading {len(state.samples)} samples × "
-        f"{len(state.fsteps)} fsteps via ZipStore-parallel zarr I/O "
+        f"{len(state.fsteps)} fsteps = {n_total} items via ZipStore-parallel zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
 
-    results = _parallel_read(
+    # --- Dispatch every (sample, fstep) pair as a separate task -----------
+    kwargs = dict(
         zarr_path=state.zarr_path,
-        samples=state.samples,
         stream=state.stream,
-        fsteps_arg=state.fsteps,
         channel_idxs=state.channel_idxs,
         is_zip=state.is_zip,
-        need_coords=not state.is_gridded,
+        read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
+    )
+    calls = [
+        delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
+        for s in state.samples
+        for fs in state.fsteps
+    ]
+    flat_results = dispatch_parallel(
+        calls,
         n_workers=state.n_workers,
         backend=state.backend,
-        label=f"RUN {state.run_id} - {state.stream} (ZipStore)",
+        desc=f"RUN {state.run_id} - {state.stream} (ZipStore)",
+        verbose=5,
     )
 
-    source_interval_starts = _extract_source_interval_starts(results, state.samples)
-    n_substeps_per_fstep = results[0][3]["n_substeps"]
-
-    # Build flat-index offsets: each fstep may produce n_sub entries in results lists
-    offsets = []
-    off = 0
-    for ns in n_substeps_per_fstep:
-        offsets.append(off)
-        off += ns
+    # --- Re-group: flat_results[sample_idx * n_fsteps + fstep_idx] --------
+    n_fsteps = len(state.fsteps)
+    # Gather per-sample results in the same shape as get_data_impl expects
+    source_interval_starts = _extract_source_interval_starts(
+        [flat_results[si * n_fsteps] for si in range(len(state.samples))],
+        state.samples,
+    )
 
     da_tars_dict: dict = {}
     da_preds_dict: dict = {}
     fstep_counter = 1
 
     for fi, fs in enumerate(state.fsteps):
-        n_sub = n_substeps_per_fstep[fi]
-        base_off = offsets[fi]
+        # Each (sample, fstep) result has n_substeps for that single fstep
+        n_sub = flat_results[fi][3]["n_substeps"][0]  # from first sample
 
         for sub_idx in range(n_sub):
-            list_idx = base_off + sub_idx
-            tars_list = [results[i][1][list_idx] for i in range(len(state.samples))]
-            preds_list = [results[i][0][list_idx] for i in range(len(state.samples))]
-            per_sample_valid_times = _collect_substep_valid_times(results, n_sub, sub_idx, fi)
+            tars_list = [
+                flat_results[si * n_fsteps + fi][1][sub_idx] for si in range(len(state.samples))
+            ]
+            preds_list = [
+                flat_results[si * n_fsteps + fi][0][sub_idx] for si in range(len(state.samples))
+            ]
+            per_sample_valid_times = []
+            for si in range(len(state.samples)):
+                res = flat_results[si * n_fsteps + fi]
+                time_entry = res[2][0]  # single fstep → index 0
+                if n_sub > 1 and sub_idx < len(time_entry):
+                    per_sample_valid_times.append(np.datetime64(time_entry[sub_idx], "ns"))
+                elif len(time_entry) > 0:
+                    per_sample_valid_times.append(np.datetime64(time_entry[0], "ns"))
+                else:
+                    per_sample_valid_times.append(np.datetime64("NaT", "ns"))
 
             fs_val = fs if n_sub == 1 else fstep_counter
+            # Build a per-sample results list compatible with _assemble_substep
+            per_sample_results = [
+                flat_results[si * n_fsteps + fi] for si in range(len(state.samples))
+            ]
             da_tar, da_pred = _assemble_substep(
                 state,
-                results,
+                per_sample_results,
                 tars_list,
                 preds_list,
                 per_sample_valid_times,
                 source_interval_starts,
                 fs_val,
-                fi,
+                0,  # fstep_idx is always 0 since each result has a single fstep
             )
             del tars_list, preds_list
             fstep_counter = _store_substep(
                 da_tar, da_pred, n_sub, fs, fstep_counter, da_tars_dict, da_preds_dict
             )
 
-    del results
+    del flat_results
 
     if state.n_workers > 1:
         get_reusable_executor().shutdown(wait=True)
