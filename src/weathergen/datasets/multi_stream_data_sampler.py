@@ -132,7 +132,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
         self.check_samples(self._get_fsm(self.mini_epoch))
-        self._init_stream_datasets(cf)
+        self.streams_datasets = self._init_stream_datasets(cf)
 
         # RNG seed setup
         rs = cf.data_loading.rng_seed
