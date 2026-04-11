@@ -101,7 +101,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self._init_forecast_cfg()
 
         # initialise fsm, but can change for future mini_epochs
-        self.fsm = self.list_num_forecast_steps[0]
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.shuffle = mode_cfg.shuffle
 
@@ -121,8 +120,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
-        self.check_samples()
-        self.calc_baseperms()
+        self.check_samples(self._get_fsm(self.mini_epoch))
         self._init_stream_datasets(cf)
 
         # RNG seed setup
@@ -188,11 +186,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if not self.repeat_data:
             assert n_duplicates <= 0
 
-    def _calc_baseperms(self) -> np.typing.NDArray:
+    def _calc_baseperms(self, fsm: int) -> np.typing.NDArray:
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
-        perms_len -= (self.fsm + self.output_offset) * (self.time_step // self.step_timedelta)
+        perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
         return np.arange(perms_len)
 
@@ -273,13 +271,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         Returns: permutation index, forecast steps index
         """
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
-        # reset fsm for each mini epoch
-        fsm = self.reset_fsm()
-        if fsm != self.fsm:
-            logger.info(f"Number of forecast steps updated from {self.fsm} to {fsm}.")
-            self.fsm = fsm
-            perms = self.check_samples()
-            self.calc_baseperms()
+        fsm = self._get_fsm()
+        self.check_samples(fsm)
+        perms = self._calc_baseperms(fsm)
 
         # rng changed, repeat if needed
         if self.repeat_data and len(perms) < self.samples_per_mini_epoch:
@@ -301,12 +295,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             fs = np.zeros(len_dt, dtype=np.int64)
 
         elif self.forecast_policy in ("fixed", "sequential"):
-            fs = self.fsm * np.ones(len_dt, dtype=np.int64)
+            fs = fsm * np.ones(len_dt, dtype=np.int64)
 
         elif self.forecast_policy in ("random", "sequential_random"):
             fs = self.rng.integers(
                 low=self.list_num_forecast_steps.min(),
-                high=self.fsm + 1,
+                high=fsm + 1,
                 size=len_dt,
                 dtype=np.int64,
             )
@@ -317,7 +311,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         self.tokenizer.reset_rng(self.rng)
         return (perms, fs)
 
-    def reset_fsm(self):
+    def _get_fsm(self) -> int:
+        """Obtain maximum number of forecast steps for current mini epoch."""
         # fixed number of forecast steps for this run
         if self.forecast_policy != "random":
             idx = min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
