@@ -196,13 +196,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         perms_len -= (self.fsm + self.output_offset) * (self.time_step // self.step_timedelta)
         self.base_perms = np.arange(perms_len)
 
-    def _init_stream_datasets(self, cf):
+    def _init_stream_datasets(self, cf) -> dict[StreamName, list[AnyDataReader]]:
         """Load dataset readers for all streams from config."""
-        self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
+        streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
 
         for _, stream_info in enumerate(cf.streams):
             # list of sources for current stream
-            self.streams_datasets[stream_info["name"]] = []
+            streams_datasets[stream_info["name"]] = []
 
             kwargs = {
                 "tw_handler": self.time_window_handler,
@@ -259,7 +259,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     else [1.0 for _ in ds.target_channels]
                 )
 
-                self.streams_datasets[stream_info["name"]] += [ds]
+                streams_datasets[stream_info["name"]] += [ds]
+
+        return streams_datasets
 
     def reset(self):
         """Reset RNG, shuffle perms, compute forecast steps."""
