@@ -9,6 +9,7 @@
 
 import logging
 import pathlib
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -130,8 +131,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
         self.rng = None
-        self.perms = None
-        self.perms_num_forecast_steps = None
 
     def _init_forecast_cfg(self):
         if len(self.forecast_cfg) == 0:
@@ -189,12 +188,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if not self.repeat_data:
             assert n_duplicates <= 0
 
-    def calc_baseperms(self):
+    def _calc_baseperms(self) -> np.typing.NDArray:
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (self.fsm + self.output_offset) * (self.time_step // self.step_timedelta)
-        self.base_perms = np.arange(perms_len)
+
+        return np.arange(perms_len)
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, list[AnyDataReader]]:
         """Load dataset readers for all streams from config."""
@@ -263,18 +263,23 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return streams_datasets
 
-    def reset(self):
-        """Reset RNG, shuffle perms, compute forecast steps."""
+    def reset(self) -> tuple[Sequence[int], Sequence[int]]:
+        """
+        Reset RNG, return shuffled perms adn forecast steps for this mini epoch.
+
+        The permutation index size is proportional to self.samples_per_mini_epoch,
+        wheras the forecast steps index length is proportional to len(self).
+
+        Returns: permutation index, forecast steps index
+        """
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
         # reset fsm for each mini epoch
         fsm = self.reset_fsm()
         if fsm != self.fsm:
             logger.info(f"Number of forecast steps updated from {self.fsm} to {fsm}.")
             self.fsm = fsm
-            self.check_samples()
+            perms = self.check_samples()
             self.calc_baseperms()
-
-        perms = self.base_perms.copy()
 
         # rng changed, repeat if needed
         if self.repeat_data and len(perms) < self.samples_per_mini_epoch:
@@ -289,8 +294,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # shuffle
         if self.shuffle:
             perms = self.rng.permutation(perms)
-
-        self.perms = perms
 
         len_dt = len(self) // self.batch_size
 
@@ -310,10 +313,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         else:
             raise ValueError(f"Unknown forecast policy {self.forecast_policy}")
 
-        self.perms_num_forecast_steps = fs
-
         # reset tokenizer RNG
         self.tokenizer.reset_rng(self.rng)
+        return (perms, fs)
 
     def reset_fsm(self):
         # fixed number of forecast steps for this run
@@ -746,7 +748,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
         # create new shuffeling
-        self.reset()
+        perms, perms_num_forecast_steps = self.reset()
 
         # bidx is used to count the #batches that have been emitted
         # idx_raw is used to index into the dataset; the decoupling is needed
@@ -755,12 +757,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
             # num_forecast_steps needs to be constant per batch
             # (amortized through data parallel training)
-            num_forecast_steps = self.perms_num_forecast_steps[i]
+            num_forecast_steps = perms_num_forecast_steps[i]
 
             # use while loop due to the scattered nature of the data in time and to
             # ensure batches are not empty
             while True:
-                idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
+                idx: TIndex = perms[idx_raw % perms.shape[0]]
                 idx_raw += 1
 
                 batch = self._get_batch(idx, num_forecast_steps)
