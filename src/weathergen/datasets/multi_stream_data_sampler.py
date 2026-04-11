@@ -145,10 +145,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        forecast_win = self.time_step * (self.fsm + self.output_offset)  # in time units
-        available_samples = (
-            self.mode_cfg.end_date - self.mode_cfg.start_date - forecast_win
-        ) // self.step_timedelta
+        max_index = self.index_range.end - (
+            (  # max time units needed to make a forecast
+                self.time_step * (fsm + self.output_offset)  # translation due to forecasting
+                + self.len_timedelta  # length of forecasting window
+            )
+            // self.step_timedelta  # as number of indexs
+        )
+
+        available_samples = max_index * self.batch_size  # as number of samples
 
         assert available_samples > 0, (
             "There is an insufficient date range to \
@@ -170,11 +175,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             logger.info("Samples will be repeated within the time range")
 
         # streamlined calculation of length
-        self.len = self.samples_per_mini_epoch
+        epoch_len = self.samples_per_mini_epoch
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((self.len // self.world_size) // self.batch_size) * self.batch_size
-        self.len = min(self.len, len_chunk)
-        n_duplicates = self.len - available_samples
+        self.len = ((epoch_len // self.world_size) // self.batch_size) * self.batch_size
+
+        n_duplicates = self.len * self.world_size - available_samples
         if not self.repeat_data:
             assert n_duplicates <= 0
 
@@ -268,11 +273,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         perms = self._calc_baseperms(fsm)
 
         # rng changed, repeat if needed
-        if self.repeat_data and len(perms) < self.samples_per_mini_epoch:
-            perms = np.tile(perms, self.samples_per_mini_epoch // len(perms))
+        n_requested_idxs = self.samples_per_mini_epoch // self.batch_size
+        if self.repeat_data and len(perms) < n_requested_idxs:
+            perms = np.tile(perms, n_requested_idxs // len(perms))
             filler = self.rng.choice(
                 perms,
-                size=self.samples_per_mini_epoch - len(perms),
+                size=n_requested_idxs - len(perms),
                 replace=False,
             )
             perms = np.concatenate([perms, filler])
