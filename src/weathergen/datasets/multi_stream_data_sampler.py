@@ -40,6 +40,13 @@ type StreamName = str
 
 logger = logging.getLogger(__name__)
 
+FORECAST_DEFAULTS = {
+    "offset": 0,
+    "time_step": np.timedelta64(0, "ms"),
+    "policy": None,
+    "num_steps": np.array([0], dtype=np.int32),
+}
+
 
 def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
     """
@@ -97,8 +104,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
-        self.forecast_cfg = mode_cfg.get("forecast", {})
-        self._init_forecast_cfg()
+        forecast_cfg = FORECAST_DEFAULTS | mode_cfg.get("forecast", {})
+        self.output_offset = forecast_cfg["offset"]
+        self.time_step = forecast_cfg["time_step"]
+        self.forecast_policy = forecast_cfg["policy"]
+        steps = np.array(forecast_cfg.num_steps, dtype=np.int32).reshape(-1)
+        self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
 
         # initialise fsm, but can change for future mini_epochs
         self.batch_size = get_batch_size_from_config(mode_cfg)
@@ -129,25 +140,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
         self.rng = None
-
-    def _init_forecast_cfg(self):
-        if len(self.forecast_cfg) == 0:
-            self.list_num_forecast_steps = np.array([0], dtype=np.int32)
-            self.output_offset = 0
-            self.forecast_policy = None
-            self.time_step = np.timedelta64(0, "ms")
-            return
-
-        self.output_offset = self.forecast_cfg.get("offset", 0)
-        self.time_step = self.forecast_cfg.get("time_step", np.timedelta64(0, "ms"))
-        self.forecast_policy = self.forecast_cfg.get("policy", None)
-
-        if isinstance(self.forecast_cfg.num_steps, int):
-            steps = [self.forecast_cfg.num_steps]
-        else:
-            steps = self.forecast_cfg.num_steps
-
-        self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
 
     def check_samples(self):
         """Check if samples_per_mini_epoch is suitable
