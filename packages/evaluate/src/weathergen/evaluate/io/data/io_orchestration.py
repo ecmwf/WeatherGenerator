@@ -103,9 +103,9 @@ def resolve_num_workers(requested: int = 0, *, check_process_headroom: bool = Fa
     2. ``$SLURM_CPUS_ON_NODE`` — CPUs available on the node.
     3. ``os.cpu_count()`` — fallback outside Slurm.
 
-    The detected CPU count is capped at 64.
+    The detected CPU count is capped at 36.
     """
-    _max_workers = 64
+    _max_workers = 36
 
     if requested > 0:
         n = min(requested, os.cpu_count() or 16)
