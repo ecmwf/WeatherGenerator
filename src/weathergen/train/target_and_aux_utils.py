@@ -9,7 +9,7 @@ from weathergen.train.teacher_utils import load_encoder_from_checkpoint, prepare
 
 
 def get_target_aux_calculator(
-    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, with_ddp, batch_size_per_gpu, **kwargs
+    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, is_sharded, batch_size_per_gpu, **kwargs
 ):
     """
     Create target aux calculator
@@ -60,7 +60,7 @@ def get_target_aux_calculator(
             meta_ema_model,
             halflife_steps=target_and_aux_calc_params.get("ema_halflife_in_thousands", 1e-3),
             rampup_ratio=target_and_aux_calc_params.get("ema_ramp_up_ratio", 0.09),
-            is_model_sharded=(with_ddp and cf.with_fsdp),
+            is_model_sharded=is_sharded,
         )
 
         batch_size = cf.get("world_size_original", cf.get("world_size")) * batch_size_per_gpu

@@ -142,5 +142,6 @@ class TrainerBase:
         runstate.rank = rank
         runstate.local_rank = local_rank
         runstate.with_ddp = world_size > 1
+        runstate.is_sharded = runstate.with_ddp and cf.with_fsdp
 
         return cf, runstate

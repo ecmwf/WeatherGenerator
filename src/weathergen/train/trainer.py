@@ -177,7 +177,7 @@ class Trainer(TrainerBase):
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
-                self.cf, loss_cfg, self.dataset, self.model, self.device, self.runstate.with_ddp, batch_size
+                self.cf, loss_cfg, self.dataset, self.model, self.device, self.runstate.is_sharded, batch_size
             ).to_device(self.device)
 
         return target_and_aux_calculators
@@ -221,7 +221,6 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.test_cfg.training_mode,
             devices[0],
-            cf.with_fsdp,
         )
 
         # get target_aux calculators for different loss terms
@@ -272,7 +271,6 @@ class Trainer(TrainerBase):
             mini_epoch_contd,
             self.training_cfg.training_mode,
             devices[0],
-            cf.with_fsdp,
         )
 
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
@@ -291,14 +289,13 @@ class Trainer(TrainerBase):
                 mini_epoch_contd,
                 cf.training_config.training_mode,
                 devices[0],
-                cf.with_fsdp,
             )
             self.ema_model = EMAModel(
                 self.model,
                 meta_ema_model,
                 halflife_steps=validate_with_ema_cfg.get("ema_halflife_in_thousands", 1e-3),
                 rampup_ratio=validate_with_ema_cfg.get("ema_ramp_up_ratio", 0.09),
-                is_model_sharded=(self.runstate.with_ddp and cf.with_fsdp),
+                is_model_sharded=self.runstate.is_sharded,
             )
 
         # get target_aux calculators for different loss terms

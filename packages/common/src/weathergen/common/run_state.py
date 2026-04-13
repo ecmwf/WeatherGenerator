@@ -20,12 +20,13 @@ class RunState():
 
     def __init__(self):
 
-        self.istep = None
-        self.world_size = None
-        self.world_size_original = None
-        self.rank = None
-        self.local_rank = None
-        self.with_ddp = None
+        self.istep: int | None = None
+        self.world_size: int | None = None
+        self.world_size_original: int | None = None
+        self.rank: int | None = None
+        self.local_rank: int | None = None
+        self.with_ddp: bool | None = None
+        self.is_sharded: bool | None = None
         self.run_history = []
 
         print("Trolololo 1")

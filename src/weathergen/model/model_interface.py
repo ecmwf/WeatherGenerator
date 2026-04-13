@@ -48,10 +48,9 @@ def init_model_and_shard(
     mini_epoch_contd,
     training_mode,
     device,
-    with_fsdp,
     overrides={},
 ):
-    model_creation_device = "meta" if runstate.with_ddp and with_fsdp else "cuda"
+    model_creation_device = "meta" if runstate.is_sharded else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
@@ -62,17 +61,7 @@ def init_model_and_shard(
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
 
-    if runstate.with_ddp and not with_fsdp:
-        # create DDP model if running without FSDP
-        model = torch.nn.parallel.DistributedDataParallel(
-            model,
-            broadcast_buffers=True,
-            find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
-            gradient_as_bucket_view=True,
-            bucket_cap_mb=512,
-        )
-
-    elif runstate.with_ddp and with_fsdp:
+    if runstate.is_sharded:
         # with DDP *and() FSDP
         fsdp_kwargs = {
             "mp_policy": (
@@ -128,7 +117,17 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
-    if runstate.with_ddp and with_fsdp:
+    elif runstate.with_ddp:
+        # create DDP model if running without FSDP
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,
+            broadcast_buffers=True,
+            find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
+            gradient_as_bucket_view=True,
+            bucket_cap_mb=512,
+        )
+
+    if runstate.is_sharded:
         fully_shard(model)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
@@ -146,18 +145,17 @@ def init_model_and_shard(
     if run_id_contd is not None:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
-        model = load_model(cf, model, device, run_id_contd, mini_epoch_contd, runstate.with_ddp)
+        model = load_model(model, device, run_id_contd, mini_epoch_contd, runstate.is_sharded)
     elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
         mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
             logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
-        model = load_model(cf, model, device, run_id, mini_epoch, runstate.with_ddp)
+        model = load_model(model, device, run_id, mini_epoch, runstate.is_sharded)
     else:
-        if runstate.with_ddp and with_fsdp:
+        if runstate.is_sharded:
             model.to_empty(device="cuda")
-            if with_fsdp:
-                model.reset_parameters()
+            model.reset_parameters()
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -167,7 +165,7 @@ def init_model_and_shard(
     return model, model_params
 
 
-def load_model(cf, model, device, run_id: str, with_ddp: bool, mini_epoch=-1):
+def load_model(model, device, run_id: str, is_sharded: bool, mini_epoch=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
         run_id : model_id of the trained model
@@ -184,8 +182,7 @@ def load_model(cf, model, device, run_id: str, with_ddp: bool, mini_epoch=-1):
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True
     )
 
-    is_model_sharded = with_ddp and cf.with_fsdp
-    if is_model_sharded:
+    if is_sharded:
         meta_sharded_sd = model.state_dict()
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
