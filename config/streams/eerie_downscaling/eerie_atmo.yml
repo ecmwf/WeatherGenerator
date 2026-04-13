@@ -1,0 +1,41 @@
+EERIE_ATMO:  
+  type: mesh
+  stream_id: 2136
+  loss_weight: 1.0
+  filenames: # Gridded data is used as source and native high-res data is used as target. 
+  - /work/ab0995/a270225/data_transformation/eerie_atmo_gr025_2d_atm_mesh_daily.parq
+  target_file: /work/ab0995/a270225/data_transformation/eerie_atmo_2d_reduced_gaussian_daily.parq
+  source:
+  - m10u # 10m u wind component 24h mean
+  - m10v # 10m v wind component 24h mean
+  - mean2t # 2m temperature 24h mean
+  - mmsl # mean sea level pressure 24h mean
+  target:
+  - m10u
+  - m10v
+  - mean2t
+  - mmsl
+  sampling_mode: patch
+  patch_size_deg: 20.0
+  location_weight : cosine_latitude
+  masking_rate : 0.6
+  masking_rate_none : 0.05
+  token_size : 32
+  tokenize_spacetime : True
+  max_num_targets: -1 
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 8
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+    # sampling_rate : 0.2
+  pred_head :
+    ens_size : 1
+    num_layers : 1
