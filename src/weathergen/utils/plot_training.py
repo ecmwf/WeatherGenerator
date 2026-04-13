@@ -528,65 +528,7 @@ def plot_loss_per_stream(
                 _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
                 plt.savefig(plt_fname, bbox_inches="tight")
                 plt.close()
-                _logger.warning(f"Could not find any data for stream: {stream_name}")
                 continue
-
-            # no valid data found
-            if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
-                continue
-
-            if legend_outside:
-                legend = _add_legend(
-                    legend_str,
-                    legend_outside=True,
-                    loc="center left",
-                    bbox_to_anchor=(1, 0.5),
-                )
-            else:
-                legend = _add_legend(legend_str, legend_outside=False)
-            for line in legend.get_lines():
-                line.set(alpha=1.0)
-            plt.grid(True, which="both", ls="-")
-
-            if y_lim is not None:
-                plt.ylim(y_lim)
-            else:
-                plt.ylim([0.95 * min_val, 1.025 * max_val])
-            if x_lim is not None:
-                plt.xlim(x_lim)
-
-            plt.yscale("log")
-            if x_scale_log:
-                plt.xscale("log")
-            plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
-            plt.ylabel("loss")
-            plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
-            plt.tight_layout()
-            rstr = "".join([f"{r}_" for r in runs_ids])
-
-            # save the plot
-            plt_fname = plot_dir / "{}{}fs_{}{}_{}.png".format(
-                rstr,
-                "".join([f"{m}_" for m in modes]),
-                "".join([f"{fs}_" for fs in forecast_steps]),
-                stream_name,
-                channel,
-            )
-            # if too long, shorten filename by cutting out the MIDDLE of the filename (while ensuring the file extension is preserved)
-            if len(plt_fname.name) > 200:
-                _logger.warning(
-                    f"Filename '{plt_fname.name}' is too long ({len(plt_fname.name)} characters). "
-                    f"Shortening it to 200 characters by cutting out the middle."
-                )
-                half_len = (200 - len(plt_fname.suffix)) // 2
-                plt_fname = plt_fname.parent / (
-                    plt_fname.name[:half_len]
-                    + "_"
-                    + plt_fname.name[-half_len - len(plt_fname.suffix) :]
-                )
-            _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
-            plt.savefig(plt_fname)
-            plt.close()
 
 
 ####################################################################################################
