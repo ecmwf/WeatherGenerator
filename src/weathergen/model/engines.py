@@ -496,18 +496,19 @@ class ForecastingEngine(torch.nn.Module):
             tokens_in = tokens
 
         if self.cf.fe_diffusion_model:
-            assert ada_ln_aux is not None, (
-                "Conditioning (noise and other) must be provided for diffusion forecast engine"
-            )
             for block in self.fe_blocks:
+                breakpoint()
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
-                    # if isinstance(block, MLP):
-                    #     # tokens = torch.concat([tokens, coords], dim=-1) if coords is not None else tokens
-                    #     # TODO: REMOVE
-                    #     tokens = tokens + self.position_layer(coords)  # Assuming args[1] contains positional information
-                    tokens = checkpoint(block, tokens, coords, noise_emb, ada_ln_aux, use_reentrant=False)
+                    if self.cf.fe_diffusion_model_conditioning in ["date_time"]:
+                        # Assuming ada_ln_aux contains the date_time embedding in this case
+                        assert ada_ln_aux is not None, "ada_ln_aux must be provided for diffusion model conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, ada_ln_aux, use_reentrant=False)
+                    else:
+                        assert ada_ln_aux is None, "ada_ln_aux should not be provided when diffusion model conditioning is disabled"
+                        assert noise_emb is not None, "noise_emb must be provided for diffusion model conditioning" 
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):

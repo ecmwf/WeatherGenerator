@@ -60,7 +60,7 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
-fe_diffusion_model_conditioning: "date_time" # options: "date_time", "forecast_step", "none"
+fe_diffusion_model_conditioning: None # options: "date_time"
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -180,8 +180,8 @@ training_config:
   samples_per_mini_epoch: 4096
   shuffle: True
  
-  start_date: 1979-06-01T00:00
-  end_date: 1979-06-01T18:00
+  start_date: 2012-06-01T00:00
+  end_date: 2012-06-01T18:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -252,8 +252,8 @@ validation_config:
   samples_per_mini_epoch: 1
   shuffle: True  # TODO: Set back to False
 
-  start_date: 1979-06-01T00:00
-  end_date: 1979-06-01T18:00
+  start_date: 2012-06-01T00:00
+  end_date: 2012-06-01T18:00
 
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 

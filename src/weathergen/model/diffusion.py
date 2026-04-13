@@ -123,10 +123,10 @@ class DiffusionForecastEngine(torch.nn.Module):
                 raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
             
             return self.inference_forward(
-                tokens=tokens,  # TODO: remove after single sample experiments
                 fstep=fstep,
                 num_steps=num_steps,
                 meta_info=meta_info,
+                coords=coords,
             )
 
     def training_forward(
@@ -150,7 +150,11 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = tokens
 
-        c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
+        if self.cf.fe_diffusion_model_conditioning == "date_time":
+            c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
+        else:
+            c = None
+            
         y = tokens
 
         if self.training:
@@ -188,7 +192,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c) #currently does nothing
-        c = self.datetime_embedder(c).to(x.device)
+        if self.cf.fe_diffusion_model_conditioning == "date_time":
+            c = self.datetime_embedder(c).to(x.device)
     
         return c_skip * x + c_out * self.net(
             c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=c
@@ -196,11 +201,10 @@ class DiffusionForecastEngine(torch.nn.Module):
 
     def inference_forward(
         self,
-        tokens,
         fstep: int,
         num_steps: int = 50,
-        coords: torch.Tensor = None,
         meta_info: dict[str, SampleMetaData] = None,
+        coords: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Forward pass of the diffusion model during inference.
@@ -213,18 +217,19 @@ class DiffusionForecastEngine(torch.nn.Module):
             fstep: Forecast step index for the network
             num_steps: Number of diffusion denoising steps (default: 30)
             meta_info: Optional sample metadata dict containing timestamps for temporal conditioning
-        
+            coords: Optional coordinate tensor for spatial conditioning
         Returns:
             torch.Tensor: Generated sample of shape (1, num_healpix_cells, ae_global_dim_embed)
         """
 
         # Extract conditioning from meta_info (same as training_forward)
         c = None
-        if meta_info is not None:
+
+        if self.cf.fe_diffusion_model_conditioning == "date_time":
             c = meta_info["ERA5"].params["timestamp"]
 
         # Sample pure noise (assuming single batch element for now)
-        torch.manual_seed(42)
+        # torch.manual_seed(42)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
 
         ### OLD WAY OF COMPUTING SIGMA SCHEDULE
@@ -323,7 +328,7 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["x"].append(x_next.cpu())
                 if self.cur_token is not None:
                     track["l2_to_target"].append((x_next - self.cur_token).norm().item())
-        track["x"].append(self.cur_token.cpu())
+                    track["x"].append(self.cur_token.cpu())
         self._plot_sampling_diagnostics(track, num_steps)
 
         return x_next

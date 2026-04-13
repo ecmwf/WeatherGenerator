@@ -591,7 +591,6 @@ class MultiSelfAttentionHead(torch.nn.Module):
             x = self.lnorm(x, ada_ln_aux)
 
         if self.noise_conditioning:
-            assert emb is not None, "Need noise embedding if using noise conditioning"
             x, gate = self.noise_conditioning(x, emb)
 
 
