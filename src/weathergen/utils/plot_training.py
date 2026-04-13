@@ -688,8 +688,6 @@ def plot_train(args=None):
                             """
     )
 
-
-
     parser.add_argument(
         "-o", "--output_dir", default="./plots/", type=Path, help="Directory where plots are saved"
     )
