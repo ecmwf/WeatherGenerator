@@ -73,6 +73,8 @@ def _add_legend(
         legend_kwargs["bbox_to_anchor"] = bbox_to_anchor
 
     legend = ax.legend(truncated, **legend_kwargs)
+    for line in legend.get_lines():
+        line.set(alpha=1.0)
     return legend
 
 
@@ -501,9 +503,7 @@ def plot_loss_per_stream(
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
                 plt.tight_layout()
-                legend = _add_legend(legend_str, legend_outside=legend_outside)
-                for line in legend.get_lines():
-                    line.set(alpha=1.0)
+                _add_legend(legend_str, legend_outside=legend_outside)
 
                 # construct file name
 
@@ -528,7 +528,6 @@ def plot_loss_per_stream(
                 _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
                 plt.savefig(plt_fname, bbox_inches="tight")
                 plt.close()
-                continue
 
 
 ####################################################################################################
@@ -638,9 +637,7 @@ def plot_loss_per_run(
     plt.ylabel("loss")
     plt.xlabel("samples")
     plt.tight_layout()
-    legend = _add_legend(legend_str, legend_outside=legend_outside)
-    for line in legend.get_lines():
-        line.set(alpha=1.0)
+    _add_legend(legend_str, legend_outside=legend_outside)
 
     sstr = "".join(
         [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
