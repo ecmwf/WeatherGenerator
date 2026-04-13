@@ -648,10 +648,11 @@ def plot_loss_per_run(
 
     # save the plot
     fname_base = "{}_{}".format(run_id, "".join([f"{m}_" for m in modes]))
+    fname_suffix = ".png"
 
-    if len(fname_base) + len(sstr) + 4 > MAX_FILENAME_LEN:
-        sstr = sstr[: MAX_FILENAME_LEN - len(fname_base) - 4]
-    fname = fname_base + sstr + ".png"
+    if len(fname_base) + len(sstr) + len(fname_suffix) > MAX_FILENAME_LEN:
+        sstr = sstr[: MAX_FILENAME_LEN - len(fname_base) - len(fname_suffix)]
+    fname = fname_base + sstr + fname_suffix
 
     plt_fname = plot_dir / fname
 
