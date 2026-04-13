@@ -177,7 +177,7 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
 
 
 ####################################################################################################
-def _adjust_reset_x_axis(x_vals, x_col: str) -> np.ndarray:
+def _adjust_reset_x_axis(x_vals, x_col: str) -> np.NDarray:
     """
     Keep sample-based x-axes monotonic when chained jobs append metrics with a reset counter.
     """
@@ -306,7 +306,6 @@ def plot_loss_avg(
         y_vals = y_vals[mask]
 
         x_vals = _adjust_reset_x_axis(x_vals, "num_samples")
-
 
         plt.plot(
             x_vals,
@@ -862,7 +861,6 @@ def plot_train(args=None):
     ]
 
     x_scale_log = args.log_x
-    print(x_scale_log)
 
     legend_outside = args.legend_outside
 
@@ -871,7 +869,12 @@ def plot_train(args=None):
 
     # plot average loss
     plot_loss_avg(
-        out_dir, runs_ids, runs_data, runs_active, stage=TRAIN, legend_outside=legend_outside,
+        out_dir,
+        runs_ids,
+        runs_data,
+        runs_active,
+        stage=TRAIN,
+        legend_outside=legend_outside,
         x_scale_log=x_scale_log,
     )
 
