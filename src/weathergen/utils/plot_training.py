@@ -506,7 +506,6 @@ def plot_loss_per_stream(
                 _add_legend(legend_str, legend_outside=legend_outside)
 
                 # construct file name
-
                 run_ids_str = "".join([f"{r}_" for r in runs_ids])
                 fname_tail = "{}fs_{}{}_{}_{}.png".format(
                     "".join([f"{m}_" for m in modes]),
