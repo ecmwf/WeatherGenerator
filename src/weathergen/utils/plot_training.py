@@ -31,7 +31,7 @@ LEGEND_FONT_SIZE = "x-small"
 _LEGEND_MAX_LABEL_LEN = 80
 
 
-def _add_legend(labels, ax=None, **kwargs):
+def _add_legend(labels, ax=None, loc="upper center", bbox_to_anchor=(0.5, -0.13), **kwargs):
     """Add a legend below the axes, safely outside the plot and x-axis labels.
 
     Call this **after** ``tight_layout()`` so that the layout engine does not
@@ -50,8 +50,8 @@ def _add_legend(labels, ax=None, **kwargs):
 
     legend = ax.legend(
         truncated,
-        bbox_to_anchor=(0.5, -0.13),
-        loc="upper center",
+        bbox_to_anchor=bbox_to_anchor,
+        loc=loc,
         ncol=ncol,
         fontsize=LEGEND_FONT_SIZE,
         framealpha=0.9,
@@ -508,12 +508,10 @@ def plot_loss_per_stream(
             if (min_val >= max_val) or np.isnan(min_val) or np.isnan(max_val):
                 continue
 
-            legend = plt.legend(
+            legend = _add_legend(
                 legend_str,
                 loc="center left",
                 bbox_to_anchor=(1, 0.5),
-                borderaxespad=0,
-                fontsize=LEGEND_FONT_SIZE,
             )
             for line in legend.get_lines():
                 line.set(alpha=1.0)
@@ -552,7 +550,7 @@ def plot_loss_per_stream(
                 half_len = (200 - len(plt_fname.suffix)) // 2
                 plt_fname = plt_fname.parent / (
                     plt_fname.name[:half_len]
-                    + "..."
+                    + "_"
                     + plt_fname.name[-half_len - len(plt_fname.suffix) :]
                 )
             _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
@@ -716,8 +714,16 @@ def plot_train(args=None):
                             """
     )
 
+
+
     parser.add_argument(
         "-o", "--output_dir", default="./plots/", type=Path, help="Directory where plots are saved"
+    )
+    parser.add_argument(
+        "--legend-outside",
+        default=False,
+        action="store_true",
+        help="Legend outside of the plot",
     )
     parser.add_argument(
         "-m",
