@@ -55,7 +55,7 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 2
+fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -249,7 +249,7 @@ validation_config:
   # Each value produces a separate validation pass with independently logged metrics.
   validation_noise_levels: [1.0, 2.0, 3.0, 4.0]
 
-  samples_per_mini_epoch: 1
+  samples_per_mini_epoch: 16
   shuffle: True  # TODO: Set back to False
 
   start_date: 2012-06-01T00:00

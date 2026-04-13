@@ -154,7 +154,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
         else:
             c = None
-            
+
         y = tokens
 
         if self.training:
@@ -298,7 +298,6 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_next = torch.tensor([t_next], device="cuda").float()
 
             x_cur = x_next
-            print(f"Step {i+1}/{num_steps}: t_cur={t_cur.item():.4f}, t_next={t_next.item():.4f}")
 
             # Increase noise temporarily. (Stochastic sampling; not used for now)
             # gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
