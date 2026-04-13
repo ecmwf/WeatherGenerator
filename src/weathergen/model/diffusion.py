@@ -29,7 +29,7 @@ import numpy as np
 
 import torch
 
-from weathergen.common.config import Config
+from weathergen.common.config import Config, get_path_run
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
@@ -198,7 +198,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self,
         tokens,
         fstep: int,
-        num_steps: int = 30,
+        num_steps: int = 50,
         coords: torch.Tensor = None,
         meta_info: dict[str, SampleMetaData] = None,
     ) -> torch.Tensor:
@@ -223,30 +223,52 @@ class DiffusionForecastEngine(torch.nn.Module):
         if meta_info is not None:
             c = meta_info["ERA5"].params["timestamp"]
 
-        # Sample noise (assuming single batch element for now)
-        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda") * 1.0
+        # Sample pure noise (assuming single batch element for now)
+        torch.manual_seed(42)
+        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
 
-        # eta = torch.tensor([1.0], device="cuda").float() # 1.0 (good), 2.0 (okay), 2.2 (max), 2.5 (hard)
-        # sigma = (eta * self.p_std + self.p_mean).exp()
-        # print("sigma", sigma)
-        # n = torch.randn_like(x).to(device="cuda") * sigma
-        # x = self.cur_token + n
+        ### OLD WAY OF COMPUTING SIGMA SCHEDULE
+        # # Time step discretization.
+        # step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
+        # t_steps = (
+        #     self.sigma_max ** (1 / self.rho)
+        #     + step_indices
+        #     / (num_steps - 1)
+        #     * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
+        # ) ** self.rho
+        # t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
 
-        x = self.cur_token * 0.05 + x
-        # breakpoint()
+        ### NEW WAY OF COMPUTING SIGMA SCHEDULE WITH TRAINING-ALIGNED BOUNDS AND DIAGNOSTICS
+        # --- Training-aligned sigma bounds ---
+        # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
+        # The network only learns to denoise reliably within the training distribution.
+        #   - sigma_max_eff: cap at 99.7th percentile = exp(p_mean + 3*p_std)
+        #     Beyond this, the denoiser is in untrained territory → garbage predictions
+        #     that poison the entire ODE trajectory.
+        #   - sigma_min_eff: floor at a level where the network still contributes.
+        #     With EDM preconditioning, c_skip = sigma_data^2/(sigma^2+sigma_data^2).
+        #     At sigma << sigma_data, c_skip → 1, meaning the output ≈ input (skip
+        #     connection dominates) and the network can no longer correct errors.
+        #     We stop at sigma_min = max(config value, sigma_data * 0.01), which gives
+        #     c_skip ≈ 0.9999 — still some network contribution, and avoids the
+        #     numerical instability of dividing by near-zero sigma in the ODE.
+        sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
+        sigma_max_eff = min(self.sigma_max, sigma_max_train)
+        sigma_min_eff = max(self.sigma_min, self.sigma_data * 0.01)
+        logger.info(
+            f"Inference sigma schedule: "
+            f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train 3σ={sigma_max_train:.4f}), "
+            f"sigma_min_eff={sigma_min_eff:.4f} (config={self.sigma_min}), "
+            f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
+        )
 
-        
-        # return self.denoise(x=x, c=None, sigma=sigma, fstep=fstep)
-        # print("initial noise statistics")
-        # print("mean", x.mean(), "std", x.std(), "max", x.max(), "min", x.min())
-
-        # Time step discretization.
+        # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
         t_steps = (
-            self.sigma_max ** (1 / self.rho)
+            sigma_max_eff ** (1 / self.rho)
             + step_indices
             / (num_steps - 1)
-            * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
+            * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
         ) ** self.rho
         t_steps = torch.cat(
             [t_steps, torch.zeros_like(t_steps[:1])]
@@ -255,6 +277,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         #     [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
         # )  # t_N = 0
 
+        # --- Per-step tracking for diagnostics ---
+        track = {
+            "sigma": [], "x_std": [], "denoised_std": [],
+            "l2_to_target": [], "cosine_to_target": [],
+            "c_skip": [], "x": [x.cpu()]
+        }
+
         # Main sampling loop.
         x_next = x * t_steps[0]
         for i, (t_cur, t_next) in enumerate(
@@ -262,8 +291,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         ):  # 0, ..., N-1
             t_cur = torch.tensor([t_cur], device="cuda").float()
             t_next = torch.tensor([t_next], device="cuda").float()
-
-            print(i, t_cur.item())
 
             x_cur = x_next
             print(f"Step {i+1}/{num_steps}: t_cur={t_cur.item():.4f}, t_next={t_next.item():.4f}")
@@ -286,7 +313,71 @@ class DiffusionForecastEngine(torch.nn.Module):
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
+            # --- Record diagnostics ---
+            with torch.no_grad():
+                s = t_cur.item()
+                track["sigma"].append(s)
+                track["c_skip"].append(self.sigma_data**2 / (s**2 + self.sigma_data**2))
+                track["x_std"].append(x_next.std().item())
+                track["denoised_std"].append(denoised.std().item())
+                track["x"].append(x_next.cpu())
+                if self.cur_token is not None:
+                    track["l2_to_target"].append((x_next - self.cur_token).norm().item())
+        track["x"].append(self.cur_token.cpu())
+        self._plot_sampling_diagnostics(track, num_steps)
+
         return x_next
+
+    def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
+        """Save a diagnostic plot of the sampling trajectory."""
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
+
+        steps = list(range(len(track["sigma"])))
+        has_target = len(track["l2_to_target"]) > 0
+        n_plots = 3
+
+        fig, axes = plt.subplots(n_plots, 1, figsize=(10, 3 * n_plots), sharex=True)
+
+        # 1) Sigma schedule
+        axes[0].semilogy(steps, track["sigma"], "o-", markersize=3)
+        axes[0].set_ylabel("sigma (noise level)")
+        axes[0].set_title(
+            f"Sampling diagnostics  |  sigma_max_eff={track['sigma'][0]:.2f}, "
+            f"sigma_data={self.sigma_data}, steps={num_steps}"
+        )
+        axes[0].axhline(self.sigma_data, color="grey", ls="--", lw=0.8, label=f"sigma_data={self.sigma_data}")
+        axes[0].legend(fontsize=8)
+        axes[0].grid(True, alpha=0.3)
+
+        # 2) Std of x_next and denoised estimate
+        axes[1].plot(steps, track["x_std"], "o-", markersize=3, label="x (noisy state)")
+        axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
+        if self.cur_token is not None:
+            target_std = self.cur_token.std().item()
+            axes[1].axhline(target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}")
+        axes[1].set_ylabel("std")
+        axes[1].legend(fontsize=8)
+        axes[1].grid(True, alpha=0.3)
+
+        if has_target:
+            # 3) L2 error to target
+            axes[2].plot(steps, track["l2_to_target"], "o-", markersize=3, color="tab:red")
+            axes[2].set_ylabel("L2 error to target")
+            axes[2].grid(True, alpha=0.3)
+
+        axes[-1].set_xlabel("sampling step")
+        fig.tight_layout()
+
+        out_dir = get_path_run(self.cf)
+        out_dir.mkdir(exist_ok=True, parents=True)
+        out_path_base = out_dir / "plots" / "validation" / "plots"
+        out_path_base.mkdir(exist_ok=True, parents=True)
+        fig.savefig(out_path_base / "sampling_diagnostics.png", dpi=150)
+        plt.close(fig)
+        logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
 
 
 class Preconditioner:

@@ -405,8 +405,6 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
-        # self.position_layer = torch.nn.Linear(2, self.cf.ae_global_dim_embed)
-
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
@@ -466,30 +464,11 @@ class ForecastingEngine(torch.nn.Module):
                         torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
                     )
 
-        # self.fe_blocks.append(
-        #     MLP(
-        #         self.cf.ae_global_dim_embed,
-        #         self.cf.ae_global_dim_embed,
-        #         num_layers=12,
-        #         with_residual=True,
-        #         pre_layer_norm=True, # TODO: REMOVE AGAIN
-        #         dropout_rate=self.cf.fe_dropout_rate,
-        #         norm_type=self.cf.norm_type,
-        #         dim_aux=dim_aux,
-        #         norm_eps=self.cf.mlp_norm_eps,
-        #         with_noise_conditioning=True, # TODO: SWITCH BACK TO TRUE
-        #     )
-        # )
         def init_weights_final(m):
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, mean=0, std=0.001)
                 if m.bias is not None:
                     torch.nn.init.normal_(m.bias, mean=0, std=0.001)
-        # def init_weights_final(m):
-        #     if isinstance(m, torch.nn.Linear):
-        #         torch.nn.init.normal_(m.weight, mean=0, std=0.1)
-        #         if m.bias is not None:
-        #             torch.nn.init.normal_(m.bias, mean=0, std=0.1)
 
         for block in self.fe_blocks:
             block.apply(init_weights_final)
