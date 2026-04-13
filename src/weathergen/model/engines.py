@@ -497,7 +497,6 @@ class ForecastingEngine(torch.nn.Module):
 
         if self.cf.fe_diffusion_model:
             for block in self.fe_blocks:
-                breakpoint()
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:

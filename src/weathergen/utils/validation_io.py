@@ -11,16 +11,15 @@ import logging
 from math import exp
 import re
 
-import cartopy.crs as ccrs
-import matplotlib.colors as mcolors
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import xarray as xr
 
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.evaluate.plotting.plotter import Plotter
 
 _logger = logging.getLogger(__name__)
 
@@ -94,7 +93,6 @@ def write_output(
         if loss_term.type == "LossPhysical"
     ]
     assert len(outputs_physical) == 1
-    
     target_aux_out = target_aux_out[outputs_physical[0]]
 
     # collect all target / prediction-related information
@@ -254,41 +252,26 @@ def write_output(
             for subset in data.items():
                 zio.write_zarr(subset)
 
-    # Extract a representative date per batch sample from target times before
-    # they are freed. Use the first non-NaT timestamp found in t_idx=0.
-    sample_dates: list[str] = []
-    if len(targets_times_all) > 0:
-        for stream_times in targets_times_all[0]:
-            if stream_times.size > 0:
-                valid_times = stream_times[~np.isnat(stream_times)]
-                if valid_times.size > 0:
-                    sample_dates.append(str(valid_times[0].astype("datetime64[h]")))
-                    break
 
     # Free arrays no longer needed after zarr writing
     del targets_all, targets_times_all, targets_lens, sources, data
 
     # TODO: REMOVE EVERYTHING BELOW THIS LINE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
 
-    # Prepare prediction data for plotting (scatter plot expects lat/lon coords on ipoint).
+    # Prepare prediction data for Plotter (scatter plot expects lat/lon coords on ipoint).
     base_plot_dir = config.get_path_run(cf) / "plots" / "validation"
     base_plot_dir.mkdir(parents=True, exist_ok=True)
-    dpi_val = 150
-    image_format = "png"
+    plotter = Plotter({"image_format": "png", "dpi_val": 150}, base_plot_dir)
     # headline_channels = {"2t", "z500", "q850", "10u", "10v"}
     # headline_channels = {"2t", "q850"}
     # headline_channels = {"z500"}
     headline_channels = {"2t", "z500"}
 
-    t_idx = np.random.randint(0, len(preds_all))  # TODO: loop over all time steps once plotting is set up
+    t_idx = 0
     for stream_idx, stream_info in enumerate(cf.streams):
         stream_name = stream_info["name"]
         preds_stream = preds_all[t_idx][stream_idx]
         coords_stream = targets_coords_all[t_idx][stream_idx]
-
-        # Check for noised data for this stream
-        noised_stream = noised_preds_all[t_idx][stream_idx]
-        has_noised = noised_stream.size > 0 and noised_stream.ndim >= 2
 
         if preds_stream.size == 0 or coords_stream.size == 0:
             _logger.warning(f"No prediction data to plot for stream {stream_name}.")
@@ -302,12 +285,6 @@ def write_output(
                 f"Unsupported prediction shape {preds_stream.shape} for stream {stream_name}."
             )
             continue
-
-        if has_noised:
-            if noised_stream.ndim == 3:
-                noised_stream = noised_stream[0]
-            elif noised_stream.ndim != 2:
-                has_noised = False
 
         channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
         selected_channels = [
@@ -325,122 +302,72 @@ def write_output(
         lat = coords_stream[:, 0]
         lon = coords_stream[:, 1]
 
-        run_id = config.get_run_id_from_config(cf)
+        plotter.stream = stream_name
+        plotter.run_id = config.get_run_id_from_config(cf)
+        plotter.fstep = forecast_offset
 
         num_samples = len(preds)
         len_per_sample = preds_stream.shape[0] // num_samples
-        noised_len_per_sample = noised_stream.shape[0] // num_samples if has_noised else 0
-
-        if noise_level is not None:
-            # Format with .1e to preserve one decimal place in mantissa, then clean up exponent notation
-            eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.1e}'))
-        else:
-            eta_str = None
-        eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
 
         for sample in range(num_samples):
             s_start = sample * len_per_sample
             s_end = (sample + 1) * len_per_sample
-            ns_start = sample * noised_len_per_sample if has_noised else 0
-            ns_end = (sample + 1) * noised_len_per_sample if has_noised else 0
-
-            # Extract sample date from target times
-            sample_date_str = sample_dates[0] if len(sample_dates) > 0 else ""
 
             for varname in selected_channels:
                 col = ch_to_col[varname]
+                vals = preds_stream[s_start:s_end, col]
+                sample_lat = lat[s_start:s_end]
+                sample_lon = lon[s_start:s_end]
 
-                # --- denoised data ---
-                den_vals = preds_stream[s_start:s_end, col]
-                den_lat = lat[s_start:s_end]
-                den_lon = lon[s_start:s_end]
-                den_valid = ~np.isnan(den_vals)
-                den_vals, den_lat, den_lon = den_vals[den_valid], den_lat[den_valid], den_lon[den_valid]
+                # Drop NaN points
+                valid = ~np.isnan(vals)
+                vals = vals[valid]
+                sample_lat = sample_lat[valid]
+                sample_lon = sample_lon[valid]
 
-                # --- noised data ---
-                if has_noised:
-                    noi_vals = noised_stream[ns_start:ns_end, col]
-                    noi_lat = lat[ns_start:ns_end]
-                    noi_lon = lon[ns_start:ns_end]
-                    noi_valid = ~np.isnan(noi_vals)
-                    noi_vals, noi_lat, noi_lon = noi_vals[noi_valid], noi_lat[noi_valid], noi_lon[noi_valid]
-                else:
-                    noi_vals = noi_lat = noi_lon = None
-
-                # Shared colour scale across both panels
-                all_vals = np.concatenate([den_vals] + ([noi_vals] if noi_vals is not None else []))
-                vmin, vmax = float(np.nanmin(all_vals)), float(np.nanmax(all_vals))
-                norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-                cmap = plt.get_cmap("coolwarm")
-
-                ncols = 2 if has_noised else 1
-                proj = ccrs.Robinson()
-                fig, axes = plt.subplots(
-                    1, ncols, figsize=(8 * ncols, 5), dpi=dpi_val,
-                    subplot_kw={"projection": proj},
+                sample_da = xr.DataArray(
+                    vals,
+                    dims=("ipoint",),
+                    coords={
+                        "ipoint": np.arange(len(vals)),
+                        "lat": ("ipoint", sample_lat),
+                        "lon": ("ipoint", sample_lon),
+                    },
                 )
-                if ncols == 1:
-                    axes = [axes]
-
-                # Left panel: noised (or skip if not available)
-                if has_noised:
-                    ax_noised = axes[0]
-                    ax_noised.coastlines()
-                    ax_noised.set_global()
-                    sc_n = ax_noised.scatter(
-                        noi_lon, noi_lat, c=noi_vals, norm=norm, cmap=cmap,
-                        s=2.0, marker="o", transform=ccrs.PlateCarree(), linewidths=0.0,
-                    )
-                    if eta_str is not None:
-                        ax_noised.set_title(f"Noised | {varname} | eta={eta_str}", fontsize=9.5)
-                    else:
-                        ax_noised.set_title(f"Noised | {varname}", fontsize=9.5)
-                    ax_noised.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
-                    ax_denoised = axes[1]
-                else:
-                    ax_denoised = axes[0]
-
-                # Right panel (or only panel): denoised
-                ax_denoised.coastlines()
-                ax_denoised.set_global()
-                sc_d = ax_denoised.scatter(
-                    den_lon, den_lat, c=den_vals, norm=norm, cmap=cmap,
-                    s=2.0, marker="o", transform=ccrs.PlateCarree(), linewidths=0.0,
-                )
-                if eta_str is not None:
-                    ax_denoised.set_title(f"Denoised | {varname} | eta={eta_str}", fontsize=9.5)
-                else:
-                    ax_denoised.set_title(f"Denoised | {varname}", fontsize=9.5)
-                ax_denoised.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=1)
-
-                # Shared colourbar
-                fig.colorbar(
-                    sc_d, ax=axes, orientation="horizontal",
-                    label=f"Variable: {varname}", fraction=0.05, pad=0.07,
-                )
-
-                date_part = f" | {sample_date_str}" if sample_date_str else ""
-                if eta_str is not None:
-                    fig.suptitle(
-                        f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1}{date_part} | eta={eta_str}",
-                        fontsize=11,
-                    )
-                else:
-                    fig.suptitle(
-                        f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1}{date_part}",
-                        fontsize=11,
-                    )
 
                 channel_dir = base_plot_dir / varname
                 channel_dir.mkdir(parents=True, exist_ok=True)
+                epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}"
+                # Add noise_level_rn to title if present for this stream
+                if noise_level is not None:
+                    eta_str = str(noise_level)
+                else:
+                    eta_str = None
+                eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
                 epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}{eta_tag}"
-                fname = channel_dir / f"{epoch_tag}.{image_format}"
-                fig.savefig(fname, bbox_inches="tight")
-                plt.close(fig)
+                
+                if noise_level is not None:
+                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1} | noise_level={eta_str}"
+                else:
+                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1}"
 
-                del den_vals, den_lat, den_lon, den_valid
-                if has_noised:
-                    del noi_vals, noi_lat, noi_lon, noi_valid
+                plot_name = plotter.scatter_plot(
+                    sample_da,
+                    channel_dir,
+                    varname=varname,
+                    regionname="global",
+                    tag=epoch_tag,
+                    title=title,
+                )
+                src = channel_dir / f"{plot_name}.{plotter.image_format}"
+                dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
+                if src != dst:
+                    try:
+                        src.replace(dst)
+                    except (FileNotFoundError, OSError):
+                        pass  # another rank already renamed or removed the file
+
+                del sample_da, vals, sample_lat, sample_lon, valid
 
         del preds_stream, coords_stream
 

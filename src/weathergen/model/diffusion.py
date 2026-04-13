@@ -113,12 +113,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         else:
             # NOTE: temporary for analysing denoising
-            # return self.training_forward(
-            #     tokens=tokens,
-            #     fstep=fstep,
-            #     meta_info=meta_info,
-            #     coords=coords,
-            # )
+            return self.training_forward(
+                tokens=tokens,
+                fstep=fstep,
+                meta_info=meta_info,
+                coords=coords,
+            )
+
             if fstep is None:
                 raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
             
