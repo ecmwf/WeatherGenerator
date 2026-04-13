@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
@@ -104,7 +105,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
-        forecast_cfg = FORECAST_DEFAULTS | mode_cfg.get("forecast", {})
+        forecast_cfg = OmegaConf.merge(FORECAST_DEFAULTS, mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
         self.time_step = forecast_cfg["time_step"]
         self.forecast_policy = forecast_cfg["policy"]
