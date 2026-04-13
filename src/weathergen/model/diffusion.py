@@ -99,7 +99,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         self.cur_token = tokens.detach()
 
-        return self.inference(fstep=fstep, num_steps=4, coords=coords)
+        # return self.inference(fstep=fstep, num_steps=10, coords=coords)
 
         c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
@@ -138,7 +138,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         x = self.preconditioner.precondition(x, c)
 
         # Direct prediction: network outputs denoised estimate directly
-        # return self.net(x, fstep=fstep, coords=coords, noise_emb=noise_emb)
         return c_skip * x + c_out * self.net(
             c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb
         )  # Eq. (7) in EDM paper
@@ -155,8 +154,19 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Sample pure noise (assuming single batch element for now)
         torch.manual_seed(42)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
-        # x = self.cur_token * 0.02 + x
 
+        ### OLD WAY OF COMPUTING SIGMA SCHEDULE
+        # # Time step discretization.
+        # step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
+        # t_steps = (
+        #     self.sigma_max ** (1 / self.rho)
+        #     + step_indices
+        #     / (num_steps - 1)
+        #     * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
+        # ) ** self.rho
+        # t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
+
+        ### NEW WAY OF COMPUTING SIGMA SCHEDULE WITH TRAINING-ALIGNED BOUNDS AND DIAGNOSTICS
         # --- Training-aligned sigma bounds ---
         # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
         # The network only learns to denoise reliably within the training distribution.
@@ -236,9 +246,8 @@ class DiffusionForecastEngine(torch.nn.Module):
                 if self.cur_token is not None:
                     track["l2_to_target"].append((x_next - self.cur_token).norm().item())
         track["x"].append(self.cur_token.cpu())
-
         self._plot_sampling_diagnostics(track, num_steps)
-        # self._plot_sampling_process(track, num_steps)
+
         return x_next
 
     def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
@@ -291,102 +300,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         fig.savefig(out_path_base / "sampling_diagnostics.png", dpi=150)
         plt.close(fig)
         logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
-
-    def _plot_sampling_process(self, track: dict, num_steps: int) -> None:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import matplotlib.colors as mcolors
-        
-        out_dir = get_path_run(self.cf)
-        out_dir.mkdir(exist_ok=True, parents=True)
-        out_path_base = out_dir / "plots" / "validation" / "plots"
-        out_path_base.mkdir(exist_ok=True, parents=True)
-        
-        vmin, vmax = track["x"][-1].min().item(), track["x"][-1].max().item()
-        for s_idx, x in enumerate(track["x"]):
-            fig, axes2 = plt.subplots(1, 2, figsize=(12, 5))
-
-            abs_max = max(abs(vmin), abs(vmax)) * 0.1
-            # im0 = axes2[0].imshow(x[0].t().cpu(), aspect="auto", cmap="seismic",
-            #                        norm=mcolors.SymLogNorm(linthresh=1e-2, vmin=-abs_max, vmax=abs_max))
-            im0 = axes2[0].imshow(x[0].t().cpu(), aspect="auto", cmap="seismic", vmin=vmin, vmax=vmax)
-            plt.colorbar(im0, ax=axes2[0])
-            if s_idx == len(track["x"]) - 1:
-                axes2[0].set_title(f"Target")
-            else:
-                axes2[0].set_title(f"Sample at step {s_idx}")
-            axes2[0].set_xlabel("healpix cell")
-            axes2[0].set_ylabel("embedding dim")
-
-            diff = (x[0].cpu() - track["x"][-1][0].cpu()).t()
-            # im1 = axes2[1].imshow(diff, aspect="auto", cmap="bwr",
-            #                        norm=mcolors.SymLogNorm(linthresh=1e-2, vmin=-0.2, vmax=0.2))
-            im1 = axes2[1].imshow(diff, aspect="auto", cmap="bwr", vmin=-1, vmax=1)
-            plt.colorbar(im1, ax=axes2[1])
-            axes2[1].set_title("Difference to target")
-            axes2[1].set_xlabel("healpix cell")
-
-            fig.tight_layout()
-            plt.savefig(out_path_base / f"sample_{s_idx:05d}.png", dpi=100)
-            plt.close(fig)
-            logger.info(f"Saved sample visualization to {out_path_base / f'sample_{s_idx:05d}.png'}")
-
-
-    # # --- OLD inference (before training-aligned sigma & diagnostics) ---
-    # def inference(
-    #     self,
-    #     fstep: int,
-    #     num_steps: int = 30,
-    #     coords: torch.Tensor = None,
-    # ) -> torch.Tensor:
-    #     # Forward pass of the diffusion model during inference
-    #     # https://github.com/NVlabs/edm/blob/main/generate.py
-    #
-    #     # Sample noise (assuming single batch element for now)
-    #     torch.manual_seed(42)
-    #     x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda") * 1.0
-    #
-    #     x = self.cur_token * 0.0 + x
-    #
-    #     # Time step discretization.
-    #     step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
-    #     t_steps = (
-    #         self.sigma_max ** (1 / self.rho)
-    #         + step_indices
-    #         / (num_steps - 1)
-    #         * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
-    #     ) ** self.rho
-    #     t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
-    #
-    #     # Main sampling loop.
-    #     x_next = x * t_steps[0]
-    #     for i, (t_cur, t_next) in enumerate(
-    #         zip(t_steps[:-1], t_steps[1:], strict=False)
-    #     ):  # 0, ..., N-1
-    #         t_cur = torch.tensor([t_cur], device="cuda").float()
-    #         t_next = torch.tensor([t_next], device="cuda").float()
-    #
-    #         print(i, t_cur.item())
-    #
-    #         x_cur = x_next
-    #
-    #         x_hat = x_cur
-    #         t_hat = t_cur
-    #
-    #         # Euler step.
-    #         denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep, coords=coords)
-    #         d_cur = (x_hat - denoised) / t_hat
-    #         x_next = x_hat + (t_next - t_hat) * d_cur
-    #
-    #         # Apply 2nd order correction.
-    #         if i < num_steps - 1:
-    #             denoised = self.denoise(x=x_next, c=None, sigma=t_next, fstep=fstep, coords=coords)
-    #             d_prime = (x_next - denoised) / t_next
-    #             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
-    #
-    #     return x_next
-    # # --- END OLD inference ---
 
 
 class Preconditioner:
