@@ -105,11 +105,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
-        forecast_cfg = OmegaConf.merge(FORECAST_DEFAULTS, mode_cfg.get("forecast", {}))
+        forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
         self.time_step = forecast_cfg["time_step"]
         self.forecast_policy = forecast_cfg["policy"]
-        steps = np.array(forecast_cfg.num_steps, dtype=np.int32).reshape(-1)
+        steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
         self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
 
         # initialise fsm, but can change for future mini_epochs
@@ -132,7 +132,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
-        self.check_samples(self._get_fsm(self.mini_epoch))
+        self.check_samples(self._get_fsm())
         self.streams_datasets = self._init_stream_datasets(cf)
 
         # RNG seed setup
