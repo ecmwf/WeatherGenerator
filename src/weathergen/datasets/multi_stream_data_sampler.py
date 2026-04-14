@@ -13,8 +13,8 @@ import pathlib
 import numpy as np
 import torch
 
-from weathergen.common.run_state import RunState
 from weathergen.common.config import Config
+from weathergen.common.run_state import RunState
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi

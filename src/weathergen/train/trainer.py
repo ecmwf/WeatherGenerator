@@ -21,8 +21,9 @@ from omegaconf import OmegaConf
 from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
-from weathergen.common.run_state import RunState
 from weathergen.common.config import Config
+from weathergen.common.run_state import RunState
+import weathergen.common.run_state as rs
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -231,6 +232,8 @@ class Trainer(TrainerBase):
         if is_root():
             config.save(self.cf, mini_epoch=0)
 
+        rs.save_runstate(self.runstate, self.cf)
+
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
         # inference validation set
@@ -371,6 +374,8 @@ class Trainer(TrainerBase):
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
+        rs.save_runstate(self.runstate, self.cf, None)
+
         # run validation before training if requested
         self.validate_before_training()
 
@@ -389,6 +394,7 @@ class Trainer(TrainerBase):
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
             )
             self.save_model(mini_epoch)
+            rs.save_runstate(self.runstate, self.cf, mini_epoch)
 
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
@@ -542,6 +548,7 @@ class Trainer(TrainerBase):
                 self.save_model(-1)
 
             self.cf.general.istep += 1
+            self.runstate.istep += 1
 
         self.dataset.advance()
 

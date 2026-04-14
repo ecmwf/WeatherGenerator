@@ -19,7 +19,7 @@ import time
 import traceback
 from pathlib import Path
 
-from weathergen.common.run_state import RunState
+from weathergen.common.run_state import init_runstate
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
@@ -98,7 +98,7 @@ def run_inference(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    runstate = RunState()
+    runstate = init_runstate()
     devices = Trainer.init_torch()
     cf, runstate = Trainer.init_ddp(cf, runstate)
 
@@ -107,6 +107,7 @@ def run_inference(args):
     logger.info(f"DDP initialization: rank={runstate.rank}, world_size={runstate.world_size}")
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
+    runstate.run_history += [(args.from_run_id, runstate.istep)]
 
     trainer = Trainer(cf.train_logging)
     try:
@@ -139,7 +140,7 @@ def run_continue(args):
     
 
 
-    runstate = RunState()
+    runstate = init_runstate()
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf, runstate = Trainer.init_ddp(cf, runstate)
@@ -148,6 +149,7 @@ def run_continue(args):
 
     # track history of run to ensure traceability of results
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
+    runstate.run_history += [(args.from_run_id, runstate.istep)]
 
     trainer = Trainer(cf.train_logging)
 
@@ -174,10 +176,12 @@ def run_train(args):
     )
     cf = config.set_run_id(cf, args.run_id, False)
 
-    runstate = RunState()
+    runstate = init_runstate()
+
     cf.data_loading.rng_seed = int(time.time())
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
+
     cf, runstate = Trainer.init_ddp(cf, runstate)
 
     # this line should probably come after the processes have been sorted out else we get lots
@@ -200,6 +204,7 @@ def run_train(args):
         traceback.print_exc()
         if runstate.world_size == 1:
             pdb.post_mortem(tb)
+
 
 
 if __name__ == "__main__":

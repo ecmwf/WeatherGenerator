@@ -7,26 +7,45 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from omegaconf import DictConfig
+from omegaconf import OmegaConf, DictConfig
 
 import logging
 
+from weathergen.common.config import Config, get_path_model
+
+RunState = DictConfig
+
 _logger = logging.getLogger(__name__)
 
-class RunState():
-    """
-    lalala
-    """
+def init_runstate() -> RunState:
 
-    def __init__(self):
+    startdict = {"istep": 0,
+                 "world_size": None,
+                 "world_size_original": None,
+                 "rank": None,
+                 "local_rank": None,
+                 "with_ddp": None,
+                 "is_sharded": None,
+                 "run_history": []}
 
-        self.istep: int | None = None
-        self.world_size: int | None = None
-        self.world_size_original: int | None = None
-        self.rank: int | None = None
-        self.local_rank: int | None = None
-        self.with_ddp: bool | None = None
-        self.is_sharded: bool | None = None
-        self.run_history = []
+    runstate = OmegaConf.create(startdict)
+    print("startdict: ", type(startdict))
+    print("runstate:  ", type(runstate))
+    assert isinstance(runstate, RunState)
+    return runstate
 
-        print("Trolololo 1")
+
+def save_runstate(runstate: RunState, config: Config, mini_epoch: int):
+
+    import json
+    from weathergen.utils.distributed import is_root
+
+    if is_root():
+        dirname = get_path_model(config)
+        dirname.mkdir(exist_ok=True, parents=True)
+
+        json_str = json.dumps(OmegaConf.to_container(runstate)) + '\n'
+
+        with (dirname/f"wololo_{mini_epoch}.json").open("w") as f:
+            f.write(json_str)
+

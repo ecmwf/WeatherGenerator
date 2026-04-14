@@ -15,8 +15,8 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing
 
-from weathergen.common.run_state import RunState
 from weathergen.common.config import Config
+from weathergen.common.run_state import RunState
 from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.distributed import is_root
 
