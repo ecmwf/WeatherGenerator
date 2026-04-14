@@ -718,12 +718,12 @@ class Trainer(TrainerBase):
             for idx, pname in enumerate(param_names):
                 if idx in optim_state_dict["state"]:
                     named_optim_state[pname] = optim_state_dict["state"][idx]
-            if named_optim_state:
-                optim_out = base_path / (filename + ".optim")
-                optim_tmp = base_path / (filename + "_tmp.optim")
-                torch.save(named_optim_state, optim_tmp)
-                optim_tmp.replace(optim_out)
-                logger.info(f"Saved optimizer state to {optim_out}")
+            #if named_optim_state:
+                # optim_out = base_path / (filename + ".optim")
+                # optim_tmp = base_path / (filename + "_tmp.optim")
+                # torch.save(named_optim_state, optim_tmp)
+                # optim_tmp.replace(optim_out)
+                #logger.info(f"Didn't saved optimizer state to {optim_out}")
 
             # save EMA teacher state (weights + centering buffers) if present
             ema_teacher = self._get_ema_teacher()
