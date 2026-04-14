@@ -88,7 +88,7 @@ def _sanitize_start_end_time_keys(sub_conf):
     for key in time_keys:
         if key in sub_conf:
             raw_key = f"_{key}"
-            sub_conf[raw_key] = f"${{{key}}}"
+            sub_conf[raw_key] = sub_conf[key]
             sub_conf[key] = f"${{{_DATETIME_TYPE_NAME}:{sub_conf[key]}}}"
 
 
@@ -98,14 +98,14 @@ def _sanitize_delta_time_keys(sub_conf):
     for key in delta_keys:
         if key in sub_conf:
             raw_key = f"_{key}"
-            sub_conf[raw_key] = f"${{{key}}}"
+            sub_conf[raw_key] = sub_conf[key]
             sub_conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf[key]}}}"
 
     if sub_conf.get("forecast") is not None:
         key = "time_step"
         if key in sub_conf.forecast:
             raw_key = f"_{key}"
-            sub_conf.forecast[raw_key] = f"${{{key}}}"
+            sub_conf.forecast[raw_key] = sub_conf.forecast[key]
             sub_conf.forecast[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf.forecast[key]}}}"
 
 
