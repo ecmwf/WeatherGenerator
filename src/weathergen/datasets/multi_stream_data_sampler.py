@@ -132,27 +132,47 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.forecast_policy = None
             self.time_step = np.timedelta64(0, "ms")
 
+        self.training_mode = mode_cfg.get("training_mode", [])
+        self.has_physical_loss = self._has_enabled_loss("LossPhysical")
+        self.has_student_teacher_loss = self._has_enabled_loss("LossLatentSSLStudentTeacher")
+
         # teacher_time_offset: number of time windows to shift the teacher's input
         # relative to the student's. When > 0 the teacher sees a future time window.
-        # Only active when student_teacher mode is used; ignored in masking mode to
-        # prevent stale offsets from JEPA pretraining leaking into forecasting
-        # finetuning/inference (where it would shift all target times by one window).
-        training_mode = mode_cfg.get("training_mode", [])
-        if "student_teacher" in training_mode:
-            self.teacher_time_offset = mode_cfg.get("teacher_time_offset", 0)
+        # Only active when student_teacher mode is used AND an enabled student-teacher
+        # loss actually requires teacher inputs. This prevents stale temporal- JEPA
+        # offsets from leaking into physical-only validation/inference.
+        configured_teacher_offset = mode_cfg.get("teacher_time_offset", 0)
+        if "student_teacher" in self.training_mode and self.has_student_teacher_loss:
+            self.teacher_time_offset = configured_teacher_offset
         else:
-            configured_offset = mode_cfg.get("teacher_time_offset", 0)
-            if configured_offset != 0:
+            if configured_teacher_offset != 0:
                 logger.warning(
-                    f"teacher_time_offset={configured_offset} is set but training_mode="
-                    f"{training_mode} does not include 'student_teacher'. "
+                    f"teacher_time_offset={configured_teacher_offset} is set but no enabled "
+                    "student-teacher target path requires it for the active stage. "
                     "Ignoring teacher_time_offset (setting to 0)."
                 )
             self.teacher_time_offset = 0
 
+        configured_physical_offset = mode_cfg.get("physical_target_time_offset", 0)
+        if self.has_physical_loss:
+            self.physical_target_time_offset = configured_physical_offset
+        else:
+            if configured_physical_offset != 0:
+                logger.warning(
+                    "physical_target_time_offset is set but no enabled physical loss requires "
+                    "physical targets for the active stage. Ignoring physical_target_time_offset "
+                    "(setting to 0)."
+                )
+            self.physical_target_time_offset = 0
+
+        self.max_target_time_offset = max(
+            self.teacher_time_offset,
+            self.physical_target_time_offset,
+        )
+
         fsm = self.list_num_forecast_steps[0]
         forecast_len = (self.time_step * (fsm + 1)) // self.step_timedelta
-        perms_len = perms_len - (forecast_len + self.output_offset + self.teacher_time_offset)
+        perms_len = perms_len - (forecast_len + self.output_offset + self.max_target_time_offset)
 
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
@@ -270,6 +290,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.perms = None
         self.perms_num_forecast_steps = None
 
+    def _has_enabled_loss(self, loss_type: str) -> bool:
+        losses_cfg = self.mode_cfg.get("losses", {})
+        return any(
+            loss_cfg.get("enabled", True) and loss_cfg.get("type") == loss_type
+            for loss_cfg in losses_cfg.values()
+        )
+
     def advance(self):
         """
         Advance mini_epoch (this is applied to the template for the worker processes)
@@ -323,10 +350,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # native length of datasets, independent of mini_epoch length that has potentially been
         # specified
         forecast_len = (self.time_step * (fsm + 1)) // self.step_timedelta
-        adjusted_idx_end = idx_end - (forecast_len + forecast_offset)
+        adjusted_idx_end = idx_end - (forecast_len + forecast_offset + self.max_target_time_offset)
         msg = (
             f"dataset size ({idx_end}) too small for forecast length plus offset "
-            f"({forecast_len + forecast_offset}) – dataset size must be strictly bigger. "
+            f"({forecast_len + forecast_offset + self.max_target_time_offset}) – dataset size "
+            "must be strictly bigger. "
             "to fix this, it usually suffices to increase the data range "
         )
         assert adjusted_idx_end > 0, msg
@@ -632,7 +660,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         Assemble a batch using the sample corresponding to idx
         """
 
-        mode = self.mode_cfg.get("training_mode")
+        mode = self.training_mode
         source_cfgs = self.mode_cfg.get("model_input")
         target_cfgs = self.mode_cfg.get("target_input", {})
 
@@ -641,9 +669,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         source_select, target_select = [], []
         if "masking" in mode:
-            source_select += ["network_input", "target_coords"]
-            target_select += ["target_values"]
-        if "student_teacher" in mode or "latent_loss" in mode:
+            source_select += ["network_input"]
+            if self.has_physical_loss:
+                source_select += ["target_coords"]
+                target_select += ["target_values"]
+        if ("student_teacher" in mode or "latent_loss" in mode) and self.has_student_teacher_loss:
             source_select += ["network_input"]
             target_select += ["network_input"]
         # remove duplicates
@@ -680,30 +710,37 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                 idx, num_forecast_steps, i_max, stream_ds
             )
 
+            physical_target_idx = idx + self.physical_target_time_offset
+            if self.physical_target_time_offset > 0:
+                (_, output_data_physical) = self._get_data_windows(
+                    physical_target_idx, num_forecast_steps, i_max, stream_ds
+                )
+            else:
+                output_data_physical = output_data
+
+            teacher_target_idx = idx + self.teacher_time_offset
+
             # When teacher_time_offset > 0, load a separate set of data windows
             # shifted forward in time for the teacher (target) samples.
             if self.teacher_time_offset > 0:
-                (input_data_target, output_data_target) = self._get_data_windows(
-                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds
+                (input_data_target, _) = self._get_data_windows(
+                    teacher_target_idx, num_forecast_steps, i_max, stream_ds
                 )
             else:
                 input_data_target = input_data
-                output_data_target = output_data
 
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
             input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
-            output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+            output_tokens_physical = self.tokenizer.get_tokens_windows(
+                stream_info, output_data_physical, False
+            )
             if self.teacher_time_offset > 0:
                 input_tokens_target = self.tokenizer.get_tokens_windows(
                     stream_info, input_data_target, True
                 )
-                output_tokens_target = self.tokenizer.get_tokens_windows(
-                    stream_info, output_data_target, False
-                )
             else:
                 input_tokens_target = input_tokens
-                output_tokens_target = output_tokens
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
@@ -715,9 +752,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     stream_info,
                     source_masks.metadata[sidx].params.get("num_steps_input", 1),
                     input_data,
-                    output_data,
+                    output_data_physical,
                     input_tokens,
-                    output_tokens,
+                    output_tokens_physical,
                     output_mask=target_masks.masks[tidx],
                     input_mask=source_mask,
                 )
@@ -726,22 +763,35 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
             # for t_idx, mask in enumerate(source_masks):
             for tidx, target_mask in enumerate(target_masks.masks):
-                # depending on the mode, the the streamdata obj to have the target mask applied to
-                # the inputs. Hence the target mask is also the source mask here.
-                # Use time-offset data for teacher when teacher_time_offset > 0.
-                target_idx = idx + self.teacher_time_offset
-                sdata = self._build_stream_data(
+                # Teacher network_input and physical target_values can come from different
+                # time windows. This keeps temporal JEPA targets shifted while allowing
+                # physical supervision to stay at the student's time window when requested.
+                target_num_input_steps = target_masks.metadata[tidx].params.get("num_steps_input", 1)
+                sdata = StreamData(
+                    teacher_target_idx,
+                    target_num_input_steps,
+                    num_output_steps,
+                    self.num_healpix_cells,
+                )
+                sdata = self._build_stream_data_input(
                     target_select,
-                    target_idx,
-                    num_forecast_steps,
+                    sdata,
+                    teacher_target_idx,
                     stream_info,
-                    target_masks.metadata[tidx].params.get("num_steps_input", 1),
+                    target_num_input_steps,
                     input_data_target,
-                    output_data_target,
                     input_tokens_target,
-                    output_tokens_target,
-                    output_mask=target_mask,
-                    input_mask=target_mask,
+                    target_mask,
+                )
+                sdata = self._build_stream_data_output(
+                    target_select,
+                    sdata,
+                    physical_target_idx,
+                    stream_info,
+                    num_forecast_steps,
+                    output_data_physical,
+                    output_tokens_physical,
+                    target_mask,
                 )
 
                 target_metadata = target_masks.metadata[tidx]
