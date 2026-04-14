@@ -33,6 +33,7 @@ class BaseAttention(torch.nn.Module):
         with_qk_lnorm=True,
         with_flash=True,
         norm_type="LayerNorm",
+        qk_norm_type=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
     ):
@@ -54,11 +55,17 @@ class BaseAttention(torch.nn.Module):
         else:
             self.norm = RMSNorm
 
+        qk_norm_type = qk_norm_type or norm_type
+        if qk_norm_type == "LayerNorm":
+            self.qk_norm = partial(torch.nn.LayerNorm, elementwise_affine=False)
+        else:
+            self.qk_norm = RMSNorm
+
         assert with_flash, "Only flash attention supported at the moment"
 
     def _make_qk_lnorms(self):
         if self.with_qk_lnorm:
-            lnorm = self.norm
+            lnorm = self.qk_norm
             self.lnorm_q = lnorm(self.dim_head_proj, eps=self.norm_eps)
             self.lnorm_k = lnorm(self.dim_head_proj, eps=self.norm_eps)
         else:
