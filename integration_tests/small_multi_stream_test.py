@@ -159,7 +159,9 @@ def evaluate_multi_stream_results(run_id):
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id)
+    file_path = get_train_metrics_path(
+        base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id
+    )
     if not file_path.is_file():
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -169,7 +171,9 @@ def load_metrics(run_id):
 
 def assert_metrics_file_exists(run_id):
     """Test that the metrics file exists and can be loaded."""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id)
+    file_path = get_train_metrics_path(
+        base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id
+    )
     assert file_path.is_file(), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")
@@ -215,7 +219,8 @@ def assert_stream_losses_below_threshold(run_id, stage="train"):
 
         assert loss is not None, f"'LossPhysical.{stream_name}.mse.avg' {stage} metric is missing"
         assert loss < threshold, (
-            f"'LossPhysical.{stream_name}.mse.avg' {stage} loss is {loss}, expected below {threshold}"
+            f"'LossPhysical.{stream_name}.mse.avg' {stage} loss is {loss}, expected below "
+            f"{threshold}"
         )
 
         losses[stream_name] = loss

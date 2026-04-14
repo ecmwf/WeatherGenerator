@@ -9,7 +9,7 @@ import weathergen.common.config as config
 TEST_RUN_ID = "test123"
 SECRET_COMPONENT = "53CR3T"
 DUMMY_PRIVATE_CONF = {
-    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"]
+    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"],
     "secrets": {
         "my_big_secret": {
             "my_secret_id": f"{SECRET_COMPONENT}01234",
@@ -61,9 +61,7 @@ EXCLUDED_STREAMS = [
     (pathlib.Path("#test.yml"), DUMMY_STREAM_CONF),
 ]
 
-DUMMY_BASE_CONF = {
-    "foo": "bar"
-}
+DUMMY_BASE_CONF = {"foo": "bar"}
 
 
 def contains_keys(super_config, sub_config):
@@ -155,9 +153,11 @@ def config_fresh(private_config_file):
 
     return cf
 
+
 @pytest.fixture
 def base_config():
     return OmegaConf.create(DUMMY_BASE_CONF)
+
 
 @pytest.fixure
 def base_file(base_config):

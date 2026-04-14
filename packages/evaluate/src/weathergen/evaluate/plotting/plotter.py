@@ -49,6 +49,7 @@ def _download_cartopy_off(enabled: bool) -> None:
     else:
         warnings.filterwarnings("default", category=DownloadWarning)
 
+
 np.seterr(divide="ignore", invalid="ignore")
 
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)

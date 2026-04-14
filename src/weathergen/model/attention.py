@@ -23,6 +23,7 @@ Some blocks optionally apply 2D RoPE. When enabled, the caller must provide per-
 coordinates aligned with the token order (lat, lon in radians).
 """
 
+
 class BaseAttention(torch.nn.Module):
     def __init__(
         self,
@@ -92,9 +93,7 @@ class MultiSelfAttentionHeadVarlen(BaseAttention):
         self.with_2d_rope = with_2d_rope
 
         assert dim_embed % self.num_heads == 0
-        self.dim_head_proj = (
-            dim_embed // self.num_heads if dim_head_proj is None else dim_head_proj
-        )
+        self.dim_head_proj = dim_embed // self.num_heads if dim_head_proj is None else dim_head_proj
 
         self._make_qk_lnorms()
 
@@ -165,9 +164,7 @@ class MultiSelfAttentionHeadVarlenFlex(BaseAttention):
         self.softcap = softcap
 
         assert dim_embed % self.num_heads == 0
-        self.dim_head_proj = (
-            dim_embed // self.num_heads if dim_head_proj is None else dim_head_proj
-        )
+        self.dim_head_proj = dim_embed // self.num_heads if dim_head_proj is None else dim_head_proj
 
         self._make_qk_lnorms()
 
