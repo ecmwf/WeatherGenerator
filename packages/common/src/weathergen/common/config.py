@@ -368,6 +368,7 @@ def merge_configs(base_config: Config, update_config: Config):
 def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
+    run_id: str | None = None,
     mini_epoch: int | None = None,
     base: Path | Config | None = None,
     *overwrites: Path | dict | Config,
@@ -416,8 +417,16 @@ def load_merge_configs(
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
+
+    # In the case where we chain several finetuning jobs we don't want to reset the istep
+    # This case is detected by from_run_id being equal to run_id
+    istep = None
+    if from_run_id is not None and run_id is not None and from_run_id == run_id:
+        istep = base_config.general.istep
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
+    if istep is not None:
+        c.general.istep = istep
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
 

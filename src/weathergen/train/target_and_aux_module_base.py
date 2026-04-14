@@ -28,12 +28,14 @@ class TargetAuxOutput:
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
+    latent_deep: dict[str, list[torch.Tensor]] | None
     aux_outputs: dict[str, torch.Tensor]
 
     def __init__(self, len_target: int, output_idxs: list) -> None:
         self.output_idxs = output_idxs
         self.physical = [{} for _ in range(len_target)]
         self.latent = [{} for _ in range(len_target)]
+        self.latent_deep = None
         self.aux_outputs = {}
 
     def add_physical_target(
@@ -116,7 +118,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                     target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[step]]
                     idxs_inv += [sample.streams_data[stream_name].idxs_inv[step]]
                     meta_data += [sample.meta_info]
-                    is_spoof += [sample.streams_data[stream_name].is_spoof()]
+                    is_spoof += [sample.streams_data[stream_name].is_spoof(step)]
 
                 targets_step = {
                     "target": targets_cur,

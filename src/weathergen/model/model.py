@@ -26,6 +26,7 @@ from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
+    DeepSSLFusion,
     EnsPredictionHead,
     ForecastingEngine,
     LatentPredictionHeadIdentity,
@@ -52,10 +53,12 @@ class ModelOutput:
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
+    latent_deep: list[dict[str, list[torch.Tensor]]] | None
 
     def __init__(self, len_output: int) -> None:
         self.physical = [{} for _ in range(len_output)]
         self.latent = [{} for _ in range(len_output)]
+        self.latent_deep = None
 
     def add_physical_prediction(
         self, fstep: int, stream_name: StreamName, pred: torch.Tensor
@@ -64,6 +67,13 @@ class ModelOutput:
 
     def add_latent_prediction(self, fstep: int, latent_name: str, pred: torch.Tensor) -> None:
         self.latent[fstep][latent_name] = pred
+
+    def add_deep_latent_prediction(
+        self, fstep: int, name: str, level_preds: list[torch.Tensor]
+    ) -> None:
+        if self.latent_deep is None:
+            self.latent_deep = [{} for _ in range(len(self.physical))]
+        self.latent_deep[fstep][name] = level_preds
 
     def get_physical_prediction(
         self, fstep: int, stream_name: StreamName | None = None, sample_idx: int | None = None
@@ -328,6 +338,8 @@ class Model(torch.nn.Module):
         self.num_register_tokens = cf.num_register_tokens
         self.latent_heads = None
         self.latent_pre_norm = None
+        self.deep_ssl_fusion: DeepSSLFusion | None = None
+        self.deep_ssl_level_projections: nn.ModuleDict | None = None
         # auxiliary tokens
         self.class_token_idxs = list(
             range(cf.num_register_tokens, cf.num_register_tokens + cf.num_class_tokens)
@@ -581,7 +593,38 @@ class Model(torch.nn.Module):
                         use_patch_token=False,
                     )
 
+        # Deep SSL fusion and per-level projections (student only)
+        deep_ssl_cfg = cf.training_config.get("deep_ssl", None)
+        if deep_ssl_cfg and deep_ssl_cfg.get("enabled", False) and deep_ssl_cfg.get("tap_after"):
+            num_taps = len(deep_ssl_cfg.tap_after)
+            num_levels = num_taps + 1  # taps + final output
+            hidden_factor = deep_ssl_cfg.get("fusion_hidden_factor", 2)
+            self.deep_ssl_fusion = DeepSSLFusion(num_levels, cf.ae_global_dim_embed, hidden_factor)
+
+            # Per-level output projections: one per latent head per level
+            # Skip identity heads (teacher model) — they have no learnable projection
+            self.deep_ssl_level_projections = nn.ModuleDict()
+            for head_name, head in self.latent_heads.items():
+                out_dim = self._get_latent_head_out_dim(head)
+                if out_dim < 0:
+                    continue
+                self.deep_ssl_level_projections[head_name] = nn.ModuleList(
+                    [nn.Linear(out_dim, out_dim, bias=False) for _ in range(num_levels)]
+                )
+
         return self
+
+    @staticmethod
+    def _get_latent_head_out_dim(head: nn.Module) -> int:
+        """Infer the output dimension of a latent prediction head."""
+        if isinstance(head, LatentPredictionHeadMLP):
+            return head.blocks.layers[-1].out_features
+        elif isinstance(head, LatentPredictionHeadTransformer):
+            return head.blocks[-1].out_features
+        elif isinstance(head, LatentPredictionHeadIdentity):
+            return -1  # identity head: projection is also identity
+        else:
+            raise ValueError(f"Cannot determine output dim for head type {type(head)}")
 
     def reset_parameters(self):
         def _reset_params(module):
@@ -651,6 +694,11 @@ class Model(torch.nn.Module):
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")
         print(f" Latent prediction heads and pre-norm: {num_params_latent_heads:,}")
+        if self.deep_ssl_fusion is not None:
+            num_params_deep_ssl = get_num_parameters(self.deep_ssl_fusion)
+            if self.deep_ssl_level_projections is not None:
+                num_params_deep_ssl += get_num_parameters(self.deep_ssl_level_projections)
+            print(f" Deep SSL fusion + level projections: {num_params_deep_ssl:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
@@ -691,13 +739,17 @@ class Model(torch.nn.Module):
 
         output = ModelOutput(batch.get_output_len())
 
-        tokens, posteriors = self.encoder(model_params, batch)
+        tokens, posteriors, intermediates = self.encoder(model_params, batch)
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
+
+        # reshape intermediates the same way as tokens
+        for i, inter in enumerate(intermediates):
+            intermediates[i] = inter.reshape(shape).sum(axis=1)
 
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
@@ -708,7 +760,7 @@ class Model(torch.nn.Module):
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output)
+            output = self.predict_latent(model_params, step, tokens, batch, output, intermediates)
 
         return output
 
@@ -719,6 +771,7 @@ class Model(torch.nn.Module):
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
+        intermediates: list[torch.Tensor] | None = None,
     ) -> ModelOutput:
         """
         Compute latent predictions
@@ -732,6 +785,33 @@ class Model(torch.nn.Module):
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
             output.add_latent_prediction(step, name, head(latent_state))
+
+        # deep SSL: multi-level predictions (only at fstep 0, matching existing SSL)
+        if intermediates and step == 0:
+            all_levels = intermediates + [tokens]
+
+            if self.deep_ssl_fusion is not None:
+                # Student path: fuse all levels, predict once, project per level
+                fused = self.deep_ssl_fusion(all_levels)
+                fused_post_norm = self.latent_pre_norm(fused)
+                fused_latent = self.tokens_to_latent_state(fused_post_norm, fused)
+                for name, head in self.latent_heads.items():
+                    predictor_out = head(fused_latent)
+                    projections = self.deep_ssl_level_projections[name]
+                    level_preds = [proj(predictor_out) for proj in projections]
+                    output.add_deep_latent_prediction(step, name, level_preds)
+            else:
+                # Teacher path: independent per-level prediction (no fusion)
+                level_preds_per_head: dict[str, list[torch.Tensor]] = {
+                    name: [] for name in self.latent_heads
+                }
+                for level_tokens in all_levels:
+                    level_post_norm = self.latent_pre_norm(level_tokens)
+                    level_state = self.tokens_to_latent_state(level_post_norm, level_tokens)
+                    for name, head in self.latent_heads.items():
+                        level_preds_per_head[name].append(head(level_state))
+                for name, preds in level_preds_per_head.items():
+                    output.add_deep_latent_prediction(step, name, preds)
 
         return output
 

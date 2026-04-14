@@ -15,12 +15,18 @@ from typing import Any
 import torch
 
 from weathergen.common.config import Config, load_run_config, merge_configs
+from weathergen.model.model import ModelParams
+from weathergen.model.model_interface import get_model
 from weathergen.model.ssl_target_processing import (
     DINOTargetProcessing,
     JEPATargetProcessing,
     iBOTPatchTargetProcessing,
 )
 from weathergen.train.target_and_aux_module_base import TargetAndAuxModuleBase, TargetAuxOutput
+from weathergen.train.teacher_utils import (
+    load_encoder_from_checkpoint,
+    prepare_encoder_teacher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +35,7 @@ class EncoderTeacher(TargetAndAuxModuleBase):
     """Base class for SSL teacher models.
 
     Handles shared logic: SSL loss extraction, target postprocessing, compute loop.
-    Subclasses must implement _forward_teacher().
+    Subclasses must implement forward_teacher().
     """
 
     def __init__(self, teacher_model, training_cfg, **kwargs):
@@ -44,21 +50,35 @@ class EncoderTeacher(TargetAndAuxModuleBase):
         # TODO: support multiple LossLatentSSLStudentTeacher loss terms
         self.postprocess_targets = get_target_postprocessing(losses_cfg[0], training_cfg, **kwargs)
 
-    def _forward_teacher(self, model_params, batch) -> Any:
-        raise NotImplementedError("Subclasses must implement _forward_teacher()")
+    def forward_teacher(self, model_params, batch) -> Any:
+        raise NotImplementedError("Subclasses must implement forward_teacher()")
 
     def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
         with torch.no_grad():
-            outputs = self._forward_teacher(model_params, batch).get_latent_prediction(0)
+            teacher_output = self.forward_teacher(model_params, batch)
+            outputs = teacher_output.get_latent_prediction(0)
             targets = {}
             for loss_name, target_module in self.postprocess_targets.items():
                 targets[loss_name] = target_module(outputs[loss_name])
+
+            # deep SSL per-level targets (if teacher produced them)
+            deep_targets = None
+            if teacher_output.latent_deep is not None:
+                deep_outputs = teacher_output.latent_deep[0]  # fstep 0
+                deep_targets = {}
+                for loss_name, target_module in self.postprocess_targets.items():
+                    if loss_name in deep_outputs:
+                        deep_targets[loss_name] = [
+                            target_module(level_pred, level_idx=i)
+                            for i, level_pred in enumerate(deep_outputs[loss_name])
+                        ]
 
             # collect target meta-information for selected samples
             aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
 
             targets_out = TargetAuxOutput(batch.get_output_len(), batch.get_output_idxs())
             targets_out.latent = targets
+            targets_out.latent_deep = deep_targets
             targets_out.aux_outputs = aux_outputs
 
             return targets_out
@@ -85,7 +105,7 @@ class EMATeacher(EncoderTeacher):
         self.batch_size = batch_size
         self.reset()
 
-    def _forward_teacher(self, model_params, batch):
+    def forward_teacher(self, model_params, batch):
         return self.ema_model.forward_eval(model_params, batch)
 
     def reset(self, batch_size=None):
@@ -130,18 +150,12 @@ class FrozenTeacher(EncoderTeacher):
             device: Target device
             params: Dict with 'teacher_run_id' and optional 'teacher_mini_epoch'
         """
-        from weathergen.model.model import ModelParams
-        from weathergen.model.model_interface import get_model
-        from weathergen.train.teacher_utils import (
-            load_encoder_from_checkpoint,
-            prepare_encoder_teacher,
-        )
 
         teacher_run_id = params["teacher_run_id"]
         teacher_mini_epoch = params.get("teacher_mini_epoch", -1)
 
         # Load teacher's config, create model with teacher's architecture
-        teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, cf.model_path)
+        teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, model_path=None)
         teacher_config = merge_configs(teacher_config, {"with_ddp": False, "with_fsdp": False})
 
         teacher_model = get_model(teacher_config, "student", dataset, {})
@@ -149,9 +163,8 @@ class FrozenTeacher(EncoderTeacher):
         # Load only encoder weights
         load_encoder_from_checkpoint(teacher_model, cf, teacher_run_id, teacher_mini_epoch, device)
 
-        # Strip to encoder + create fresh heads (heads are created on CPU, so re-move to device)
-        teacher_dim = teacher_config.ae_global_dim_embed
-        prepare_encoder_teacher(teacher_model, cf.training_config, teacher_dim)
+        # Strip to encoder + create fresh heads
+        prepare_encoder_teacher(teacher_model, cf.training_config, teacher_config)
         teacher_model.to(device)
 
         # Create model params matching teacher's architecture
@@ -159,7 +172,7 @@ class FrozenTeacher(EncoderTeacher):
 
         return cls(teacher_model, cf.training_config, teacher_model_params)
 
-    def _forward_teacher(self, model_params, batch):
+    def forward_teacher(self, model_params, batch):
         params = (
             self.teacher_model_params if self.teacher_model_params is not None else model_params
         )
@@ -184,6 +197,12 @@ def get_target_postprocessing(
     Returns:
         Dict mapping loss name → target processing module
     """
+    # Determine number of deep SSL levels for per-level center tracking
+    deep_ssl = training_cfg.get("deep_ssl", None) if training_cfg else None
+    num_deep_ssl_levels = 0
+    if deep_ssl and deep_ssl.get("tap_after"):
+        num_deep_ssl_levels = len(deep_ssl.tap_after) + 1
+
     return_dict = {}
     for loss_name, conf in target_losses.items():
         if loss_name == "iBOT":
@@ -196,6 +215,7 @@ def get_target_postprocessing(
                 student_temp=conf["loss_extra_args"]["student_temp"],
                 teacher_temp=conf["teacher_temp"],
                 teacher_style=conf["teacher_style"],
+                num_deep_ssl_levels=num_deep_ssl_levels,
             )
         elif loss_name == "DINO":
             for key in ("out_dim", "center_momentum", "teacher_style"):
@@ -206,6 +226,7 @@ def get_target_postprocessing(
                 center_momentum=conf["center_momentum"],
                 student_temp=conf["loss_extra_args"]["student_temp"],
                 teacher_style=conf["teacher_style"],
+                num_deep_ssl_levels=num_deep_ssl_levels,
             )
         elif loss_name == "JEPA":
             return_dict[loss_name] = JEPATargetProcessing()

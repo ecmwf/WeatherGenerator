@@ -21,13 +21,13 @@ import yaml
 
 import weathergen.common.config as config
 from weathergen.evaluate.plotting.plot_utils import create_filename
-from weathergen.train.utils import TRAIN, VAL
+from weathergen.train.utils import TRAIN
 from weathergen.utils.train_logger import Metrics, TrainLogger
 
 _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
-MAX_FILENAME_LEN = 255
+MAX_FILENAME_LEN = 128
 
 
 ####################################################################################################
@@ -177,6 +177,34 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
 
 
 ####################################################################################################
+def _adjust_reset_x_axis(x_vals, x_col: str) -> np.NDarray:
+    """
+    Keep sample-based x-axes monotonic when chained jobs append metrics with a reset counter.
+    """
+    adjusted_x_vals = np.array(x_vals, dtype=np.float64, copy=True)
+
+    if adjusted_x_vals.size < 2 or "sample" not in x_col.lower():
+        return adjusted_x_vals
+
+    offset = 0.0
+    prev_raw = np.nan
+    prev_adjusted = np.nan
+    for idx, raw_val in enumerate(adjusted_x_vals):
+        if np.isnan(raw_val):
+            adjusted_x_vals[idx] = raw_val
+            continue
+        if not np.isnan(prev_raw) and raw_val < prev_raw:
+            offset = prev_adjusted
+
+        adjusted_val = raw_val + offset
+        adjusted_x_vals[idx] = adjusted_val
+        prev_raw = raw_val
+        prev_adjusted = adjusted_val
+
+    return adjusted_x_vals
+
+
+####################################################################################################
 def plot_lr(
     runs_ids: dict[str, list],
     runs_data: list[Metrics],
@@ -232,9 +260,9 @@ def plot_lr(
         return
 
     if legend_outside:
-        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small")
+        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="x-small")
     else:
-        plt.legend(legend_str)
+        plt.legend(legend_str, fontsize="x-small")
     plt.grid(True, which="both", ls="-")
     plt.yscale("log")
     plt.title("learning rate")
@@ -247,7 +275,7 @@ def plot_lr(
         rstr = rstr[: MAX_FILENAME_LEN - 6]
 
     # save the plot
-    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=["lr.png"])
+    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=["lr.png"], max_len=128)
     _logger.info(f"Saving learning rate plot to '{plt_fname}'")
     plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
@@ -272,12 +300,16 @@ def plot_loss_avg(
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
         x_vals = np.array(run_data_stage["num_samples"])
         y_vals = np.array(run_data_stage["loss_avg_mean"])
-
         mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
 
+        x_vals = x_vals[mask]
+        y_vals = y_vals[mask]
+
+        x_vals = _adjust_reset_x_axis(x_vals, "num_samples")
+
         plt.plot(
-            x_vals[mask],
-            y_vals[mask],
+            x_vals,
+            y_vals,
             color=colors[i_run % len(colors)],
         )
         # legend_str += [ run_id + " : " + runs_ids[run_id][1]]
@@ -286,9 +318,9 @@ def plot_loss_avg(
         ]
 
     if legend_outside:
-        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small")
+        plt.legend(legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="x-small")
     else:
-        plt.legend(legend_str)
+        plt.legend(legend_str, fontsize="x-small")
     plt.grid(True, which="both", ls="-")
     plt.yscale("log")
     # cap at 1.0 in case of divergence of run (through normalziation, max should be around 1.0)
@@ -299,7 +331,9 @@ def plot_loss_avg(
     plt.ylabel("loss")
     plt.xlabel("step")
     plt.tight_layout()
-    plt_fname = plot_dir / create_filename(middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"])
+    plt_fname = plot_dir / create_filename(
+        middle=runs_ids.keys(), suffix=[f"{str(stage)}_avg.png"], max_len=128
+    )
     _logger.info(f"Saving avg plot to '{plt_fname}'")
     plt.savefig(plt_fname, bbox_inches="tight")
     plt.close()
@@ -405,10 +439,13 @@ def plot_loss_per_stream(
                             x_vals = np.array(run_data_mode[x_col])
                             y_data = np.array(run_data_mode[col])
                             mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_data))
+                            x_vals = x_vals[mask]
+                            y_data = y_data[mask]
+                            x_vals = _adjust_reset_x_axis(x_vals, x_col)
 
                             plt.plot(
-                                x_vals[mask],
-                                y_data[mask],
+                                x_vals,
+                                y_data,
                                 linestyle,
                                 color=colors[j % len(colors)],
                                 alpha=alpha,
@@ -440,7 +477,9 @@ def plot_loss_per_stream(
                     continue
 
                 legend = plt.legend(
-                    legend_str, loc="upper right" if not x_scale_log else "lower left"
+                    legend_str,
+                    loc="upper right",
+                    fontsize="x-small",
                 )
                 for line in legend.get_lines():
                     line.set(alpha=1.0)
@@ -476,10 +515,11 @@ def plot_loss_per_stream(
                     # cut off run_ids_str so that the tail with err, channel etc is preserved
                     # required to retain unique names
                     run_ids_str = run_ids_str[: -(len(fname_tail) + 1)]
-                fname = run_ids_str + fname_tail
 
                 # save the plot
-                plt_fname = plot_dir / fname
+                plt_fname = plot_dir / create_filename(
+                    middle=runs_ids.keys(), suffix=[f"{fname_tail}"], max_len=128
+                )
 
                 _logger.info(f"Saving loss per stream plot to '{plt_fname}'")
                 plt.savefig(plt_fname)
@@ -567,7 +607,7 @@ def plot_loss_per_run(
                         if run_data_mode[col].shape[0] == 0:
                             continue
 
-                        x_vals = np.array(run_data_mode[x_col])
+                        x_vals = _adjust_reset_x_axis(run_data_mode[x_col], x_col)
                         y_data = np.array(run_data_mode[col])
 
                         plt.plot(
@@ -588,10 +628,10 @@ def plot_loss_per_run(
     plt.title(run_id + " : " + run_desc[1])
     if legend_outside:
         legend = plt.legend(
-            legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="small"
+            legend_str, bbox_to_anchor=(1.02, 1), loc="upper left", fontsize="x-small"
         )
     else:
-        legend = plt.legend(legend_str, loc="lower left")
+        legend = plt.legend(legend_str, loc="lower left", fontsize="x-small")
     for line in legend.get_lines():
         line.set(alpha=1.0)
     plt.yscale("log")
@@ -606,6 +646,7 @@ def plot_loss_per_run(
         create_filename(
             prefix=[run_id] + list(modes),
             middle=[r.replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str],
+            max_len=128,
         )
         + ".png"
     )
@@ -717,6 +758,13 @@ def plot_train(args=None):
         choices=["step", "reltime"],
         help="Type of x-axis used in plots. Options: 'step' or 'reltime'",
     )
+    parser.add_argument(
+        "--log-x",
+        dest="log_x",
+        default=False,
+        action="store_true",
+        help="Use log scale for the x-axis (produces log-log plots)",
+    )
 
     parser.add_argument(
         "--legend-outside",
@@ -769,7 +817,7 @@ def plot_train(args=None):
         clean_plot_folder(out_dir)
 
     # read logged data, skipping faulty run IDs
-    valid_runs_ids = []
+    valid_runs_ids = {}
     runs_data = []
     # collect all physical streams from all run_ids if requested
     if "all" in streams:
@@ -794,16 +842,13 @@ def plot_train(args=None):
 
     # read logged data
 
-    runs_data = [
-        TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
-        for run_id in runs_ids
-    ]
+    runs_data = []
     for run_id in runs_ids:
         try:
             runs_data.append(
                 TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
             )
-            valid_runs_ids.append(run_id)
+            valid_runs_ids[run_id] = runs_ids[run_id]
         except Exception as e:
             _logger.warning(f"Skipping run_id '{run_id}': {e}")
     runs_ids = valid_runs_ids
@@ -815,7 +860,7 @@ def plot_train(args=None):
         np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
     ]
 
-    x_scale_log = False
+    x_scale_log = args.log_x
 
     legend_outside = args.legend_outside
 
@@ -823,8 +868,15 @@ def plot_train(args=None):
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir, legend_outside=legend_outside)
 
     # plot average loss
-    plot_loss_avg(out_dir, runs_ids, runs_data, runs_active, stage=TRAIN,
-                  legend_outside=legend_outside)
+    plot_loss_avg(
+        out_dir,
+        runs_ids,
+        runs_data,
+        runs_active,
+        stage=TRAIN,
+        legend_outside=legend_outside,
+        x_scale_log=x_scale_log,
+    )
 
     # compare different runs
     plot_loss_per_stream(

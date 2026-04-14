@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import dataclasses
+import math
 
 import torch
 import torch.nn as nn
@@ -117,7 +118,9 @@ class EmbeddingEngine(torch.nn.Module):
 
         # per cell indices into positional encoding
         tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
-        pe_idxs = torch.cat([torch.arange(c) for c in tok_counts])
+        rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+        rows = rows.expand(tok_counts.shape[0], -1)
+        pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
 
         # actual scatter operation
         tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
@@ -257,9 +260,7 @@ class Local2GlobalSumEngine(torch.nn.Module):
     def __init__(self, cf: Config) -> None:
         super(Local2GlobalSumEngine, self).__init__()
         self.cf = cf
-        self.proj = torch.nn.Linear(
-            cf.ae_local_dim_embed, cf.ae_global_dim_embed, bias=False
-        )
+        self.proj = torch.nn.Linear(cf.ae_local_dim_embed, cf.ae_global_dim_embed, bias=False)
         ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
         self.mlp_blocks = torch.nn.ModuleList()
         for _ in range(ae_adapter_num_blocks - 1):
@@ -382,16 +383,21 @@ class QueryAggregationEngine(torch.nn.Module):
 class GlobalAssimilationEngine(torch.nn.Module):
     name: "GlobalAssimilationEngine"
 
-    def __init__(self, cf: Config, num_healpix_cells: int) -> None:
+    def __init__(
+        self, cf: Config, num_healpix_cells: int, tap_global_layers: set[int] | None = None
+    ) -> None:
         """
         Initialize the GlobalAssimilationEngine with the configuration.
 
         :param cf: Configuration object containing parameters for the engine.
         :param num_healpix_cells: Number of healpix cells used for local queries.
+        :param tap_global_layers: Logical layer indices at which to collect intermediate
+            representations for deep self-supervision. None means disabled.
         """
         super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+        self.tap_global_layers = tap_global_layers
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
@@ -451,9 +457,15 @@ class GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens, coords=None):
         aux_info = None
+        intermediates: list[torch.Tensor] = []
+        logical_layer = 0
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
-        return tokens
+            if isinstance(block, MLP):
+                if self.tap_global_layers and logical_layer in self.tap_global_layers:
+                    intermediates.append(tokens)
+                logical_layer += 1
+        return tokens, intermediates
 
 
 class ForecastingEngine(torch.nn.Module):
@@ -897,6 +909,25 @@ class TargetPredictionEngine(nn.Module):
         return output
 
 
+class DeepSSLFusion(nn.Module):
+    """Concatenate multi-level representations along channel dim, fuse with MLP.
+
+    Used by the student in deep self-supervision (V-JEPA 2.1 style): all intermediate
+    encoder levels are concatenated and projected back to the embedding dimension.
+    """
+
+    def __init__(self, num_levels: int, dim_embed: int, hidden_factor: int = 2):
+        super().__init__()
+        self.proj = nn.Sequential(
+            nn.Linear(num_levels * dim_embed, hidden_factor * dim_embed, bias=False),
+            nn.GELU(),
+            nn.Linear(hidden_factor * dim_embed, dim_embed, bias=False),
+        )
+
+    def forward(self, levels: list[torch.Tensor]) -> torch.Tensor:
+        return self.proj(torch.cat(levels, dim=-1))
+
+
 @dataclasses.dataclass
 class LatentState:
     """
@@ -1030,13 +1061,31 @@ class LatentPredictionHeadMLP(nn.Module):
         return torch.cat(outputs, dim=1)
 
 
+class EfficientBilinear(torch.nn.Module):
+    def __init__(self, in_dim_lhs, in_dim_rhs, out, bias=False):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(out, in_dim_lhs, in_dim_rhs))
+        self.bias = nn.Parameter(torch.zeros(out)) if bias else 0.0
+        self.total_in = in_dim_lhs * in_dim_rhs
+
+    def forward(self, x_lhs, x_rhs):
+        return torch.einsum("bi,oij,bj->bo", x_lhs, self.weight, x_rhs) + self.bias
+
+    def reset_parameters(self):
+        if isinstance(self.weight, nn.Parameter):
+            bound = math.sqrt(2.0 / self.total_in)
+            nn.init.uniform_(self.weight, -bound, bound)
+        if isinstance(self.bias, nn.Parameter):
+            nn.init.zeros_(self.bias)
+
+
 class BilinearDecoder(nn.Module):
     def __init__(self, stream_name, coord_dim, latent_dim, out_dim):
         super().__init__()
 
         self.name = f"BilinearDecoder_{stream_name}"
         self.latent_dim = latent_dim
-        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
+        self.bilin = EfficientBilinear(coord_dim, latent_dim, out_dim)
 
     def forward(self, coords_md, latent_nd, tcs_lens_n1):
         """
