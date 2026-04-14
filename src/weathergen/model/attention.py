@@ -40,6 +40,10 @@ class BaseAttention(torch.nn.Module):
     ):
         super(BaseAttention, self).__init__()
 
+        # values assigned by _make_qk_lnorms() in each subclass __init__
+        self.lnorm_q = None
+        self.lnorm_k = None
+
         self.num_heads = num_heads
         self.with_flash = with_flash
         self.with_residual = with_residual
