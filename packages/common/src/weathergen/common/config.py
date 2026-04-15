@@ -82,14 +82,19 @@ OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
 OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
+def _patch_time(key, sub_conf, time_key):
+    raw_key = f"_{key}"
+    sub_conf[raw_key] = f"${{{key}}}"
+    sub_conf[key] = f"${{{time_key}:{sub_conf[key]}}}"
+    return sub_conf
+
+
 def _sanitize_start_end_time_keys(sub_conf):
     """Convert start_date and end_date keys to datetime resolvers."""
     time_keys = ["start_date", "end_date"]
     for key in time_keys:
         if key in sub_conf:
-            raw_key = f"_{key}"
-            sub_conf[raw_key] = f"${{{key}}}"
-            sub_conf[key] = f"${{{_DATETIME_TYPE_NAME}:{sub_conf[key]}}}"
+            sub_conf = _patch_time(key, sub_conf, _DATETIME_TYPE_NAME)
 
 
 def _sanitize_delta_time_keys(sub_conf):
@@ -97,16 +102,12 @@ def _sanitize_delta_time_keys(sub_conf):
     delta_keys = ["time_window_step", "time_window_len"]
     for key in delta_keys:
         if key in sub_conf:
-            raw_key = f"_{key}"
-            sub_conf[raw_key] = f"${{{key}}}"
-            sub_conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf[key]}}}"
+            sub_conf = _patch_time(key, sub_conf, _TIMEDELTA_TYPE_NAME)
 
     if sub_conf.get("forecast") is not None:
         key = "time_step"
         if key in sub_conf.forecast:
-            raw_key = f"_{key}"
-            sub_conf.forecast[raw_key] = f"${{{key}}}"
-            sub_conf.forecast[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf.forecast[key]}}}"
+            sub_conf.forecast = _patch_time(key, sub_conf.forecast, _TIMEDELTA_TYPE_NAME)
 
 
 def _sanitize_time_keys(conf: Config) -> Config:
@@ -627,6 +628,10 @@ def load_streams(streams_directory: Path) -> list[Config]:
             # support commenting out entire stream files to avoid loading them.
             _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
             continue
+
+    for _, stream in streams.items():
+        if stream.get("frequency", None) is not None:
+            stream = _patch_time("frequency", stream, _TIMEDELTA_TYPE_NAME)
 
     return list(streams.values())
 

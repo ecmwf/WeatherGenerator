@@ -201,7 +201,7 @@ class Trainer(TrainerBase):
             "shuffle": False,
             "num_workers": loader_num_workers,
             "pin_memory": cf.data_loading.get("memory_pinning", False),
-            "persistent_workers": cf.data_loading.get("persistent_workers", False)
+            "persistent_workers": cf.data_loading.get("persistent_workers", False),
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset, **loader_params, sampler=None
@@ -366,7 +366,7 @@ class Trainer(TrainerBase):
 
         if is_root():
             config.save(self.cf, None)
-            logger.info(config.format_cf(self.cf))
+            # logger.info(config.format_cf(self.cf))
 
         # run validation before training if requested
         self.validate_before_training()
