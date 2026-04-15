@@ -301,8 +301,10 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
 
         # Restore EMA teacher weights when continuing from a checkpoint
-        if run_id_contd is not None:
+        if run_id_contd is not None and cf.general.istep > 0:
             self._load_ema_teacher_state(run_id_contd, mini_epoch_contd)
+        elif run_id_contd is not None and is_root():
+            logger.info("Warm start detected (istep=0): skipping EMA teacher state restore.")
 
         # if with_fsdp then parameter count is unreliable
         if is_root():
@@ -345,8 +347,10 @@ class Trainer(TrainerBase):
         )
 
         # Restore optimizer momentum buffers when continuing from a checkpoint
-        if run_id_contd is not None:
+        if run_id_contd is not None and cf.general.istep > 0:
             self._load_optimizer_state(run_id_contd, mini_epoch_contd)
+        elif run_id_contd is not None and is_root():
+            logger.info("Warm start detected (istep=0): skipping optimizer state restore.")
 
         if self.cf.general.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
