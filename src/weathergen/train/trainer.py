@@ -597,7 +597,7 @@ class Trainer(TrainerBase):
                         enabled=cf.with_mixed_precision,
                     ):
                         chunks = self._get_fcst_chunks(mode_cfg)
-                        x = batch.get_source_samples()
+                        source_samples = batch.get_source_samples()
                         total_steps = batch.get_output_len()
                         preds_full = (
                             ModelOutput(total_steps, batch=batch.get_source_samples())
@@ -617,15 +617,15 @@ class Trainer(TrainerBase):
 
                         for chunk_idx, chunk_size in enumerate(chunks):
                             if self.ema_model is None:
-                                x = self.model(
+                                source_samples = self.model(
                                     self.model_params,
-                                    x,
+                                    source_samples,
                                     chunk_size,
                                 )
                             else:
-                                x = self.ema_model.forward_eval(
+                                source_samples = self.ema_model.forward_eval(
                                     self.model_params,
-                                    x,
+                                    source_samples,
                                     chunk_size,
                                 )
 
@@ -642,7 +642,7 @@ class Trainer(TrainerBase):
                                     )
                                 output_idxs = batch.get_output_idxs()
                                 forecast_step_offset = output_idxs[0] if len(output_idxs) > 0 else 0
-                                chunk_step_offset = forecast_step_offset + x.step_offset
+                                chunk_step_offset = forecast_step_offset + source_samples.step_offset
                                 timestep_idxs = list(
                                     range(chunk_step_offset, chunk_step_offset + chunk_size)
                                 )
@@ -654,7 +654,7 @@ class Trainer(TrainerBase):
                                     bidx,
                                     denormalize_data_fct,
                                     batch,
-                                    x,
+                                    source_samples,
                                     targets_and_auxs,
                                     timestep_idxs=timestep_idxs,
                                     fstep_offset=chunk_step_offset,
@@ -662,13 +662,13 @@ class Trainer(TrainerBase):
                             if compute_loss and preds_full is not None:
                                 output_idxs = batch.get_output_idxs()
                                 forecast_step_offset = output_idxs[0] if len(output_idxs) > 0 else 0
-                                chunk_step_offset = forecast_step_offset + x.step_offset
+                                chunk_step_offset = forecast_step_offset + source_samples.step_offset
                                 for step_idx in range(chunk_size):
                                     preds_full.physical[chunk_step_offset + step_idx].update(
-                                        x.physical[step_idx]
+                                        source_samples.physical[step_idx]
                                     )
                                     preds_full.latent[chunk_step_offset + step_idx].update(
-                                        x.latent[step_idx]
+                                        source_samples.latent[step_idx]
                                     )
                             if chunk_size and chunk_idx < len(chunks) - 1:
                                 if not x.latent or "latent_state" not in x.latent[chunk_size - 1]:
