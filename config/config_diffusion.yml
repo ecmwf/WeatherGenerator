@@ -110,9 +110,9 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'ae4wlc5m', 'epoch': -1}  # multi-var d2048 hl3, sigma_data=2.7047
 # load_chkpt: {'run_id': 'r45iwyns', 'epoch': -1}  # multi-var d512 hl3, sigma_data=1.1785
 # load_chkpt: {'run_id': 'ydka6uql', 'epoch': -1}  # multi-var d512 hl4, sigma_data=0.827
-load_chkpt: {'run_id': 'qf9yoimd', 'epoch': -1}  # multi-var d512 hl5, sigma_data=0.5789
+# load_chkpt: {'run_id': 'qf9yoimd', 'epoch': -1}  # multi-var d512 hl5, sigma_data=0.5789
 # load_chkpt: {'run_id': 'v8kd6xc1', 'epoch': -1}  # multi-var d512 hl5 nopos, sigma_data=0.6481
-# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5 enc-lnorm, sigma_data=1.0
+load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5 enc-lnorm, sigma_data=1.0
 # load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
 # load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
 
@@ -270,7 +270,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config
