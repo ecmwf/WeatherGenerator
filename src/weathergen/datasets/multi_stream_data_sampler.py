@@ -400,8 +400,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 rdata = input_data[-(step + 1)]
                 token_data = input_tokens[-(step + 1)]
 
-                stream_data.source_is_spoof = rdata.is_spoof
-
                 # preprocess data for model input
                 (source_cells, source_cells_lens) = self.tokenizer.get_source(
                     stream_info,
@@ -442,8 +440,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             rdata = output_data[step]
             token_data = output_tokens[step]
 
-            stream_data.target_is_spoof = rdata.is_spoof
-
             if "target_coords" in mode:
                 (tc, tc_l) = self.tokenizer.get_target_coords(
                     stream_info,
@@ -452,7 +448,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(timestep_idx, tc, tc_l)
+                stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
@@ -462,7 +458,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_values(timestep_idx, tt_cells, tt_c, tt_t, idxs_inv)
+                stream_data.add_target_values(
+                    timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
+                )
 
         return stream_data
 
@@ -554,7 +552,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
-                    stream_ds[0].mean[stream_ds[0].source_idx],
+                    len(stream_ds[0].mean[stream_ds[0].source_idx]),
                 )
                 rdata.is_spoof = True
 
@@ -571,12 +569,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             if rdata.is_empty():
                 # work around for https://github.com/pytorch/pytorch/issues/158719
                 # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(timestep_idx)
+                time_win = self.time_window_handler.window(step_forecast_dt)
                 rdata = spoof(
                     self.healpix_level,
                     time_win.start,
                     stream_ds[0].get_geoinfo_size(),
-                    stream_ds[0].mean[stream_ds[0].target_idx],
+                    len(stream_ds[0].mean[stream_ds[0].target_idx]),
                 )
                 rdata.is_spoof = True
 
