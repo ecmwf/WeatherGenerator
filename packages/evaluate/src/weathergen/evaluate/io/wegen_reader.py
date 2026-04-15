@@ -28,9 +28,9 @@ from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.data.dataarray_builders import EnsembleSelect
 from weathergen.evaluate.io.data.io_orchestration import (
     _build_io_state,
-    get_data_impl,
-    get_data_zip_impl,
-    resolve_num_workers,
+    get_data_dirstore,
+    get_data_zipstore,
+    get_num_workers,
 )
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score_utils import to_list
@@ -374,7 +374,8 @@ class WeatherGenZarrReader(WeatherGenReader):
         self._cached_is_gridded: dict[str, bool] = {}
 
         # Raw I/O worker config (direct zarr access)
-        self._num_io_workers: int = resolve_num_workers(int(eval_cfg.get("num_io_workers", 0)))
+        self._max_workers: int | None = eval_cfg.get("max_workers")
+        self._num_io_workers: int = get_num_workers(max_workers=self._max_workers)
 
     def get_data(
         self,
@@ -414,9 +415,8 @@ class WeatherGenZarrReader(WeatherGenReader):
             self._num_io_workers,
             ens_select,
         )
-        if state.is_zip:
-            return get_data_zip_impl(state)
-        return get_data_impl(state)
+        get_data = get_data_zipstore if state.is_zip else get_data_dirstore
+        return get_data(state)
 
     def get_stream(self, stream: str):
         """
@@ -501,7 +501,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         return self._cached_is_gridded[stream]
 
     def _compute_is_gridded(self, stream: str) -> bool:
-        """Original is_gridded_data logic, called once per stream and cached."""
+        """is_gridded_data logic, called once per stream and cached."""
         _logger.debug(f"Checking regular spacing for stream {stream}...")
 
         with zarrio_reader(self.fname_zarr) as zio:

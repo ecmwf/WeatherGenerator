@@ -302,6 +302,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})
+    max_workers = cfg.get("max_workers")  # global hard cap for parallel workers
 
     tasks = []
 
@@ -310,6 +311,11 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     for run_id, run in runs.items():
         if "streams" not in run:
             run["streams"] = default_streams
+
+        # Propagate top-level max_workers into each run dict so that readers
+        # and orchestration code can pick it up via eval_cfg.get("max_workers").
+        if max_workers is not None and "max_workers" not in run:
+            run["max_workers"] = max_workers
 
         for stream in run.get("streams", {}):
             tasks.append(

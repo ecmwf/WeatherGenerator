@@ -16,7 +16,7 @@ import numpy as np
 import xarray as xr
 from joblib import delayed
 
-from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, resolve_num_workers
+from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import scalar_coord_to_dim
@@ -26,7 +26,7 @@ from weathergen.evaluate.utils.regions import RegionBoundingBox
 _logger = logging.getLogger(__name__)
 
 
-def get_next_data(fstep, da_preds, da_tars, fsteps):
+def get_next_fstep_data(fstep, da_preds, da_tars, fsteps):
     """Get the next forecast step data for the given forecast step."""
     fstep_idx = fsteps.index(fstep)
     next_fstep = fsteps[fstep_idx + 1] if fstep_idx + 1 < len(fsteps) else None
@@ -51,9 +51,6 @@ def _score_single_fstep(
     group_by_coord: str | None,
 ) -> tuple[int, xr.DataArray, dict[tuple[int, str], dict]] | None:
     """Score all metrics for one fstep in one region. Stateless, thread-safe.
-
-    All inputs are immutable xarray DataArrays. All numpy/xarray operations
-    release the GIL during C-level computation, enabling effective threading.
 
     Parameters
     ----------
@@ -175,138 +172,255 @@ def calc_scores_per_stream(
     fsteps = sorted(list(da_preds.keys()))
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
+    max_workers = reader.eval_cfg.get("max_workers", None)
+
     for region in regions:
         bbox = RegionBoundingBox.from_region_name(region)
         metrics = metrics_dict[region]
 
-        _logger.info(
-            f"RUN {reader.run_id} - {stream}: Calculating scores for region {region}"
-            f" across {len(fsteps)} fsteps and metrics {list(metrics.keys())}..."
-        )
-        metric_stream = xr.DataArray(
-            np.full(
-                (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
-                np.nan,
-            ),
-            coords={
-                "sample": samples,
-                "forecast_step": fsteps,
-                "channel": channels,
-                "metric": list(metrics.keys()),
-                "ens": ensemble,
-            },
+        fstep_results, all_metric_attrs = compute_scores_for_region(
+            reader.run_id,
+            stream,
+            region,
+            da_preds,
+            da_tars,
+            fsteps,
+            aligned_clim_data,
+            is_gridded_data,
+            group_by_coord,
+            bbox,
+            metrics,
+            max_workers,
         )
 
-        if "lead_time" in da_preds[fsteps[0]].coords:
-            metric_stream = metric_stream.assign_coords(
-                lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
-            )
-
-        all_metric_attrs = {}
-
-        fstep_tasks = []
-        for fstep in fsteps:
-            tars_fs = da_tars[fstep]
-            preds_fs = da_preds[fstep]
-            # froct/troct need next-step data but only work on gridded data
-            # (scatter data has different ipoints per fstep so groupby fails)
-            if is_gridded_data:
-                preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
-            else:
-                preds_next, tars_next = None, None
-            climatology = aligned_clim_data[fstep] if aligned_clim_data else None
-            fstep_tasks.append((fstep, tars_fs, preds_fs, preds_next, tars_next, climatology))
-
-        calls = [
-            delayed(_score_single_fstep)(
-                fstep,
-                tars_fs,
-                preds_fs,
-                preds_next,
-                tars_next,
-                climatology,
-                bbox,
-                metrics,
-                group_by_coord,
-            )
-            for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks
-        ]
-        n_workers = resolve_num_workers(int(reader.eval_cfg.get("num_scoring_threads", 0)))
-        all_results = dispatch_parallel(
-            calls,
-            n_workers=n_workers,
-            backend="threading",
-            desc=f"Scoring {reader.run_id} - {stream} {region}",
+        store_metrics_for_region(
+            local_scores,
+            reader.run_id,
+            stream,
+            region,
+            fstep_results,
+            all_metric_attrs,
+            metrics,
+            samples,
+            fsteps,
+            channels,
+            ensemble,
+            da_preds,
         )
-        fstep_results = [r for r in all_results if r is not None]
-
-        fstep_results.sort(key=lambda r: r[0])
-
-        for fstep, combined_metrics, fstep_attrs in fstep_results:
-            all_metric_attrs.update(fstep_attrs)
-
-            criteria = {
-                "forecast_step": int(fstep),
-                "sample": combined_metrics.sample.values,
-                "channel": combined_metrics.channel.values,
-                "metric": combined_metrics.metric.values,
-            }
-            if "ens" in combined_metrics.dims:
-                criteria["ens"] = combined_metrics.ens.values
-
-            metric_stream.loc[criteria] = combined_metrics
-
-            for coord_name in combined_metrics.coords:
-                if coord_name in combined_metrics.dims or coord_name in metric_stream.dims:
-                    continue
-                if coord_name == "lead_time":
-                    metric_stream.coords["lead_time"].loc[{"forecast_step": int(fstep)}] = (
-                        combined_metrics.coords["lead_time"]
-                        .values.astype("timedelta64[h]")
-                        .astype(int)
-                    )
-                else:
-                    coord_dims = combined_metrics.coords[coord_name].dims
-                    if not all(dim in metric_stream.dims for dim in coord_dims):
-                        _logger.debug(
-                            f"Skipping coordinate '{coord_name}' with incompatible "
-                            f"dimensions {coord_dims} (metric_stream has {metric_stream.dims})"
-                        )
-                        continue
-
-                    if coord_name not in metric_stream.coords:
-                        coord_shape = tuple(len(metric_stream.coords[dim]) for dim in coord_dims)
-                        metric_stream = metric_stream.assign_coords(
-                            {
-                                coord_name: xr.DataArray(
-                                    np.full(coord_shape, "", dtype=object),
-                                    dims=coord_dims,
-                                    coords={dim: metric_stream.coords[dim] for dim in coord_dims},
-                                )
-                            }
-                        )
-
-                    indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
-                    metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[
-                        coord_name
-                    ]
-
-        _logger.info(f"Scores for run {reader.run_id} - {stream} calculated successfully.")
-        _logger.debug(f"all_metric_attrs keys: {list(all_metric_attrs.keys())}")
-
-        for metric, parameters in metrics.items():
-            metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
-            for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
-                if stored_metric == metric and attrs:
-                    _logger.debug(f"Restoring {len(attrs)} attributes for {metric}")
-                    metric_data.attrs.update(attrs)
-                    break
-
-            local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
-                reader.run_id
-            ] = metric_data
 
     return local_scores
+
+
+def compute_scores_for_region(
+    run_id: str,
+    stream: str,
+    region: str,
+    da_preds: dict,
+    da_tars: dict,
+    fsteps: list[int],
+    aligned_clim_data: dict | None,
+    is_gridded_data: bool,
+    group_by_coord: str | None,
+    bbox: "RegionBoundingBox",
+    metrics: dict,
+    max_workers: int | None,
+) -> tuple[list, dict]:
+    """Dispatch parallel scoring for all fsteps in one region.
+
+    Parameters
+    ----------
+    run_id : str
+        Run identifier (used for logging).
+    stream : str
+        Stream name.
+    region : str
+        Region name.
+    da_preds, da_tars : dict
+        Prediction and target dicts keyed by forecast step.
+    fsteps : list[int]
+        Sorted forecast steps.
+    aligned_clim_data : dict | None
+        Climatology aligned to forecast steps, or None.
+    is_gridded_data : bool
+        Whether the stream is gridded.
+    group_by_coord : str | None
+        Coordinate to group by (None for gridded, "sample" for scatter).
+    bbox : RegionBoundingBox
+        Region bounding box.
+    metrics : dict
+        Metric name → parameters dict.
+    max_workers : int | None
+        Hard cap on parallel workers from config.
+
+    Returns
+    -------
+    tuple[list, dict]
+        ``(fstep_results, all_metric_attrs)`` — sorted list of
+        ``(fstep, combined_metrics, fstep_attrs)`` tuples plus the
+        merged attribute dict.
+    """
+    _logger.info(
+        f"RUN {run_id} - {stream}: Calculating scores for region {region}"
+        f" across {len(fsteps)} fsteps and metrics {list(metrics.keys())}..."
+    )
+
+    fstep_tasks = []
+    for fstep in fsteps:
+        tars_fs = da_tars[fstep]
+        preds_fs = da_preds[fstep]
+        if is_gridded_data:
+            preds_next, tars_next = get_next_fstep_data(fstep, da_preds, da_tars, fsteps)
+        else:
+            preds_next, tars_next = None, None
+        climatology = aligned_clim_data[fstep] if aligned_clim_data else None
+        fstep_tasks.append((fstep, tars_fs, preds_fs, preds_next, tars_next, climatology))
+
+    calls = [
+        delayed(_score_single_fstep)(
+            fstep,
+            tars_fs,
+            preds_fs,
+            preds_next,
+            tars_next,
+            climatology,
+            bbox,
+            metrics,
+            group_by_coord,
+        )
+        for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks
+    ]
+    n_workers = get_num_workers(max_workers=max_workers)
+    all_results = dispatch_parallel(
+        calls,
+        n_workers=n_workers,
+        backend="threading",
+        desc=f"Scoring {run_id} - {stream} {region}",
+    )
+    fstep_results = sorted(
+        [r for r in all_results if r is not None],
+        key=lambda r: r[0],
+    )
+
+    all_metric_attrs: dict = {}
+    for _, _, fstep_attrs in fstep_results:
+        all_metric_attrs.update(fstep_attrs)
+
+    return fstep_results, all_metric_attrs
+
+
+def store_metrics_for_region(
+    local_scores: dict,
+    run_id: str,
+    stream: str,
+    region: str,
+    fstep_results: list,
+    all_metric_attrs: dict,
+    metrics: dict,
+    samples: list,
+    fsteps: list[int],
+    channels: list[str],
+    ensemble: list[str],
+    da_preds: dict,
+) -> None:
+    """Populate the result data structure from computed per-fstep scores.
+
+    Parameters
+    ----------
+    local_scores : dict
+        Output dict, mutated in-place (metric → region → stream → run_id → DataArray).
+    run_id : str
+        Run identifier.
+    stream : str
+        Stream name.
+    region : str
+        Region name.
+    fstep_results : list
+        Sorted list of ``(fstep, combined_metrics, fstep_attrs)`` tuples.
+    all_metric_attrs : dict
+        Merged attribute dict from all fsteps.
+    metrics : dict
+        Metric name → parameters dict.
+    samples, fsteps, channels, ensemble
+        Coordinate arrays for the output DataArray.
+    da_preds : dict
+        Prediction dict (used only to check for ``lead_time`` coord).
+    """
+    metric_stream = xr.DataArray(
+        np.full(
+            (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
+            np.nan,
+        ),
+        coords={
+            "sample": samples,
+            "forecast_step": fsteps,
+            "channel": channels,
+            "metric": list(metrics.keys()),
+            "ens": ensemble,
+        },
+    )
+
+    if "lead_time" in da_preds[fsteps[0]].coords:
+        metric_stream = metric_stream.assign_coords(
+            lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
+        )
+
+    for fstep, combined_metrics, _fstep_attrs in fstep_results:
+        criteria = {
+            "forecast_step": int(fstep),
+            "sample": combined_metrics.sample.values,
+            "channel": combined_metrics.channel.values,
+            "metric": combined_metrics.metric.values,
+        }
+        if "ens" in combined_metrics.dims:
+            criteria["ens"] = combined_metrics.ens.values
+
+        metric_stream.loc[criteria] = combined_metrics
+
+        for coord_name in combined_metrics.coords:
+            if coord_name in combined_metrics.dims or coord_name in metric_stream.dims:
+                continue
+            if coord_name == "lead_time":
+                metric_stream.coords["lead_time"].loc[{"forecast_step": int(fstep)}] = (
+                    combined_metrics.coords["lead_time"].values.astype("timedelta64[h]").astype(int)
+                )
+            else:
+                coord_dims = combined_metrics.coords[coord_name].dims
+                if not all(dim in metric_stream.dims for dim in coord_dims):
+                    _logger.debug(
+                        f"Skipping coordinate '{coord_name}' with incompatible "
+                        f"dimensions {coord_dims} (metric_stream has {metric_stream.dims})"
+                    )
+                    continue
+
+                if coord_name not in metric_stream.coords:
+                    coord_shape = tuple(len(metric_stream.coords[dim]) for dim in coord_dims)
+                    metric_stream = metric_stream.assign_coords(
+                        {
+                            coord_name: xr.DataArray(
+                                np.full(coord_shape, "", dtype=object),
+                                dims=coord_dims,
+                                coords={dim: metric_stream.coords[dim] for dim in coord_dims},
+                            )
+                        }
+                    )
+
+                indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
+                metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[coord_name]
+
+    _logger.info(f"Scores for run {run_id} - {stream} calculated successfully.")
+    _logger.debug(f"all_metric_attrs keys: {list(all_metric_attrs.keys())}")
+
+    for metric, parameters in metrics.items():
+        metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
+        for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
+            if stored_metric == metric and attrs:
+                _logger.debug(f"Restoring {len(attrs)} attributes for {metric}")
+                metric_data.attrs.update(attrs)
+                break
+
+        local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
+            run_id
+        ] = metric_data
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +456,7 @@ def metric_list_to_json(
                 metric_data_dict = metric_data.to_dict()
 
                 if save_path.exists():
-                    _logger.info(f"{save_path} already present")
+                    _logger.debug(f"{save_path} already present")
                     with save_path.open("r") as f:
                         data_dict = json.load(f)
                     if "scores" not in data_dict:
@@ -355,9 +469,9 @@ def metric_list_to_json(
                             break
                     else:
                         scores.append(metric_data_dict)
-                        _logger.info(f"Appending results to {save_path}")
+                        _logger.debug(f"Appending results to {save_path}")
                 else:
-                    _logger.info(f"Saving results to new file {save_path}")
+                    _logger.debug(f"Saving results to new file {save_path}")
                     data_dict = {"scores": [metric_data_dict]}
 
                 with open(save_path, "w") as f:

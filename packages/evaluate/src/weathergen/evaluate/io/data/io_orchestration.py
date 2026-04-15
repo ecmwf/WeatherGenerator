@@ -33,14 +33,14 @@ from weathergen.evaluate.io.data.dataarray_builders import (
     build_gridded_dataarrays,
     build_scatter_dataarrays,
 )
+from weathergen.evaluate.io.data.dataarray_postprocessing import (
+    _add_lead_time_coord,
+    _select_channels,
+)
 from weathergen.evaluate.io.data.io_workers import (
     _compute_early_channel_selection,
     _read_coords_and_meta,
     _read_sample,
-)
-from weathergen.evaluate.io.data.xarray_utils import (
-    _add_lead_time_coord,
-    _select_channels,
 )
 from weathergen.evaluate.io.io_reader import ReaderOutput
 from weathergen.evaluate.utils.derived_channels import scale_z_channels
@@ -84,49 +84,44 @@ class IOState:
 # ---------------------------------------------------------------------------
 
 
-def resolve_num_workers(requested: int = 0, *, check_process_headroom: bool = False) -> int:
+def get_num_workers(*, check_process_headroom: bool = False, max_workers: int | None = None) -> int:
     """Determine safe number of parallel workers.
 
     Parameters
     ----------
-    requested : int
-        Value from config (``num_io_workers``, ``num_plot_workers``, …).
-        0 (the default) means *auto-detect*.
     check_process_headroom : bool
         When *True* (useful for ``loky`` / process-based backends), also
         verify that the user has enough ``RLIMIT_NPROC`` headroom before
         returning > 1.  If headroom is dangerously low the function
         returns 1 regardless of the CPU-based estimate.
+    max_workers : int | None
+        Optional hard cap for max workers.  When set from the eval config
+        (``max_workers`` key in the YAML), it overrides the default of 36.
 
-    Auto-detection (``requested == 0``):
+    Auto-detection priority:
     1. ``$SLURM_CPUS_PER_TASK`` — CPUs allocated to this task (preferred).
     2. ``$SLURM_CPUS_ON_NODE`` — CPUs available on the node.
     3. ``os.cpu_count()`` — fallback outside Slurm.
 
-    The detected CPU count is capped at 36.
+    The detected CPU count is capped at *max_workers* (default 36).
     """
-    _max_workers = 36
+    _max_workers = max_workers if max_workers is not None else 36
 
-    if requested > 0:
-        n = min(requested, os.cpu_count() or 16)
-    else:
-        # Prefer Slurm-aware CPU counts — they reflect the actual allocation,
-        # not the full node (which os.cpu_count() returns).
-        slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("SLURM_CPUS_ON_NODE")
-        if slurm_cpus is not None:
-            try:
-                n = max(1, int(slurm_cpus))
-                n = min(n, _max_workers)
-                _logger.info(f"Auto-detected {slurm_cpus} Slurm CPUs. Using n_workers={n}.")
-            except ValueError:
-                slurm_cpus = None  # fall through
+    # Prefer Slurm-aware CPU counts — they reflect the actual allocation,
+    # not the full node (which os.cpu_count() returns).
+    slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("SLURM_CPUS_ON_NODE")
+    if slurm_cpus is not None:
+        try:
+            n = max(1, int(slurm_cpus))
+            n = min(n, _max_workers)
+            _logger.info(f"Auto-detected {slurm_cpus} Slurm CPUs. Using n_workers={n}.")
+        except ValueError:
+            slurm_cpus = None  # fall through
 
-        if slurm_cpus is None:
-            cpu_count = os.cpu_count() or 16
-            n = max(1, min(cpu_count, _max_workers))
-            _logger.info(
-                f"No Slurm environment detected (cpu_count={cpu_count}). Using n_workers={n}."
-            )
+    if slurm_cpus is None:
+        cpu_count = os.cpu_count() or 16
+        n = max(1, min(cpu_count, _max_workers))
+        _logger.info(f"No Slurm environment detected (cpu_count={cpu_count}). Using n_workers={n}.")
 
     # --- Optional process-headroom guard (for loky / process backends) ---
     if check_process_headroom and n > 1:
@@ -205,8 +200,7 @@ def dispatch_parallel(
     -----
     * ``Parallel(n_jobs=1)`` already runs sequentially, so the only reason we
       keep a try/except path is that **loky** can fail at pool creation time
-      (RLIMIT_NPROC exhausted, sandbox issues, etc.).  For the ``"threading"``
-      backend no such failure mode exists, so we skip the try/except entirely.
+      (RLIMIT_NPROC exhausted, sandbox issues, etc.).
     * When *n_workers* ≤ 1 **and** the backend is ``"loky"`` we also skip the
       ``Parallel`` call to avoid any pool-creation overhead.
     """
@@ -216,29 +210,28 @@ def dispatch_parallel(
 
     effective = min(n_workers, n_tasks)
 
-    # --- fast path: skip Parallel entirely when sequential ----------------
+    # skip Parallel entirely when sequential loky to avoid pool-creation overhead
     if effective <= 1 and backend == "loky":
-        return [c[0](*c[1], **c[2]) for c in calls]
+        results = [c[0](*c[1], **c[2]) for c in calls]
 
-    # --- threading or loky-with-multiple-workers --------------------------
-    if backend != "loky":
-        # Threading never fails at pool creation — no fallback needed.
-        return Parallel(n_jobs=effective, backend=backend, verbose=verbose)(calls)
+    # parallel: try, then fall back to sequential on pool-creation failure.
+    else:
+        try:
+            results = Parallel(n_jobs=effective, backend=backend, verbose=verbose)(calls)
+            if backend == "loky":
+                with contextlib.suppress(Exception):
+                    get_reusable_executor().shutdown(wait=True)
+        except Exception as exc:
+            _logger.warning(
+                f"{desc}: parallel pool failed ({type(exc).__name__}: {exc}). "
+                f"Falling back to sequential."
+            )
+            if backend == "loky":
+                with contextlib.suppress(Exception):
+                    get_reusable_executor().shutdown(wait=True)
+            results = [c[0](*c[1], **c[2]) for c in calls]
 
-    # loky with effective > 1: try, then fall back to sequential.
-    try:
-        results = Parallel(n_jobs=effective, backend=backend, verbose=verbose)(calls)
-        with contextlib.suppress(Exception):
-            get_reusable_executor().shutdown(wait=True)
-        return results
-    except Exception as exc:
-        _logger.warning(
-            f"{desc}: parallel pool failed ({type(exc).__name__}: {exc}). "
-            f"Falling back to sequential."
-        )
-        with contextlib.suppress(Exception):
-            get_reusable_executor().shutdown(wait=True)
-        return [c[0](*c[1], **c[2]) for c in calls]
+    return results
 
 
 def _build_io_state(
@@ -305,8 +298,15 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
-) -> list:
-    """Dispatch _read_sample over samples, with parallel→sequential fallback."""
+) -> tuple[list, bool]:
+    """Dispatch _read_sample over samples, with parallel→sequential fallback.
+
+    Returns
+    -------
+    tuple[list, bool]
+        ``(results, fell_back)`` — the per-sample results and whether
+        the dispatch fell back from parallel to sequential execution.
+    """
     kwargs = dict(
         zarr_path=zarr_path,
         stream=stream,
@@ -318,7 +318,26 @@ def _parallel_read(
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
-    return dispatch_parallel(calls, n_workers=n_workers, backend=backend, desc=label, verbose=5)
+    effective = min(n_workers, len(calls))
+
+    if effective <= 1:
+        results = [c[0](*c[1], **c[2]) for c in calls]
+        return results, False
+
+    try:
+        results = Parallel(n_jobs=effective, backend=backend, verbose=5)(calls)
+        with contextlib.suppress(Exception):
+            get_reusable_executor().shutdown(wait=True)
+        return results, False
+    except Exception as exc:
+        _logger.warning(
+            f"{label}: parallel pool failed ({type(exc).__name__}: {exc}). "
+            f"Falling back to sequential."
+        )
+        with contextlib.suppress(Exception):
+            get_reusable_executor().shutdown(wait=True)
+        results = [c[0](*c[1], **c[2]) for c in calls]
+        return results, True
 
 
 def _extract_source_interval_starts(results: list, samples: list[int]) -> NDArray:
@@ -433,7 +452,7 @@ def _store_substep(
 # ---------------------------------------------------------------------------
 
 
-def get_data_impl(state: IOState) -> ReaderOutput:
+def get_data_dirstore(state: IOState) -> ReaderOutput:
     """LocalStore fast-path: one fstep at a time, all samples in parallel.
 
     Processes one forecast step at a time to keep peak memory bounded at
@@ -457,7 +476,7 @@ def get_data_impl(state: IOState) -> ReaderOutput:
             f"Reading fstep {fs} ({fi + 1}/{len(state.fsteps)})..."
         )
 
-        results = _parallel_read(
+        results, fell_back = _parallel_read(
             zarr_path=state.zarr_path,
             samples=state.samples,
             stream=state.stream,
@@ -471,11 +490,8 @@ def get_data_impl(state: IOState) -> ReaderOutput:
             label=f"RUN {state.run_id} - {state.stream} fstep {fs}",
         )
         # If _parallel_read fell back to sequential, honour that for the rest
-        if n_workers > 1 and len(results) == len(state.samples):
-            # check if it actually ran sequentially (no exception path exposed,
-            # but n_workers may have been reset inside — we can't detect that here,
-            # so we just trust the results list length is correct).
-            pass
+        if fell_back:
+            n_workers = 1
 
         if source_interval_starts is None:
             source_interval_starts = _extract_source_interval_starts(results, state.samples)
@@ -520,7 +536,7 @@ def get_data_impl(state: IOState) -> ReaderOutput:
 # ---------------------------------------------------------------------------
 
 
-def get_data_zip_impl(state: IOState) -> ReaderOutput:
+def get_data_zipstore(state: IOState) -> ReaderOutput:
     """ZipStore fast-path: dispatch *all* (sample, fstep) pairs in parallel.
 
     Each worker opens its own ZipStore handle, so the zip central-directory
@@ -559,7 +575,7 @@ def get_data_zip_impl(state: IOState) -> ReaderOutput:
 
     # --- Re-group: flat_results[sample_idx * n_fsteps + fstep_idx] --------
     n_fsteps = len(state.fsteps)
-    # Gather per-sample results in the same shape as get_data_impl expects
+    # Gather per-sample results in the same shape as get_data_dirstore expects
     source_interval_starts = _extract_source_interval_starts(
         [flat_results[si * n_fsteps] for si in range(len(state.samples))],
         state.samples,

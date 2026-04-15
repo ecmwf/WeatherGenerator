@@ -613,18 +613,6 @@ class Plotter:
         lc.set_transform(ccrs.PlateCarree())
         return lc
 
-    def animation(self, samples, fsteps, variables, select, tag) -> list[str]:
-        """Return the task descriptors for building GIF animations.
-
-        .. deprecated::
-            Parallel dispatch has moved to
-            :func:`~weathergen.evaluate.plotting.plot_orchestration._dispatch_animations`.
-            This thin wrapper is kept only for backwards compatibility.
-        """
-        from weathergen.evaluate.plotting.plot_orchestration import _dispatch_animations
-
-        return _dispatch_animations(self, samples, fsteps, variables, select, tag)
-
     def get_map_output_dir(self, tag):
         return self.out_plot_basedir / self.stream / "maps" / tag
 

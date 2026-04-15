@@ -7,7 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""xarray post-processing helpers for channel selection, scaling, and time splitting."""
+"""
+Post-processing helpers for evaluation DataArrays 
+(channel selection, derived channels, lead-time).
+"""
 
 import logging
 

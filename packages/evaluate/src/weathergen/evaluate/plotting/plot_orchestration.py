@@ -21,7 +21,7 @@ from joblib import delayed
 from PIL import Image
 from tqdm import tqdm
 
-from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, resolve_num_workers
+from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
@@ -39,7 +39,7 @@ from weathergen.evaluate.plotting.plotter import (
     ScoreCards,
 )
 from weathergen.evaluate.scores.score import VerifiedData, get_score
-from weathergen.evaluate.scores.score_orchestration import get_next_data
+from weathergen.evaluate.scores.score_orchestration import get_next_fstep_data
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
@@ -80,7 +80,7 @@ def plot_score_maps_per_stream(
 
     map_dir = reader.runplot_dir / "plots" / stream / "score_maps"
     map_dir.mkdir(parents=True, exist_ok=True)
-    _logger.info(f"RUN {reader.run_id} - {stream}: Plotting score maps to {map_dir}")
+    _logger.info(f"RUN {reader.run_id} - {stream}: Saving score maps to {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
     fsteps = available_data.fsteps
@@ -98,8 +98,9 @@ def plot_score_maps_per_stream(
     fsteps = sorted(da_preds.keys())
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
-    n_plot_workers = resolve_num_workers(
-        int(reader.eval_cfg.get("num_plot_workers", 0)), check_process_headroom=True
+    n_plot_workers = get_num_workers(
+        check_process_headroom=True,
+        max_workers=reader.eval_cfg.get("max_workers", None),
     )
 
     cfg = reader.global_plotting_options
@@ -118,7 +119,7 @@ def plot_score_maps_per_stream(
         for fstep in fsteps:
             tars_fs = da_tars[fstep]
             preds_fs = da_preds[fstep]
-            preds_next, tars_next = get_next_data(fstep, da_preds, da_tars, fsteps)
+            preds_next, tars_next = get_next_fstep_data(fstep, da_preds, da_tars, fsteps)
             climatology = aligned_clim_data[fstep] if aligned_clim_data else None
             tars_r, preds_r, tars_next_r, preds_next_r = [
                 bbox.apply_mask(x) if x is not None else None
@@ -312,6 +313,7 @@ def _dispatch_animations(
     variables: list[str],
     select: dict,
     tag: str,
+    max_workers: int | None = None,
 ) -> list[str]:
     """Build GIF animations in parallel for all (region, sample, variable) combinations.
 
@@ -355,7 +357,10 @@ def _dispatch_animations(
         for t in tqdm(tasks, desc=f"Creating animations {plotter.stream} {tag}")
     ]
     results = dispatch_parallel(
-        calls, n_workers=resolve_num_workers(), backend="threading", desc="Animations"
+        calls,
+        n_workers=get_num_workers(max_workers=max_workers),
+        backend="threading",
+        desc="Animations",
     )
     return [p for r in results if r for p in r]
 
@@ -542,8 +547,9 @@ def plot_data(
     bias_config_dict = oc.OmegaConf.to_container(bias_config, resolve=True)
     output_basedir = str(reader.runplot_dir)
 
-    num_plot_workers = resolve_num_workers(
-        int(reader.eval_cfg.get("num_plot_workers", 0)), check_process_headroom=True
+    num_plot_workers = get_num_workers(
+        check_process_headroom=True,
+        max_workers=reader.eval_cfg.get("max_workers", None),
     )
 
     tasks: list[dict] = []
@@ -622,18 +628,37 @@ def plot_data(
             "stream": stream,
             "forecast_step": last_fstep,
         }
+        max_wk = reader.eval_cfg.get("max_workers", None)
         for ens in available_data.ensemble:
             preds_name = "preds" if "ens" not in last_preds.dims else f"preds_ens_{ens}"
             _dispatch_animations(
-                plotter, plot_samples, plot_fsteps, plot_chs, data_selection, preds_name
+                plotter,
+                plot_samples,
+                plot_fsteps,
+                plot_chs,
+                data_selection,
+                preds_name,
+                max_workers=max_wk,
             )
         if plot_target:
             _dispatch_animations(
-                plotter, plot_samples, plot_fsteps, plot_chs, data_selection, "targets"
+                plotter,
+                plot_samples,
+                plot_fsteps,
+                plot_chs,
+                data_selection,
+                "targets",
+                max_workers=max_wk,
             )
         if plot_bias:
             _dispatch_animations(
-                plotter, plot_samples, plot_fsteps, plot_chs, data_selection, "bias"
+                plotter,
+                plot_samples,
+                plot_fsteps,
+                plot_chs,
+                data_selection,
+                "bias",
+                max_workers=max_wk,
             )
 
 

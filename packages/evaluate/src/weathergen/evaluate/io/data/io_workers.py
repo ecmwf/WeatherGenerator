@@ -9,7 +9,7 @@
 
 """Module-level loky worker functions and direct zarr I/O helpers.
 
-These are module-level (not class-bound) so they are picklable and can be
+These are module-level (not class-bound) so they are pickable and can be
 dispatched to loky / ProcessPoolExecutor workers.
 """
 
