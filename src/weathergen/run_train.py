@@ -106,7 +106,6 @@ def run_inference(args):
 
     logger.info(f"DDP initialization: rank={runstate.rank}, world_size={runstate.world_size}")
 
-    cf.general.run_history += [(args.from_run_id, cf.general.istep)]
     runstate.run_history += [(args.from_run_id, runstate.istep)]
 
     trainer = Trainer(cf.train_logging)
@@ -148,7 +147,6 @@ def run_continue(args):
     init_loggers(cf.general.run_id)
 
     # track history of run to ensure traceability of results
-    cf.general.run_history += [(args.from_run_id, cf.general.istep)]
     runstate.run_history += [(args.from_run_id, runstate.istep)]
 
     trainer = Trainer(cf.train_logging)

@@ -230,9 +230,8 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
         if is_root():
-            config.save(self.cf, mini_epoch=0)
+            rs.save_runstate(self.runstate, self.cf, mini_epoch=0)
 
-        rs.save_runstate(self.runstate, self.cf)
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -340,12 +339,12 @@ class Trainer(TrainerBase):
             self.optimizer,
             self.batch_size_per_gpu,
             self.runstate.world_size,
-            cf.general.istep,
+            self.runstate.istep,
             lr_steps,
             self.training_cfg.learning_rate_scheduling,
         )
 
-        if self.cf.general.istep > 0 and is_root():
+        if self.runstate.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
             if is_root():
                 logger.info(str)
@@ -357,13 +356,13 @@ class Trainer(TrainerBase):
 
         # recover mini_epoch when continuing run
         if self.world_size_original is None:
-            mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
+            mini_epoch_base = int(self.runstate.istep / len(self.data_loader))
         else:
             len_per_rank = (
                 len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu)
             ) * self.batch_size_per_gpu
             mini_epoch_base = int(
-                self.cf.general.istep
+                self.runstate.istep
                 / (
                     min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
                     * self.world_size_original
@@ -372,9 +371,9 @@ class Trainer(TrainerBase):
 
         if is_root():
             config.save(self.cf, None)
+            rs.save_runstate(self.runstate, self.cf, None)
             logger.info(config.format_cf(self.cf))
 
-        rs.save_runstate(self.runstate, self.cf, None)
 
         # run validation before training if requested
         self.validate_before_training()
@@ -394,7 +393,6 @@ class Trainer(TrainerBase):
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
             )
             self.save_model(mini_epoch)
-            rs.save_runstate(self.runstate, self.cf, mini_epoch)
 
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
@@ -459,7 +457,7 @@ class Trainer(TrainerBase):
                     target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
                     # apply target-aux calculator
                     targets_and_auxs[loss_name] = target_aux.compute(
-                        self.cf.general.istep,
+                        self.runstate.istep,
                         batch.get_target_samples(target_idxs),
                         self.model_params,
                         self.model,
@@ -478,11 +476,11 @@ class Trainer(TrainerBase):
             #     loss_values.loss += cf.latent_noise_kl_weight * kl.mean()
 
             [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                target_aux.update_state_pre_backward(self.runstate.istep, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators.items()
             ]
             [
-                target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
+                target_aux.update_state_pre_backward(self.runstate.istep, batch, self.model)
                 for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
 
@@ -511,7 +509,7 @@ class Trainer(TrainerBase):
             self.lr_scheduler.step()
 
             batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
-            step = batch_size_total * self.cf.general.istep
+            step = batch_size_total * self.runstate.istep
 
             [
                 target_aux.update_state_post_opt_step(step, batch, self.model)
@@ -524,13 +522,12 @@ class Trainer(TrainerBase):
 
             # EMA update
             if self.validate_with_ema:
-                self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
+                self.ema_model.update(step, batch_size_total)
 
             # Compute collapse monitoring metrics
-            if self.collapse_monitor.should_compute(self.cf.general.istep):
+            if self.collapse_monitor.should_compute(self.runstate.istep):
                 self.collapse_monitor._compute_collapse_metrics(
-                    self.cf,
-                    batch_size_total,
+                    step,
                     self.target_and_aux_calculators,
                     preds,
                     targets_and_auxs,
@@ -540,14 +537,13 @@ class Trainer(TrainerBase):
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log collapse metrics
-                if self.collapse_monitor.should_log(self.cf.general.istep):
+                if self.collapse_monitor.should_log(self.runstate.istep):
                     self._log_collapse_metrics(TRAIN)
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
 
-            self.cf.general.istep += 1
             self.runstate.istep += 1
 
         self.dataset.advance()
@@ -597,7 +593,7 @@ class Trainer(TrainerBase):
                         for loss_name, target_aux in self.target_and_aux_calculators_val.items():
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
-                                self.cf.general.istep,
+                                self.runstate.istep,
                                 batch.get_target_samples(target_idxs),
                                 self.model_params,
                                 self.model,
@@ -712,8 +708,8 @@ class Trainer(TrainerBase):
             if is_root():
                 logger.info(f"Saved model to {file_out}")
 
-            # save config
-            config.save(self.cf, mini_epoch)
+            # save runstate
+            rs.save_runstate(self.runstate, self.cf, mini_epoch)
 
     def _log(self, stage: Stage):
         """
@@ -734,14 +730,14 @@ class Trainer(TrainerBase):
             loss_calculator.stddev_unweighted_hist,
         )
 
-        samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
+        samples = self.runstate.istep * self.get_batch_size_total(self.batch_size_per_gpu)
 
         if is_root():
             # plain logger
             if stage == VAL:
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
-            elif self.cf.general.istep >= 0:
+            elif self.runstate.istep >= 0:
                 self.train_logger.add_logs(
                     stage,
                     samples,
@@ -799,7 +795,7 @@ class Trainer(TrainerBase):
                     len_dataset = len(self.data_loader) // self.batch_size_per_gpu
                     pstr = (
                         f"{mini_epoch:03d} : {bidx:05d}/{len_dataset:05d} : "
-                        + f"{self.cf.general.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
+                        + f"{self.runstate.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
                     if self.log_grad_norms:
@@ -823,5 +819,5 @@ class Trainer(TrainerBase):
         """
         metrics = self.collapse_monitor.get_cached_metrics()
         if metrics and is_root():
-            metrics["num_samples"] = self.cf.general.istep
+            metrics["num_samples"] = self.runstate.istep
             self.train_logger.log_metrics(stage, metrics)

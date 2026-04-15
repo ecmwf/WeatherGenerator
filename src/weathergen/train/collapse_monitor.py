@@ -607,7 +607,7 @@ class CollapseMonitor:
         return normalized_entropy.item()
 
     def _compute_collapse_metrics(
-        self, cf, batch_size, target_and_aux_calculators, preds, targets_and_auxs
+        self, step, target_and_aux_calculators, preds, targets_and_auxs
     ) -> None:
         """
         Extract latent tensors from predictions and targets, then compute collapse metrics.
@@ -702,7 +702,6 @@ class CollapseMonitor:
         # Get EMA beta from target_and_aux_calculators
         for _calc_name, calculator in target_and_aux_calculators.items():
             if isinstance(calculator, EMATeacher):
-                step = batch_size * cf.general.istep
                 ema_beta = calculator.get_current_beta(step)
                 break
 

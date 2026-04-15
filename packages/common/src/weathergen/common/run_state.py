@@ -35,17 +35,30 @@ def init_runstate() -> RunState:
     return runstate
 
 
-def save_runstate(runstate: RunState, config: Config, mini_epoch: int):
+def _get_runstate_file_write_name(run_id: str, mini_epoch: int | None):
+    """Generate the filename for writing a model config file."""
+    if mini_epoch is None:
+        mini_epoch_str = ""
+    elif mini_epoch == -1:
+        mini_epoch_str = "_latest"
+    else:
+        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+
+    return f"runstate_{run_id}{mini_epoch_str}.json"
+
+
+def save_runstate(runstate: RunState, config: Config, mini_epoch: int | None):
 
     import json
     from weathergen.utils.distributed import is_root
 
-    if is_root():
-        dirname = get_path_model(config)
-        dirname.mkdir(exist_ok=True, parents=True)
+    dirname = get_path_model(config)
+    dirname.mkdir(exist_ok=True, parents=True)
 
-        json_str = json.dumps(OmegaConf.to_container(runstate)) + '\n'
+    fname = _get_runstate_file_write_name(config.general.run_id, mini_epoch)
 
-        with (dirname/f"wololo_{mini_epoch}.json").open("w") as f:
-            f.write(json_str)
+    json_str = json.dumps(OmegaConf.to_container(runstate)) + '\n'
+
+    with (dirname/f"{fname}").open("w") as f:
+        f.write(json_str)
 
