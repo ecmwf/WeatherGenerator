@@ -82,12 +82,12 @@ class ThroughputTracker:
                        fresh each step via ``compute_source_bytes`` as batch sizes
                        can vary across samples.
         """
-        torch.cuda.synchronize()
         if not self._warmup_done:
             if istep >= self._warmup_steps - 1:
                 self._t0 = time.time()
                 self._warmup_done = True
         else:
+            torch.cuda.synchronize()
             self._total_batches += 1
             self._total_samples += batch_size_per_gpu
             self._total_mb += source_mb

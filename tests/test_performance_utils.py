@@ -75,14 +75,14 @@ def _make_mock_batch(source_samples):
 
 def test_compute_source_bytes_single_stream():
     # 1 sample, 1 stream, 1 tensor shape (4, 8) float32 → 4×8×4 = 128 bytes
-    source = _make_mock_source_samples([[[(4, 8)]]])
+    source = _make_mock_source_samples([[(4, 8)]])
     assert compute_source_bytes(source) == 128
 
 
 def test_compute_source_bytes_multiple_samples_and_streams():
     # 2 samples × 2 streams × 1 tensor (2, 4) float32 = 2×2×1×2×4×4 = 128 bytes
-    shapes = [[(2, 4)], [(2, 4)]]  # 2 streams per sample
-    source = _make_mock_source_samples([shapes, shapes])
+    shapes = [(2, 4), (2, 4)]  # 2 streams per sample
+    source = _make_mock_source_samples([shapes, shapes])  # 2 samples
     assert compute_source_bytes(source) == 128
 
 
@@ -99,7 +99,7 @@ def test_compute_source_bytes_empty():
 @pytest.fixture()
 def tracker():
     """A tracker with warmup_steps=2 on CPU."""
-    return ThroughputTracker(device=torch.device("cpu"), world_size=1, warmup_steps=2)
+    return ThroughputTracker(device=torch.device("cpu"), warmup_steps=2)
 
 
 def test_no_metrics_before_warmup(tracker):
@@ -149,7 +149,7 @@ def test_accumulates_batches_and_samples(tracker):
 
 def test_warmup_steps_not_counted():
     """Steps during warmup do not contribute to totals."""
-    tracker = ThroughputTracker(device=torch.device("cpu"), world_size=1, warmup_steps=3)
+    tracker = ThroughputTracker(device=torch.device("cpu"), warmup_steps=3)
     for istep in range(3):
         tracker.update(batch_size_per_gpu=4, istep=istep, source_mb=1.0)
 
@@ -173,7 +173,7 @@ def test_throughput_values_positive(tracker):
 
 def test_step_calls_log_fn_on_root(tracker):
     """step() invokes log_fn with metrics on the root rank after warmup."""
-    source = _make_mock_source_samples([[[(2, 2)]]])
+    source = _make_mock_source_samples([[(2, 2)]])
     batch = _make_mock_batch(source)
 
     logged = {}
@@ -194,7 +194,7 @@ def test_step_calls_log_fn_on_root(tracker):
 
 def test_step_does_not_log_on_non_root(tracker):
     """step() does not invoke log_fn on non-root ranks."""
-    source = _make_mock_source_samples([[[(2, 2)]]])
+    source = _make_mock_source_samples([[(2, 2)]])
     batch = _make_mock_batch(source)
 
     logged = {}
