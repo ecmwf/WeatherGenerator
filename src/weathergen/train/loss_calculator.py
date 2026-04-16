@@ -83,6 +83,7 @@ class LossCalculator:
         preds: ModelOutput,
         targets_and_aux: TargetAuxOutput,
         metadata: dict,
+        istep: int = 0,
     ):
         losses_all = defaultdict(dict)
         stddev_all = defaultdict(dict)
@@ -90,14 +91,14 @@ class LossCalculator:
         for loss_term_name, calc_term in self.loss_calculators.items():
             target = targets_and_aux[loss_term_name]
             for weight, calculator in calc_term:
-                loss_values = calculator.compute_loss(
-                    preds=preds, targets=target, metadata=metadata
-                )
                 if weight > 0.0:
+                    loss_values = calculator.compute_loss(
+                        preds=preds, targets=target, metadata=metadata, istep=istep
+                    )
                     loss = loss + weight * loss_values.loss
-                losses_all[calculator.name] = loss_values.losses_all
-                losses_all[calculator.name]["loss_avg"] = loss_values.loss
-                stddev_all[calculator.name] = loss_values.stddev_all
+                    losses_all[calculator.name] = loss_values.losses_all
+                    losses_all[calculator.name]["loss_avg"] = loss_values.loss
+                    stddev_all[calculator.name] = loss_values.stddev_all
 
         # Keep histories for logging
         self.loss_hist += [loss.detach()]

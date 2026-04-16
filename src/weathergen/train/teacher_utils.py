@@ -72,6 +72,10 @@ def prepare_encoder_teacher(model: nn.Module, training_cfg, override_cfg) -> Non
     model.target_token_engines = nn.ModuleDict()
     model.pred_heads = nn.ModuleDict()
 
+    # Strip deep SSL fusion (teacher uses independent per-level prediction, not fusion)
+    model.deep_ssl_fusion = None
+    model.deep_ssl_level_projections = None
+
     # Ensure latent_pre_norm exists (teacher may not have had SSL training)
     if model.latent_pre_norm is None:
         model.latent_pre_norm = nn.LayerNorm(teacher_dim_embed)

@@ -68,7 +68,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         # TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():
             self.encoder.encoder.eval()  # NOTE: might be redundant
-            tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
+            tokens, _, _ = self.encoder.encoder(model_params=model_params, batch=batch)
         # NOTE: must not set to train afterwards unless it was already in train
 
         output_idxs = batch.get_output_idxs()

@@ -24,7 +24,7 @@ ERA5 :
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 4
+    num_heads : 8
     dim_embed : 256
     num_blocks : 2
   embed_target_coords :

@@ -89,7 +89,7 @@ class WeatherGenReader(Reader):
             _logger.info(
                 f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
             )
-            config = load_merge_configs(self.private_paths, self.run_id, self.mini_epoch)
+            config = load_merge_configs(self.private_paths, self.run_id, None, self.mini_epoch)
         else:
             _logger.info(
                 f"Loading config for run {self.run_id} from model directory: {self.model_base_dir}"
