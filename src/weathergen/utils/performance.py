@@ -31,9 +31,11 @@ class ThroughputTracker:
         self,
         device: torch.device,
         warmup_steps: int,
+        batch_size_per_gpu: int,
     ) -> None:
         self._device = device
         self._warmup_steps = warmup_steps
+        self.batch_size_per_gpu = batch_size_per_gpu
         self._t0: float | None = None
         self._warmup_done: bool = False
         self._total_batches: int = 0
@@ -47,7 +49,6 @@ class ThroughputTracker:
     def step(
         self,
         batch,
-        batch_size_per_gpu: int,
         istep: int,
         log_fn: Callable[[dict[str, float]], None] | None = None,
     ) -> None:
@@ -65,14 +66,14 @@ class ThroughputTracker:
                     complete. Typically ``lambda m: logger.log_metrics(stage, m, step=istep)``.
         """
         source_mb = compute_source_bytes(batch.get_source_samples()) / 1e6
-        self.update(batch_size_per_gpu, istep, source_mb)
+        self.update(istep, source_mb)
         self._sync()  # collective: all ranks must participate
         if log_fn is not None and is_root():
             metrics = self.compute_metrics()
             if metrics is not None:
                 log_fn(metrics)
 
-    def update(self, batch_size_per_gpu: int, istep: int, source_mb: float) -> None:
+    def update(self, istep: int, source_mb: float) -> None:
         """Record one training step, handling warmup internally.
 
         Args:
@@ -89,7 +90,7 @@ class ThroughputTracker:
         else:
             torch.cuda.synchronize()
             self._total_batches += 1
-            self._total_samples += batch_size_per_gpu
+            self._total_samples += self.batch_size_per_gpu
             self._total_mb += source_mb
 
     def _sync(self) -> None:
@@ -163,7 +164,7 @@ class NullThroughputTracker:
     training loop need no ``if`` guards.
     """
 
-    def step(self, batch, batch_size_per_gpu: int, istep: int, log_fn=None) -> None:
+    def step(self, batch, istep: int, log_fn=None) -> None:
         pass
 
 

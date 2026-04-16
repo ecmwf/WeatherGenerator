@@ -99,19 +99,19 @@ def test_compute_source_bytes_empty():
 @pytest.fixture()
 def tracker():
     """A tracker with warmup_steps=2 on CPU."""
-    return ThroughputTracker(device=torch.device("cpu"), warmup_steps=2)
+    return ThroughputTracker(device=torch.device("cpu"), warmup_steps=2, batch_size_per_gpu=4)
 
 
 def test_no_metrics_before_warmup(tracker):
     """compute_metrics returns None during the warmup phase."""
-    tracker.update(batch_size_per_gpu=4, istep=0, source_mb=1.0)
+    tracker.update(istep=0, source_mb=1.0)
     assert tracker.compute_metrics() is None
 
 
 def test_metrics_available_after_warmup(tracker):
     """After warmup_steps, metrics become available."""
-    tracker.update(batch_size_per_gpu=4, istep=1, source_mb=1.0)
-    tracker.update(batch_size_per_gpu=4, istep=2, source_mb=1.0)
+    tracker.update(istep=1, source_mb=1.0)
+    tracker.update(istep=2, source_mb=1.0)
     tracker._sync()
     metrics = tracker.compute_metrics()
     assert metrics is not None
@@ -119,8 +119,8 @@ def test_metrics_available_after_warmup(tracker):
 
 def test_metrics_keys(tracker):
     """All expected metric keys are present."""
-    tracker.update(batch_size_per_gpu=4, istep=1, source_mb=1.0)
-    tracker.update(batch_size_per_gpu=4, istep=2, source_mb=2.0)
+    tracker.update(istep=1, source_mb=1.0)
+    tracker.update(istep=2, source_mb=2.0)
     tracker._sync()
     metrics = tracker.compute_metrics()
 
@@ -138,9 +138,9 @@ def test_metrics_keys(tracker):
 
 def test_accumulates_batches_and_samples(tracker):
     """Counters accumulate correctly after warmup."""
-    tracker.update(batch_size_per_gpu=4, istep=1, source_mb=0.5)
-    tracker.update(batch_size_per_gpu=4, istep=2, source_mb=1.0)
-    tracker.update(batch_size_per_gpu=4, istep=3, source_mb=1.5)
+    tracker.update(istep=1, source_mb=0.5)
+    tracker.update(istep=2, source_mb=1.0)
+    tracker.update(istep=3, source_mb=1.5)
 
     assert tracker._total_batches == 2
     assert tracker._total_samples == 8
@@ -149,9 +149,9 @@ def test_accumulates_batches_and_samples(tracker):
 
 def test_warmup_steps_not_counted():
     """Steps during warmup do not contribute to totals."""
-    tracker = ThroughputTracker(device=torch.device("cpu"), warmup_steps=3)
+    tracker = ThroughputTracker(device=torch.device("cpu"), warmup_steps=3, batch_size_per_gpu=4)
     for istep in range(3):
-        tracker.update(batch_size_per_gpu=4, istep=istep, source_mb=1.0)
+        tracker.update(istep=istep, source_mb=1.0)
 
     assert tracker._total_batches == 0
     assert tracker._total_samples == 0
@@ -159,9 +159,9 @@ def test_warmup_steps_not_counted():
 
 def test_throughput_values_positive(tracker):
     """Throughput values are positive after real steps elapse."""
-    tracker.update(batch_size_per_gpu=4, istep=1, source_mb=1.0)
+    tracker.update(istep=1, source_mb=1.0)
     tracker._t0 = time.time() - 0.1
-    tracker.update(batch_size_per_gpu=4, istep=2, source_mb=1.0)
+    tracker.update(istep=2, source_mb=1.0)
     tracker._sync()
     metrics = tracker.compute_metrics()
 

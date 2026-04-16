@@ -165,6 +165,7 @@ class Trainer(TrainerBase):
             self.perf_tracker = ThroughputTracker(
                 device=torch.device(self.devices[0]),
                 warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
+                batch_size_per_gpu=self.batch_size_per_gpu,
             )
 
     def get_target_aux_calculators(self, mode_cfg):
@@ -527,7 +528,6 @@ class Trainer(TrainerBase):
 
             self.perf_tracker.step(
                 batch,
-                self.batch_size_per_gpu,
                 self.cf.general.istep,
                 log_fn=lambda m: self.train_logger.log_metrics(
                     TRAIN, m, step=self.cf.general.istep
