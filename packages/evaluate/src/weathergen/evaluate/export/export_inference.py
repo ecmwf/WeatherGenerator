@@ -275,7 +275,8 @@ def export_from_args(args: list) -> None:
     for dtype in args.type:
         _logger.info(
             f"Starting processing {dtype} for run ID {kwargs['run_id']}. "
-            f"Detected {kwargs['samples']} samples and {kwargs['fsteps']} forecast steps."
+            f"Processing {kwargs['samples'] if kwargs['samples'] is not None else 'all'} samples \
+and {kwargs['fsteps'] if kwargs['fsteps'] is not None else 'all'} forecast steps."
         )
 
         export_model_outputs(dtype, config, **kwargs)
