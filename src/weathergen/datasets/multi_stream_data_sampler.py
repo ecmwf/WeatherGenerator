@@ -283,6 +283,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             + self.tokenizer.get_size_time_embedding()
             for _, ds in self.streams_datasets.items()
         ]
+    def get_condition_num_channels(self):
+        return sum([ds[0].num_channels for _, ds in self.condition_datasets.items()])
 
     def get_sources_num_channels(self):
         return [ds[0].get_source_num_channels() for _, ds in self.streams_datasets.items()]
@@ -561,7 +563,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
 
         for i in range(num_output_steps):    
-            batch.conditions[i] += self._get_condition(
+            batch.conditions[i] += self.get_condition(
                 condition_ds, base_idx + (self.time_step * i) // self.step_timedelta)
     
 

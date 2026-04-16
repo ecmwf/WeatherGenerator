@@ -297,6 +297,7 @@ class ModelBatch:
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
         self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+        self.conditions = [[] for i in range(output_steps)]
 
     def pin_memory(self):
         """Pin all tensors in this batch to CPU pinned memory"""
