@@ -177,7 +177,7 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
 
 
 ####################################################################################################
-def _adjust_reset_x_axis(x_vals, x_col: str) -> np.NDarray:
+def _adjust_reset_x_axis(x_vals, x_col: str):
     """
     Keep sample-based x-axes monotonic when chained jobs append metrics with a reset counter.
     """
