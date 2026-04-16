@@ -10,6 +10,7 @@
 embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
+qk_norm_type: True
 
 ae_local_dim_embed: 2048
 ae_local_num_blocks: 0

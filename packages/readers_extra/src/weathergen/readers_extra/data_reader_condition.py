@@ -49,12 +49,19 @@ class DataReaderCondition(DataReaderTimestep):
         -------
         None
         """
+        self.source_idx = []
+        self.source_channels = []
+        self.target_channels = []
+        self.geoinfo_channels = []
+        self.target_idx = []
+        self.geoinfo_idx = []
+        self.target_channel_weights = []
 
         self.transform: str = stream_info.get("transform", "absolute")
         self.variables: list[str] = list(
             stream_info.get("variables", ["start_day", "start_time", "end_day", "end_time"])
         )
-        self._num_channels: int = self._compute_num_channels(stream_info)
+        self.num_channels: int = self._compute_num_channels(stream_info)
         self.source_idx = []
 
         super().__init__(

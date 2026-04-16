@@ -51,7 +51,7 @@ class EmbeddingEngine(torch.nn.Module):
         self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
 
         for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
-            if si.get("diagnostic", False) or self.sources_size[i] == 0:
+            if si.get("diagnostic", False) or self.sources_size[i] == 0 :
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
 
