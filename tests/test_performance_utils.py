@@ -181,13 +181,13 @@ def test_step_calls_log_fn_on_root(tracker):
     def log_fn(m):
         logged.update(m)
 
-    tracker.step(batch, batch_size_per_gpu=4, istep=1, log_fn=log_fn)
+    tracker.step(batch, istep=1, log_fn=log_fn)
     assert logged == {}
 
     tracker._t0 = time.time() - 0.1
 
     with patch("weathergen.utils.performance.is_root", return_value=True):
-        tracker.step(batch, batch_size_per_gpu=4, istep=2, log_fn=log_fn)
+        tracker.step(batch, istep=2, log_fn=log_fn)
 
     assert "performance.throughput.device.batches_per_sec" in logged
 
@@ -199,10 +199,10 @@ def test_step_does_not_log_on_non_root(tracker):
 
     logged = {}
 
-    tracker.step(batch, batch_size_per_gpu=4, istep=1, log_fn=lambda m: logged.update(m))
+    tracker.step(batch, istep=1, log_fn=lambda m: logged.update(m))
     tracker._t0 = time.time() - 0.1
 
     with patch("weathergen.utils.performance.is_root", return_value=False):
-        tracker.step(batch, batch_size_per_gpu=4, istep=2, log_fn=lambda m: logged.update(m))
+        tracker.step(batch, istep=2, log_fn=lambda m: logged.update(m))
 
     assert logged == {}
