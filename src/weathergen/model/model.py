@@ -293,7 +293,7 @@ class Model(torch.nn.Module):
         coordinates to its physical space.
     """
 
-    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
+    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size, condition_num_channels) -> None:
         """
         Args:
             cf : Configuration with model parameters
@@ -313,7 +313,7 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
-
+        self.aux_info = condition_num_channels
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
@@ -372,7 +372,9 @@ class Model(torch.nn.Module):
         mode_cfg = cf.training_config
         self.forecast_engine = None
         if cf.fe_num_blocks > 0:
-            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            self.forecast_engine = ForecastingEngine(
+                cf, mode_cfg, self.num_healpix_cells, self.aux_info if self.aux_info > 0 else None
+            )
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
