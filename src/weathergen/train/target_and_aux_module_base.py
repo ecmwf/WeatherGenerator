@@ -116,7 +116,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                     target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[step]]
                     idxs_inv += [sample.streams_data[stream_name].idxs_inv[step]]
                     meta_data += [sample.meta_info]
-                    is_spoof += [sample.streams_data[stream_name].is_spoof()]
+                    is_spoof += [sample.streams_data[stream_name].is_spoof(step)]
 
                 targets_step = {
                     "target": targets_cur,
