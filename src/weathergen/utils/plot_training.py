@@ -814,13 +814,6 @@ def plot_train(args=None):
         help="Use log scale for the x-axis (produces log-log plots)",
     )
 
-    parser.add_argument(
-        "--legend-outside",
-        default=False,
-        action="store_true",
-        help="Place legend outside the plot (to the right) with reduced font size",
-    )
-
     run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
         "-fd",
@@ -913,7 +906,7 @@ def plot_train(args=None):
     legend_outside = args.legend_outside
 
     # plot learning rate
-    plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir, legend_outside=args.legend_outside)
+    plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir, legend_outside=legend_outside)
 
     # plot average loss
     plot_loss_avg(
@@ -922,7 +915,7 @@ def plot_train(args=None):
         runs_data,
         runs_active,
         stage=TRAIN,
-        legend_outside=args.legend_outside,
+        legend_outside=legend_outside,
     )
 
     # compare different runs
@@ -939,9 +932,8 @@ def plot_train(args=None):
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
-        legend_outside=args.legend_outside,
-        plot_dir=out_dir,
         legend_outside=legend_outside,
+        plot_dir=out_dir
     )
     plot_loss_per_stream(
         ["val"],
@@ -956,9 +948,8 @@ def plot_train(args=None):
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
-        legend_outside=args.legend_outside,
-        plot_dir=out_dir,
         legend_outside=legend_outside,
+        plot_dir=out_dir
     )
     plot_loss_per_stream(
         ["train"],
@@ -973,8 +964,6 @@ def plot_train(args=None):
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
-        legend_outside=args.legend_outside,
-        plot_dir=out_dir,
         legend_outside=legend_outside,
     )
 
@@ -993,7 +982,7 @@ def plot_train(args=None):
             stream_names,
             channels=args.channels,
             plot_dir=out_dir,
-            legend_outside=args.legend_outside,
+            legend_outside=legend_outside,
         )
     plot_loss_per_run(
         ["val"],
@@ -1003,7 +992,7 @@ def plot_train(args=None):
         get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
         channels=args.channels,
         plot_dir=out_dir,
-        legend_outside=args.legend_outside,
+        legend_outside=legend_outside,
     )
 
 

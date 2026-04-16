@@ -34,7 +34,7 @@ ae_global_with_qk_lnorm: True
 # See https://github.com/ecmwf/WeatherGenerator/issues/1050
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
-ae_global_mlp_hidden_factor: 4
+ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
 ae_aggregation_num_blocks: 5
@@ -70,7 +70,8 @@ frequency_embedding_dim: 256
 embedding_dim: 512
 sigma_min: 0.002
 sigma_max: 80
-sigma_data: 2.1921
+# sigma_data: 2.1921
+sigma_data: 3.2621
 rho: 7
 p_mean: -1.2
 p_std: 1.2
@@ -115,7 +116,8 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5 enc-lnorm, sigma_data=1.0
 # load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
 # load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
-load_chkpt: {'run_id': 'c9bgfa31-pretrain', 'epoch': -1}  # JEPAv2, sigma_data=2.1921
+# load_chkpt: {'run_id': 'c9bgfa31-pretrain', 'epoch': -1}  # JEPAv2, sophie's model, sigma_data=2.1921
+load_chkpt: {'run_id': 'op8wojf6-stage1', 'epoch': 64}  # JEPAv2, seb's temporal model, sigma_data=3.2621
 
 
 norm_type: "LayerNorm"
@@ -188,7 +190,7 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6 #5e-5
-    lr_max: 1e-5 #1e-4
+    lr_max: 7e-6 #1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 64
