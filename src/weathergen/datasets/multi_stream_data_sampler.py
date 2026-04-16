@@ -563,8 +563,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
 
         for i in range(num_output_steps):    
-            batch.conditions[i] += self.get_condition(
-                condition_ds, base_idx + (self.time_step * i) // self.step_timedelta)
+            
+            condition_data = condition_ds.get_condition(
+                    base_idx + (self.time_step * i) // self.step_timedelta)
+            batch.get_source_samples().conditions[i] += condition_ds.get_condition(
+                 base_idx + (self.time_step * i) // self.step_timedelta)
     
 
     def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):

@@ -56,6 +56,7 @@ class DataReaderCondition(DataReaderTimestep):
         self.target_idx = []
         self.geoinfo_idx = []
         self.target_channel_weights = []
+        self.condition_idx = []
 
         self.transform: str = stream_info.get("transform", "absolute")
         self.variables: list[str] = list(
@@ -143,7 +144,7 @@ class DataReaderCondition(DataReaderTimestep):
             elif var == "end_time":  # noqa: PLR200
                 values.append(_hour_of_day(dtr.end))
 
-        return np.array(values, dtype=np.float32)
+        return  values
 
 
 def _day_of_year(dt: np.datetime64) -> float:

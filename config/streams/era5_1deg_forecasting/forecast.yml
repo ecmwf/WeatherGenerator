@@ -13,5 +13,6 @@ Forecast_conditions :
   variables : ['start_day', 'start_time', 'end_day', 'end_time']
   transform : "absolute"  # absolute, cos_sin, fourier
   entry_point : "forecast_engine"
-  diagnostic: True  
+  forcing: True  
+  diagnostic: True
   emb_dimension : None 
