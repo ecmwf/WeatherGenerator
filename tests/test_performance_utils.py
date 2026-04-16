@@ -50,8 +50,8 @@ def _make_mock_source_samples(tensor_shapes: list[list[tuple]]):
     class Sample:
         def __init__(self, tensor_shapes_per_stream):
             self.streams_data = {
-                f"stream_{i}": StreamData([torch.zeros(shape) for shape in shapes])
-                for i, shapes in enumerate(tensor_shapes_per_stream)
+                f"stream_{i}": StreamData([torch.zeros(shape)])
+                for i, shape in enumerate(tensor_shapes_per_stream)
             }
 
     class SourceSamples:
