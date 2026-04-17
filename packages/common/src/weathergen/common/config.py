@@ -82,10 +82,10 @@ OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
 OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
-def _patch_time(key, sub_conf, time_key):
+def _patch_time(key, sub_conf, resolver):
     raw_key = f"_{key}"
-    sub_conf[raw_key] = f"${{{key}}}"
-    sub_conf[key] = f"${{{time_key}:{sub_conf[key]}}}"
+    sub_conf[raw_key] = sub_conf[key]
+    sub_conf[key] = f"${{{resolver}:{sub_conf[key]}}}"
     return sub_conf
 
 
