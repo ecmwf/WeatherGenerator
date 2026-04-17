@@ -169,7 +169,7 @@ accomodate any number of samples or forecast steps"
 samples_per_mini_epoch reduced to {available_samples} to avoid repeating data. \
 Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
-                self.samples_per_mini_epoch = available_samples - 1
+                self.samples_per_mini_epoch = max(available_samples - 1, 1)
             else:
                 logger.info("Sufficient available samples in the time range specified")
         else:
