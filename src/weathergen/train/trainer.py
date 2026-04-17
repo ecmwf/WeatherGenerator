@@ -19,20 +19,21 @@ import tqdm
 from omegaconf import OmegaConf
 
 # FSDP2
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
-    get_target_aux_calculator,
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
@@ -167,8 +168,6 @@ class Trainer(TrainerBase):
         batch_size = get_batch_size_from_config(mode_cfg)
 
         # get target_aux calculators for different loss terms
-        # del self.cf.training_config.losses["student-teacher"]["loss_fcts"]["JEPA"]
-        # del mode_cfg.losses["student-teacher"]["loss_fcts"]["JEPA"]
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
@@ -299,6 +298,10 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
 
+        # Restore EMA teacher weights when continuing from a checkpoint
+        if run_id_contd is not None:
+            self._load_ema_teacher_state(run_id_contd, mini_epoch_contd)
+
         # if with_fsdp then parameter count is unreliable
         if is_root():
             # ddp-wrapped model does not expose this function
@@ -338,6 +341,10 @@ class Trainer(TrainerBase):
             lr_steps,
             self.training_cfg.learning_rate_scheduling,
         )
+
+        # Restore optimizer momentum buffers when continuing from a checkpoint
+        if run_id_contd is not None:
+            self._load_optimizer_state(run_id_contd, mini_epoch_contd)
 
         if self.cf.general.istep > 0 and is_root():
             str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
@@ -683,7 +690,9 @@ class Trainer(TrainerBase):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
         max_mini_epoch = self.training_cfg.num_mini_epochs
         assert mini_epoch <= max_mini_epoch, (mini_epoch, max_mini_epoch)
+        # Gather full state dicts (collective ops for FSDP — all ranks must participate)
         model_state_dict = self._get_full_model_state_dict()
+        optim_state_dict = self._get_full_optimizer_state_dict()
 
         if is_root():
             filename = "".join(
@@ -701,11 +710,139 @@ class Trainer(TrainerBase):
             torch.save(model_state_dict, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
-            if is_root():
-                logger.info(f"Saved model to {file_out}")
+            logger.info(f"Saved model to {file_out}")
+
+            # save optimizer state keyed by parameter name for robust resumption
+            param_names = [n for n, _ in self.model.named_parameters()]
+            named_optim_state = {}
+            for idx, pname in enumerate(param_names):
+                if idx in optim_state_dict["state"]:
+                    named_optim_state[pname] = optim_state_dict["state"][idx]
+            if named_optim_state:
+                optim_out = base_path / (filename + ".optim")
+                optim_tmp = base_path / (filename + "_tmp.optim")
+                torch.save(named_optim_state, optim_tmp)
+                optim_tmp.replace(optim_out)
+                logger.info(f"Saved optimizer state to {optim_out}")
+
+            # save EMA teacher state (weights + centering buffers) if present
+            ema_teacher = self._get_ema_teacher()
+            if ema_teacher is not None:
+                ema_state = {
+                    "ema_model": ema_teacher.ema_model.ema_model.state_dict(),
+                    "postprocess_targets": {
+                        name: module.state_dict()
+                        for name, module in ema_teacher.postprocess_targets.items()
+                    },
+                }
+                ema_out = base_path / (filename + ".ema_teacher")
+                ema_tmp = base_path / (filename + "_tmp.ema_teacher")
+                torch.save(ema_state, ema_tmp)
+                ema_tmp.replace(ema_out)
+                logger.info(f"Saved EMA teacher state to {ema_out}")
 
             # save config
             config.save(self.cf, mini_epoch)
+
+    def _get_ema_teacher(self) -> EMATeacher | None:
+        """Return the training EMATeacher calculator if one exists, else None."""
+        if self.target_and_aux_calculators is None:
+            return None
+        for calc in self.target_and_aux_calculators.values():
+            if isinstance(calc, EMATeacher):
+                return calc
+        return None
+
+    @staticmethod
+    def _get_ema_teachers_from(calculators) -> list[EMATeacher]:
+        """Return all EMATeacher instances in *calculators*."""
+        if calculators is None:
+            return []
+        return [c for c in calculators.values() if isinstance(c, EMATeacher)]
+
+    def _load_ema_teacher_state(self, run_id: str, mini_epoch):
+        """Load EMA teacher weights into both training and validation teachers."""
+        all_teachers = self._get_ema_teachers_from(
+            self.target_and_aux_calculators
+        ) + self._get_ema_teachers_from(self.target_and_aux_calculators_val)
+        if not all_teachers:
+            return
+
+        path_run = config.get_path_model(run_id=run_id)
+        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
+        ema_file = path_run / f"{run_id}_{mini_epoch_id}.ema_teacher"
+
+        if not ema_file.exists():
+            if is_root():
+                logger.info(f"No EMA teacher state at {ema_file}, using reset from student.")
+            return
+
+        if is_root():
+            logger.info(f"Loading EMA teacher state from {ema_file}")
+
+        state = torch.load(ema_file, map_location=torch.device("cpu"), weights_only=True)
+
+        for ema_teacher in all_teachers:
+            # Restore EMA model weights
+            mkeys, ukeys = ema_teacher.ema_model.ema_model.load_state_dict(
+                state["ema_model"], strict=False
+            )
+            if is_root():
+                if mkeys:
+                    logger.warning(f"Missing keys in EMA teacher model: {mkeys}")
+                if ukeys:
+                    logger.warning(f"Unused keys in EMA teacher model: {ukeys}")
+
+            # Restore postprocessing state (e.g. DINO/iBOT centering buffers)
+            for name, module in ema_teacher.postprocess_targets.items():
+                if name in state.get("postprocess_targets", {}):
+                    module.load_state_dict(state["postprocess_targets"][name], strict=False)
+
+        if is_root():
+            logger.info(f"EMA teacher state restored into {len(all_teachers)} teacher(s).")
+
+    def _load_optimizer_state(self, run_id: str, mini_epoch):
+        """Load optimizer state from checkpoint if available.
+
+        Restores AdamW momentum buffers (exp_avg, exp_avg_sq) so that training
+        resumes smoothly when chaining jobs via train_continue.
+        """
+        path_run = config.get_path_model(run_id=run_id)
+        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
+        optim_file = path_run / f"{run_id}_{mini_epoch_id}.optim"
+
+        if not optim_file.exists():
+            if is_root():
+                logger.info(f"No optimizer state found at {optim_file}, starting fresh.")
+            return
+
+        if is_root():
+            logger.info(f"Loading optimizer state from {optim_file}")
+
+        named_state = torch.load(
+            optim_file, map_location=torch.device("cpu"), mmap=True, weights_only=True
+        )
+        is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
+
+        loaded = 0
+        for name, param in self.model.named_parameters():
+            if name not in named_state:
+                continue
+            entry = named_state[name]
+            new_entry = {}
+            for key, val in entry.items():
+                if isinstance(val, torch.Tensor) and val.dim() > 0 and is_model_sharded:
+                    new_entry[key] = distribute_tensor(val, param.device_mesh, param.placements)
+                elif isinstance(val, torch.Tensor):
+                    new_entry[key] = val.to(device=param.device)
+                else:
+                    new_entry[key] = val
+            self.optimizer.state[param] = new_entry
+            loaded += 1
+
+        if is_root():
+            total = sum(1 for _ in self.model.parameters())
+            logger.info(f"Loaded optimizer state for {loaded}/{total} parameters.")
 
     def _log(self, stage: Stage):
         """

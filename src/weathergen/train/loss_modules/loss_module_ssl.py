@@ -292,46 +292,72 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             )
 
 
-def jepa_loss(student_patches_masked, student_masks, teacher_patches_masked, teacher_masks):
+def _masked_l1_loss_per_sample(
+    student_patches, teacher_patches, mask, empty_warning: str | None = None
+):
+    """Average L1 on a masked token set, normalized on the set's own support.
+
+    Reduction order:
+    1. Mean over feature dimension for each selected token.
+    2. Mean over selected tokens per sample.
+    3. Mean over samples with at least one selected token.
+    """
+
+    assert mask.shape[0] == student_patches.shape[0], (
+        "mask.shape[0], batch dimension, has to match batch dimension for student_patches."
+    )
+    assert teacher_patches.shape[0] in (1, mask.shape[0]), (
+        "teacher_patches batch dimension must be 1 or match mask batch dimension."
+    )
+
+    if mask.sum() == 0:
+        if empty_warning is not None:
+            logger.warning(empty_warning)
+        return student_patches.sum() * 0.0
+
+    teacher_patches = teacher_patches.expand((mask.shape[0], -1, -1))
+    per_token_loss = F.l1_loss(student_patches, teacher_patches, reduction="none").mean(dim=-1)
+
+    mask_f = mask.to(per_token_loss.dtype)
+    token_counts = mask_f.sum(dim=-1)
+    valid_samples = token_counts > 0
+    per_sample_loss = (per_token_loss * mask_f).sum(dim=-1) / token_counts.clamp(min=1.0)
+
+    return per_sample_loss[valid_samples].mean()
+
+
+def jepa_loss(
+    student_patches_masked, student_masks, teacher_patches_masked, teacher_masks, temporal=False
+):
     # TODO remove as we deal with batch dimension
     assert teacher_masks.shape[0] == 1 or teacher_masks.shape[0] == student_masks.shape[0]
     student_masks = student_masks.squeeze(dim=1)
     teacher_masks = teacher_masks.squeeze(dim=1)
-    masks_weight = (
-        (1 / student_masks.sum(-1).clamp(min=1.0))
-        .unsqueeze(-1)
-        .expand_as(student_masks)  # [student_masks_flat]
+
+    if temporal:
+        # Temporal JEPA: predict teacher's representation at ALL teacher-visible cells
+        # (no spatial masking exclusion since the prediction task is across time, not space)
+        mask = teacher_masks
+    else:
+        # Standard JEPA: predict only at cells the teacher sees but the student doesn't
+        mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+
+    return _masked_l1_loss_per_sample(
+        student_patches_masked,
+        teacher_patches_masked,
+        mask,
+        empty_warning="jepa_loss mask is all zeros, likely incorrect masking config.",
     )
-
-    mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
-    if mask.sum() == 0:
-        logger.warning("jepa_loss mask is all true, likely incorrect masking config.")
-
-    assert mask.shape[0] == student_patches_masked.shape[0], (
-        "mask.shape[0], batch dimension, has to match batch dimension for student_patches_masked."
-    )
-    # expand/repeat teacher_masks to match number of student samples
-    teacher_patches = teacher_patches_masked.expand((mask.shape[0], -1, -1))
-    # compute loss
-    loss = F.l1_loss(student_patches_masked[mask], teacher_patches[mask])
-    loss = loss * masks_weight[mask]
-
-    return loss.sum()  # / student_masks.shape[0]
 
 
 def context_loss(student_patches, student_masks, teacher_patches, teacher_masks):
-    """V-JEPA 2.1 context loss: L1 on context (student-visible) tokens."""
+    """V-JEPA 2.1 context loss: L1 on context tokens, normalized on context support."""
     student_masks = student_masks.squeeze(dim=1)
     teacher_masks = teacher_masks.squeeze(dim=1)
 
     # Context = positions visible to the student (AND visible to teacher)
     mask = torch.logical_and(student_masks, teacher_masks)
-    if mask.sum() == 0:
-        return torch.tensor(0.0, device=student_patches.device, requires_grad=True)
-
-    teacher_patches = teacher_patches.expand((mask.shape[0], -1, -1))
-    loss = F.l1_loss(student_patches[mask], teacher_patches[mask], reduction="mean")
-    return loss
+    return _masked_l1_loss_per_sample(student_patches, teacher_patches, mask)
 
 
 def ibot_loss(

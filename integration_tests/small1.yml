@@ -77,7 +77,7 @@ norm_eps: 1e-4
 
 latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
-latent_noise_saturate_encodings: 5 
+latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
@@ -102,13 +102,13 @@ general:
   rank: ???
   world_size: ???
 
-  # local_rank, 
+  # local_rank,
   # with_ddp,
-  # data_path_*, 
-  # model_path, 
-  # run_path, 
+  # data_path_*,
+  # model_path,
+  # run_path,
   # path_shared_
-  
+
   multiprocessing_method: "fork"
 
   desc: ""
@@ -127,14 +127,14 @@ data_loading :
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
-  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
+  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
   # If this happens, you can disable the flag, but performance will drop on GH200.
   memory_pinning: True
 
 # config for training
 training_config:
-  
+
   training_mode: ["masking"]
 
   num_mini_epochs: 1
@@ -148,7 +148,7 @@ training_config:
   time_window_len: 06:00:00
 
   window_offset_prediction : 1
-  
+
   learning_rate_scheduling :
     lr_start: 1e-6
     lr_max: 0.00005
@@ -187,12 +187,12 @@ training_config:
   forecast :
       time_step: 06:00:00
       num_steps: 2
-      policy: "fixed" 
+      policy: "fixed"
       offset: 1
 
 
 # validation config; full validation config is merge of training and validation config
-validation_config: 
+validation_config:
 
   samples_per_mini_epoch: 32
   shuffle: False
@@ -203,14 +203,16 @@ validation_config:
   output:
     streams: ["ERA5"]
 
-  validate_with_ema: 
+  validate_with_ema:
     enabled : True
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
 test_config:
+  start_date: 2021-10-10T00:00
+  end_date: 2022-10-11T00:00
   output:
-    num_samples: 2
+    num_samples: 10
 
 
 # TODO: read latent from here

@@ -26,7 +26,7 @@ ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 2
+ae_global_num_blocks: 5
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -34,10 +34,10 @@ ae_global_with_qk_lnorm: True
 # See https://github.com/ecmwf/WeatherGenerator/issues/1050
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
-ae_global_mlp_hidden_factor: 2
+ae_global_mlp_hidden_factor: 4
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 8
+ae_aggregation_num_blocks: 5
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -50,8 +50,8 @@ pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
-num_class_tokens: 1
-num_register_tokens: 7
+num_class_tokens: 0
+num_register_tokens: 8
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
@@ -186,9 +186,9 @@ training_config:
   context_loss:
     enabled: true
     weight: 0.2
-    warmup_steps: 10000             # linear warmup from 0 to weight over this many steps
+    warmup_steps: 6000             # linear warmup from 0 to weight over this many steps
 
-  num_mini_epochs: 32
+  num_mini_epochs: 64
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -206,15 +206,15 @@ training_config:
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 512
-    num_steps_cooldown: 512
+    num_steps_cooldown: 1024
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 1.0
-    weight_decay: 0.1
+    grad_clip: 0.5
+    weight_decay: 0.05
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.975
@@ -236,7 +236,7 @@ training_config:
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 900000,
+            ema_halflife_in_thousands: 600000,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
@@ -261,9 +261,9 @@ training_config:
 
   target_input: {
     "random_easy_target" : {
-      masking_strategy: "healpix",
+      masking_strategy: "cropping_healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
+      masking_strategy_config : { rate : 0.8, hl_mask: 3, rate_sampling: False },
     },
   }
 

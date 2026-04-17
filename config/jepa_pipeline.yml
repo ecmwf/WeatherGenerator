@@ -27,7 +27,7 @@ stages:
     base-config: ./config/config_jepa_deep_ssl_n320.yml
     config: ./config/config_jepa_deep_ssl_n320.yml
     options: []
-    chain: 1
+    chain: 4
     nodes: 1
 
   # Stage 2: Masking-based finetuning (freezes encoder)
@@ -42,4 +42,6 @@ stages:
     command: train-continue
     from: pretrain
     config: ./config/config_jepa_forecasting_finetuning_n320.yml
-    chain: 1
+    # chain: 1
+    # config: ./config/config_jepa_forecasting_finetuning.yml
+    chain: 4

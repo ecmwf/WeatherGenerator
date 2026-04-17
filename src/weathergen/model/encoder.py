@@ -24,7 +24,6 @@ from weathergen.model.engines import (
 
 # from weathergen.model.model import ModelParams
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
-from weathergen.model.positional_encoding import positional_encoding_harmonic
 
 
 class EncoderModule(torch.nn.Module):
@@ -65,6 +64,7 @@ class EncoderModule(torch.nn.Module):
         assert cf.ae_global_att_dense_rate == 1.0, "Local attention not adapted for register tokens"
         self.num_register_tokens = cf.num_register_tokens
         self.num_class_tokens = cf.num_class_tokens
+        self.num_aux_tokens = self.num_register_tokens + self.num_class_tokens
 
         # local assimilation engine
         self.ae_local_engine = LocalAssimilationEngine(cf)
@@ -110,6 +110,10 @@ class EncoderModule(torch.nn.Module):
             s = (1, cf.ae_local_num_queries, cf.ae_global_dim_embed)
             q_cells = torch.rand(s, requires_grad=True) / cf.ae_global_dim_embed
         self.q_cells = torch.nn.Parameter(q_cells, requires_grad=True)
+
+        s_aux = (1, self.num_aux_tokens, cf.ae_global_dim_embed)
+        q_aux = torch.rand(s_aux, requires_grad=True) / cf.ae_global_dim_embed
+        self.q_aux = torch.nn.Parameter(q_aux, requires_grad=True)
 
         # query aggregation engine
         self.ae_aggregation_engine = QueryAggregationEngine(cf, self.num_healpix_cells)
@@ -313,10 +317,8 @@ class EncoderModule(torch.nn.Module):
         num_steps_input = batch.get_num_steps()
         rs = num_steps_input * len(batch)
 
-        # create register and latent tokens and prepend to latent spatial tokens
-        num_extra_tokens = self.num_register_tokens + self.num_class_tokens
-        pos_enc = positional_encoding_harmonic
-        tokens_global_register_class = pos_enc(self.q_cells.repeat(rs, num_extra_tokens, 1))
+        # create dedicated auxiliary tokens and prepend them to the spatial tokens
+        tokens_global_register_class = self.q_aux.repeat(rs, 1, 1)
 
         # TODO: re-enable or remove ae_local_queries_per_cell
         if self.cf.ae_local_queries_per_cell:
@@ -352,7 +354,7 @@ class EncoderModule(torch.nn.Module):
         # create mask from cell lens
         mask_reg_class_tokens = (
             torch.ones(
-                self.num_register_tokens + self.num_class_tokens,
+                self.num_aux_tokens,
                 device=tokens_global.device,
             )
             .to(torch.bool)
@@ -366,7 +368,7 @@ class EncoderModule(torch.nn.Module):
         tokens_global[mask] = tokens_global_unmasked.to(tokens_global.dtype)
 
         # recover batch dimension and build global token list
-        num_tokens_tot = self.num_healpix_cells + self.num_register_tokens + self.num_class_tokens
+        num_tokens_tot = self.num_healpix_cells + self.num_aux_tokens
         q_c_shape = self.q_cells.shape
         tokens_global = (
             tokens_global.reshape([rs, num_tokens_tot, q_c_shape[-2], q_c_shape[-1]])
