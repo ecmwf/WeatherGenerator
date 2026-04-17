@@ -194,42 +194,6 @@ class AdaLayerNormLayer(torch.nn.Module):
             + x
         )
 
-    
-# NOTE: Inspired by GenCast/DiT.
-class LinearNormConditioning(torch.nn.Module):
-    """Module for norm conditioning, adapted from GenCast with additional gate parameter from DiT.
-
-    Conditions the normalization of `inputs` by applying a linear layer to the
-    `norm_conditioning` which produces the scale and offset for each channel.
-    """
-
-    def __init__(self, latent_space_dim: int, noise_emb_dim: int = 512, dtype=torch.bfloat16):
-        super().__init__()
-        self.dtype = dtype
-
-        self.conditional_linear_layer = torch.nn.Linear(
-            in_features=noise_emb_dim,
-            out_features=3 * latent_space_dim,
-        )
-        # Optional: initialize weights similar to TruncatedNormal(stddev=1e-8)
-        torch.nn.init.normal_(self.conditional_linear_layer.weight, std=1e-8)
-        torch.nn.init.zeros_(self.conditional_linear_layer.bias)
-
-    def forward(self, inputs, noise_emb):
-        conditional_scale_offset = self.conditional_linear_layer(noise_emb.to(self.dtype))
-        scale_minus_one, offset, gate = torch.chunk(conditional_scale_offset, 3, dim=-1)
-        scale = scale_minus_one + 1.0
-
-        # Reshape scale and offset for broadcasting if needed
-        while scale.dim() < inputs.dim():
-            scale = scale.unsqueeze(1)
-            offset = offset.unsqueeze(1)
-        return (inputs * scale + offset).to(
-            self.dtype
-        ), gate  # TODO: check if to(self.dtype) needed here
-
-
-
 class SaturateEncodings(nn.Module):
     """A common alternative to a KL regularisation prevent outliers in the latent space when
     learning an auto-encoder for latent generative model, an example value for the scale factor is 5

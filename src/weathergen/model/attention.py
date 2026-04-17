@@ -567,7 +567,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
             assert with_residual, "DIT attention should always have residual connection"
             self.lnorm = AdaLNZero(dim_embed, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_embed, eps=norm_eps)
             self.noise_conditioning = LinearNormConditioning(
-                latent_space_dim=dim_embed
+                latent_space_dim=dim_embed, dtype=attention_dtype
             ) #TODO: Do I need to pass dtype?
         elif dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
