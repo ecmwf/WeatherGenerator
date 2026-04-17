@@ -421,8 +421,9 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_noise_conditioning=self.cf.fe_diffusion_model,
                             with_2d_rope=self.cf.get("rope_2D", False),
+                            is_dit=self.cf.fe_diffusion_model,
+                            dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
                         )
                     )
                 else:
@@ -439,8 +440,9 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_noise_conditioning=self.cf.fe_diffusion_model,
                             with_2d_rope=self.cf.get("rope_2D", False),
+                            is_dit=self.cf.fe_diffusion_model,
+                            dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
                         )
                     )
                 # Add MLP block
@@ -450,12 +452,12 @@ class ForecastingEngine(torch.nn.Module):
                         self.cf.ae_global_dim_embed,
                         num_layers=2,
                         with_residual=True,
-                        post_layer_norm=cf.fe_diffusion_model_conditioning in ["date_time"],
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
-                        with_noise_conditioning=self.cf.fe_diffusion_model
+                        is_dit=self.cf.fe_diffusion_model,
+                        dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer

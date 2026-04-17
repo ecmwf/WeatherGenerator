@@ -134,7 +134,7 @@ class EncoderModule(torch.nn.Module):
             use_reentrant=False,
         )
 
-        # tokens_global = self.ln(tokens_global)
+        tokens_global = self.ln(tokens_global)
 
         return tokens_global, posteriors
 
