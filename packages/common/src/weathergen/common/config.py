@@ -155,12 +155,11 @@ def _strip_interpolation(conf: Config) -> Config:
                 val = conf[raw_key]
             else:
                 val = conf[key]
-            
+
             stripped[key] = val
     elif OmegaConf.is_list(conf):
         stripped = [
-            _strip_interpolation(item) if OmegaConf.is_config(item) else item
-            for item in conf
+            _strip_interpolation(item) if OmegaConf.is_config(item) else item for item in conf
         ]
 
     return OmegaConf.create(stripped)
@@ -631,7 +630,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
     streams = {}
     # exclude temp files starting with "." or "#" (eg. emacs, vim, macos savefiles)
     stream_files = sorted(streams_directory.rglob("[!.#]*.yml"))
-    _logger.info(f"Discover stream configs: {', '.join(map(str, stream_files))}")
+    _logger.info(fpackages/common/src/weathergen/common/config.py"Discover stream configs: {', '.join(map(str, stream_files))}")
     for config_file in stream_files:
         try:
             config = OmegaConf.load(config_file)
