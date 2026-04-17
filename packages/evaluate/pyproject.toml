@@ -12,6 +12,7 @@ dependencies = [
     "panel",
     "omegaconf",
     "plotly>=6.2.0",
+    "joblib>=1.3",
     "weathergen-common",
     "weathergen-metrics",
     "eccodes==2.44.0", 

@@ -28,8 +28,8 @@ from weathergen.train.teacher_utils import (
     prepare_encoder_teacher,
 )
 
-logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
 
 class EncoderTeacher(TargetAndAuxModuleBase):
     """Base class for SSL teacher models.
