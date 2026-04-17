@@ -137,8 +137,8 @@ def _sanitize_time_keys(conf: Config) -> Config:
 
 def _strip_interpolation(conf: Config) -> Config:
     """Recursively convert interpolated timedelta/datetime objects to strings."""
+    stripped = {}
     if OmegaConf.is_dict(conf):
-        stripped = {}
         for key in list(conf.keys()):
             if OmegaConf.is_missing(conf, key):
                 val = "???"
