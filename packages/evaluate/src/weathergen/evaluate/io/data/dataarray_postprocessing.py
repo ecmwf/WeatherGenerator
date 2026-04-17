@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 """
-Post-processing helpers for evaluation DataArrays 
+Post-processing helpers for evaluation DataArrays
 (channel selection, derived channels, lead-time).
 """
 
