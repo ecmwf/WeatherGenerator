@@ -16,13 +16,13 @@ from math import sqrt
 import numpy as np
 import torch
 import tqdm
+import weathergen.common.config as config
 from omegaconf import OmegaConf
 
 # FSDP2
 from torch.distributed.tensor import DTensor
-
-import weathergen.common.config as config
 from weathergen.common.config import Config
+
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -366,7 +366,7 @@ class Trainer(TrainerBase):
 
         if is_root():
             config.save(self.cf, None)
-            # logger.info(config.format_cf(self.cf))
+            logger.info(config.format_cf(self.cf))
 
         # run validation before training if requested
         self.validate_before_training()
