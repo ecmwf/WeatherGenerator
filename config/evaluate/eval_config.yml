@@ -20,6 +20,9 @@
 #      vmin: -40
 #      vmax: 40
 
+
+# max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
+
 evaluation:
   metrics  : ["rmse", "mae"]
   regions: ["global", "nhem"]

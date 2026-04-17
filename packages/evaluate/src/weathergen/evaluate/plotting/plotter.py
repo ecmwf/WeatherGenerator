@@ -1,5 +1,4 @@
 import datetime
-import glob
 import logging
 import os
 import re
@@ -18,7 +17,6 @@ from astropy_healpix import HEALPix as HEALPixGrid
 from cartopy.io import DownloadWarning
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
-from PIL import Image
 from scipy.stats import wilcoxon
 
 from weathergen.common.config import _load_private_conf
@@ -48,6 +46,7 @@ def _download_cartopy_off(enabled: bool) -> None:
         )
     else:
         warnings.filterwarnings("default", category=DownloadWarning)
+
 
 np.seterr(divide="ignore", invalid="ignore")
 
@@ -165,7 +164,11 @@ class Plotter:
             xarray DataArray with selected data.
         """
         for key, value in selection.items():
-            if key in da.coords and key not in da.dims:
+            if key not in da.coords and key not in da.dims:
+                # Key is not a coordinate or dimension of this DataArray
+                # (e.g. "stream" is used for file-naming only). Skip it.
+                continue
+            elif key in da.coords and key not in da.dims:
                 # Coordinate like 'sample' aligned to another dim
                 da = da.where(da[key] == value, drop=True)
             else:
@@ -210,7 +213,7 @@ class Plotter:
 
         if not os.path.exists(hist_output_dir):
             _logger.info(f"Creating dir {hist_output_dir}")
-            os.makedirs(hist_output_dir)
+            os.makedirs(hist_output_dir, exist_ok=True)
 
         for var in variables:
             select_var = self.select | {"channel": var}
@@ -371,7 +374,7 @@ class Plotter:
 
         if not os.path.exists(map_output_dir):
             _logger.info(f"Creating dir {map_output_dir}")
-            os.makedirs(map_output_dir)
+            os.makedirs(map_output_dir, exist_ok=True)
 
         for region in self.regions:
             if region != "global":
@@ -387,9 +390,7 @@ class Plotter:
 
                 if self.plot_subtimesteps:
                     ntimes_unique = len(np.unique(da.valid_time))
-                    _logger.info(
-                        f"Creating maps for {ntimes_unique} valid times of variable {var} - {tag}"
-                    )
+                    _logger.debug(f"Creating maps for variable {var} - {tag}")
                     if ntimes_unique == 0:
                         _logger.warning(
                             f"No valid times found for variable {var} - {tag}. Skipping."
@@ -397,7 +398,7 @@ class Plotter:
                         continue
                     groups = da.groupby("valid_time")
                 else:
-                    _logger.info(f"Creating maps for all valid times of {var} - {tag}")
+                    _logger.debug(f"Creating maps for variable {var} - {tag}")
                     groups = [(None, da)]  # single dummy group
 
                 for valid_time, da_t in groups:
@@ -513,6 +514,8 @@ class Plotter:
         except Exception:
             _logger.warning("Could not add coastlines to plot; continuing without them.")
 
+        data = data.squeeze()
+
         assert data["lon"].shape == data["lat"].shape == data.shape, (
             f"Scatter plot:: Data shape do not match. Shapes: "
             f"lon {data['lon'].shape}, lat {data['lat'].shape}, data {data.shape}."
@@ -609,77 +612,6 @@ class Plotter:
         )
         lc.set_transform(ccrs.PlateCarree())
         return lc
-
-    def animation(self, samples, fsteps, variables, select, tag) -> list[str]:
-        """
-        Plot 2D animations for a dataset
-
-        Parameters
-        ----------
-        samples: list
-            List of the samples to be plotted
-        fsteps: list
-            List of the forecast steps to be plotted
-        variables: list
-            List of variables to be plotted
-        select: dict
-            Selection to be applied to the DataArray
-        tag: str
-            Any tag you want to add to the plot
-
-        Returns
-        -------
-            List of plot names for the saved animations.
-
-        """
-
-        self.update_data_selection(select)
-        map_output_dir = self.get_map_output_dir(tag)
-
-        # Convert FPS to duration in milliseconds
-        duration_ms = int(1000 / self.fps) if self.fps > 0 else 400
-
-        for region in self.regions:
-            for _, sa in enumerate(samples):
-                for _, var in enumerate(variables):
-                    _logger.info(f"Creating animation for {var} sample: {sa} - {tag}")
-                    image_paths = []
-                    for _, fstep in enumerate(fsteps):
-                        # TODO: refactor to avoid code duplication with scatter_plot
-                        parts = [
-                            "map",
-                            self.run_id,
-                            tag,
-                            str(sa),
-                            "*",
-                            self.stream,
-                            region,
-                            var,
-                            "fstep",
-                            str(fstep).zfill(3),
-                        ]
-
-                        name = "_".join(filter(None, parts))
-                        fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
-
-                        names = glob.glob(fname)
-                        image_paths += names
-
-                    if image_paths:
-                        image_paths = sorted(image_paths)
-                        images = [Image.open(path) for path in image_paths]
-                        images[0].save(
-                            f"{map_output_dir}/animation_{self.run_id}_{tag}_{sa}_{self.stream}_{region}_{var}.gif",
-                            save_all=True,
-                            append_images=images[1:],
-                            duration=duration_ms,
-                            loop=0,
-                        )
-
-                    else:
-                        _logger.warning(f"No images found for animation {var} sample {sa}")
-
-        return image_paths
 
     def get_map_output_dir(self, tag):
         return self.out_plot_basedir / self.stream / "maps" / tag
@@ -1506,8 +1438,10 @@ class ScoreCards:
         skill_models = []
         for run_index in range(1, n_runs):
             skill_model = 0.0
+            data0_channels = [str(x) for x in np.atleast_1d(data[0].channel.values)]
+            data_idx_channels = [str(x) for x in np.atleast_1d(data[run_index].channel.values)]
             for var_index, var in enumerate(common_channels):
-                if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                if var not in data0_channels or var not in data_idx_channels:
                     continue
                 diff, avg_diff, avg_skill = self.compare_models(
                     data, baseline, run_index, var, metric
@@ -1597,8 +1531,10 @@ class ScoreCards:
     def extract_common_channels(self, data, channels, n_runs):
         common_channels = []
         for run_index in range(1, n_runs):
+            data0_channels = [str(x) for x in np.atleast_1d(data[0].channel.values)]
+            data_idx_channels = [str(x) for x in np.atleast_1d(data[run_index].channel.values)]
             for var in channels:
-                if var not in data[0].channel.values or var not in data[run_index].channel.values:
+                if var not in data0_channels or var not in data_idx_channels:
                     continue
                 common_channels.append(var)
         common_channels = list(set(common_channels))
