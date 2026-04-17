@@ -623,7 +623,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
             _logger.info("Deserialize default configuration.")
             conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
     assert isinstance(conf, Config)
-    return conf
+    return _apply_fixes(conf)
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
