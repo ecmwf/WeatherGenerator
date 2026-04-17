@@ -21,6 +21,7 @@ from pathlib import Path
 
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
+from weathergen.utils.distributed import is_root
 from weathergen.common.logger import init_loggers
 from weathergen.train.trainer import Trainer
 
@@ -122,7 +123,7 @@ def run_continue(args):
 
     Note: All model configurations are set in the function body.
     """
-    t_overall_start = time.time()  # Track overall run start time
+    t_overall_start = time.time()
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
@@ -174,7 +175,7 @@ def run_train(args):
 
     Note: All model configurations are set in the function body.
     """
-    t_overall_start = time.time()  # Track overall run start time
+    t_overall_start = time.time()
 
     cli_overwrite = config.from_cli_arglist(args.options)
 

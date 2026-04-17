@@ -233,8 +233,8 @@ class Trainer(TrainerBase):
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
-        t_run_start = time.time()  # Track trainer.run() start time (for startup_time)
-        
+        t_run_start = time.time()
+
         # general initalization
         self.init(cf, devices)
         cf = self.cf
@@ -373,14 +373,14 @@ class Trainer(TrainerBase):
         # run validation before training if requested
         self.validate_before_training()
 
-        # Log startup time (time from run() start to training loop start)
+        # Log startup time
         if is_root():
             startup_time = time.time() - t_run_start
             self.train_logger.log_metrics("train", {"startup_time_seconds": startup_time})
             logger.info(f"Startup time: {startup_time:.2f} seconds")
 
         # training loop
-        t_training_start = time.time()  # Track start of actual training
+        t_training_start = time.time()
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
