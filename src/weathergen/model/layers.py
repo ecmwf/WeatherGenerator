@@ -104,12 +104,12 @@ class MLP(torch.nn.Module):
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
 
-        if post_layer_norm:
-            self.layers.append(
-                norm(dim_out, eps=norm_eps)
-                if dim_aux is None
-                else AdaLayerNormFinal(dim_out, dim_aux, norm_eps=norm_eps)
-            )
+        # if post_layer_norm:
+        #     self.layers.append(
+        #         norm(dim_out, eps=norm_eps)
+        #         if dim_aux is None
+        #         else AdaLayerNormFinal(dim_out, dim_aux, norm_eps=norm_eps)
+        #     )
 
     # TODO: expanded args, must check dependencies (previously aux = args[-1])
     def forward(self, *args):
@@ -134,14 +134,12 @@ class MLP(torch.nn.Module):
             else:
                 if i == 0 and self.with_noise_conditioning:
                     x, gate = self.noise_conditioning(x, noise_emb)
-                if isinstance(layer, (AdaLayerNormFinal)):
+                if self.with_aux and isinstance(layer, (AdaLayerNormFinal)):
                     x = layer(x, aux)
                 else:
                     x = layer(x)
 
         if self.with_residual:
-            if gate is not None:
-                x = x * gate
             if gate is not None:
                 x = x * gate
             if x.shape[-1] == x_in.shape[-1]:

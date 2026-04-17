@@ -234,7 +234,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         if dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
-            self.lnorm_final = AdaLayerNormFinal(dim_embed, dim_aux, norm_eps=norm_eps)
+            # self.lnorm_final = AdaLayerNormFinal(dim_embed, dim_aux, norm_eps=norm_eps)
         else:
             self.lnorm = norm(dim_embed, eps=norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
@@ -296,8 +296,8 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         out = self.proj_out(self.dropout(outs.flatten(-2, -1)))
 
-        if ada_ln_aux is not None:
-            out = self.lnorm_final(out, ada_ln_aux)
+        # if ada_ln_aux is not None:
+        #     out = self.lnorm_final(out, ada_ln_aux)
 
         if self.with_residual:
             out = x_in + out * gate if self.noise_conditioning else x_in + out
@@ -552,7 +552,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         if dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps) #should be initialised to zero
-            self.lnorm_final = AdaLayerNormFinal(dim_embed, dim_aux, norm_eps=norm_eps) #should be initialised to zero
+            # self.lnorm_final = AdaLayerNormFinal(dim_embed, dim_aux, norm_eps=norm_eps) #should be initialised to zero
         else:
             self.lnorm = norm(dim_embed, eps=norm_eps)
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
@@ -614,8 +614,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         out = self.proj_out(outs.flatten(-2, -1))
 
-        if ada_ln_aux is not None:
-            out = self.lnorm_final(out, ada_ln_aux)
+        # if ada_ln_aux is not None:
+        #     out = self.lnorm_final(out, ada_ln_aux)
 
         if self.with_residual:
             out = x_in + out * gate if self.noise_conditioning else out + x_in

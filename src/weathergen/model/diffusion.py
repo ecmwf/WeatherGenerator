@@ -71,7 +71,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         fstep: int = None,
         meta_info: dict[str, SampleMetaData] = None,
         coords: torch.Tensor = None,
-        num_steps: int = 30,
+        num_steps: int = 10,
     ) -> torch.Tensor:
         """
         Forward pass that routes to training_forward or inference_forward based on model status.
@@ -113,12 +113,12 @@ class DiffusionForecastEngine(torch.nn.Module):
             )
         else:
             # NOTE: temporary for analysing denoising
-            return self.training_forward(
-                tokens=tokens,
-                fstep=fstep,
-                meta_info=meta_info,
-                coords=coords,
-            )
+            # return self.training_forward(
+            #     tokens=tokens,
+            #     fstep=fstep,
+            #     meta_info=meta_info,
+            #     coords=coords,
+            # )
 
             if fstep is None:
                 raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
@@ -149,7 +149,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
 
-        self.cur_token = tokens
+        self.cur_token = tokens.detach()
 
         if self.cf.fe_diffusion_model_conditioning == "date_time":
             c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
@@ -170,7 +170,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         n = torch.randn_like(y) * sigma
 
         self._noised_tokens = (y + n).detach()
-        self._noised_tokens = y + n
 
         
 

@@ -59,12 +59,10 @@ class RMSNorm(torch.nn.Module):
         """
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
-
-
+    
 class AdaLayerNorm(torch.nn.Module):
     """
-    AdaLayerNorm for embedding auxiliary information.
-    Produces scale and shift for adaptive layer norm.
+    AdaLayerNorm for embedding auxiliary information
     """
 
     def __init__(
@@ -72,20 +70,51 @@ class AdaLayerNorm(torch.nn.Module):
     ):
         super().__init__()
 
-        # MLP for embedding auxiliary information (matches DiT style)
+        # simple 2-layer MLP for embedding auxiliary information
+        self.embed_aux = torch.nn.ModuleList()
+        self.embed_aux.append(torch.nn.Linear(dim_aux, 4 * dim_aux))
+        self.embed_aux.append(torch.nn.SiLU())
+        self.embed_aux.append(torch.nn.Linear(4 * dim_aux, 2 * dim_embed_x))
+
         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
-        self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(dim_aux, 2 * dim_embed_x, bias=True)
-        )
-        
-        # Initialize weights to zero for stable training (DiT style)
-        nn.init.zeros_(self.adaLN_modulation[-1].weight)
-        nn.init.zeros_(self.adaLN_modulation[-1].bias)
 
     def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
-        shift, scale = self.adaLN_modulation(aux).chunk(2, dim=-1)
-        return modulate(self.norm(x), shift, scale)
+        for block in self.embed_aux:
+            aux = block(aux)
+        scale, shift = aux.split(aux.shape[-1] // 2, dim=-1)
+
+        x = self.norm(x) * (1 + scale) + shift
+
+        return x
+
+# TODO: Check if want to overall AdaLayernorm implementation as below...
+# class AdaLayerNorm(torch.nn.Module):
+#     """
+#     AdaLayerNorm for embedding auxiliary information.
+#     Produces scale and shift for adaptive layer norm.
+#     """
+
+#     def __init__(
+#         self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-5
+#     ):
+#         super().__init__()
+
+#         breakpoint()
+
+#         # MLP for embedding auxiliary information (matches DiT style)
+#         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
+#         self.adaLN_modulation = nn.Sequential(
+#             nn.SiLU(),
+#             nn.Linear(dim_aux, 2 * dim_embed_x, bias=True)
+#         )
+        
+#         # Initialize weights to zero for stable training (DiT style)
+#         nn.init.zeros_(self.adaLN_modulation[-1].weight)
+#         nn.init.zeros_(self.adaLN_modulation[-1].bias)
+
+#     def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
+#         shift, scale = self.adaLN_modulation(aux).chunk(2, dim=-1)
+#         return modulate(self.norm(x), shift, scale)
 
     
 class AdaLayerNormFinal(torch.nn.Module):
@@ -98,6 +127,8 @@ class AdaLayerNormFinal(torch.nn.Module):
         self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-5
     ):
         super().__init__()
+
+        breakpoint()
 
         self.norm = torch.nn.LayerNorm(dim_embed_x, norm_eps, norm_elementwise_affine)
         self.adaLN_modulation = nn.Sequential(
