@@ -112,7 +112,7 @@ class EncoderModule(torch.nn.Module):
         # global assimilation engine
         self.ae_global_engine = GlobalAssimilationEngine(cf, self.num_healpix_cells)
 
-        # self.ln = torch.nn.LayerNorm(cf.ae_local_dim_embed, elementwise_affine=False)
+        self.ln = torch.nn.LayerNorm(cf.ae_local_dim_embed, elementwise_affine=False)
 
     def forward(self, model_params, batch):
         """

@@ -418,9 +418,9 @@ class NoiseEmbedder(torch.nn.Module):
         :param max_period: controls the minimum frequency of the embeddings.
         :return: an (N, D) Tensor of positional embeddings.
         """
-        # Ensure t is at least 1D
-        if t.dim() == 0:
-            t = t.unsqueeze(0)
+        # Ensure t is 1D
+        if t.ndim == 0:
+            t = t.view(1)
         
         half = self.frequency_embedding_dim // 2
         freqs = torch.exp(
