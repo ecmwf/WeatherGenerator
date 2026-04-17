@@ -147,11 +147,27 @@ Potential new docs:
 
 ## Maintenance
 
-### Update Skills When:
+## Maintenance
+
+### Skills Review Cycle
+
+**Every 2-3 months (or after 5+ uses):**
+- Review skill usage frequency
+- Compactify verbose sections
+- Remove outdated examples
+- Merge overlapping skills
+- Add new patterns discovered
+
+**When to update:**
 - Discover better approaches
 - Fix missing steps
 - Add new pitfalls
 - Update examples
+
+**When to consolidate:**
+- Two skills cover similar ground
+- Skill rarely used (<3 times)
+- Overly complex (>5 pages)
 
 ### Archive Completed Tasks:
 - Move to `tasks/archive/` if not needed
