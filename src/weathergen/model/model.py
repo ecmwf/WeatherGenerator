@@ -53,8 +53,6 @@ class ModelOutput:
 
     physical: list[dict[StreamName, torch.Tensor]]
     latent: list[dict[str, torch.Tensor | LatentState]]
-    batch: BatchSamples | None
-    step_offset: int
 
     def __init__(
         self, len_output: int, batch: BatchSamples | None = None, step_offset: int = 0
@@ -694,14 +692,6 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
-    def _resolve_forward_input(
-        self, batch: BatchSamples | ModelOutput
-    ) -> tuple[BatchSamples | None, LatentState | None, int]:
-        if isinstance(batch, BatchSamples):
-            return batch, None, 0
-
-        return batch.batch, batch.get_last_latent_state(), batch.step_offset + len(batch.physical)
-
     def forward(
         self,
         model_params: ModelParams,
@@ -718,22 +708,27 @@ class Model(torch.nn.Module):
             A list containing all prediction results
         """
 
-        batch_ctx, latent_state, step_offset = self._resolve_forward_input(batch)
-        output = ModelOutput(rollout_steps, batch=batch_ctx, step_offset=step_offset)
-
-        if batch_ctx is not None and latent_state is None:
+        output = ModelOutput(rollout_steps)
+        if isinstance(batch, BatchSamples):
+            step_offset = 0
+            batch_ctx = batch
             tokens, posteriors = self.encoder(model_params, batch_ctx)
             output.add_latent_prediction(0, "posteriors", posteriors)
 
-            # recover batch dimension and separate input_steps
-            shape = (len(batch_ctx), batch_ctx.get_num_steps(), *tokens.shape[1:])
-            # collapse along input step dimension
+            shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
             tokens = tokens.reshape(shape).sum(axis=1)
         else:
-            if latent_state is None or latent_state.z_pre_norm is None:
-                raise ValueError("LatentState.z_pre_norm must be provided to run the model.")
+            step_offset = batch.step_offset + len(batch.physical)
+            latent_state = batch.get_last_latent_state()
+            batch_ctx = batch.batch
             tokens = latent_state.z_pre_norm
             output.add_latent_prediction(0, "posteriors", latent_state)
+        output.batch = batch_ctx
+        output.step_offset = step_offset
+        batch_step_offset = step_offset
+        if batch_ctx is not None and rollout_steps != batch_ctx.get_output_len():
+            output_idxs = batch_ctx.get_output_idxs()
+            batch_step_offset += output_idxs[0] if len(output_idxs) > 0 else 0
 
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in range(rollout_steps):
@@ -743,7 +738,7 @@ class Model(torch.nn.Module):
 
             # decoder predictions
             output = self.predict_decoders(
-                model_params, step, step + step_offset, tokens, batch_ctx, output
+                model_params, step, step + batch_step_offset, tokens, batch_ctx, output
             )
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch_ctx, output)
