@@ -402,7 +402,12 @@ class Trainer(TrainerBase):
         # Log total training time
         if is_root():
             total_training_time = time.time() - t_training_start
-            self.train_logger.log_metrics("train", {"total_training_time_seconds": total_training_time})
+            total_samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
+            self.train_logger.log_metrics("train", {
+                "total_training_time_seconds": total_training_time,
+                "final_num_samples": total_samples,
+                "samples_per_second_total": total_samples / total_training_time if total_training_time > 0 else 0,
+            })
             logger.info(f"Total training time: {total_training_time / 3600:.2f} hours")
 
     def validate_before_training(self):
@@ -642,6 +647,17 @@ class Trainer(TrainerBase):
 
                 self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)
+
+                # Log elapsed training time and throughput metrics
+                # This ensures time is tracked even if job is killed mid-mini-epoch
+                if is_root():
+                    elapsed_time = time.time() - t_training_start
+                    total_samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
+                    self.train_logger.log_metrics("train", {
+                        "elapsed_training_time_seconds": elapsed_time,
+                        "num_samples": total_samples,
+                        "samples_per_second_elapsed": total_samples / elapsed_time if elapsed_time > 0 else 0,
+                    })
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
