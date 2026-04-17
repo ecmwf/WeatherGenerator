@@ -1,0 +1,49 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# forecast_freeze_model: False # not0in default config
+fe_num_blocks: 2 # 6
+fe_num_heads: 16 # same as default
+
+healpix_level: 4 #5
+
+################
+
+streams_directory: "./integration_tests/streams_multi/"
+
+general:
+  desc: ""
+
+train_log_freq:
+  terminal: 10
+  metrics: 20
+  checkpoint: 50 # 250
+
+# config for training
+training_config:
+  num_mini_epochs: 2
+  samples_per_mini_epoch: 256 #128 #256
+
+  start_date: 2012-01-01T00:00 # 1979-01-01T00:00
+  end_date: 2020-12-31T00:00 # 2022-12-31T00:00
+
+  learning_rate_scheduling :
+    num_steps_warmup: 20 # 512
+    num_steps_cooldown: 10 # 512
+
+# validation config; full validation config is merge of training and validation config
+validation_config: 
+
+  samples_per_mini_epoch: 32 # 256
+
+  start_date: 2021-10-10T00:00 # changed 2023-10-01T00:00
+  end_date: 2022-10-11T00:00 # changed 2023-12-31T00:00
+
+test_config:  
+  write_num_samples: 2

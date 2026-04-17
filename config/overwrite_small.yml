@@ -1,0 +1,25 @@
+train_log_freq:
+  terminal: 10
+  metrics: 20
+  checkpoint: 100
+
+data_loading :
+  num_workers: 12
+
+training_config:  
+  num_mini_epochs: 1
+  samples_per_mini_epoch: 128
+  
+  learning_rate_scheduling :
+    num_steps_warmup: 16
+    num_steps_cooldown: 16
+
+validation_config: 
+  samples_per_mini_epoch: 64
+
+wgtags:
+  org: jsc
+  issue: null
+  exp: jupiter_file_system_speed
+  grid: null
+
