@@ -136,35 +136,34 @@ def _sanitize_time_keys(conf: Config) -> Config:
 
 
 def _strip_interpolation(conf: Config) -> Config:
-    """Remove OmegaConf interpolations and convert timedelta/datetime objects to strings."""
-    stripped = OmegaConf.create()
-    for key in list(conf.keys()):
-        if key.startswith("_"):
-            # Skip hidden/backup keys
-            continue
-        elif OmegaConf.is_interpolation(conf, key):
-            raw_key = f"_{key}"
-            if raw_key in conf:
+    """Recursively convert interpolated timedelta/datetime objects to strings."""
+    if OmegaConf.is_dict(conf):
+        stripped = {}
+        for key in list(conf.keys()):
+            if OmegaConf.is_missing(conf, key):
+                val = "???"
+            elif OmegaConf.is_config(conf[key]):
+                val = _strip_interpolation(conf[key])
+            elif key.startswith("_"):
+                continue  # Skip hidden/backup keys
+            elif OmegaConf.is_interpolation(conf, key):
+                raw_key = f"_{key}"
+                assert raw_key in conf, (
+                    f"Backup key: {raw_key} expected for interpolated key: {key}"
+                )
                 # Retrieve the value from the backup key (resolves interpolation)
                 val = conf[raw_key]
             else:
-                # Fallback to the original key
                 val = conf[key]
-        else:
-            # Standard key retrieval
-            val = conf[key]
+            
+            stripped[key] = val
+    elif OmegaConf.is_list(conf):
+        stripped = [
+            _strip_interpolation(item) if OmegaConf.is_config(item) else item
+            for item in conf
+        ]
 
-        # Convert unsupported types (timedelta/datetime) to strings
-        if isinstance(val, np.timedelta64 | pd.Timedelta):
-            val = timedelta_to_str(val)
-        elif isinstance(val, np.datetime64 | pd.Timestamp):
-            dt = pd.to_datetime(val)
-            # Format: Standard ISO without microseconds
-            val = dt.strftime("%Y-%m-%dT%H:%M:%S")
-
-        stripped[key] = val
-
-    return stripped
+    return OmegaConf.create(stripped)
 
 
 def get_run_id():
@@ -257,7 +256,6 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
-    config = _sanitize_time_keys(config)
 
     return _apply_fixes(config)
 
@@ -312,6 +310,7 @@ def _apply_fixes(config: Config) -> Config:
     "outdatet" run configurations. The fixes in this function should be
     eventually removed.
     """
+    config = _check_time_interpolation(config)
     config = _check_datasets(config)
     return config
 
@@ -331,6 +330,38 @@ def _check_datasets(config: Config) -> Config:
         ]
         paths = [config.get(key) for key in legacy_keys]
         config.data_paths = [path for path in paths if path is not None]
+
+    return config
+
+
+def _check_time_interpolation(config: Config) -> Config:
+    """
+    convert 'value': '${resolver:time_value_str}' to 'time_value_str'.
+    """
+
+    def _convert_interpolation(cfg, key):
+        if OmegaConf.is_interpolation(cfg, key):
+            interpolation = OmegaConf.to_container(cfg, resolve=False)[key]
+            resolver, sep, value = interpolation[2:-1].partition(":")
+            cfg[key] = value
+
+    time_keys = ["start_date", "end_date"]
+    delta_keys = ["time_window_step", "time_window_len"]
+    forecast_step_dt = "time_step"
+
+    config = config.copy()
+    subconfs = [
+        config.get("training_config"),
+        config.get("test_config"),
+        config.get("validation_config"),
+    ]
+
+    for subconf in subconfs:
+        if subconf is not None:
+            for key in (*time_keys, *delta_keys):
+                _convert_interpolation(subconf, key)
+            if "forecast" in subconf:
+                _convert_interpolation(subconf.forecast, forecast_step_dt)
 
     return config
 
