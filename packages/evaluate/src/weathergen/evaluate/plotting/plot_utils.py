@@ -17,6 +17,50 @@ from numpy.typing import NDArray
 _logger = logging.getLogger(__name__)
 
 
+class DefaultMarkerSize:
+    """
+    Utility class for managing default configuration values, such as marker sizes
+    for various data streams.
+    """
+
+    _marker_size_stream = {
+        "era5": 2.5,
+        "imerg": 0.25,
+        "cerra": 0.1,
+    }
+
+    _default_marker_size = 0.5
+
+    @classmethod
+    def get_marker_size(cls, stream_name: str) -> float:
+        """
+        Get the default marker size for a given stream name.
+
+        Parameters
+        ----------
+        stream_name : str
+            The name of the stream.
+
+        Returns
+        -------
+        float
+            The default marker size for the stream.
+        """
+        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
+
+    @classmethod
+    def list_streams(cls):
+        """
+        List all streams with defined marker sizes.
+
+        Returns
+        -------
+        list[str]
+            List of stream names.
+        """
+        return list(cls._marker_size_stream.keys())
+
+
 def _flatten_or_average(arr: NDArray) -> NDArray:
     """Flatten array or average across non-quantile dimensions.
 
@@ -230,7 +274,7 @@ def ratio_plot_metric_region(
         run_ids = []
         for run_id, run_data in runs.items():
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data.isnull().all():
+            if data is None or data.isnull().all():
                 continue
             selected_data.append(data)
             label = run_data.get("label", run_id)
@@ -289,7 +333,7 @@ def heat_maps_metric_region(
         run_ids = []
         for run_id in runs:
             data = scores_dict.get(metric, {}).get(region, {}).get(stream, {}).get(run_id)
-            if data.isnull().all():
+            if data is None or data.isnull().all():
                 continue
 
             selected_data.append(data)
@@ -349,10 +393,15 @@ def score_card_metric_region(
             selected_data.append(data)
             run_ids.append(run_id)
 
-        if selected_data:
+        if len(selected_data) >= 2:
             _logger.info(f"Creating score cards for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             sc_plotter.plot(selected_data, run_ids, metric, channels_set, name)
+        elif len(selected_data) == 1:
+            _logger.info(
+                f"Skipping score card for {metric} - {region} - {stream}: "
+                f"only one run available (need at least 2 to compare)."
+            )
 
 
 def bar_plot_metric_region(
@@ -394,50 +443,6 @@ def bar_plot_metric_region(
             _logger.info(f"Creating bar plots for {metric} - {region} - {stream}.")
             name = "_".join([metric, region, stream])
             br_plotter.plot(selected_data, run_ids, metric, channels_set, name)
-
-
-class DefaultMarkerSize:
-    """
-    Utility class for managing default configuration values, such as marker sizes
-    for various data streams.
-    """
-
-    _marker_size_stream = {
-        "era5": 2.5,
-        "imerg": 0.25,
-        "cerra": 0.1,
-    }
-
-    _default_marker_size = 0.5
-
-    @classmethod
-    def get_marker_size(cls, stream_name: str) -> float:
-        """
-        Get the default marker size for a given stream name.
-
-        Parameters
-        ----------
-        stream_name : str
-            The name of the stream.
-
-        Returns
-        -------
-        float
-            The default marker size for the stream.
-        """
-        return cls._marker_size_stream.get(stream_name.lower(), cls._default_marker_size)
-
-    @classmethod
-    def list_streams(cls):
-        """
-        List all streams with defined marker sizes.
-
-        Returns
-        -------
-        list[str]
-            List of stream names.
-        """
-        return list(cls._marker_size_stream.keys())
 
 
 def quantile_plot_metric_region(
