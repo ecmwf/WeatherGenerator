@@ -122,6 +122,7 @@ def run_continue(args):
 
     Note: All model configurations are set in the function body.
     """
+    t_overall_start = time.time()  # Track overall run start time
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
@@ -153,6 +154,18 @@ def run_continue(args):
         traceback.print_exc()
         if cf.world_size == 1:
             pdb.post_mortem(tb)
+    finally:
+        # Log overall time (only on root rank)
+        if is_root():
+            t_overall_end = time.time()
+            overall_time = t_overall_end - t_overall_start
+            trainer.train_logger.log_metrics(
+                "train",
+                {
+                    "overall_time_seconds": overall_time,
+                },
+            )
+            logger.info(f"Training completed. Overall time: {overall_time / 3600:.2f} hours")
 
 
 def run_train(args):
@@ -161,6 +174,7 @@ def run_train(args):
 
     Note: All model configurations are set in the function body.
     """
+    t_overall_start = time.time()  # Track overall run start time
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
@@ -194,6 +208,18 @@ def run_train(args):
         traceback.print_exc()
         if cf.world_size == 1:
             pdb.post_mortem(tb)
+    finally:
+        # Log overall time (only on root rank)
+        if is_root():
+            t_overall_end = time.time()
+            overall_time = t_overall_end - t_overall_start
+            trainer.train_logger.log_metrics(
+                "train",
+                {
+                    "overall_time_seconds": overall_time,
+                },
+            )
+            logger.info(f"Training completed. Overall time: {overall_time / 3600:.2f} hours")
 
 
 if __name__ == "__main__":
