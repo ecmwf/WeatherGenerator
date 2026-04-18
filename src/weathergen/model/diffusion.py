@@ -82,21 +82,21 @@ class DiffusionForecastEngine(torch.nn.Module):
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
 
-        # TODO: remove after single sample experiments
-        if self.cur_token is not None:
-            # logger.info("checking single sampling")
-            assert self.cur_token[0].shape == tokens[0].shape, (
-                "first token shape was different between iterations "
-                "– violates single sample overfitting with difference"
-            )
-            assert torch.equal(self.cur_token[0], tokens[0]), (
-                f"first token was different between iterations "
-                f"– violates single sample overfitting {self.cur_token[0] - tokens[0]}"
-            )
-            assert torch.equal(self.cur_token, tokens), (
-                f"tokens were different between iterations "
-                f"– violates single sample overfitting {self.cur_token - tokens}"
-            )
+        # # TODO: remove after single sample experiments
+        # if self.cur_token is not None:
+        #     # logger.info("checking single sampling")
+        #     assert self.cur_token[0].shape == tokens[0].shape, (
+        #         "first token shape was different between iterations "
+        #         "– violates single sample overfitting with difference"
+        #     )
+        #     assert torch.equal(self.cur_token[0], tokens[0]), (
+        #         f"first token was different between iterations "
+        #         f"– violates single sample overfitting {self.cur_token[0] - tokens[0]}"
+        #     )
+        #     assert torch.equal(self.cur_token, tokens), (
+        #         f"tokens were different between iterations "
+        #         f"– violates single sample overfitting {self.cur_token - tokens}"
+        #     )
         self.cur_token = tokens.detach()
 
         # return self.inference(fstep=fstep, num_steps=10, coords=coords)

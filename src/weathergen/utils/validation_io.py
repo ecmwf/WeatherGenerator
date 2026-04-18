@@ -11,6 +11,8 @@ import logging
 from math import exp
 import re
 
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
 import numpy as np
 import torch
 import xarray as xr
@@ -254,7 +256,7 @@ def write_output(
 
 
     # Free arrays no longer needed after zarr writing
-    del targets_all, targets_times_all, targets_lens, sources, data
+    del targets_all, targets_lens, sources, data
 
     # TODO: REMOVE EVERYTHING BELOW THIS LINE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
 
@@ -271,7 +273,9 @@ def write_output(
     for stream_idx, stream_info in enumerate(cf.streams):
         stream_name = stream_info["name"]
         preds_stream = preds_all[t_idx][stream_idx]
+        noised_stream = noised_preds_all[t_idx][stream_idx]
         coords_stream = targets_coords_all[t_idx][stream_idx]
+        times_stream = targets_times_all[t_idx][stream_idx]
 
         if preds_stream.size == 0 or coords_stream.size == 0:
             _logger.warning(f"No prediction data to plot for stream {stream_name}.")
@@ -286,26 +290,26 @@ def write_output(
             )
             continue
 
+        has_noised = (
+            noised_stream.size > 0 and noised_stream.ndim >= 2
+        )
+        if has_noised and noised_stream.ndim == 3:
+            noised_stream = noised_stream[0]
+
         channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
         selected_channels = [
             ch for ch in channels if _normalize_channel_name(ch) in headline_channels
         ]
         if not selected_channels:
             _logger.warning(f"No headline channels available for plotting stream {stream_name}.")
-            del preds_stream, coords_stream
             continue
 
-        # Build a channel index map so we can slice numpy arrays directly
-        # instead of constructing a full xarray DataArray for all channels.
         ch_to_col = {ch: idx for idx, ch in enumerate(channels)}
 
         lat = coords_stream[:, 0]
         lon = coords_stream[:, 1]
 
-        plotter.stream = stream_name
-        plotter.run_id = config.get_run_id_from_config(cf)
-        plotter.fstep = forecast_offset
-
+        run_id = config.get_run_id_from_config(cf)
         num_samples = len(preds)
         len_per_sample = preds_stream.shape[0] // num_samples
 
@@ -313,164 +317,94 @@ def write_output(
             s_start = sample * len_per_sample
             s_end = (sample + 1) * len_per_sample
 
+            # Extract sample date from target times
+            sample_times = times_stream[s_start:s_end]
+            sample_date = np.unique(sample_times)
+            if len(sample_date) > 0 and not np.isnat(sample_date[0]):
+                date_str = str(sample_date[0].astype("datetime64[h]"))
+            else:
+                date_str = "unknown date"
+
             for varname in selected_channels:
                 col = ch_to_col[varname]
-                vals = preds_stream[s_start:s_end, col]
+                pred_vals = preds_stream[s_start:s_end, col]
                 sample_lat = lat[s_start:s_end]
                 sample_lon = lon[s_start:s_end]
 
-                # Drop NaN points
-                valid = ~np.isnan(vals)
-                vals = vals[valid]
-                sample_lat = sample_lat[valid]
-                sample_lon = sample_lon[valid]
-
-                sample_da = xr.DataArray(
-                    vals,
-                    dims=("ipoint",),
-                    coords={
-                        "ipoint": np.arange(len(vals)),
-                        "lat": ("ipoint", sample_lat),
-                        "lon": ("ipoint", sample_lon),
-                    },
-                )
+                # Drop NaN points (use pred mask for both panels)
+                valid = ~np.isnan(pred_vals)
+                pred_vals = pred_vals[valid]
+                plot_lat = sample_lat[valid]
+                plot_lon = sample_lon[valid]
 
                 channel_dir = base_plot_dir / varname
                 channel_dir.mkdir(parents=True, exist_ok=True)
-                epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}"
-                # Add noise_level_rn to title if present for this stream
-                if noise_level is not None:
-                    eta_str = str(noise_level)
-                else:
-                    eta_str = None
+
+                eta_str = str(noise_level) if noise_level is not None else None
                 eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
                 epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}{eta_tag}"
-                
-                if noise_level is not None:
-                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1} | noise_level={eta_str}"
-                else:
-                    title = f"{stream_name} - {varname} (fstep {forecast_offset}) | sample {sample + 1}"
 
-                plot_name = plotter.scatter_plot(
-                    sample_da,
-                    channel_dir,
-                    varname=varname,
-                    regionname="global",
-                    tag=epoch_tag,
-                    title=title,
+                # Determine number of panels
+                ncols = 2 if has_noised else 1
+                proj = ccrs.Robinson()
+                fig, axes = plt.subplots(
+                    1, ncols, figsize=(8 * ncols, 5),
+                    subplot_kw={"projection": proj}, dpi=150,
                 )
-                src = channel_dir / f"{plot_name}.{plotter.image_format}"
-                dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
-                if src != dst:
-                    try:
-                        src.replace(dst)
-                    except (FileNotFoundError, OSError):
-                        pass  # another rank already renamed or removed the file
+                if ncols == 1:
+                    axes = [axes]
 
-                del sample_da, vals, sample_lat, sample_lon, valid
+                # Shared color limits across panels
+                vmin, vmax = np.nanmin(pred_vals), np.nanmax(pred_vals)
+
+                # Panel 1: noised (if available)
+                if has_noised:
+                    noised_vals = noised_stream[s_start:s_end, col][valid]
+                    vmin = min(vmin, np.nanmin(noised_vals))
+                    vmax = max(vmax, np.nanmax(noised_vals))
+                    ax_noised = axes[0]
+                    ax_noised.coastlines()
+                    ax_noised.set_global()
+                    sc_n = ax_noised.scatter(
+                        plot_lon, plot_lat, c=noised_vals,
+                        vmin=vmin, vmax=vmax, cmap="coolwarm",
+                        s=4.0, marker="o", transform=ccrs.PlateCarree(), linewidths=0.0,
+                    )
+                    ax_noised.set_title("Noised", fontsize=10)
+                    ax_denoised = axes[1]
+                else:
+                    ax_denoised = axes[0]
+
+                # Panel 2 (or only panel): denoised prediction
+                ax_denoised.coastlines()
+                ax_denoised.set_global()
+                sc_d = ax_denoised.scatter(
+                    plot_lon, plot_lat, c=pred_vals,
+                    vmin=vmin, vmax=vmax, cmap="coolwarm",
+                    s=4.0, marker="o", transform=ccrs.PlateCarree(), linewidths=0.0,
+                )
+                ax_denoised.set_title("Denoised", fontsize=10)
+
+                # Shared colorbar
+                fig.colorbar(sc_d, ax=axes, orientation="horizontal",
+                             label=varname, shrink=0.6, pad=0.05)
+
+                # Suptitle with date
+                eta_info = f" | noise_level={eta_str}" if eta_str else ""
+                fig.suptitle(
+                    f"{stream_name} - {varname} (fstep {forecast_offset})"
+                    f" | sample {sample + 1} | {date_str}{eta_info}",
+                    fontsize=11,
+                )
+
+                fname = channel_dir / f"{epoch_tag}_{sample}.{plotter.image_format}"
+                fig.savefig(fname, bbox_inches="tight")
+                plt.close(fig)
+
+                del pred_vals, plot_lat, plot_lon, valid
 
         del preds_stream, coords_stream
 
-    # Plot decoded noised tokens (diffusion models only)
-    has_noised = any(
-        noised_preds_all[t_idx][s_idx].size > 0
-        for s_idx in range(len(cf.streams))
-        if noised_preds_all[t_idx][s_idx].ndim >= 2
-    )
-    if has_noised:
-        for stream_idx, stream_info in enumerate(cf.streams):
-            stream_name = stream_info["name"]
-            noised_stream = noised_preds_all[t_idx][stream_idx]
-            coords_stream = targets_coords_all[t_idx][stream_idx]
-
-            if noised_stream.size == 0 or coords_stream.size == 0:
-                continue
-
-            if noised_stream.ndim == 3:
-                noised_stream = noised_stream[0]
-            elif noised_stream.ndim != 2:
-                continue
-
-            channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
-            selected_channels = [
-                ch for ch in channels if _normalize_channel_name(ch) in headline_channels
-            ]
-            if not selected_channels:
-                del noised_stream, coords_stream
-                continue
-
-            ch_to_col = {ch: idx for idx, ch in enumerate(channels)}
-
-            lat = coords_stream[:, 0]
-            lon = coords_stream[:, 1]
-
-            plotter.stream = stream_name
-            plotter.run_id = config.get_run_id_from_config(cf)
-            plotter.fstep = forecast_offset
-
-            num_samples = len(preds)
-            len_per_sample = noised_stream.shape[0] // num_samples
-
-            for sample in range(num_samples):
-                s_start = sample * len_per_sample
-                s_end = (sample + 1) * len_per_sample
-
-                for varname in selected_channels:
-                    col = ch_to_col[varname]
-                    vals = noised_stream[s_start:s_end, col]
-                    sample_lat = lat[s_start:s_end]
-                    sample_lon = lon[s_start:s_end]
-
-                    # Drop NaN points
-                    valid = ~np.isnan(vals)
-                    vals = vals[valid]
-                    sample_lat = sample_lat[valid]
-                    sample_lon = sample_lon[valid]
-
-                    sample_da = xr.DataArray(
-                        vals,
-                        dims=("ipoint",),
-                        coords={
-                            "ipoint": np.arange(len(vals)),
-                            "lat": ("ipoint", sample_lat),
-                            "lon": ("ipoint", sample_lon),
-                        },
-                    )
-
-                    channel_dir = base_plot_dir / varname / "noised"
-                    channel_dir.mkdir(parents=True, exist_ok=True)
-                    epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}_{sample}_noised"
-
-                    if noise_level is not None:
-                        eta_str = str(noise_level)
-                    else:
-                        eta_str = None
-                    eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
-                    epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}{eta_tag}"
-                    
-                    if noise_level is not None:
-                        title = f"{stream_name} - {varname} (fstep {forecast_offset}) | noised sample {sample + 1} | noise_level={eta_str}"
-                    else:
-                        title = f"{stream_name} - {varname} (fstep {forecast_offset}) | noised sample {sample + 1}"
-
-                    plot_name = plotter.scatter_plot(
-                        sample_da,
-                        channel_dir,
-                        varname=varname,
-                        regionname="global",
-                        tag=epoch_tag,
-                        title=title,
-                    )
-                    src = channel_dir / f"{plot_name}.{plotter.image_format}"
-                    dst = channel_dir / f"{epoch_tag}.{plotter.image_format}"
-                    if src != dst:
-                        try:
-                            src.replace(dst)
-                        except (FileNotFoundError, OSError):
-                            pass  # another rank already renamed or removed the file
-
-                    del sample_da, vals, sample_lat, sample_lon, valid
-
-            del noised_stream, coords_stream
+    del targets_times_all
 
     i += 1
