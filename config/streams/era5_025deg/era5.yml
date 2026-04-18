@@ -18,7 +18,7 @@ ERA5 :
   location_weight : cosine_latitude
   token_size : 64
   tokenize_spacetime : True
-  max_num_targets: 8192 #16384 # 32768 #32768 # 131072 # 65536 # 32768 # 16384 # 8192
+  max_num_targets: 40000 #32768 #8192 #16384 # 32768 #32768 # 131072 # 65536 # 32768 # 16384 # 8192
   frequency: 06:00:00
   embed : 
     net : transformer

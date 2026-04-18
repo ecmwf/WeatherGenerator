@@ -1,0 +1,47 @@
+# JEPA deep-SSL sweep pipeline for launch-slurm-sophie.py
+#
+# Three stages:
+#   1. pretrain  — JEPA self-supervised with EMA teacher (deep SSL, context loss)
+#   2. finetune  — masking-based finetuning (freezes encoder)
+#   3. finetune-forecast — forecasting finetuning (freezes encoder)
+#
+# Sweep parameters (pretrain only) via --stage-options:
+#   - training_config.learning_rate_scheduling.lr_max
+#   - training_config.losses.student-teacher.target_and_aux_calc.EMATeacher.ema_halflife_in_thousands
+#   - training_config.model_input.random_easy.masking_strategy_config.rate
+#
+# Usage:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py --pipeline config/jepa_pipeline_n320_hlpx6.yml
+
+stages:
+  # Stage 1: JEPA pre-training with EMA teacher + deep SSL
+  - name: pretrain
+    stage: train
+    base_config: ./config/config_jepa_deep_ssl_n320_hlpx6.yml
+    config_files:
+      - ./config/config_jepa_deep_ssl_n320_hlpx6.yml
+    options: []
+    chain_jobs: 4
+    nodes: 1
+    mini_epoch: -1
+    cleanup_scripts: yes
+
+  # Stage 2: Masking-based finetuning (freezes encoder)
+  - name: finetune
+    stage: train
+    from_run_id: STAGE.pretrain
+    config_files:
+      - ./config/config_jepa_finetuning_n320_hlpx6.yml
+    chain_jobs: 2
+    nodes: 1
+    cleanup_scripts: yes
+
+  # Stage 3: Forecasting finetuning (freezes encoder)
+  - name: finetunefc
+    stage: train
+    from_run_id: STAGE.pretrain
+    config_files:
+      - ./config/config_jepa_forecasting_finetuning_n320_hlpx6.yml
+    chain_jobs: 4
+    nodes: 1
+    cleanup_scripts: yes
