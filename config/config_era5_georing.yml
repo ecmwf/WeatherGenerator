@@ -132,7 +132,7 @@ data_loading :
 
   num_workers: 12
   rng_seed: ???
-  repeat_data_in_mini_epoch : False
+  repeat_data_in_mini_epoch : True
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
@@ -154,7 +154,7 @@ training_config:
   end_date: 2022-12-31T00:00
 
   time_window_step: 01:00:00
-  time_window_len: 01:00:00
+  time_window_len: 06:00:00
   
   learning_rate_scheduling :
     lr_start: 1e-6
