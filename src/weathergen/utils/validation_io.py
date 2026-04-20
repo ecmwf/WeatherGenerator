@@ -68,9 +68,9 @@ def write_output(
 
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
-            pred_idx = t_idx - fstep_offset
+            t_chunk_idx = t_idx - fstep_offset
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                preds = model_output.get_physical_prediction(pred_idx, sname)
+                preds = model_output.get_physical_prediction(t_chunk_idx, sname)
                 preds_shape = preds[0].shape
                 # for-loop to make sure we have a consistent number of samples
                 preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in preds]
@@ -79,7 +79,7 @@ def write_output(
                 t_times_s = [np.array([]).astype("datetime64[ns]") for _ in preds]
 
             else:
-                preds = model_output.get_physical_prediction(pred_idx, sname)
+                preds = model_output.get_physical_prediction(t_chunk_idx, sname)
                 targets = target_aux_out.physical[t_idx][sname]["target"]
 
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
@@ -97,7 +97,12 @@ def write_output(
 
                     idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
                     if idxs_inv is not None:
-                        pred = pred[:, idxs_inv]
+                        pred_idxs_inv = (
+                            idxs_inv.to(pred.device, non_blocking=True)
+                            if isinstance(idxs_inv, torch.Tensor) and idxs_inv.device != pred.device
+                            else idxs_inv
+                        )
+                        pred = pred[:, pred_idxs_inv]
                         target = target[idxs_inv]
                         t_coords = t_coords[idxs_inv]
                         t_times = t_times[idxs_inv]
