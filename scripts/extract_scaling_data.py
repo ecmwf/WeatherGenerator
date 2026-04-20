@@ -21,6 +21,12 @@ def extract_num_nodes(err_log_path: Path) -> int | None:
 
 
 def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | None:
+    """Extract metrics from NDJSON file with startup and training lines.
+    
+    Format:
+    - Line 1: startup_time_seconds
+    - Line 2+: loss_avg_mean, LossPhysical.loss_avg, etc.
+    """
     metrics_path = shared_work_dir / "results" / run_id / f"{run_id}_train_metrics.json"
     if not metrics_path.exists():
         return None
@@ -28,17 +34,30 @@ def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | No
         df = pl.read_ndjson(metrics_path)
         if len(df) == 0:
             return None
-        final_row = df.tail(1)
-        overall_time = final_row.get_column("overall_time_seconds").item() if "overall_time_seconds" in final_row.columns else None
+        
+        # Extract startup_time from first row (startup line)
+        startup_time = None
+        if "startup_time_seconds" in df.columns:
+            startup_time = df.select(pl.col("startup_time_seconds").first()).item()
+        
+        # Extract loss_avg_mean from last training row
+        loss_avg_mean = None
+        if "loss_avg_mean" in df.columns:
+            loss_avg_mean = df.select(pl.col("loss_avg_mean").last()).item()
+        
+        # Extract overall_time from last row
+        overall_time = None
+        if "overall_time_seconds" in df.columns:
+            overall_time = df.select(pl.col("overall_time_seconds").last()).item()
+        
         if overall_time is None:
             return None
-        startup_time = final_row.get_column("startup_time_seconds").item() if "startup_time_seconds" in final_row.columns else None
-        loss_avg = final_row.get_column("loss_avg_mean").item() if "loss_avg_mean" in final_row.columns else None
+        
         return {
             "overall_time_seconds": overall_time,
             "startup_time_seconds": startup_time,
             "training_time": overall_time - startup_time if startup_time else None,
-            "loss_avg_mean": loss_avg,
+            "loss_avg_mean": loss_avg_mean,
         }
     except Exception:
         return None
