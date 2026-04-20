@@ -349,15 +349,6 @@ class Trainer(TrainerBase):
         val_cfg = self.validation_cfg
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
 
-        channel_weight_params = []
-        for _, calc_list in self.loss_calculator.loss_calculators.items():
-            for _, calc in calc_list:
-                if hasattr(calc, "channel_weights") and len(list(calc.channel_weights.parameters())) > 0:
-                    channel_weight_params.extend(calc.channel_weights.parameters())
-
-        if channel_weight_params: 
-            self.optimizer.add_param_group({"params": channel_weight_params})
-
         # recover mini_epoch when continuing run
         if self.world_size_original is None:
             mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))

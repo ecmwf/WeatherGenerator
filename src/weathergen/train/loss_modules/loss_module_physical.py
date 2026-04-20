@@ -15,7 +15,6 @@ from collections import defaultdict
 
 import numpy as np
 import torch
-import torch.nn as nn
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
@@ -57,15 +56,6 @@ class LossPhysical(LossModuleBase):
         self.stage = stage
         self.device = device
         self.name = "LossPhysical"
-        self.channel_weights = nn.ParameterDict()
-
-        for stream_info in self.cf.streams:
-            if ("target_channel_weights" in stream_info and stream_info.get("learnable_channel_weights", False)):
-                stream_key = stream_info["name"].replace(".", "_")
-                weights = torch.tensor(
-                    stream_info["target_channel_weights"], device=device, dtype=torch.float32
-                )
-                self.channel_weights[stream_key] = nn.Parameter(weights)
 
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -88,17 +78,13 @@ class LossPhysical(LossModuleBase):
         if self.stage == TRAIN:
             # set loss_weights to 1. when not specified
             stream_info_loss_weight = stream_info.get("loss_weight", 1.0)
-            stream_key = stream_info["name"].replace(".", "_")
-            if stream_key in self.channel_weights:
-                weights_channels = self.channel_weights[stream_key]
-            else:
-                weights_channels = (
-                    torch.tensor(stream_info["target_channel_weights"]).to(
-                        device=device, non_blocking=True
-                    )
-                    if "target_channel_weights" in stream_info
-                    else None
+            weights_channels = (
+                torch.tensor(stream_info["target_channel_weights"]).to(
+                    device=device, non_blocking=True
                 )
+                if "target_channel_weights" in stream_info
+                else None
+            )
         elif self.stage == VAL:
             # in validation mode, always unweighted loss
             stream_info_loss_weight = 1.0

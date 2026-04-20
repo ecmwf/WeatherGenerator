@@ -14,8 +14,6 @@ from abc import abstractmethod
 from collections import defaultdict
 
 from torch import Tensor
-import torch.nn as nn  
-
 
 from weathergen.common.config import Config
 from weathergen.utils.train_logger import Stage
@@ -41,7 +39,7 @@ class LossValues:
     stddev_all: defaultdict
 
 
-class LossModuleBase(nn.Module):
+class LossModuleBase:
     def __init__(self):
         """
         Base class for loss modules.
@@ -53,7 +51,6 @@ class LossModuleBase(nn.Module):
                    This dictates which set of loss functions (training or validation) will be used.
             device: The computation device, such as 'cpu' or 'cuda:0', where tensors will reside.
         """
-        super().__init__()        
         self.cf: Config | None = None
         self.stage: Stage
         self.loss_fcts = []
