@@ -2,6 +2,9 @@
 
 train:
   plot:
+    bpeh160r:
+      slurm_id: 381190
+      description: "single samples, lr_start=1e-6, lr_max=1e-6"
     cigywmh2:
       slurm_id: 380678
       description: "single samples, lr_start=1e-6, lr_max=1e-5"
