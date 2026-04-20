@@ -660,18 +660,6 @@ def get_path_results(config: Config, mini_epoch: int) -> Path:
 
     return base_path / fname
 
-def overwrite_path_model(config: Config, new_path: Path) -> Config:
-    """Overwrite the model path in the config with a new path."""
-    config = config.copy()
-    private_config = _load_private_conf()
-    shared_wg_path = Path(private_config.get("path_shared_working_dir"))
-    if not new_path.is_absolute():
-        new_path = shared_wg_path / new_path
-    with open_dict(config):
-        _logger.warning(f"Overwriting model path in config with new path: {new_path}")
-        config.path_model = str(new_path)
-    return config
-
 
 @functools.cache
 def _get_shared_wg_path() -> Path:
