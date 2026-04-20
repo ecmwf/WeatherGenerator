@@ -10,6 +10,7 @@
 from omegaconf import OmegaConf, DictConfig
 
 import logging
+import json
 
 from weathergen.common.config import Config, get_path_model
 
@@ -48,9 +49,9 @@ def _get_runstate_file_write_name(run_id: str, mini_epoch: int | None):
 
 
 def save_runstate(runstate: RunState, config: Config, mini_epoch: int | None):
-
-    import json
-    from weathergen.utils.distributed import is_root
+    """
+    Save runstate
+    """
 
     dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
@@ -62,3 +63,8 @@ def save_runstate(runstate: RunState, config: Config, mini_epoch: int | None):
     with (dirname/f"{fname}").open("w") as f:
         f.write(json_str)
 
+
+def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -> RunState:
+    """
+    Load runstate
+    """
