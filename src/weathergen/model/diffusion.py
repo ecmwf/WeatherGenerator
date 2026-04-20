@@ -152,7 +152,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         # https://github.com/NVlabs/edm/blob/main/generate.py
 
         # Sample pure noise (assuming single batch element for now)
-        torch.manual_seed(42)
+        # torch.manual_seed(42)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
 
         ### OLD WAY OF COMPUTING SIGMA SCHEDULE
