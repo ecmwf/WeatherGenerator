@@ -153,8 +153,8 @@ training_config:
   start_date: 2014-01-01T00:00
   end_date: 2022-12-31T00:00
 
-  time_window_step: 06:00:00
-  time_window_len: 06:00:00
+  time_window_step: 01:00:00
+  time_window_len: 01:00:00
   
   learning_rate_scheduling :
     lr_start: 1e-6
