@@ -1,5 +1,45 @@
-train : 
-  plot :    
-    h8wnm1kt:
+train:
+  plot:
+    it6wj130:
+      slurm_id: 376473
+      description: "single samples, lr_start=1e-6, lr_max=1e-5"
+    p54uvzl2:
+      slurm_id: 376808
+      description: "single samples, lr_start=1e-5, lr_max=1e-5"
+    lq5djr4m:
+      slurm_id: 376811
+      description: "single samples, lr_start=1e-6, lr_max=1e-6"
+    wcruesg4:
+      slurm_id: 376816
+      description: "single samples, lr_start=1e-7, lr_max=1e-6"
+    k3qh6elp:
+      slurm_id: 377059
+      description: "single samples, lr_start=1e-6, lr_max=5e-6"
+    # w8hp1c2g:
+    #   slurm_id: 376855
+    #   description: "20y distribution, lr_start=1e-5, lr_max=1e-5"
+    # ss9z2rqi:
+    #   slurm_id: 376858
+    #   description: "20y distribution, lr_start=1e-6, lr_max=1e-6"
+    # g9iqgz0d:
+    #   slurm_id: 376860
+    #   description: "20y distribution, lr_start=1e-7, lr_max=1e-6"
+    # q5u9p8xo: 
+    #   slurm_id: 377063
+    #   description: "20y distribution, lr_start=1e-6, lr_max=5e-6"
+    # f8e97mqx:
+    #   slurm_id: 376862
+    #   description: "20y distribution, lr_start=1e-6, lr_max=1e-5"
+    xqgy519d:
       slurm_id: 0
-      description: "first conditioning experiment"
+      description: "Old Matze Baseline 1e-5 (single samples)"
+    rj2xksg0:
+      slurm_id: 0
+      description: "Old Matze Baseline 1e-5  (single samples)"
+    bbosl5wy:
+      slurm_id: 0
+      description: "New Matze Baseline (20y)"
+    y0l8egdr:
+      slurm_id: 0
+      description: "New Matze Baseline (single samples)"
+
