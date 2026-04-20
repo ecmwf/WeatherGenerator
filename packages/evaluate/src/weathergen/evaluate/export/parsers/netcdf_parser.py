@@ -308,7 +308,9 @@ class NetcdfParser(CfParser):
             ds["forecast_reference_time"].encoding.update(time_encoding)
 
         if "forecast_period" in ds.coords:
-            ds["forecast_period"].encoding.update({"coordinates": "forecast_reference_time"})
+            ds["forecast_period"].attrs.update(
+                {"coordinates": "forecast_reference_time", "dtype": "timedelta64[ns]"}
+            )
 
         return ds
 
