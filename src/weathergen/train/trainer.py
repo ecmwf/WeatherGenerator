@@ -573,7 +573,7 @@ class Trainer(TrainerBase):
                         enabled=cf.with_mixed_precision,
                     ):
                         if self.ema_model is None:
-                            preds = self.model(
+                            tokens, output  = self.model.forward_latent(
                                 self.model_params,
                                 batch.get_source_samples(),
                             )
@@ -583,47 +583,67 @@ class Trainer(TrainerBase):
                                 batch.get_source_samples(),
                             )
 
-                        targets_and_auxs = {}
-                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
-                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
-                            targets_and_auxs[loss_name] = target_aux.compute(
-                                self.cf.general.istep,
-                                batch.get_target_samples(target_idxs),
-                                self.model_params,
-                                self.model,
-                            )
+                        forecast_min = mode_cfg.forecast.offset
+                        forecast_max = mode_cfg.forecast.offset
 
-                    _ = self.loss_calculator_val.compute_loss(
-                        preds=preds,
-                        targets_and_aux=targets_and_auxs,
-                        metadata=extract_batch_metadata(batch),
-                    )
+                        forecast_chunk_size = cf.training_config.forecast.forecast_chunk_size
+                        for step in batch.get_source_samples().get_output_idxs():
+                            if self.model.forecast_engine:
+                                tokens = self.model.forecast_engine(tokens, step, coords=self.model_params.rope_coords)
+                            output = self.model.predict_decoders(self.model_params, step, tokens, batch.get_source_samples(), output)
+                            output = self.model.predict_latent(self.model_params, step, tokens, batch.get_source_samples(), output)
+                            forecast_max +=1
+                            is_chunk_completed = (forecast_max-forecast_min) % forecast_chunk_size  == 0  
+                            is_last_step = forecast_max == len(batch.get_source_samples().get_output_idxs())
+                            if is_chunk_completed or is_last_step:
+                                targets_and_auxs = {}
+                                for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                                    target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
+                                    targets_and_auxs[loss_name] = target_aux.compute(
+                                        self.cf.general.istep,
+                                        batch.get_target_samples(target_idxs),
+                                        self.model_params,
+                                        self.model,
+                                        forecast_min=forecast_min,
+                                        forecast_max=forecast_max,
+                                    )
 
-                    # log output
-                    if bidx < num_samples_write:
-                        # denormalization function for data
-                        denormalize_data_fct = (
-                            (lambda x0, x1: x1)
-                            if mode_cfg.get("output", {}).get("normalized_samples", False)
-                            else self.dataset_val.denormalize_target_channels
-                        )
-                        # write output
-                        write_output(
-                            self.cf,
-                            mode_cfg,
-                            batch_size,
-                            mini_epoch,
-                            bidx,
-                            denormalize_data_fct,
-                            batch,
-                            preds,
-                            targets_and_auxs,
-                        )
+                                _ = self.loss_calculator_val.compute_loss(
+                                    preds=output,
+                                    targets_and_aux=targets_and_auxs,
+                                    metadata=extract_batch_metadata(batch),
+                                    forecast_min=forecast_min,
+                                    forecast_max=forecast_max
+                                )
+                                ## log output
+                                num_samples = mode_cfg.get("write_num_samples", 0) * batch_size
+                                if bidx < num_samples_write:
+                                    denormalize_data_fct = (
+                                        (lambda x0, x1: x1)
+                                        if mode_cfg.get("output", {}).get("normalized_samples", False)
+                                        else self.dataset_val.denormalize_target_channels
+                                    )
+                                    write_output(
+                                        self.cf,
+                                        mode_cfg,
+                                        batch_size,
+                                        mini_epoch,
+                                        bidx,
+                                        denormalize_data_fct,
+                                        batch,
+                                        output,
+                                        targets_and_auxs,
+                                        forecast_min=forecast_min,
+                                        forecast_max=forecast_max
+                                    )
+                                print(f"-----------done with writing------------------")
+                                output.empty_physical_prediction(len(output.physical))
+                                output.empty_latent_prediction(len(output.physical))
+                                pbar.update(batch_size)
+                                forecast_min = forecast_max
 
-                    pbar.update(batch_size)
-
-                    if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
-                        break
+                                if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
+                                    break
 
                 self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)

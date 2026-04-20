@@ -162,7 +162,7 @@ class LossPhysical(LossModuleBase):
 
         return loss_lfct, losses_chs
 
-    def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
+    def compute_loss(self, preds: dict, targets: dict, metadata, **kwargs) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
         stream data.
@@ -203,6 +203,15 @@ class LossPhysical(LossModuleBase):
         losses_all = defaultdict(dict)
 
         source2target_idxs, output_info, target2source_idxs, target_info = metadata
+
+        if "forecast_min" in kwargs and "forecast_max" in kwargs:
+            forecast_min = kwargs['forecast_min']
+            forecast_max = kwargs['forecast_max']
+        elif "forecast_min" not in kwargs and "forecast_max" not in kwargs:
+            forecast_min = self.forecast_offset
+            forecast_max = targets.num_forecast_steps
+        else:
+            assert False,"either both forecast_min and forecast_max should be in kwargs or none should be in kwargs"
 
         # TODO: iterate over batch dimension
 

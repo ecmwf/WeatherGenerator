@@ -61,6 +61,12 @@ class TargetAuxOutput:
     def get_latent_target(self, timestep_idx: int):
         return self.latent[timestep_idx]
 
+    def empty_physical_prediction(self, forecast_steps):
+        self.physical = [{} for _ in range(forecast_steps)]
+
+    def empty_latent_prediction(self, forecast_steps):
+        self.latent = [{} for _ in range(forecast_steps)]
+
 
 class TargetAndAuxModuleBase:
     def __init__(self, cf, model, **kwargs):
@@ -95,11 +101,18 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
+    def compute(self, bidx, batch, model_params, model, **kwargs) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
         output_idxs = batch.get_output_idxs()
         assert len(output_idxs) > 0
+
+        if "forecast_min" in kwargs and "forecast_max" in kwargs:
+            forecast_min = kwargs['forecast_min']-1
+            forecast_max = kwargs['forecast_max']
+        else:
+            forecast_min = 0
+            forecast_max =  batch.get_forecast_steps()
 
         targets = TargetAuxOutput(batch.get_output_len(), output_idxs)
 
