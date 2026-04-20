@@ -72,7 +72,7 @@ frequency_embedding_dim: 256
 embedding_dim: 512
 sigma_min: 0.002
 sigma_max: 80
-sigma_data: 1.0
+sigma_data: 0.63
 rho: 7
 p_mean: -1.2
 p_std: 1.2
@@ -114,7 +114,7 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'ydka6uql', 'epoch': -1}  # multi-var d512 hl4, sigma_data=0.827
 load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5, sigma_data=0.5789
 # load_chkpt: {'run_id': 'v8kd6xc1', 'epoch': -1}  # multi-var d512 hl5 nopos, sigma_data=0.6481
-# load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5 enc-lnorm, sigma_data=1.0
+load_chkpt: {'run_id': 'lwjkb3y4', 'epoch': -1}  # multi-var d512 hl5 enc-lnorm, sigma_data=1.0
 # load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
 # load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
 
@@ -162,7 +162,7 @@ data_loading :
 
   num_workers: 12
   rng_seed: ???
-  repeat_data_in_mini_epoch : True
+  repeat_data_in_mini_epoch : False
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
@@ -180,8 +180,8 @@ training_config:
   samples_per_mini_epoch: 1028
   shuffle: True
  
-  start_date: 2012-06-01T00:00
-  end_date: 2012-06-01T18:00
+  start_date: 1979-01-01T00:00
+  end_date: 2022-12-31T18:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -250,11 +250,11 @@ validation_config:
   validation_noise_levels: [1.0, 2.0, 3.0, 4.0]
 
   samples_per_mini_epoch: 16
-  shuffle: False  # TODO: Set back to False
+  shuffle: True
 
-  start_date: 2012-06-01T00:00
-  end_date: 2012-06-01T18:00
-
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T18:00
+  
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
     enabled : True
