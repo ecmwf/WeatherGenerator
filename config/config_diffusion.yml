@@ -180,15 +180,15 @@ training_config:
   samples_per_mini_epoch: 1028
   shuffle: True
  
-  start_date: 1992-06-01T00:00
-  end_date: 2012-06-01T00:00
+  start_date: 2012-06-01T00:00
+  end_date: 2012-06-01T18:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
   
   learning_rate_scheduling :
     lr_start: 1e-6 #5e-5
-    lr_max: 5e-6 #1e-4
+    lr_max: 5e-5 #1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 64
@@ -252,8 +252,8 @@ validation_config:
   samples_per_mini_epoch: 16
   shuffle: False  # TODO: Set back to False
 
-  start_date: 1992-06-01T00:00
-  end_date: 2012-06-01T00:00
+  start_date: 2012-06-01T00:00
+  end_date: 2012-06-01T18:00
 
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
@@ -272,7 +272,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config

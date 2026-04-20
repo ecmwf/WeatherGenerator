@@ -1,20 +1,28 @@
+
+
 train:
   plot:
-    it6wj130:
-      slurm_id: 376473
+    cigywmh2:
+      slurm_id: 380678
       description: "single samples, lr_start=1e-6, lr_max=1e-5"
-    p54uvzl2:
-      slurm_id: 376808
-      description: "single samples, lr_start=1e-5, lr_max=1e-5"
-    lq5djr4m:
-      slurm_id: 376811
-      description: "single samples, lr_start=1e-6, lr_max=1e-6"
-    wcruesg4:
-      slurm_id: 376816
-      description: "single samples, lr_start=1e-7, lr_max=1e-6"
-    k3qh6elp:
-      slurm_id: 377059
-      description: "single samples, lr_start=1e-6, lr_max=5e-6"
+    kxe5zfla:
+      slurm_id: 380680
+      description: "single samples, lr_start=1e-6, lr_max=5e-5"
+    # it6wj130:
+    #   slurm_id: 376473
+    #   description: "single samples, lr_start=1e-6, lr_max=1e-5"
+    # p54uvzl2:
+    #   slurm_id: 376808
+    #   description: "single samples, lr_start=1e-5, lr_max=1e-5"
+    # lq5djr4m:
+    #   slurm_id: 376811
+    #   description: "single samples, lr_start=1e-6, lr_max=1e-6"
+    # wcruesg4:
+    #   slurm_id: 376816
+    #   description: "single samples, lr_start=1e-7, lr_max=1e-6"
+    # k3qh6elp:
+    #   slurm_id: 377059
+    #   description: "single samples, lr_start=1e-6, lr_max=5e-6"
     # w8hp1c2g:
     #   slurm_id: 376855
     #   description: "20y distribution, lr_start=1e-5, lr_max=1e-5"

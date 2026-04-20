@@ -284,6 +284,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             if self.dit_is_cond:
                 x, cond_gate = self.lnorm(x, ada_ln_aux)
             else:
+                x = self.lnorm(x)
                 cond_gate = 1
             x, noise_gate = self.noise_conditioning(x, emb)
             gate = cond_gate * noise_gate
@@ -602,6 +603,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
             if self.dit_is_cond:
                 x, cond_gate = self.lnorm(x, ada_ln_aux)
             else:
+                x = self.lnorm(x)
                 cond_gate = 1
             x, noise_gate = self.noise_conditioning(x, emb)
             gate = cond_gate * noise_gate

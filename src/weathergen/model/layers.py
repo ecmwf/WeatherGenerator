@@ -125,6 +125,7 @@ class MLP(torch.nn.Module):
                 assert ada_ln_aux is not None, "Need auxiliary input for conditional DIT"
                 x, cond_gate = self.lnorm(x, ada_ln_aux)
             else:
+                x = self.lnorm(x)
                 cond_gate = 1
             assert noise_emb is not None, "Need noise embedding for noise conditioning in DIT"
             x, noise_gate = self.noise_conditioning(x, noise_emb)

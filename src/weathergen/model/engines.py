@@ -498,6 +498,7 @@ class ForecastingEngine(torch.nn.Module):
             tokens_in = tokens
 
         if self.cf.fe_diffusion_model:
+            assert noise_emb is not None, "noise_emb must be provided for diffusion model conditioning" 
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
@@ -508,7 +509,6 @@ class ForecastingEngine(torch.nn.Module):
                         tokens = checkpoint(block, tokens, coords, noise_emb, ada_ln_aux, use_reentrant=False)
                     else:
                         assert ada_ln_aux is None, "ada_ln_aux should not be provided when diffusion model conditioning is disabled"
-                        assert noise_emb is not None, "noise_emb must be provided for diffusion model conditioning" 
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
         else:
             for block in self.fe_blocks:
