@@ -11,6 +11,7 @@
 import copy
 import logging
 import time
+from math import sqrt
 
 import numpy as np
 import torch
@@ -25,13 +26,13 @@ from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
-    get_target_aux_calculator,
     init_model_and_shard,
 )
 from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
@@ -166,8 +167,6 @@ class Trainer(TrainerBase):
         batch_size = get_batch_size_from_config(mode_cfg)
 
         # get target_aux calculators for different loss terms
-        # del self.cf.training_config.losses["student-teacher"]["loss_fcts"]["JEPA"]
-        # del mode_cfg.losses["student-teacher"]["loss_fcts"]["JEPA"]
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
@@ -201,6 +200,8 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": loader_num_workers,
+            "pin_memory": cf.data_loading.get("memory_pinning", False),
+            "persistent_workers": cf.data_loading.get("persistent_workers", False),
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset, **loader_params, sampler=None
@@ -759,7 +760,9 @@ class Trainer(TrainerBase):
         grad_norms = {"grad_norm.total": self.last_grad_norm}
         for name, param in self.model.named_parameters():
             if param.grad is not None:
-                grad_norms["grad_norm." + name] = self._get_tensor_item(param.grad.norm())
+                grad_norms["grad_norm." + name] = self._get_tensor_item(
+                    param.grad.norm() / sqrt(param.numel())
+                )
 
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)

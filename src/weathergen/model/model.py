@@ -37,7 +37,6 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
-from weathergen.train.utils import get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
 
@@ -92,9 +91,8 @@ class ModelParams(torch.nn.Module):
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
-        self.batch_size_per_gpu = get_batch_size_from_config(cf.training_config)
 
-        ### POSITIONAL EMBEDDINGS ###
+        # Positional embeddings
         len_token_seq = 1024
         self.pe_embed = torch.nn.Parameter(
             torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
@@ -108,7 +106,7 @@ class ModelParams(torch.nn.Module):
         )
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
-        ### ROPE COORDS ###
+        # RoPE coordinates
         self.rope_2D = cf.get("rope_2D", False)
         if self.rope_2D:
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
@@ -136,7 +134,7 @@ class ModelParams(torch.nn.Module):
             self.rope_coords = None
             self.rope_cell_coords = None
 
-        ### HEALPIX NEIGHBOURS ###
+        # HEALPix neighbours
         hlc = self.healpix_level
         with warnings.catch_warnings(action="ignore"):
             temp = hp.neighbours(
@@ -388,9 +386,13 @@ class Model(torch.nn.Module):
         for i_stream, _ in enumerate(cf.streams):
             stream_name = self.stream_names[i_stream]
 
-        loss_terms = [v.type for _, v in cf.training_config.losses.items()]
+        loss_terms = [
+            v.type for _, v in cf.training_config.losses.items() if v.get("enabled", True)
+        ]
         if cf.validation_config.get("losses"):
-            loss_terms += [v.type for _, v in cf.validation_config.losses.items()]
+            loss_terms += [
+                v.type for _, v in cf.validation_config.losses.items() if v.get("enabled", True)
+            ]
 
         if "LossPhysical" in loss_terms:
             for i_stream, si in enumerate(cf.streams):
@@ -546,7 +548,7 @@ class Model(torch.nn.Module):
         ssl_losses_cfgs = [
             v
             for _, v in cf.training_config.losses.items()
-            if v.type == "LossLatentSSLStudentTeacher"
+            if v.type == "LossLatentSSLStudentTeacher" and v.get("enabled", True)
         ]
 
         # TODO: support multiple LossLatentSSLStudentTeacher terms
@@ -604,7 +606,7 @@ class Model(torch.nn.Module):
         num_params_q_cells = (
             np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
         )
-        num_params_ae_adapater = get_num_parameters(self.encoder.ae_local_global_engine.ae_adapter)
+        num_params_ae_adapter = get_num_parameters(self.encoder.ae_local_global_engine)
 
         num_params_ae_aggregation = get_num_parameters(
             self.encoder.ae_aggregation_engine.ae_aggregation_blocks
@@ -642,7 +644,7 @@ class Model(torch.nn.Module):
             for si, np in zip(cf.streams, num_params_embed, strict=False)
         ]
         print(f" Local assimilation engine: {num_params_ae_local:,}")
-        print(f" Local-global adapter: {num_params_ae_adapater:,}")
+        print(f" Local-global adapter: {num_params_ae_adapter:,}")
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")

@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 512 #1024
+ae_local_dim_embed: 1024
 ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -25,7 +25,7 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 512 #1024 #2048
+ae_global_dim_embed: 2048
 ae_global_num_blocks: 2
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 2
+ae_aggregation_num_blocks: 0
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -50,8 +50,6 @@ pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
-num_class_tokens: 1
-num_register_tokens: 7
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
@@ -63,6 +61,9 @@ fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm 
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
+
+num_class_tokens: 0
+num_register_tokens: 0
 
 healpix_level: 5
 
@@ -90,6 +91,7 @@ freeze_modules: ""
 load_chkpt: {}
 
 norm_type: "LayerNorm"
+qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
@@ -144,35 +146,6 @@ training_config:
 
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
-
-  # Collapse monitoring for detecting representation collapse
-  # Works with SSL training (JEPA/DINO) and forecasting modes
-  # For forecasting, monitors latent_state.patch_tokens at each forecast step
-  collapse_monitoring:
-    enabled: true
-    compute_frequency: 100  # batches between metric computations
-    log_frequency: 100      # batches between metric logging
-    metrics:
-      effective_rank:
-        enabled: true
-        tensor_source: "student"  # "student", "teacher", or "both"
-        sample_size: 2048         # max samples for SVD (0 = no sampling)
-        # For forecasting sequences: "all" (per-step + aggregates),
-        # "aggregate_only" (mean/min/max/degradation), "per_step_only"
-        forecast_aggregation: "all"
-      singular_values:
-        enabled: true
-        tensor_source: "student"
-        sample_size: 2048
-        forecast_aggregation: "all"
-      dimension_variance:
-        enabled: true
-        tensor_source: "student"
-        forecast_aggregation: "all"
-      prototype_entropy:
-        enabled: false  # only relevant for DINO
-      ema_beta:
-        enabled: false  # only relevant for SSL with EMA teacher
 
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
