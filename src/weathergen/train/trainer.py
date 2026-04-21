@@ -380,7 +380,7 @@ class Trainer(TrainerBase):
             logger.info(f"Startup time: {startup_time:.2f} seconds")
 
         # training loop
-        t_training_start = time.time()
+        self.t_training_start = time.time()
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
@@ -737,7 +737,7 @@ class Trainer(TrainerBase):
 
         if is_root():
             # Log elapsed training time and throughput metrics with every metric log
-            elapsed_time = time.time() - t_training_start
+            elapsed_time = time.time() - self.t_training_start
             time_metrics = {
                 "elapsed_training_time_seconds": elapsed_time,
                 "num_samples": samples,
