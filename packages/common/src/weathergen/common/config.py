@@ -334,6 +334,7 @@ def _check_datasets(config: Config) -> Config:
 
     return config
 
+
 def _check_time_interpolation(config: Config) -> Config:
     """
     convert 'value': '${resolver:time_value_str}' to 'time_value_str'.
@@ -364,6 +365,7 @@ def _check_time_interpolation(config: Config) -> Config:
                 _convert_interpolation(subconf.forecast, forecast_step_dt)
 
     return config
+
 
 def _check_streams(config: Config) -> Config:
     """Convert streams stored as list to dict/DictConfig."""
@@ -676,6 +678,7 @@ def load_streams(streams_directory: Path) -> Config:
             stream = _patch_time("frequency", stream, _TIMEDELTA_TYPE_NAME)
 
     return OmegaConf.create(streams)
+
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""

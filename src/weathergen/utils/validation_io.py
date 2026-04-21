@@ -11,10 +11,10 @@ import logging
 
 import numpy as np
 import torch
+
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
-
 from weathergen.datasets.data_reader_base import TimeWindowHandler
 
 _logger = logging.getLogger(__name__)
@@ -52,7 +52,6 @@ def write_output(
         targets_times_all += [[]]
         targets_lens += [[]]
         for sname in cf.streams.keys():
-
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:

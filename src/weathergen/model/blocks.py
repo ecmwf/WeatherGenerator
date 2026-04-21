@@ -200,7 +200,7 @@ class OriginalPredictionBlock(nn.Module):
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
 
         self.block = nn.ModuleList()
-        
+
         target_readout_num_heads = next(self.cf.streams.values())["target_readout"]["num_heads"]
 
         # Multi-Cross Attention Head
