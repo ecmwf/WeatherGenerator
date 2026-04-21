@@ -1,16 +1,29 @@
-
+# ERA5 – no cond	t8cm7bn9	382239
+# ERA5 – cond	b9oyntjg	382235
 
 train:
   plot:
-    bpeh160r:
-      slurm_id: 381190
-      description: "single samples, lr_start=1e-6, lr_max=1e-6"
-    cigywmh2:
-      slurm_id: 380678
-      description: "single samples, lr_start=1e-6, lr_max=1e-5"
-    kxe5zfla:
-      slurm_id: 380680
-      description: "single samples, lr_start=1e-6, lr_max=5e-5"
+    # bpeh160r:
+    #   slurm_id: 381190
+    #   description: "single samples, lr_start=1e-6, lr_max=1e-6"
+    # cigywmh2:
+    #   slurm_id: 380678
+    #   description: "single samples, lr_start=1e-6, lr_max=1e-5"
+    # kxe5zfla:
+    #   slurm_id: 380680
+    #   description: "single samples, lr_start=1e-6, lr_max=5e-5"
+    fuz6l32i:
+      slurm_id: 382174
+      description: "conditioning w/ single samples, lr_start=1e-6, lr_max=5e-5"
+    # vujmw4g2:
+    #   slurm_id: 382207
+    #   description: "conditioning w/ ERA5, lr_start=1e-6, lr_max=5e-5"
+    t8cm7bn9:
+      slurm_id: 382239
+      description: "MERGE no conditioning w/ ERA5, lr_start=1e-6, lr_max=5e-5"
+    b9oyntjg:
+      slurm_id: 382235
+      description: "MERGE conditioning w/ ERA5, lr_start=1e-6, lr_max=5e-5"
     # it6wj130:
     #   slurm_id: 376473
     #   description: "single samples, lr_start=1e-6, lr_max=1e-5"
@@ -41,16 +54,16 @@ train:
     # f8e97mqx:
     #   slurm_id: 376862
     #   description: "20y distribution, lr_start=1e-6, lr_max=1e-5"
-    xqgy519d:
-      slurm_id: 0
-      description: "Old Matze Baseline 1e-5 (single samples)"
-    rj2xksg0:
-      slurm_id: 0
-      description: "Old Matze Baseline 1e-5  (single samples)"
+    # xqgy519d:
+    #   slurm_id: 0
+    #   description: "Old Matze Baseline 1e-5 (single samples)"
+    # rj2xksg0:
+    #   slurm_id: 0
+    #   description: "Old Matze Baseline 1e-5  (single samples)"
     bbosl5wy:
       slurm_id: 0
-      description: "New Matze Baseline (20y)"
-    y0l8egdr:
-      slurm_id: 0
-      description: "New Matze Baseline (single samples)"
+      description: "Matze Baseline (ERA5)"
+    # y0l8egdr:
+    #   slurm_id: 0
+    #   description: "New Matze Baseline (single samples)"
 
