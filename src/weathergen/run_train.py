@@ -19,7 +19,7 @@ import time
 import traceback
 from pathlib import Path
 
-from weathergen.common.run_state import init_runstate
+from weathergen.common.run_state import init_runstate, load_runstate
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
@@ -98,7 +98,7 @@ def run_inference(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
 
-    runstate = init_runstate()
+    runstate = load_runstate(run_id=args.run_id, mini_epoch=args.mini_epoch, model_path=None)
     devices = Trainer.init_torch()
     cf, runstate = Trainer.init_ddp(cf, runstate)
 
@@ -137,9 +137,7 @@ def run_continue(args):
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
     
-
-
-    runstate = init_runstate()
+    runstate = load_runstate(run_id=args.run_id, mini_epoch=args.mini_epoch, model_path=None)
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf, runstate = Trainer.init_ddp(cf, runstate)

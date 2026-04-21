@@ -11,6 +11,7 @@ from omegaconf import OmegaConf, DictConfig
 
 import logging
 import json
+from pathlib import Path
 
 from weathergen.common.config import Config, get_path_model
 
@@ -37,7 +38,7 @@ def init_runstate() -> RunState:
 
 
 def _get_runstate_file_write_name(run_id: str, mini_epoch: int | None):
-    """Generate the filename for writing a model config file."""
+    """Generate the filename for writing a model run state file."""
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
@@ -68,3 +69,44 @@ def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -
     """
     Load runstate
     """
+
+    # Loading path
+    if Path(run_id).exists():  # load from the full path if a full path is provided
+        fname = Path(run_id)
+        _logger.info(f"Loading run_state from provided full run_id path: {fname}")
+
+    else:
+        # Load model config here. In case model_path is not provided, get it from private conf
+        if model_path is None:
+            path = get_path_model(run_id=run_id)
+        else:
+            path = Path(model_path) / run_id
+
+        runstate_path_with_epoch = path / _get_runstate_file_write_name(run_id, mini_epoch)
+        runstate_path_without_epoch = path / _get_runstate_file_write_name(run_id, None)
+
+        if runstate_path_with_epoch.exists():
+            fname = config_path_with_epoch
+            _logger.info(f"Loading runstate from specified run_id and mini_epoch: {fname}")
+        elif runstate_path_without_epoch.exists():
+            fname = config_path_without_epoch
+            _logger.info(
+                f"Runstate for mini_epoch {mini_epoch} not found. "
+                f"Falling back to runstate without mini_epoch: {fname}"
+            )
+
+        else:
+            raise FileNotFoundError(
+                f"Could not find model runstate for run_id '{run_id}' "
+                f"(mini_epoch={mini_epoch}) in '{path}'. "
+                f"Tried: '{runstate_path_with_epoch.name}' and '{runstate_path_without_epoch.name}'. "
+                f"Please check run_id and mini_epoch."
+            )
+
+    with fname.open() as f:
+        json_str = f.read()
+
+    runstate = OmegaConf.create(json.loads(json_str))
+
+    return runstate
+
