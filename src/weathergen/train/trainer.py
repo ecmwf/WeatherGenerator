@@ -174,7 +174,21 @@ class Trainer(TrainerBase):
             ).to_device(self.device)
 
         return target_and_aux_calculators
-
+    
+    def _channel_weights_for_metadata(self) -> dict:
+        """
+        Get learnable channel weights for metadata if they are defined in the model, otherwise return empty dict.
+        """
+        channel_weights = getattr(self.model, "channel_weights", None)
+        if not channel_weights:
+            return {}
+        result = {}
+        for name in self.model.stream_names:
+            stream_key = name.replace(".", "_")
+            if stream_key in channel_weights:
+                result[name] = torch.softmax(channel_weights[stream_key], dim=0)
+        return result
+        
     def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
         self.init(cf, devices)
@@ -459,7 +473,7 @@ class Trainer(TrainerBase):
             loss = self.loss_calculator.compute_loss(
                 preds=preds,
                 targets_and_aux=targets_and_auxs,
-                metadata=extract_batch_metadata(batch),
+                metadata=(*extract_batch_metadata(batch), self._channel_weights_for_metadata()),
             )
 
             # TODO re-enable this, need to think on how to make it compatible with
@@ -596,7 +610,7 @@ class Trainer(TrainerBase):
                     _ = self.loss_calculator_val.compute_loss(
                         preds=preds,
                         targets_and_aux=targets_and_auxs,
-                        metadata=extract_batch_metadata(batch),
+                        metadata=(*extract_batch_metadata(batch),{}),
                     )
 
                     # log output

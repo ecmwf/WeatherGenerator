@@ -321,6 +321,7 @@ class Model(torch.nn.Module):
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
         self.target_token_engines = None
+        self.channel_weights = None
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
             "Local attention not adapted for register tokens"
@@ -395,12 +396,19 @@ class Model(torch.nn.Module):
             ]
 
         if "LossPhysical" in loss_terms:
+            self.channel_weights = nn.ParameterDict()
             for i_stream, si in enumerate(cf.streams):
                 stream_name = self.stream_names[i_stream]
 
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
+
+                if si.get("learnable_channel_weights", False):
+                    stream_key = stream_name.raplace(".", "_")
+                    n_channels = self.targets_num_channels[i_stream]
+                    self.channel_weights[stream_key] = nn.Parameter(torch.ones(n_channels))
+
 
                 # skip for the moment to ensure target embedding and tte exist (ordering of
                 # cf.streams is random)
@@ -619,6 +627,8 @@ class Model(torch.nn.Module):
             get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
         )
 
+        num_params_channel_weights = (get_num_parameters(self.channels_weights) if self.self.channel_weights else 0)
+
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
@@ -651,6 +661,8 @@ class Model(torch.nn.Module):
         print(f" Latent prediction heads and pre-norm: {num_params_latent_heads:,}")
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
+        print(f"Learnable channel weights: {num_params_channel_weights:,}")
+        
         zps = zip(
             cf.streams,
             num_params_embed_tcs,
