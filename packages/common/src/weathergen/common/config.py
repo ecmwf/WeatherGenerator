@@ -312,6 +312,7 @@ def _apply_fixes(config: Config) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
+    config = _check_streams(config)
     return config
 
 
@@ -332,7 +333,6 @@ def _check_datasets(config: Config) -> Config:
         config.data_paths = [path for path in paths if path is not None]
 
     return config
-
 
 def _check_time_interpolation(config: Config) -> Config:
     """
@@ -363,6 +363,17 @@ def _check_time_interpolation(config: Config) -> Config:
             if "forecast" in subconf:
                 _convert_interpolation(subconf.forecast, forecast_step_dt)
 
+    return config
+
+def _check_streams(config: Config) -> Config:
+    """Convert streams stored as list to dict/DictConfig."""
+    config = config.copy()
+    stream_conf = config.get("streams")
+    assert stream_conf
+    if isinstance(stream_conf, list | ListConfig):
+        stream_conf = OmegaConf.create({conf["name"] for conf in stream_conf})
+
+    config["streams"] = stream_conf
     return config
 
 
@@ -597,7 +608,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
     return conf
 
 
-def load_streams(streams_directory: Path) -> list[Config]:
+def load_streams(streams_directory: Path) -> Config:
     """Load all stream configurations from a directory."""
     # TODO: might want to put this into config later instead of hardcoding it here...
     streams_history = {
@@ -664,8 +675,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         if stream.get("frequency", None) is not None:
             stream = _patch_time("frequency", stream, _TIMEDELTA_TYPE_NAME)
 
-    return list(streams.values())
-
+    return OmegaConf.create(streams)
 
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
