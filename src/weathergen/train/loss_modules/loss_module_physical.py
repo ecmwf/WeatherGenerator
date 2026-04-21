@@ -202,7 +202,7 @@ class LossPhysical(LossModuleBase):
         # create tensor for each stream
         losses_all = defaultdict(dict)
 
-        source2target_idxs, output_info, target2source_idxs, target_inf, channel_weights = metadata
+        source2target_idxs, output_info, target2source_idxs, target_info, channel_weights = metadata
 
         # TODO: iterate over batch dimension
         for stream_info in self.cf.streams:

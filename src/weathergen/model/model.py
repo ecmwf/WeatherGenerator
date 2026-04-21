@@ -405,7 +405,7 @@ class Model(torch.nn.Module):
                     continue
 
                 if si.get("learnable_channel_weights", False):
-                    stream_key = stream_name.raplace(".", "_")
+                    stream_key = stream_name.replace(".", "_")
                     n_channels = self.targets_num_channels[i_stream]
                     self.channel_weights[stream_key] = nn.Parameter(torch.ones(n_channels))
 
@@ -627,7 +627,7 @@ class Model(torch.nn.Module):
             get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
         )
 
-        num_params_channel_weights = (get_num_parameters(self.channels_weights) if self.self.channel_weights else 0)
+        num_params_channel_weights = (get_num_parameters(self.channel_weights) if self.channel_weights else 0)
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
@@ -662,7 +662,7 @@ class Model(torch.nn.Module):
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
         print(f"Learnable channel weights: {num_params_channel_weights:,}")
-        
+
         zps = zip(
             cf.streams,
             num_params_embed_tcs,
