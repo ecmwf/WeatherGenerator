@@ -54,6 +54,12 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     coords_arr = np.asarray(ds_group["coords"])  # (npoints, 2)
     times_arr = np.asarray(ds_group["times"]).astype("datetime64[ns]")  # (npoints,)
     channels = list(ds_group.attrs["channels"])
+    source_interval_start = np.asarray(ds_group.attrs["source_interval"]["start"]).astype(
+        "datetime64[ns]"
+    )
+    source_interval_end = np.asarray(ds_group.attrs["source_interval"]["end"]).astype(
+        "datetime64[ns]"
+    )
 
     # Build a lightweight xarray DataArray with the same structure
     # that process_sample / assign_coords expects:
@@ -75,6 +81,8 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
             "valid_time": ("ipoint", times_arr),
             "lat": ("ipoint", coords_arr[:, 0]),
             "lon": ("ipoint", coords_arr[:, 1]),
+            "source_interval_start": source_interval_start,
+            "source_interval_end": source_interval_end,
         },
     )
 
@@ -268,6 +276,13 @@ def get_ref_times(fname_zarr, stream, samples, fstep_hours, n_processes) -> list
     return ref_times
 
 
+def get_streams(stream, fname_zarr):
+    with zarrio_reader(fname_zarr) as zio:
+        zio_streams = zio.streams
+    streams = zio_streams if stream is None else [stream]
+    return streams
+
+
 def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     """
     Retrieve data from Zarr store and export to the requested format.
@@ -303,96 +318,105 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     fname_zarr = get_model_results(run_id, epoch, rank)
     fsteps = get_fsteps(fsteps, fname_zarr)
     samples = get_samples(samples, fname_zarr)
-    grid_type = get_grid_type(data_type, stream, fname_zarr)
-    channels = get_channels(channels, stream, fname_zarr)
-    ref_times = get_ref_times(fname_zarr, stream, samples, fstep_hours, n_processes)
+    streams = get_streams(stream, fname_zarr)
+    for stream in streams:
+        grid_type = get_grid_type(data_type, stream, fname_zarr)
+        channels = get_channels(channels, stream, fname_zarr)
+        ref_times = get_ref_times(fname_zarr, stream, samples, fstep_hours, n_processes)
+        kwargs["grid_type"] = grid_type
+        kwargs["channels"] = channels
+        kwargs["data_type"] = data_type
 
-    kwargs["grid_type"] = grid_type
-    kwargs["channels"] = channels
-    kwargs["data_type"] = data_type
+        parser = CfParserFactory.get_parser(config=config, **kwargs)
 
-    parser = CfParserFactory.get_parser(config=config, **kwargs)
+        n_fsteps = len(fsteps)
+        total_tasks = len(samples) * n_fsteps
 
-    n_fsteps = len(fsteps)
-    total_tasks = len(samples) * n_fsteps
+        # Batch size in *samples*. Limits how many samples can be in-flight at once,
+        # bounding peak memory while still allowing read/write overlap within each batch.
+        batch_size = max(1, n_processes * 2)
+        n_batches = (len(samples) + batch_size - 1) // batch_size
 
-    # Batch size in *samples*. Limits how many samples can be in-flight at once,
-    # bounding peak memory while still allowing read/write overlap within each batch.
-    batch_size = max(1, n_processes * 2)
-    n_batches = (len(samples) + batch_size - 1) // batch_size
+        _logger.info(
+            f"Exporting {len(samples)} samples × {n_fsteps} fsteps "
+            f"({total_tasks} total tasks) in {n_batches} batch(es) of up to "
+            f"{batch_size} samples, using {n_processes} workers. "
+            f"Reading and writing are interleaved within each batch."
+        )
 
-    _logger.info(
-        f"Exporting {len(samples)} samples × {n_fsteps} fsteps "
-        f"({total_tasks} total tasks) in {n_batches} batch(es) of up to "
-        f"{batch_size} samples, using {n_processes} workers. "
-        f"Reading and writing are interleaved within each batch."
-    )
+        # Initialise each worker with the zarr path so it is resolved only once.
+        with Pool(
+            processes=n_processes,
+            initializer=_init_worker,
+            initargs=(fname_zarr,),
+        ) as pool:
+            samples_written = 0
 
-    # Initialise each worker with the zarr path so it is resolved only once.
-    with Pool(
-        processes=n_processes,
-        initializer=_init_worker,
-        initargs=(fname_zarr,),
-    ) as pool:
-        samples_written = 0
+            for batch_idx in range(n_batches):
+                batch_start = batch_idx * batch_size
+                batch_end = min(batch_start + batch_size, len(samples))
+                batch_samples = samples[batch_start:batch_end]
+                batch_ref_times = ref_times[batch_start:batch_end]
 
-        for batch_idx in range(n_batches):
-            batch_start = batch_idx * batch_size
-            batch_end = min(batch_start + batch_size, len(samples))
-            batch_samples = samples[batch_start:batch_end]
-            batch_ref_times = ref_times[batch_start:batch_end]
+                # Map sample -> index within this batch for ref_times lookup.
+                sample_to_batch_idx = {s: i for i, s in enumerate(batch_samples)}
 
-            # Map sample -> index within this batch for ref_times lookup.
-            sample_to_batch_idx = {s: i for i, s in enumerate(batch_samples)}
+                batch_tasks = [
+                    (sample, fstep, stream, data_type)
+                    for sample in batch_samples
+                    for fstep in fsteps
+                ]
 
-            batch_tasks = [
-                (sample, fstep, stream, data_type) for sample in batch_samples for fstep in fsteps
-            ]
-
-            _logger.info(
-                f"Batch {batch_idx + 1}/{n_batches}: "
-                f"samples {batch_start}–{batch_end - 1} "
-                f"({len(batch_samples)} samples, {len(batch_tasks)} tasks)"
-            )
-
-            # Interleaved read/write: as soon as all fsteps for a sample
-            # arrive, write it immediately while workers continue reading.
-            sample_results: dict[int, list] = defaultdict(list)
-            batch_written = 0
-
-            pbar = tqdm(
-                total=len(batch_tasks),
-                desc=f"  Batch {batch_idx + 1}/{n_batches}",
-            )
-
-            for sample, _fstep, data in pool.imap_unordered(
-                get_data_worker, batch_tasks, chunksize=max(1, n_fsteps)
-            ):
-                sample_results[sample].append(data)
-                pbar.update(1)
-
-                # Check if this sample is complete (all fsteps received).
-                if len(sample_results[sample]) == n_fsteps:
-                    b_idx = sample_to_batch_idx[sample]
-                    ref_time = batch_ref_times[b_idx]
-                    results_iter = iter(sample_results[sample])
-                    parser.process_sample(results_iter, ref_time=ref_time)
-
-                    # Free memory immediately.
-                    del sample_results[sample]
-                    batch_written += 1
-
-            pbar.close()
-
-            samples_written += batch_written
-            if batch_written != len(batch_samples):
-                _logger.error(
-                    f"Batch {batch_idx + 1}: expected {len(batch_samples)} "
-                    f"samples but only wrote {batch_written}. "
-                    f"Incomplete: {list(sample_results.keys())}"
+                _logger.info(
+                    f"Batch {batch_idx + 1}/{n_batches}: "
+                    f"samples {batch_start}–{batch_end - 1} "
+                    f"({len(batch_samples)} samples, {len(batch_tasks)} tasks)"
                 )
 
-            # Free any remaining refs before next batch.
-            del sample_results
+                # Interleaved read/write: as soon as all fsteps for a sample
+                # arrive, write it immediately while workers continue reading.
+                sample_results: dict[int, list] = defaultdict(list)
+                batch_written = 0
 
-    _logger.info(f"Export complete. Wrote {samples_written}/{len(samples)} samples.")
+                pbar = tqdm(
+                    total=len(batch_tasks),
+                    desc=f"  Batch {batch_idx + 1}/{n_batches}",
+                )
+
+                processed_samples = []
+
+                for sample, _fstep, data in pool.imap_unordered(
+                    get_data_worker, batch_tasks, chunksize=max(1, n_fsteps)
+                ):
+                    sample_results[sample].append(data)
+                    pbar.update(1)
+
+                    # Check if this sample is complete (all fsteps received).
+                    if len(sample_results[sample]) == n_fsteps:
+                        b_idx = sample_to_batch_idx[sample]
+                        ref_time = batch_ref_times[b_idx]
+                        results_iter = iter(sample_results[sample])
+                        processed = parser.process_sample(results_iter, ref_time=ref_time)
+                        processed_samples.append(processed)
+
+                        # Free memory immediately.
+                        del sample_results[sample]
+                        batch_written += 1
+
+                # Only save here if need to merge samples, otherwise saved in process_sample
+                if processed_samples[0] is not None:
+                    parser.save(processed_samples)
+                pbar.close()
+
+                samples_written += batch_written
+                if batch_written != len(batch_samples):
+                    _logger.error(
+                        f"Batch {batch_idx + 1}: expected {len(batch_samples)} "
+                        f"samples but only wrote {batch_written}. "
+                        f"Incomplete: {list(sample_results.keys())}"
+                    )
+
+                # Free any remaining refs before next batch.
+                del sample_results
+
+        _logger.info(f"Export complete. Wrote {samples_written}/{len(samples)} samples.")
