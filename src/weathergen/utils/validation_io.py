@@ -11,10 +11,10 @@ import logging
 
 import numpy as np
 import torch
-
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
+
 from weathergen.datasets.data_reader_base import TimeWindowHandler
 
 _logger = logging.getLogger(__name__)
@@ -124,8 +124,8 @@ def write_output(
     # more prep work
 
     # output stream names to be written, use specified ones or all if nothing specified
-    stream_names = cf.streams.keys()
-    stream_infos = cf.streams.values()
+    stream_names = list(cf.streams.keys())
+    stream_infos = list(cf.streams.values())
     if val_cfg.get("output").get("streams") is not None:
         output_stream_names = val_cfg.output.streams
     else:

@@ -185,7 +185,7 @@ def format_cf(config: Config) -> str:
     for key, value in clean_cf.items():
         match key:
             case "streams":
-                for rt in value:
+                for rt in value.values():
                     for k, v in rt.items():
                         whitespace = "" if k == "reportypes" else "  "
                         stream.write(f"{whitespace}{k} : {v}")

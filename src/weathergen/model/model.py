@@ -594,7 +594,7 @@ class Model(torch.nn.Module):
 
         num_params_embed = [
             get_num_parameters(self.encoder.embed_engine.embeds[name])
-            for name in self.stream.keys()
+            for name in self.streams.keys()
         ]
         num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)

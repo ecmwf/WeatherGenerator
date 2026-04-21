@@ -299,9 +299,15 @@ class WeatherGenReader(Reader):
         ------------
             The parameter value if found, otherwise the default.
         """
-        for stream in self.inference_cfg.get("streams", []):
-            if stream.get("name") == stream_name:
-                return stream.get(key, default)
+
+        streams = self.inference_cfg.get("streams", {})
+        if isinstance(streams, list | oc.ListConfig):
+            for stream in streams:
+                if stream.get("name") == stream_name:
+                    return stream.get(key, default)
+        else:
+            return streams[stream_name].get(key, default)
+
         return default
 
 
