@@ -14,8 +14,8 @@ import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
-
 from weathergen.common.config import Config
+
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -48,9 +48,9 @@ class EmbeddingEngine(torch.nn.Module):
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        self.streams = cf.streams
 
-        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
+        for i, (stream_name, si) in enumerate(self.streams.items()):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
@@ -89,7 +89,7 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
-        for stream_name in self.stream_names:
+        for stream_name in self.streams.keys():
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
