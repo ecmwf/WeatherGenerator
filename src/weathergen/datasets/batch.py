@@ -183,6 +183,18 @@ class BatchSamples:
             bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
+    def get_subset_view(self, subset: list | None = None):
+        if subset is None:
+            return self
+        else:
+            assert len(list(set(subset))) == len(subset), "subset contains duplicates"
+            # Share underlying sample storage for read-only callers to avoid duplicating tensors.
+            bs = copy.copy(self)
+            bs.samples = [bs.samples[i] for i in subset]
+            torch_idxs = torch.tensor(subset, dtype=torch.long, device=bs.tokens_lens.device)
+            bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
+            return bs
+
     def get_num_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
@@ -309,13 +321,15 @@ class ModelBatch:
 
         return self
 
-    def to_device(self, device):  # -> ModelBatch
+    def to_device(self, device, include_targets: bool = True, include_sources: bool = True):  # -> ModelBatch
         """
         Move batch to device
         """
 
-        self.source_samples.to_device(device)
-        self.target_samples.to_device(device)
+        if include_sources:
+            self.source_samples.to_device(device)
+        if include_targets:
+            self.target_samples.to_device(device)
 
         self.device = device
 
@@ -413,6 +427,12 @@ class ModelBatch:
         Get target samples
         """
         return self.target_samples.get_subset(subset)
+
+    def get_target_samples_view(self, subset: list | None = None) -> BatchSamples:
+        """
+        Get a read-only view of target samples without duplicating underlying tensor storage.
+        """
+        return self.target_samples.get_subset_view(subset)
 
     def get_source_idx_for_target(self, target_idx: int) -> int:
         """
