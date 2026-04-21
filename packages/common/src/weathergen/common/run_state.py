@@ -76,7 +76,7 @@ def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -
         _logger.info(f"Loading run_state from provided full run_id path: {fname}")
 
     else:
-        # Load model config here. In case model_path is not provided, get it from private conf
+        # Load model runstate here. In case model_path is not provided, get it from private conf
         if model_path is None:
             path = get_path_model(run_id=run_id)
         else:
@@ -86,10 +86,10 @@ def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -
         runstate_path_without_epoch = path / _get_runstate_file_write_name(run_id, None)
 
         if runstate_path_with_epoch.exists():
-            fname = config_path_with_epoch
+            fname = runstate_path_with_epoch
             _logger.info(f"Loading runstate from specified run_id and mini_epoch: {fname}")
         elif runstate_path_without_epoch.exists():
-            fname = config_path_without_epoch
+            fname = runstate_path_without_epoch
             _logger.info(
                 f"Runstate for mini_epoch {mini_epoch} not found. "
                 f"Falling back to runstate without mini_epoch: {fname}"
