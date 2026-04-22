@@ -72,8 +72,10 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
             "lon": ("ipoint", coords_arr[:, 1]),
         }
     if data_arr.ndim == 3:
-        data_dims.append("mem")
-        #data_arr = np.mean(data_arr, axis=2)
+        if data_arr.shape[2] == 1:
+            data_arr = data_arr[:, :, 0]
+        else:
+            data_dims.append("mem")
 
     da_result = xr.DataArray(
         data_arr,
