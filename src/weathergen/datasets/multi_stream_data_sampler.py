@@ -9,9 +9,11 @@
 
 import logging
 import pathlib
+from collections.abc import Sequence
 
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
@@ -38,6 +40,13 @@ type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
 
 logger = logging.getLogger(__name__)
+
+FORECAST_DEFAULTS = {
+    "offset": 0,
+    "time_step": np.timedelta64(0, "ms"),
+    "policy": None,
+    "num_steps": np.array([0], dtype=np.int32),
+}
 
 
 def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
@@ -77,71 +86,119 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
-    def __init__(
-        self,
-        cf: Config,
-        mode_cfg: dict,
-        stage: Stage,
-    ):
+    def __init__(self, cf: Config, mode_cfg: dict, stage: Stage):
         super(MultiStreamDataSampler, self).__init__()
 
-        self.mask_value = 0.0
+        self.mode_cfg = mode_cfg
         self._stage = stage
 
+        self.mini_epoch = 0
+        self.mask_value = 0.0
         self.streams = cf.streams
         self.rank = cf.rank
         self.world_size = cf.world_size
-
-        self.healpix_level: int = cf.healpix_level
-        self.num_healpix_cells: int = 12 * 4**self.healpix_level
-
-        self.mode_cfg = mode_cfg
-        self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
-        self.shuffle = mode_cfg.shuffle
-        self.batch_size = get_batch_size_from_config(mode_cfg)
-        self.len_timedelta: np.timedelta64 = mode_cfg.time_window_len
-        self.step_timedelta: np.timedelta64 = mode_cfg.time_window_step
-        self.time_window_handler = TimeWindowHandler(
-            mode_cfg.start_date, mode_cfg.end_date, self.len_timedelta, self.step_timedelta
-        )
-        if is_root():
-            logger.info(self.time_window_handler)
-
-        index_range = self.time_window_handler.get_index_range()
-        perms_len = int(index_range.end - index_range.start)
-
-        # Handle forecast_delta_hrs which might be int (hours) or string (timedelta)
-        self.forecast_cfg = mode_cfg.get("forecast", {})
-        if len(self.forecast_cfg) > 0:
-            self.output_offset = self.forecast_cfg.get("offset", 0)
-            self.time_step = self.forecast_cfg.get("time_step", np.timedelta64(0, "ms"))
-            self.forecast_policy = self.forecast_cfg.get("policy", None)
-
-            # forecast step
-            self.list_num_forecast_steps = np.array(
-                [self.forecast_cfg.get("num_steps", 0)]
-                if isinstance(self.forecast_cfg.num_steps, int)
-                else self.forecast_cfg.num_steps,
-                dtype=np.int32,
-            )
-
-        else:
-            # no forecast policy specified so set neutral default for no forecasting
-            self.list_num_forecast_steps = np.array([0], dtype=np.int32)
-            self.output_offset = 0
-            self.forecast_policy = None
-            self.time_step = np.timedelta64(0, "ms")
-
-        fsm = self.list_num_forecast_steps[0]
-        forecast_len = (self.time_step * (fsm + 1)) // self.step_timedelta
-        perms_len = perms_len - (forecast_len + self.output_offset)
-
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
-        self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
+        # initialise healpic
+        self.healpix_level = cf.healpix_level
+        self.num_healpix_cells = 12 * 4**self.healpix_level
+        self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
+        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+
+        forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
+        self.output_offset = forecast_cfg["offset"]
+        self.time_step = forecast_cfg["time_step"]
+        self.forecast_policy = forecast_cfg["policy"]
+        steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
+        self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
+
+        # initialise fsm, but can change for future mini_epochs
+        self.batch_size = get_batch_size_from_config(mode_cfg)
+        self.shuffle = mode_cfg.shuffle
+
+        self.len_timedelta = mode_cfg.time_window_len
+        self.step_timedelta = mode_cfg.time_window_step
+        tw = TimeWindowHandler(
+            self.mode_cfg.start_date,
+            self.mode_cfg.end_date,
+            self.len_timedelta,
+            self.step_timedelta,
+        )
+
+        self.time_window_handler = tw
+        if is_root():
+            logger.info(self.time_window_handler)
+        self.index_range = tw.get_index_range()
+
+        # check samples per mini epoch
+        self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
+        self.check_samples(self._get_fsm())
+        self.streams_datasets = self._init_stream_datasets(cf)
+
+        # RNG seed setup
+        rs = cf.data_loading.rng_seed
+        nw = cf.data_loading.num_workers
+        self.data_loader_rng_seed = rs if rs > nw else rs * 97
+
+        self.rng = None
+
+    def check_samples(self, fsm: int):
+        """Check if samples_per_mini_epoch is suitable
+        Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
+
+        max_index = self.index_range.end - (
+            (  # max time units needed to make a forecast
+                self.time_step * (fsm + self.output_offset)  # translation due to forecasting
+                + self.len_timedelta  # length of forecasting window
+            )
+            // self.step_timedelta  # as number of indexs
+        )
+
+        available_samples = max_index * self.batch_size  # as number of samples
+
+        assert available_samples > 0, (
+            "There is an insufficient date range to \
+accomodate any number of samples or forecast steps"
+        )
+
+        # choose correct num samples
+        if not self.repeat_data and self.samples_per_mini_epoch:
+            if self.samples_per_mini_epoch >= available_samples:
+                logger.warning(
+                    f"There are only {available_samples} available_samples, \
+samples_per_mini_epoch reduced to {available_samples} to avoid repeating data. \
+Set repeat_data_in_mini_epoch to True if this is undesired."
+                )
+                self.samples_per_mini_epoch = max(available_samples - 1, 1)
+            else:
+                logger.info("Sufficient available samples in the time range specified")
+        else:
+            logger.info("Samples will be repeated within the time range")
+
+        # streamlined calculation of length
+        epoch_len = self.samples_per_mini_epoch
+        # adjust len to split loading across all workers and ensure it is multiple of batch_size
+        self.len = ((epoch_len // self.world_size) // self.batch_size) * self.batch_size
+
+        n_duplicates = self.len * self.world_size - available_samples
+        if not self.repeat_data:
+            assert n_duplicates <= 0
+
+    def _calc_baseperms(self, fsm: int) -> np.typing.NDArray:
+        """This calculates the base permutation array and
+        depends on fsm so must be repeated for __init__ and reset"""
+        perms_len = int(self.index_range.end - self.index_range.start)
+        perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
+
+        return np.arange(perms_len)
+
+    def _init_stream_datasets(self, cf) -> dict[StreamName, list[AnyDataReader]]:
+        """Load dataset readers for all streams from config."""
+        streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
+
         for _, stream_info in enumerate(cf.streams):
             # list of sources for current stream
-            self.streams_datasets[stream_info["name"]] = []
+            streams_datasets[stream_info["name"]] = []
 
             kwargs = {
                 "tw_handler": self.time_window_handler,
@@ -198,59 +255,73 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     else [1.0 for _ in ds.target_channels]
                 )
 
-                self.streams_datasets[stream_info["name"]] += [ds]
+                streams_datasets[stream_info["name"]] += [ds]
 
-        # length of dataset; check the repeat data flag and adjust len accordingly
-        self.len = int(index_range.end - index_range.start)
-        if not self.repeat_data:
-            if self.samples_per_mini_epoch:
-                if self.samples_per_mini_epoch <= self.len:
-                    self.len = self.samples_per_mini_epoch
-                else:
-                    msg = (
-                        f"WARNING: Adjusted length of data sampler to {self.len} "
-                        f"(<samples_per_mini_epoch={self.samples_per_mini_epoch}) "
-                        "due to insufficient number of data samples. "
-                        "Enable repeat_data_in_mini_epoch to instead duplicate samples "
-                        "to fill samples_per_mini_epoch."
-                    )
-                    logger.warning(msg)
-        else:
-            self.len = self.samples_per_mini_epoch
+        return streams_datasets
 
-        # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        len_chunk = ((self.len // cf.world_size) // self.batch_size) * self.batch_size
-        self.len = min(self.len, len_chunk)
+    def reset(self) -> tuple[Sequence[int], Sequence[int]]:
+        """
+        Reset RNG, return shuffled perms adn forecast steps for this mini epoch.
 
-        n_duplicates = self.len - perms_len
-        if n_duplicates > 0:
-            # TODO fix this more permanently (#1085)
-            msg = (
-                "WARNING: Missmatch between length of permutation indexes and"
-                "length of MultiStreamDataSampler,"
-                f"{n_duplicates} duplicate samples will be sampled."
-                "To avoid this increase the the length of the"
-                f"global sampling window by {n_duplicates * self.step_timedelta} hours."
+        The permutation index size is proportional to self.samples_per_mini_epoch,
+        wheras the forecast steps index length is proportional to len(self).
+
+        Returns: permutation index, forecast steps index
+        """
+        self.rng = np.random.default_rng(self.data_loader_rng_seed)
+        fsm = self._get_fsm()
+        self.check_samples(fsm)
+        perms = self._calc_baseperms(fsm)
+
+        # rng changed, repeat if needed
+        n_requested_idxs = self.samples_per_mini_epoch // self.batch_size
+        if self.repeat_data and len(perms) < n_requested_idxs:
+            perms = np.tile(perms, n_requested_idxs // len(perms))
+            filler = self.rng.choice(
+                perms,
+                size=n_requested_idxs - len(perms),
+                replace=False,
             )
-            logger.warning(msg)
-        logger.info(f"index_range={index_range}, len={self.len}, len_chunk={len_chunk}")
+            perms = np.concatenate([perms, filler])
 
-        # ensure data_loader_rng_seed is not smaller than loader_num_workers to avoid
-        # issues in per loader rng seed computation
-        self.data_loader_rng_seed = (
-            cf.data_loading.rng_seed
-            if cf.data_loading.rng_seed > cf.data_loading.num_workers
-            else cf.data_loading.rng_seed * 97
-        )
+        # shuffle
+        if self.shuffle:
+            perms = self.rng.permutation(perms)
 
-        self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
+        len_dt = len(self) // self.batch_size
 
-        self.mini_epoch = 0
+        if self.forecast_policy is None:
+            fs = np.zeros(len_dt, dtype=np.int64)
 
-        self.rng = None
-        self.perms = None
-        self.perms_num_forecast_steps = None
+        elif self.forecast_policy in ("fixed", "sequential"):
+            fs = fsm * np.ones(len_dt, dtype=np.int64)
+
+        elif self.forecast_policy in ("random", "sequential_random"):
+            fs = self.rng.integers(
+                low=self.list_num_forecast_steps.min(),
+                high=fsm + 1,
+                size=len_dt,
+                dtype=np.int64,
+            )
+        else:
+            raise ValueError(f"Unknown forecast policy {self.forecast_policy}")
+
+        # reset tokenizer RNG
+        self.tokenizer.reset_rng(self.rng)
+        return (perms, fs)
+
+    def _get_fsm(self) -> int:
+        """Obtain maximum number of forecast steps for current mini epoch."""
+        # fixed number of forecast steps for this run
+        if self.forecast_policy != "random":
+            idx = min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
+            fsm = self.list_num_forecast_steps[idx]
+        else:
+            fsm = self.list_num_forecast_steps.max()
+
+        if fsm > 0:
+            logger.info(f"forecast_steps : {fsm}")
+        return fsm
 
     def advance(self):
         """
@@ -282,67 +353,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
             for _, ds in self.streams_datasets.items()
         ]
-
-    def reset(self):
-        # initialize the random number generator: self.data_loader_rng_seed is set to a DDP-unique
-        # value in worker_workset()
-        self.rng = np.random.default_rng(self.data_loader_rng_seed)
-
-        fsm = (
-            self.list_num_forecast_steps[
-                min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
-            ]
-            if self.forecast_policy != "random"
-            else self.list_num_forecast_steps.max()
-        )
-        if fsm > 0:
-            logger.info(f"forecast_steps : {fsm}")
-
-        # data
-        forecast_offset = self.output_offset
-        index_range = self.time_window_handler.get_index_range()
-        idx_end = index_range.end
-        # native length of datasets, independent of mini_epoch length that has potentially been
-        # specified
-        forecast_len = (self.time_step * (fsm + 1)) // self.step_timedelta
-        adjusted_idx_end = idx_end - (forecast_len + forecast_offset)
-        msg = (
-            f"dataset size ({idx_end}) too small for forecast length plus offset "
-            f"({forecast_len + forecast_offset}) – dataset size must be strictly bigger. "
-            "to fix this, it usually suffices to increase the data range "
-        )
-        assert adjusted_idx_end > 0, msg
-        self.perms = np.arange(index_range.start, adjusted_idx_end)
-
-        # check repeat_data flag and fill up perms accordingly
-        if self.repeat_data and len(self.perms) < self.samples_per_mini_epoch:
-            self.perms = np.tile(self.perms, self.samples_per_mini_epoch // len(self.perms))
-            random_filler = self.rng.choice(
-                self.perms, size=self.samples_per_mini_epoch - len(self.perms), replace=False
-            )
-            self.perms = np.concatenate([self.perms, random_filler])
-
-        if self.shuffle:
-            self.perms = self.rng.permutation(self.perms)
-
-        # forecast time steps
-        len_dt_samples = len(self) // self.batch_size
-        if self.forecast_policy is None:
-            self.perms_num_forecast_steps = np.zeros(len_dt_samples, dtype=np.int64)
-        elif self.forecast_policy == "fixed" or self.forecast_policy == "sequential":
-            self.perms_num_forecast_steps = fsm * np.ones(len_dt_samples, dtype=np.int64)
-        elif self.forecast_policy == "random" or self.forecast_policy == "sequential_random":
-            # randint high=one-past
-            self.perms_num_forecast_steps = self.rng.integers(
-                low=self.list_num_forecast_steps.min(),
-                high=fsm + 1,
-                size=len_dt_samples,
-                dtype=np.int64,
-            )
-        else:
-            assert False
-
-        self.tokenizer.reset_rng(self.rng)
 
     def denormalize_source_channels(self, stream_name, data) -> torch.Tensor:
         # [0]: with multiple ds per stream we use the first one
@@ -730,7 +740,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
         # create new shuffeling
-        self.reset()
+        perms, perms_num_forecast_steps = self.reset()
 
         # bidx is used to count the #batches that have been emitted
         # idx_raw is used to index into the dataset; the decoupling is needed
@@ -739,12 +749,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
             # num_forecast_steps needs to be constant per batch
             # (amortized through data parallel training)
-            num_forecast_steps = self.perms_num_forecast_steps[i]
+            num_forecast_steps = perms_num_forecast_steps[i]
 
             # use while loop due to the scattered nature of the data in time and to
             # ensure batches are not empty
             while True:
-                idx: TIndex = self.perms[idx_raw % self.perms.shape[0]]
+                idx: TIndex = perms[idx_raw % perms.shape[0]]
                 idx_raw += 1
 
                 batch = self._get_batch(idx, num_forecast_steps)
