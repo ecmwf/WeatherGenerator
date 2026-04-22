@@ -85,10 +85,11 @@ class NetcdfParser(CfParser):
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
 
         if da_fs:
-            if (len(da_fs) > 1):
-                assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), \
-                "Grid points between forecast steps are not consistent."\
+            if len(da_fs) > 1:
+                assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
+                    "Grid points between forecast steps are not consistent."
                     "Check that inference was not performed with masking"
+                )
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
