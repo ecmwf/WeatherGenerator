@@ -373,7 +373,7 @@ def _check_streams(config: Config) -> Config:
     stream_conf = config.get("streams")
     assert stream_conf
     if isinstance(stream_conf, list | ListConfig):
-        stream_conf = OmegaConf.create({conf["name"] for conf in stream_conf})
+        stream_conf = OmegaConf.create({conf["name"]: conf for conf in stream_conf})
 
     config["streams"] = stream_conf
     return config
