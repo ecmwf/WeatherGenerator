@@ -176,8 +176,8 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
 
-  num_mini_epochs: 512
-  samples_per_mini_epoch: 1028
+  num_mini_epochs: 128
+  samples_per_mini_epoch: 4096
   shuffle: True
  
   start_date: 1979-01-01T00:00
@@ -188,7 +188,7 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6 #5e-5
-    lr_max: 5e-5 #1e-4
+    lr_max: 7e-6 #1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 64
@@ -272,7 +272,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: True
 
 
 # test config; full test config is merge of validation and test config
