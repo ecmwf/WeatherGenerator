@@ -214,10 +214,10 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--verif-template",
-        default="verif/%S/%V/verif_%S_%V_%M_%D.nc",
+        default="verif/%S/%V/%R_%S_%V_%M_%D.nc",
         help="Template for the output nc filenames, default will be to create output/verif/%S/%V \
-              repertories where %S, %V, %M, %D are replaced by the "
-        "streams, variable, method and date",
+              repertories where %S, %V, %M, %D, %R are replaced by the "
+        "streams, variable, method, date, and run ID",
     )
 
     args, unknown_args = parser.parse_known_args(args)
