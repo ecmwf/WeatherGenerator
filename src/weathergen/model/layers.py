@@ -108,17 +108,16 @@ class MLP(torch.nn.Module):
     # TODO: expanded args, must check dependencies (previously aux = args[-1])
     def forward(self, *args):
         x, x_in = args[0], args[0]
-        if len(args) < 2 and self.with_aux:
-            raise ValueError("Auxiliary input required but not provided")
-        if len(args) == 2:
-            ada_ln_aux = args[1]
-        elif len(args) > 2:
-            ada_ln_aux = args[-1]
-            noise_emb = args[2] if self.is_dit else None
-            noise_emb = args[2] if self.is_dit else None
-
-        if self.is_dit:
-            assert ada_ln_aux is None, "conditioning not yet implemented for DIT attention"
+        if not self.is_dit:
+            if len(args) < 2 and self.with_aux:
+                raise ValueError("Auxiliary input required but not provided")
+            if len(args) == 2:
+                ada_ln_aux = args[1]
+            elif len(args) > 2:
+                ada_ln_aux = args[-1]
+        else:
+            assert len(args) == 3, "DIT gets 3 args (no conditioning implemented yet)"
+            noise_emb = args[-1]
             x = self.lnorm(x)
             assert noise_emb is not None, "Need noise embedding for noise conditioning in DIT"
             x, gate = self.noise_conditioning(x, noise_emb)

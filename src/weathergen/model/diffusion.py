@@ -151,10 +151,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = tokens.detach()
 
-        if self.cf.fe_diffusion_model_conditioning == "date_time":
-            c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
-        else:
-            c = None
+        c = None
 
         y = tokens
 
@@ -192,8 +189,6 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c) #currently does nothing
-        if self.cf.fe_diffusion_model_conditioning == "date_time":
-            c = self.datetime_embedder(c).to(x.device)
     
         return c_skip * x + c_out * self.net(
             c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=c
@@ -224,9 +219,6 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Extract conditioning from meta_info (same as training_forward)
         c = None
-
-        if self.cf.fe_diffusion_model_conditioning == "date_time":
-            c = meta_info["ERA5"].params["timestamp"]
 
         # Sample pure noise (assuming single batch element for now)
         # torch.manual_seed(42)

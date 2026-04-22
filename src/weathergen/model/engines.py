@@ -500,13 +500,8 @@ class ForecastingEngine(torch.nn.Module):
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
-                    if self.cf.fe_diffusion_model_conditioning in ["date_time"]:
-                        # Assuming ada_ln_aux contains the date_time embedding in this case
-                        assert ada_ln_aux is not None, "ada_ln_aux must be provided for diffusion model conditioning"
-                        tokens = checkpoint(block, tokens, coords, noise_emb, ada_ln_aux, use_reentrant=False)
-                    else:
-                        assert ada_ln_aux is None, "ada_ln_aux should not be provided when diffusion model conditioning is disabled"
-                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    assert ada_ln_aux is None, "ada_ln_aux should not be provided when diffusion model conditioning is disabled"
+                    tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
