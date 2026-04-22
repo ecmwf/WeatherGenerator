@@ -111,14 +111,22 @@ class MLP(torch.nn.Module):
     # TODO: expanded args, must check dependencies (previously aux = args[-1])
     def forward(self, *args):
         x, x_in = args[0], args[0]
-        if len(args) < 2 and self.with_aux:
-            raise ValueError("Auxiliary input required but not provided")
-        if len(args) == 2:
-            ada_ln_aux = args[1]
-        elif len(args) > 2:
-            ada_ln_aux = args[-1]
-            noise_emb = args[2] if self.is_dit else None
-            noise_emb = args[2] if self.is_dit else None
+        if not self.is_dit:
+            if len(args) < 2 and self.with_aux:
+                raise ValueError("Auxiliary input required but not provided")
+            if len(args) == 2:
+                ada_ln_aux = args[1]
+            elif len(args) > 2:
+                ada_ln_aux = args[-1]
+        else:
+            if self.dit_is_cond:
+                assert len(args) == 4, "DIT with cond gets 4 args"
+                ada_ln_aux = args[-1]
+                noise_emb = args[-2]
+            else:
+                assert len(args) == 3, "DIT with cond gets 3 args"
+                ada_ln_aux = args[-1]
+
 
         if self.is_dit:
             if self.dit_is_cond:
