@@ -15,7 +15,7 @@ evaluation:
   summary_plots : true
   ratio_plots : false
   heat_maps : false
-  summary_dir: "./plots_alhi7c8a_1"
+  summary_dir: "./plots_wpzcy6ak_0"
   plot_ensemble: false #supported: false, "std", "minmax", "members"
   plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
   print_summary: false #print out score values on screen. it can be verbose
@@ -30,7 +30,7 @@ default_streams:
     channels: ["2t", "10si", "10wdir", "r_850", "t_850", "u_850", "v_850", "z_500"] #, "blah"]
     evaluation:
       forecast_step: "all"
-      sample: [1]
+      sample: [0]
       ensemble: "all"
     # plotting:
     #  sample: [0]
@@ -43,5 +43,5 @@ default_streams:
     #  plot_animations: true
       
 run_ids:
-  alhi7c8a:
-    label: "sample_0_alhi7c8a"
+  wpzcy6ak:
+    label: "sample_0_wpzcy6ak"
