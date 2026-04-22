@@ -10,7 +10,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.preprocess import compute_mslp, compute_precip
+from weathergen.evaluate.utils.derived_channels import compute_mslp, compute_precip
 from weathergen.evaluate.export.reshape import (
     InterpolatorFactory,
     find_pl,
@@ -68,8 +68,7 @@ class VerifParser(CfParser):
         lat, lon, _ = get_obs_coordinates(self.obs)
         self.obs_coords = np.column_stack((lat.values, lon.values))
         self.zarr_coords = None
-
-        required_channels = ["10u", "10v", "sp", "2t", "msl"]
+        required_channels = ["10u", "10v", "sp", "2t", "msl", "tp"]
         self.channels = list(set(self.channels) & set(required_channels))
         self.zarr_dt: np.timedelta64 | None = None
 
