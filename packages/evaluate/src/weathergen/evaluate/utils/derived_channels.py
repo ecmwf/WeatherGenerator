@@ -203,6 +203,7 @@ def scale_z_channels(data: xr.DataArray, stream: str) -> xr.DataArray:
         data = data.where(~mask, data / factor)
     return data
 
+
 """
 Extra helper functions to preprocess data
 e.g. for verif applications
@@ -284,6 +285,7 @@ def compute_precip(
 
         for i in range(int_factor):
             back_time = frt - zarr_dt + (i + 1) * obs_dt
-            accumulate += obs_data.data_vars["precipitation_amount_1h"].sel(time=back_time).squeeze()
+            accumulate += (
+                obs_data.data_vars["precipitation_amount_1h"].sel(time=back_time).squeeze()
+            )
         return accumulate
-
