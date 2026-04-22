@@ -118,10 +118,10 @@ class EmbeddingEngine(torch.nn.Module):
 
         # per cell indices into positional encoding
         tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
-        rows = torch.arange( tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+        rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
         rows = rows.expand(tok_counts.shape[0], -1)
         pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
-        
+
         # actual scatter operation
         tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
 
@@ -150,7 +150,7 @@ class LocalAssimilationEngine(torch.nn.Module):
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
-                    qk_norm_type=self.cf.qk_norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
@@ -197,7 +197,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 dropout_rate=self.cf.ae_adapter_dropout_rate,
                 with_flash=self.cf.with_flash_attention,
                 norm_type=self.cf.norm_type,
-                qk_norm_type=self.cf.qk_norm_type,
+                qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                 norm_eps=self.cf.norm_eps,
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
@@ -227,7 +227,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_adapter_dropout_rate,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
-                    qk_norm_type=self.cf.qk_norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
@@ -334,7 +334,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -352,7 +352,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                     )
@@ -410,7 +410,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -427,7 +427,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -485,7 +485,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            qk_norm_type=self.cf.qk_norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
@@ -503,7 +503,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            qk_norm_type=self.cf.qk_norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
@@ -653,7 +653,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
-                    qk_norm_type=self.cf.qk_norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     softcap=self.softcap,
                     dim_aux=self.dim_coord_in,
                     norm_eps=self.cf.norm_eps,
@@ -671,7 +671,7 @@ class TargetPredictionEngineClassic(nn.Module):
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         dim_aux=self.dim_coord_in,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
