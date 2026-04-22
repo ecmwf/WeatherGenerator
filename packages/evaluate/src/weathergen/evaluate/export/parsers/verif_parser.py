@@ -68,8 +68,8 @@ class VerifParser(CfParser):
         lat, lon, _ = get_obs_coordinates(self.obs)
         self.obs_coords = np.column_stack((lat.values, lon.values))
         self.zarr_coords = None
-        required_channels = ["10u", "10v", "sp", "2t", "msl", "tp"]
-        self.channels = list(set(self.channels) & set(required_channels))
+        obs_data_channels = ["10u", "10v", "sp", "2t", "msl", "tp"]
+        self.channels = list(set(self.channels) & set(obs_data_channels))
         self.zarr_dt: np.timedelta64 | None = None
 
     def process_sample(
@@ -169,6 +169,7 @@ class VerifParser(CfParser):
             .replace("%V", variable)
             .replace("%M", self.method)
             .replace("%D", self.data_type)
+            .replace("%R", self.run_id)
         )
         outfile = Path(self.output_dir) / outfile
         pathdir = outfile.parent

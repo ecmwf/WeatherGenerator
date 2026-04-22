@@ -248,10 +248,6 @@ def compute_mslp(obs: xr.DataArray, time: np.datetime64) -> np.typing.NDArray:
 
     tv = t / (1.0 - 0.379 * (6.11 * np.power(10.0, ((7.5 * dewpoint) / (237.7 + dewpoint))) / p))
 
-    #        mslp = np.where(altitude >= 50.,
-    #                        p * np.exp((g * altitude / R) / (t + 0.5 * a * altitude + e * Ch)),
-    #                        p + p * altitude / (29.27 * tv))
-
     mslp = p + p * altitude / (29.27 * tv)
 
     return mslp
