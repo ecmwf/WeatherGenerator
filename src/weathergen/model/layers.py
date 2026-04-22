@@ -124,8 +124,8 @@ class MLP(torch.nn.Module):
                 ada_ln_aux = args[-1]
                 noise_emb = args[-2]
             else:
-                assert len(args) == 3, "DIT with cond gets 3 args"
-                ada_ln_aux = args[-1]
+                assert len(args) == 3, "DIT without cond gets 3 args"
+                noise_emb = args[-1]
 
 
         if self.is_dit:
