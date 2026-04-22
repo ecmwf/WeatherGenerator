@@ -209,6 +209,7 @@ _build/
 ~*
 *.sync
 _version.py
+*.png
 
 # development directories
 outputs/
@@ -228,3 +229,4 @@ output
 models
 results
 reports
+bias_maps_sample_parallel
