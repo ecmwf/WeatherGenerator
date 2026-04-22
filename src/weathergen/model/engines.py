@@ -423,7 +423,6 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.fe_diffusion_model,
-                            dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
                         )
                     )
                 else:
@@ -442,7 +441,6 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.fe_diffusion_model,
-                            dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
                         )
                     )
                 # Add MLP block
@@ -457,7 +455,6 @@ class ForecastingEngine(torch.nn.Module):
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         is_dit=self.cf.fe_diffusion_model,
-                        dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
