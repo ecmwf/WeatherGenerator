@@ -409,7 +409,6 @@ class Model(torch.nn.Module):
                     n_channels = self.targets_num_channels[i_stream]
                     self.channel_weights[stream_key] = nn.Parameter(torch.ones(n_channels))
 
-
                 # skip for the moment to ensure target embedding and tte exist (ordering of
                 # cf.streams is random)
                 if si.get("pred_spatial_shared") is None:
@@ -627,7 +626,9 @@ class Model(torch.nn.Module):
             get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
         )
 
-        num_params_channel_weights = (get_num_parameters(self.channel_weights) if self.channel_weights else 0)
+        num_params_channel_weights = (
+            get_num_parameters(self.channel_weights) if self.channel_weights else 0
+        )
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [

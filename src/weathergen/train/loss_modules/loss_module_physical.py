@@ -221,7 +221,6 @@ class LossPhysical(LossModuleBase):
             if self.stage == TRAIN and stream_name in channel_weights:
                 weights_channels = channel_weights[stream_name]
 
-
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
             if len(targets.physical) - len(targets.output_idxs) > 0:
