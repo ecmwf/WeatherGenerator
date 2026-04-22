@@ -134,17 +134,20 @@ class NetcdfParser(CfParser):
         data_vars = {}
 
         for new_var, pls in var_dict.items():
+            data_dims = ["ipoint"]
+            if "mem" in data.dims:
+                data_dims.append("mem")
             if pls[0] is not None:
                 old_vars = [f"{new_var}_{p}" for p in pls]
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
-                    dims=["ipoint", "pressure_level"],
+                    dims=[*data_dims, "pressure_level"],
                     coords={"pressure_level": pls},
                 )
             else:
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=new_var).values,
-                    dims=["ipoint"],
+                    dims=data_dims,
                 )
 
         reshaped_dataset = xr.Dataset(data_vars)
