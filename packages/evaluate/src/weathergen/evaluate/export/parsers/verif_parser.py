@@ -621,6 +621,7 @@ class VerifParser(CfParser):
     def merge(self, ds, obs_ds):
         lat, lon, alt = get_obs_coordinates(self.obs)
         merged = xr.merge([ds, obs_ds, lat, lon, alt], compat="minimal")
+        # may need join=inner if some leadtimes missing in obs
         return merged
 
     def save(self, list_samples: list) -> None:
