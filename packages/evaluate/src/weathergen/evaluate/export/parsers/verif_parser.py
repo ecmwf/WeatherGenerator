@@ -113,13 +113,10 @@ class VerifParser(CfParser):
                 self.zarr_coords = get_grid_points(da_fs[0])
                 self.zarr_dt = self.get_zarr_dt(da_fs[0])
             # check consistency of grid points across forecast steps
-            if (len(da_fs) > 1) and not (
-                np.array_equal(get_grid_points(da_fs[1]), self.zarr_coords)
-            ):
-                raise ValueError(
-                    "Grid points between forecast steps are not consistent."
+            if (len(da_fs) > 1):
+                assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), \
+                "Grid points between forecast steps are not consistent."\
                     "Check that inference was not performed with masking"
-                )
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
