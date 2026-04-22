@@ -147,7 +147,7 @@ training_config:
   training_mode: ["masking"]
 
   num_mini_epochs: 1
-  samples_per_mini_epoch: 512
+  samples_per_mini_epoch: 1024
   shuffle: True
 
   start_date: 2014-01-01T00:00
