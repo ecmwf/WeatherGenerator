@@ -29,9 +29,9 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.positional_encoding import positional_encoding_harmonic as peh
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
-from weathergen.model.positional_encoding import positional_encoding_harmonic as peh
 
 
 class EmbeddingEngine(torch.nn.Module):
@@ -90,14 +90,14 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
-        for stream_id, stream_name in enumerate(self.stream_names):
+        for stream_name in self.stream_names:
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
                 for sample in batch.get_samples():
                     sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
 
-            if all( s==None for s in sdata) :
+            if all(s is None for s in sdata):
                 continue
 
             sdata = torch.cat(sdata).to(tokens_all.dtype)
@@ -106,79 +106,84 @@ class EmbeddingEngine(torch.nn.Module):
                 continue
 
             # embedding from physical space to per patch latent representation
-            # import code; code.interact(local=dict(globals(), **locals()))
-            # x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
-            x_embed = self.embeds[stream_name](sdata).flatten(0, 1)
+            x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 
-            stream_id_embed = (stream_id+1) * 10
-            dev = x_embed.device
-            dtype = x_embed.dtype
-            len_token_seq = x_embed.shape[0]
-            dim_embed = x_embed.shape[1]
-            pe = torch.zeros(len_token_seq, dim_embed, device=dev, dtype=dtype)
-            position = torch.full( (len_token_seq,1), stream_id, device=dev, dtype=dtype)
-            div = torch.exp(torch.arange(0, dim_embed, 2, device=dev, dtype=dtype) * -(math.log(10000) / dim_embed))
-            pe[:, 0::2] = torch.sin(position * div[: pe[:, 0::2].shape[1]])
-            pe[:, 1::2] = torch.cos(position * div[: pe[:, 1::2].shape[1]])
-            x_embed = x_embed + pe
+        # switch from stream to cell-based ordering and apply per cell positional encoding
 
-            x_embeds += [x_embed]
-
-        if batch.tokens_lens.shape[2] == 1 :
-
+        if batch.tokens_lens.shape[2] == 1:
+            # trivial with one stream
             tokens_all = peh(torch.cat(x_embeds))
 
-        else :
-
-            # switch from stream to cell-based ordering and apply per cell positional encoding
-
-            # # computer scatter index across batch items and input steps
-            # aa = torch.cat(x_embeds)
-            # tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten()
-            # repeat = torch.repeat_interleave
-            # scatter_idxs = repeat(
-            #     torch.ones(len(tok_counts), dtype=torch.int64, device=tok_counts.device), tok_counts
-            # )
-            # scatter_idxs = scatter_idxs.cumsum(0) - 1
-            # # scatter index must exist for each element and not just per row
-            # scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-
-            tok_counts = batch.tokens_lens.permute([2, 0, 1, 3])[:,0,0]
-            pad = torch.tensor([0], dtype=torch.int64, device=tok_counts.device)
-            offset1 = torch.cat( [pad, tok_counts.sum(0).cumsum(0)])
-            pad = pad = torch.zeros( (1,tok_counts.shape[1]), dtype=torch.int64, device=tok_counts.device)
-            offset = torch.cat( [pad, tok_counts.cumsum(0) ]) + offset1[:-1]
-            # scatter_idxs = []
-            # for i in range(len(tok_counts)) :
-            #     for j in range(tok_counts.shape[1]) :
-            #         if tok_counts[i, j] == 0:
-            #             continue
-            #         # offset = tok_counts[:,:j].flatten().sum()
-            #         # offset += tok_counts[:i,j].sum()
-            #         scatter_idxs += [ offset[i,j] + torch.arange(tok_counts[i, j], device=tok_counts.device) ]
-            # scatter_idxs = torch.cat( scatter_idxs).to( torch.int64)
-            
-            aa = torch.arange(tok_counts.max(), device=tok_counts.device).repeat((3*12288,1))
-            bb = (aa.transpose(1,0) + offset[:-1].flatten()).transpose(1,0)
-            cc = tok_counts.flatten()
-            scatter_idxs = torch.cat([b[:c] for b,c in zip(bb,cc) if c > 0]).to( torch.int64)
-
+        else:
+            scatter_idxs = self.get_scatter_idxs_vectorized(batch)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-            # # per cell indices into positional encoding
-            # tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
-            # rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
-            # rows = rows.expand(tok_counts.shape[0], -1)
-            # pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
-
-            # import code; code.interact(local=dict(globals(), **locals()))
+            # per cell indices into positional encoding
+            tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+            rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+            rows = rows.expand(tok_counts.shape[0], -1)
+            pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
 
             # actual scatter operation
-            # tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
-            tokens_all.scatter_(0, scatter_idxs, peh(torch.cat(x_embeds))) 
-            # tokens_all = peh(torch.cat(x_embeds))
+            tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
 
         return tokens_all
+
+    def get_scatter_idxs(self, batch):
+        """
+        Compute reordering index so that tokens from different streams but same cell are
+        continguous
+
+        Simple version (reference implementation)
+        """
+
+        dev = batch.get_device()
+        # batch.tokens_lens : (num_samples, num_steps_input, num_streams, num_cells)
+        # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+
+        scatter_idxs = []
+        for i in range(len(tok_counts)):
+            for j in range(tok_counts.shape[1]):
+                if tok_counts[i, j] == 0:
+                    continue
+                # offset from preceding cells
+                offset = tok_counts[:, :j].flatten().sum()
+                # offset from preceding streams in cells
+                offset += tok_counts[:i, j].sum()
+                # scatter idxs is offset and idxs for all tokens in cell for current stream
+                scatter_idxs += [offset[i, j] + torch.arange(tok_counts[i, j], device=dev)]
+
+        scatter_idxs = torch.cat(scatter_idxs).to(torch.int64)
+
+        return scatter_idxs
+
+    def get_scatter_idxs_vectorized(self, batch):
+        """
+        Compute reordering index so that tokens from different streams but same cell are
+        continguous
+
+        Vectorized version
+        """
+
+        dev = batch.get_device()
+        # batch.tokens_lens : (num_samples, num_steps_input, num_streams, num_cells)
+        # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+
+        # partial sums for per cell offsets
+        pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)
+        offset = torch.cat([pad, tok_counts.cumsum(0)])[:-1]
+        offset[:, 1:] += tok_counts.sum(0).cumsum(0)[:-1]
+
+        ranges = torch.arange(tok_counts.max(), device=dev).repeat((tok_counts.numel(), 1))
+        idxs = (offset.flatten() + ranges.transpose(1, 0)).transpose(1, 0)
+        # select idxs[i][:ranges[i]] for each i; vectorized version
+        col_indices = torch.arange(idxs.shape[1], device=dev).unsqueeze(0)
+        valid_mask = col_indices < tok_counts.flatten().unsqueeze(1)
+        scatter_idxs = idxs[valid_mask].to(torch.int64)
+
+        return scatter_idxs
 
 
 class LocalAssimilationEngine(torch.nn.Module):
