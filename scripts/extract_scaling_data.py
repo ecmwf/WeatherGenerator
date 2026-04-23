@@ -40,23 +40,25 @@ def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | No
         if "startup_time_seconds" in df.columns:
             startup_time = df.select(pl.col("startup_time_seconds").first()).item()
         
-        # Extract loss_avg_mean from last training row
+        # Extract loss_avg_mean from last non-NaN training row
         loss_avg_mean = None
         if "loss_avg_mean" in df.columns:
-            loss_avg_mean = df.select(pl.col("loss_avg_mean").last()).item()
+            loss_avg_mean = df.select(pl.col("loss_avg_mean").drop_nulls().last()).item()
         
-        # Extract overall_time from last row
+        # Extract training for mini-epoch from last non-NaN row
+        overall_training_time = None
+        if "elapsed_time_mini_epoch" in df.columns:
+            overall_training_time = df.select(pl.col("elapsed_time_mini_epoch").drop_nulls().last()).item()
+
+        # Extract overall_time from last non-NaN row
         overall_time = None
         if "overall_time_seconds" in df.columns:
-            overall_time = df.select(pl.col("overall_time_seconds").last()).item()
-        
-        if overall_time is None:
-            return None
+            overall_time = df.select(pl.col("overall_time_seconds").drop_nulls().last()).item()
         
         return {
             "overall_time_seconds": overall_time,
             "startup_time_seconds": startup_time,
-            "training_time": overall_time - startup_time if startup_time else None,
+            "training_time": overall_training_time,
             "loss_avg_mean": loss_avg_mean,
         }
     except Exception:
@@ -66,31 +68,20 @@ def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | No
 def main():
     parser = argparse.ArgumentParser(description="Extract strong scaling data from WeatherGenerator runs")
     parser.add_argument("--run-ids", nargs="+", help="List of run-ids to process")
-    parser.add_argument("--run-id-file", type=Path, help="File containing run-ids (one per line)")
     parser.add_argument("--logs-base-dir", type=Path, default=Path("/e/scratch/weatherai/logs"), help="Base directory for run logs")
     parser.add_argument("--shared-work-dir", type=Path, default=Path("/e/scratch/weatherai/shared_work"), help="Base directory for shared work/results")
     parser.add_argument("--output", type=Path, default=Path("scaling_data.parquet"), help="Output parquet file path")
 
     args = parser.parse_args()
 
-    if args.run_ids and args.run_id_file:
-        sys.exit("Error: Cannot specify both --run-ids and --run-id-file")
-    elif args.run_ids:
-        run_ids = args.run_ids
-    elif args.run_id_file:
-        if not args.run_id_file.exists():
-            sys.exit(f"Error: Run-id file not found: {args.run_id_file}")
-        run_ids = [line.strip() for line in args.run_id_file.read_text().splitlines() if line.strip()]
-    else:
-        sys.exit("Error: Must specify either --run-ids or --run-id-file")
-
+    run_ids = args.run_ids
     if not run_ids:
         sys.exit("Error: No run-ids provided")
 
     results = []
     for run_id in run_ids:
-        log_pattern = args.logs_base_dir / run_id / "weathermen.*.err"
-        err_files = list(log_pattern.parent.glob("weathermen.*.err"))
+        log_pattern = args.logs_base_dir / run_id / "weathergen.*.err"
+        err_files = list(log_pattern.parent.glob("weathergen.*.err"))
         num_nodes = extract_num_nodes(err_files[0]) if err_files else None
         metrics = extract_metrics_from_run_id(run_id, args.shared_work_dir)
         if metrics is None:
