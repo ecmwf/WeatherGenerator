@@ -385,16 +385,6 @@ class Trainer(TrainerBase):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
             self.train(mini_epoch)
 
-             # Log training time after one epoch
-            if is_root():
-                total_training_time = time.time() - self.t_training_start
-                self.train_logger.log_metrics("train", {
-                    "completed_mini_epoch": mini_epoch,
-                    "elapsed_time_mini_epoch": total_training_time,
-                })
-                logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time / 3600:.2f} hours")
-                self._log(TRAIN)
-
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
             )
@@ -560,6 +550,18 @@ class Trainer(TrainerBase):
             self.cf.general.istep += 1
 
         self.dataset.advance()
+
+        torch.cuda.synchronize()
+        if is_root():
+            total_training_time = time.time() - self.t_training_start
+            self.train_logger.log_metrics("train", {
+                "completed_mini_epoch": mini_epoch,
+                "elapsed_time_mini_epoch": total_training_time,
+            })
+            logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time / 3600:.2f} hours")
+        self._log(TRAIN)
+        torch.cuda.synchronize()
+            
 
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
