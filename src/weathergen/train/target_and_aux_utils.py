@@ -16,7 +16,7 @@ def get_target_aux_calculator(
     device,
     is_sharded,
     batch_size_per_gpu,
-    **kwargs
+    **kwargs,
 ):
     """
     Create target aux calculator

@@ -185,7 +185,7 @@ class Trainer(TrainerBase):
                 self.model,
                 self.device,
                 self.runstate.is_sharded,
-                batch_size
+                batch_size,
             ).to_device(self.device)
 
         return target_and_aux_calculators
@@ -240,7 +240,6 @@ class Trainer(TrainerBase):
 
         if is_root():
             rs.save_runstate(self.runstate, self.cf, mini_epoch=0)
-
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -382,7 +381,6 @@ class Trainer(TrainerBase):
             config.save(self.cf, None)
             rs.save_runstate(self.runstate, self.cf, None)
             logger.info(config.format_cf(self.cf))
-
 
         # run validation before training if requested
         self.validate_before_training()

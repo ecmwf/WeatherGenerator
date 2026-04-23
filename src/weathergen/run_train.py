@@ -136,7 +136,7 @@ def run_continue(args):
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
-    
+
     runstate = load_runstate(run_id=args.from_run_id, mini_epoch=args.mini_epoch, model_path=None)
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
@@ -200,7 +200,6 @@ def run_train(args):
         traceback.print_exc()
         if runstate.world_size == 1:
             pdb.post_mortem(tb)
-
 
 
 if __name__ == "__main__":

@@ -20,16 +20,18 @@ RunState = DictConfig
 
 _logger = getLogger(__name__)
 
-def init_runstate() -> RunState:
 
-    startdict = {"istep": 0,
-                 "world_size": None,
-                 "world_size_original": None,
-                 "rank": None,
-                 "local_rank": None,
-                 "with_ddp": None,
-                 "is_sharded": None,
-                 "run_history": []}
+def init_runstate() -> RunState:
+    startdict = {
+        "istep": 0,
+        "world_size": None,
+        "world_size_original": None,
+        "rank": None,
+        "local_rank": None,
+        "with_ddp": None,
+        "is_sharded": None,
+        "run_history": [],
+    }
 
     runstate = OmegaConf.create(startdict)
     assert isinstance(runstate, RunState)
@@ -58,9 +60,9 @@ def save_runstate(runstate: RunState, config: Config, mini_epoch: int | None):
 
     fname = _get_runstate_file_write_name(config.general.run_id, mini_epoch)
 
-    json_str = dumps(OmegaConf.to_container(runstate)) + '\n'
+    json_str = dumps(OmegaConf.to_container(runstate)) + "\n"
 
-    with (dirname/f"{fname}").open("w") as f:
+    with (dirname / f"{fname}").open("w") as f:
         f.write(json_str)
 
 
@@ -107,6 +109,6 @@ def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -
         json_str = f.read()
 
     runstate = OmegaConf.create(loads(json_str))
+    assert isinstance(runstate, RunState)
 
     return runstate
-
