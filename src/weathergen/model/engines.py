@@ -147,20 +147,22 @@ class EmbeddingEngine(torch.nn.Module):
             pad = torch.tensor([0], dtype=torch.int64, device=tok_counts.device)
             offset1 = torch.cat( [pad, tok_counts.sum(0).cumsum(0)])
             pad = pad = torch.zeros( (1,tok_counts.shape[1]), dtype=torch.int64, device=tok_counts.device)
-            offset2 = torch.cat( [pad, tok_counts.cumsum(0) ])
-            offset3 = torch.cat( [pad, tok_counts.cumsum(0) ]) + offset1[:-1]
-            scatter_idxs = []
-            for i in range(len(tok_counts)) :
-                for j in range(tok_counts.shape[1]) :
-                    if tok_counts[i, j] == 0:
-                        continue
-                    # offset = tok_counts[:,:j].flatten().sum()
-                    # offset += tok_counts[:i,j].sum()
-                    offset = offset1[j] + offset2[i,j]
-                    assert offset == offset3[i,j]
-                    # assert tok_counts[:i,j].sum()==offset2[i,j]
-                    scatter_idxs += [ offset + torch.arange(tok_counts[i, j], device=tok_counts.device) ]
-            scatter_idxs = torch.cat( scatter_idxs).to( torch.int64)
+            offset = torch.cat( [pad, tok_counts.cumsum(0) ]) + offset1[:-1]
+            # scatter_idxs = []
+            # for i in range(len(tok_counts)) :
+            #     for j in range(tok_counts.shape[1]) :
+            #         if tok_counts[i, j] == 0:
+            #             continue
+            #         # offset = tok_counts[:,:j].flatten().sum()
+            #         # offset += tok_counts[:i,j].sum()
+            #         scatter_idxs += [ offset[i,j] + torch.arange(tok_counts[i, j], device=tok_counts.device) ]
+            # scatter_idxs = torch.cat( scatter_idxs).to( torch.int64)
+            
+            aa = torch.arange(tok_counts.max(), device=tok_counts.device).repeat((3*12288,1))
+            bb = (aa.transpose(1,0) + offset[:-1].flatten()).transpose(1,0)
+            cc = tok_counts.flatten()
+            scatter_idxs = torch.cat([b[:c] for b,c in zip(bb,cc) if c > 0]).to( torch.int64)
+
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
             # # per cell indices into positional encoding
