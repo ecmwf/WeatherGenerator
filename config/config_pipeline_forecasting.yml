@@ -1,0 +1,28 @@
+# Example pipeline_dev.yml:
+
+stages:
+  - name: pretrain
+    stage: train
+    config_files:
+      - config/config_forecasting.yml
+    options:
+      - training_config.num_mini_epochs=196
+      - training_config.learning_rate_scheduling.lr_max=5e-5
+    chain_jobs: 6
+    nodes: 2
+    # slurm_args:
+    #   - "--time=00:15:00"
+
+  - name: finetune
+    stage: train
+    from_run_id: STAGE.pretrain.run_id   # optional; use STAGE.<name>.run_id to reference a previous stage's run_id
+    config_files:
+      - config/config_forecasting_finetuning.yml
+    options:
+      - training_config.num_mini_epochs=32
+      - training_config.learning_rate_scheduling.lr_max=5e-5
+    chain_jobs: 4
+    nodes: 2
+    slurm_args:
+      # - "--time=00:15:00"
+      # - "--partition=booster"
