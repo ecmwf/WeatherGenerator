@@ -7,17 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from omegaconf import OmegaConf, DictConfig
 
-import logging
-import json
+from json import dumps, loads
+from logging import getLogger
 from pathlib import Path
+
+from omegaconf import DictConfig, OmegaConf
 
 from weathergen.common.config import Config, get_path_model
 
 RunState = DictConfig
 
-_logger = logging.getLogger(__name__)
+_logger = getLogger(__name__)
 
 def init_runstate() -> RunState:
 
@@ -31,8 +32,6 @@ def init_runstate() -> RunState:
                  "run_history": []}
 
     runstate = OmegaConf.create(startdict)
-    print("startdict: ", type(startdict))
-    print("runstate:  ", type(runstate))
     assert isinstance(runstate, RunState)
     return runstate
 
@@ -59,7 +58,7 @@ def save_runstate(runstate: RunState, config: Config, mini_epoch: int | None):
 
     fname = _get_runstate_file_write_name(config.general.run_id, mini_epoch)
 
-    json_str = json.dumps(OmegaConf.to_container(runstate)) + '\n'
+    json_str = dumps(OmegaConf.to_container(runstate)) + '\n'
 
     with (dirname/f"{fname}").open("w") as f:
         f.write(json_str)
@@ -99,14 +98,15 @@ def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -
             raise FileNotFoundError(
                 f"Could not find model runstate for run_id '{run_id}' "
                 f"(mini_epoch={mini_epoch}) in '{path}'. "
-                f"Tried: '{runstate_path_with_epoch.name}' and '{runstate_path_without_epoch.name}'. "
+                f"Tried: '{runstate_path_with_epoch.name}' and"
+                f"'{runstate_path_without_epoch.name}'. "
                 f"Please check run_id and mini_epoch."
             )
 
     with fname.open() as f:
         json_str = f.read()
 
-    runstate = OmegaConf.create(json.loads(json_str))
+    runstate = OmegaConf.create(loads(json_str))
 
     return runstate
 
