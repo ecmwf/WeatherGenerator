@@ -175,7 +175,7 @@ def run_train(args):
 
     Note: All model configurations are set in the function body.
     """
-    t_overall_start = time.time()
+    t_start = time.time()
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
@@ -203,7 +203,7 @@ def run_train(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices)
+        trainer.run(cf, devices, t_start=t_start)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -212,8 +212,8 @@ def run_train(args):
     finally:
         # Log overall time (only on root rank)
         if is_root():
-            t_overall_end = time.time()
-            overall_time = t_overall_end - t_overall_start
+            t_end = time.time()
+            overall_time = t_end - t_start
             trainer.train_logger.log_metrics(
                 "train",
                 {

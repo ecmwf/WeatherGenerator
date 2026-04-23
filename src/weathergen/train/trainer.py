@@ -232,8 +232,7 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
-        t_run_start = time.time()
+    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None, t_start: float | None = None):
 
         # general initalization
         self.init(cf, devices)
@@ -374,8 +373,8 @@ class Trainer(TrainerBase):
         self.validate_before_training()
 
         # Log startup time
-        if is_root():
-            startup_time = time.time() - t_run_start
+        if is_root() and t_start is not None:
+            startup_time = time.time() - t_start
             self.train_logger.log_metrics("train", {"startup_time_seconds": startup_time})
             logger.info(f"Startup time: {startup_time:.2f} seconds")
 
