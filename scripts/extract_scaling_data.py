@@ -14,7 +14,8 @@ def extract_num_nodes(err_log_path: Path) -> int | None:
         return None
     try:
         content = err_log_path.read_text()
-        match = re.search(r"Number of Nodes:\s*(\d+)", content)
+        # Case-insensitive match for "Number of Nodes:" with flexible whitespace
+        match = re.search(r"number\s+of\s+nodes\s*:\s*(\d+)", content, re.IGNORECASE)
         return int(match.group(1)) if match else None
     except Exception:
         return None
@@ -80,8 +81,8 @@ def main():
 
     results = []
     for run_id in run_ids:
-        log_pattern = args.logs_base_dir / run_id / "weathergen.*.err"
-        err_files = list(log_pattern.parent.glob("weathergen.*.err"))
+        log_pattern = args.logs_base_dir / run_id / "weathergen.*.*.err"
+        err_files = list(log_pattern.parent.glob("weathergen.*.*.err"))
         num_nodes = extract_num_nodes(err_files[0]) if err_files else None
         metrics = extract_metrics_from_run_id(run_id, args.shared_work_dir)
         if metrics is None:
