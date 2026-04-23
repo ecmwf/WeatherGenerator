@@ -769,7 +769,7 @@ class Trainer(TrainerBase):
                     {
                         "elapsed_training_time_seconds": elapsed_time,
                         "total_num_samples": samples,
-                        "average_samples_per_second_": samples / elapsed_time if elapsed_time > 0 else 0,
+                        "average_samples_per_second": samples / elapsed_time if elapsed_time > 0 else 0,
                     }
                                               )
 
