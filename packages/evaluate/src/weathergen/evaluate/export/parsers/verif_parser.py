@@ -10,13 +10,13 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.preprocess import compute_mslp, compute_precip
 from weathergen.evaluate.export.reshape import (
     InterpolatorFactory,
     find_pl,
     get_grid_points,
     get_obs_coordinates,
 )
+from weathergen.evaluate.utils.derived_channels import compute_mslp, compute_precip
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -68,9 +68,8 @@ class VerifParser(CfParser):
         lat, lon, _ = get_obs_coordinates(self.obs)
         self.obs_coords = np.column_stack((lat.values, lon.values))
         self.zarr_coords = None
-
-        required_channels = ["10u", "10v", "sp", "2t", "msl"]
-        self.channels = list(set(self.channels) & set(required_channels))
+        obs_data_channels = ["10u", "10v", "sp", "2t", "msl", "tp"]
+        self.channels = list(set(self.channels) & set(obs_data_channels))
         self.zarr_dt: np.timedelta64 | None = None
 
     def process_sample(
@@ -114,8 +113,8 @@ class VerifParser(CfParser):
                 self.zarr_coords = get_grid_points(da_fs[0])
                 self.zarr_dt = self.get_zarr_dt(da_fs[0])
             # check consistency of grid points across forecast steps
-            if ((len(da_fs) > 1) and not (np.array_equal(get_grid_points(da_fs[1]), self.zarr_coords))):
-                raise ValueError(
+            if len(da_fs) > 1:
+                assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
                     "Grid points between forecast steps are not consistent."
                     "Check that inference was not performed with masking"
                 )
@@ -168,6 +167,7 @@ class VerifParser(CfParser):
             .replace("%V", variable)
             .replace("%M", self.method)
             .replace("%D", self.data_type)
+            .replace("%R", self.run_id)
         )
         outfile = Path(self.output_dir) / outfile
         pathdir = outfile.parent
@@ -622,6 +622,7 @@ class VerifParser(CfParser):
     def merge(self, ds, obs_ds):
         lat, lon, alt = get_obs_coordinates(self.obs)
         merged = xr.merge([ds, obs_ds, lat, lon, alt], compat="minimal")
+        # may need join=inner if some leadtimes missing in obs
         return merged
 
     def save(self, list_samples: list) -> None:
