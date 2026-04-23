@@ -69,7 +69,7 @@ def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | No
 def main():
     parser = argparse.ArgumentParser(description="Extract strong scaling data from WeatherGenerator runs")
     parser.add_argument("--run-ids", nargs="+", help="List of run-ids to process")
-    parser.add_argument("--logs-base-dir", type=Path, default=Path("/e/scratch/weatherai/logs"), help="Base directory for run logs")
+    parser.add_argument("--logs-base-dir", type=Path, default=Path("logs"), help="Base directory for run logs (default: logs relative to current dir)")
     parser.add_argument("--shared-work-dir", type=Path, default=Path("/e/scratch/weatherai/shared_work"), help="Base directory for shared work/results")
     parser.add_argument("--output", type=Path, default=Path("scaling_data.parquet"), help="Output parquet file path")
 
@@ -81,8 +81,9 @@ def main():
 
     results = []
     for run_id in run_ids:
-        log_pattern = args.logs_base_dir / run_id / "weathergen.*.*.err"
-        err_files = list(log_pattern.parent.glob("weathergen.*.*.err"))
+        # Look for weathergen.*.err files (e.g., weathergen.part1.388004.err)
+        log_dir = args.logs_base_dir / run_id
+        err_files = list(log_dir.glob("weathergen.*.err")) if log_dir.exists() else []
         num_nodes = extract_num_nodes(err_files[0]) if err_files else None
         metrics = extract_metrics_from_run_id(run_id, args.shared_work_dir)
         if metrics is None:
