@@ -216,9 +216,13 @@ def tokenize_spacetime(
         )
         idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
 
-        # collect data for all time steps
-        idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
-        idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
+        # append tokens/n_tokens for current time step for each healpix cell to existing tokens
+        for cell_steps_tokens, cell_steps_tokens_cur, cell_steps_lens, cell_steps_lens_cur in zip(
+            idxs_cells, idxs_cur, idxs_cells_lens, idxs_cur_lens, strict=True
+        ):
+            cell_steps_tokens.extend(cell_steps_tokens_cur)
+            cell_steps_lens.extend(cell_steps_lens_cur)
+        
         offset_step += mask.sum()
 
     return idxs_cells, idxs_cells_lens
@@ -395,6 +399,7 @@ def tokenize_apply_mask_target(
     else:
         coords_local = torch.tensor([])
 
+    # geoinfos information is embedded into coords_local here
     return data, datetimes, coords, coords_local, masked_points_per_cell
 
 
