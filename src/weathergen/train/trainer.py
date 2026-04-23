@@ -549,9 +549,7 @@ class Trainer(TrainerBase):
 
             self.cf.general.istep += 1
 
-        self.dataset.advance()
-
-        torch.cuda.synchronize()
+        torch.distributed.barrier()
         if is_root():
             total_training_time = time.time() - self.t_training_start
             self.train_logger.log_metrics("train", {
@@ -560,8 +558,13 @@ class Trainer(TrainerBase):
             })
             logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds")
         self._log(TRAIN)
-        torch.cuda.synchronize()
-            
+
+        time_before_advance = time.time()
+        self.dataset.advance()
+        time_after_advance = time.time()
+        time_for_advance = time_after_advance - time_before_advance
+        if is_root():
+            logger.info(f"Time to advance dataset after mini epoch {mini_epoch}: {time_for_advance} seconds")
 
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
