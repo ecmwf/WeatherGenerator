@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from weathergen.common.config import Config
+from weathergen.datasets.data_reader_base import DTRange
 from weathergen.datasets.stream_data import StreamData
 
 
@@ -275,13 +276,17 @@ class ModelBatch:
 
     def __init__(
         self,
-        streams: dict,
+        source_time_range: DTRange,
+        idx: int,
+        streams: list[Config],
         num_source_samples: int,
         num_target_samples: int,
         output_offset,
         output_steps,
     ) -> None:
         """ """
+        self.source_time_range: DTRange = source_time_range
+        self.idx = idx
 
         # define forecast indices
         self.output_offset = output_offset

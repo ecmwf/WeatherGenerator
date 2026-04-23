@@ -653,6 +653,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         num_output_steps = self._get_output_length(num_forecast_steps)
         batch = ModelBatch(
+            self.time_window_handler.window(idx),
+            idx,
             self.streams,
             num_source_samples,
             num_target_samples,
