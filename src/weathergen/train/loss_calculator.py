@@ -1,3 +1,4 @@
+# pylint: disable=bad-builtin
 # ruff: noqa: T201
 
 # (C) Copyright 2025 WeatherGenerator contributors.

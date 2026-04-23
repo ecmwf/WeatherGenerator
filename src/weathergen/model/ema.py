@@ -30,6 +30,7 @@ class EMAModel:
         self.rampup_ratio = rampup_ratio
         self.ema_model = empty_model
         self.is_model_sharded = is_model_sharded
+        self.batch_size = 1
         # Build a name → param map once
         self.src_params = dict(self.original_model.named_parameters())
 
@@ -47,7 +48,13 @@ class EMAModel:
         for p in self.ema_model.parameters():
             p.requires_grad = False
         maybe_sharded_sd = self.original_model.state_dict()
-        # this copies correctly tested in pdb
+        # Strip "module." prefix from DDP-wrapped student so keys match the unwrapped
+        # teacher model. The update() method already handles this mismatch (line 73),
+        # but load_state_dict needs matching keys upfront.
+        ema_keys = set(self.ema_model.state_dict().keys())
+        needs_strip = not any(k in ema_keys for k in maybe_sharded_sd)
+        if needs_strip:
+            maybe_sharded_sd = {k.removeprefix("module."): v for k, v in maybe_sharded_sd.items()}
         mkeys, ukeys = self.ema_model.load_state_dict(maybe_sharded_sd, strict=False, assign=False)
         self.ema_model.eval()
 
@@ -55,16 +62,33 @@ class EMAModel:
         for p in self.ema_model.parameters():
             p.requires_grad = flag
 
+    def get_current_beta(self, cur_step: int) -> float:
+        """
+        Get current EMA beta value for monitoring.
+
+        The beta value determines how much the teacher model is updated towards
+        the student model at each step. Higher beta means slower teacher updates.
+
+        Args:
+            cur_step: Current training step (typically istep * batch_size).
+
+        Returns:
+            Current EMA beta value.
+        """
+        halflife_steps = self.halflife_steps
+        if self.rampup_ratio is not None:
+            halflife_steps = min(halflife_steps, cur_step * self.rampup_ratio)
+        beta = 0.5 ** (self.batch_size / max(halflife_steps, 1e-6))
+        return beta
+
     @torch.no_grad()
     def update(self, cur_step, batch_size):
         # ensure model remains sharded
         if self.is_model_sharded:
             self.ema_model.reshard()
         # determine correct interpolation params
-        halflife_steps = self.halflife_steps
-        if self.rampup_ratio is not None:
-            halflife_steps = min(halflife_steps, cur_step / 1e3 * self.rampup_ratio)
-        beta = 0.5 ** (batch_size / max(halflife_steps * 1e3, 1e-6))
+        self.batch_size = batch_size
+        beta = self.get_current_beta(cur_step)
 
         for name, p_ema in self.ema_model.named_parameters():
             p_src = self.src_params.get(name, None)

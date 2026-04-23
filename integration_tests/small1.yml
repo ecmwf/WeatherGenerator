@@ -92,6 +92,8 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 ################
 
 streams_directory: "./integration_tests/streams/"
+model_path: "./models"
+results_path: "./results"
 
 general:
 
@@ -113,7 +115,7 @@ general:
   run_id: ???
   run_history: []
 
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
@@ -136,7 +138,7 @@ training_config:
   training_mode: ["masking"]
 
   num_mini_epochs: 1
-  samples_per_mini_epoch: 16 #128 #256
+  samples_per_mini_epoch: 64
   shuffle: True
 
   start_date: 2014-01-01T00:00
@@ -199,7 +201,7 @@ validation_config:
   end_date: 2022-10-11T00:00
 
   output:
-    streams: ["ERA5", "latent"]
+    streams: ["ERA5"]
 
   validate_with_ema: 
     enabled : True
@@ -214,4 +216,4 @@ test_config:
 # TODO: read latent from here
 inference_config:
   output:
-    streams: ["ERA5", "latent"]
+    streams: ["ERA5"]
