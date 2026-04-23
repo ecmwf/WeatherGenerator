@@ -209,7 +209,7 @@ class ItemKey:
         """Decide if output item should contain source dataset."""
         return self.forecast_step == 0
 
-    def with_target(self, forecast_offset: typing.Literal[0, 1]) -> bool:
+    def with_prediction(self, forecast_offset: typing.Literal[0, 1]) -> bool:
         """Decide if output item should contain target and predictions."""
         assert forecast_offset in (0, 1)
         return (not self.with_source) or (forecast_offset == 0)
@@ -226,11 +226,19 @@ class ItemKey:
         return 0 if "target" in datasets else 1
 
 
+class DSKind(enum.StrEnum):
+    """The different kinds of output data."""
+
+    source = enum.auto()
+    target = enum.auto()
+    prediction = enum.auto()
+
+
 @dataclasses.dataclass
 class OutputDataset:
     """Access source/target/prediction zarr data contained in one output item."""
 
-    name: str
+    name: DSKind
     item_key: ItemKey
     source_interval: TimeRange
 
@@ -265,7 +273,7 @@ class OutputDataset:
         assert "source_interval" in attrs, "missing expected attribute 'source_interval'"
 
         source_interval = TimeRange(**attrs.pop("source_interval"))
-        return cls(name, key, source_interval, **arrays, **attrs)
+        return cls(DSKind(name), key, source_interval, **arrays, **attrs)
 
     @functools.cached_property
     def arrays(self) -> dict[str, ArrayType]:
@@ -335,32 +343,36 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
-        forecast_offset=int | None,
-        target: OutputDataset | None = None,
-        prediction: OutputDataset | None = None,
-        source: OutputDataset | None = None,
+        datasets: dict[DSKind, OutputDataset],
+        forecast_offset: int | None,
     ):
         """Collection of possible datasets for one output item."""
         self.key = key
-        self.target = target
-        self.prediction = prediction
-        self.source = source
-
-        self.datasets = []
+        self.datasets = datasets
 
         if self.key.with_source:
-            self._append_dataset(self.source, "source")
+            self._check_dataset(DSKind.source)
 
-        if self.key.with_target(forecast_offset):
-            self._append_dataset(self.target, "target")
-            self._append_dataset(self.prediction, "prediction")
+        if self.key.with_prediction(forecast_offset):
+            # Check only prediction since target data might be unknowable
+            self._check_dataset(DSKind.prediction)
 
-    def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
-        if dataset:
-            self.datasets.append(dataset)
-        else:
-            msg = f"Missing {name} dataset for item: {self.key.path}"
+    def _check_dataset(self, kind: DSKind) -> None:
+        if not self.datasets.get(kind):
+            msg = f"Missing {kind} dataset for item: {self.key.path}"
             raise ValueError(msg)
+
+    @property
+    def source(self) -> OutputDataset | None:
+        return self.datasets.get(DSKind.source)
+
+    @property
+    def target(self) -> OutputDataset | None:
+        return self.datasets.get(DSKind.target)
+
+    @property
+    def prediction(self) -> OutputDataset | None:
+        return self.datasets.get(DSKind.prediction)
 
 
 class ZarrIO:
@@ -408,7 +420,7 @@ class ZarrIO:
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
-        for dataset in item.datasets:
+        for dataset in item.datasets.values():
             if dataset is not None:
                 self._write_dataset(group, dataset)
 
@@ -422,22 +434,23 @@ class ZarrIO:
         """Get datasets for a output item."""
         datasets = self._get_datasets(key)
 
-        return OutputItem(key=key, forecast_offset=self.forecast_offset, **datasets)
+        return OutputItem(key, datasets, self.forecast_offset)
 
     def _get_datasets(self, key: ItemKey):
         group = self._get_group(key, create=False)
+        groups = ((DSKind(name), dataset) for name, dataset in group.groups())
         return {
             name: OutputDataset.create(
                 name, key, dict(dataset.arrays()), dict(dataset.attrs).copy()
             )
-            for name, dataset in group.groups()
+            for name, dataset in groups
         }
 
     def _get_group(self, item: ItemKey, create: bool) -> zarr.Array | zarr.Group:
         assert self.data_root is not None, "ZarrIO must be opened before accessing data."
         if create:
             assert self.data_root.get(item.path) is None, (
-                f"Group at {ItemKey} already exists, stop overwriting"
+                f"Group at {ItemKey} already exists. Overwriting is not permitted. Aborting."
             )
             group = self.data_root.create_group(item.path)
         else:
@@ -628,7 +641,7 @@ class OutputBatchData:
         else:
             source_dataset = None
 
-        if key.with_target(self.forecast_offset):
+        if key.with_prediction(self.forecast_offset):
             target_dataset, prediction_dataset = self._extract_targets_predictions(
                 stream_idx, offset_key, key, source_interval
             )
@@ -636,11 +649,13 @@ class OutputBatchData:
             target_dataset, prediction_dataset = (None, None)
 
         return OutputItem(
-            key=key,
-            forecast_offset=self.forecast_offset,
-            source=source_dataset,
-            target=target_dataset,
-            prediction=prediction_dataset,
+            key,
+            {
+                DSKind.source: source_dataset,
+                DSKind.target: target_dataset,
+                DSKind.prediction: prediction_dataset,
+            },
+            self.forecast_offset,
         )
 
     def _offset_key(self, key: ItemKey):
