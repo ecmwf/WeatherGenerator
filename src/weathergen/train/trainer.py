@@ -388,14 +388,12 @@ class Trainer(TrainerBase):
              # Log training time after one epoch
             if is_root():
                 total_training_time = time.time() - self.t_training_start
-                total_samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
                 self.train_logger.log_metrics("train", {
                     "completed_mini_epoch": mini_epoch,
-                    "elapsed_training_time_seconds": total_training_time,
-                    "total_num_samples": total_samples,
-                    "average_samples_per_second": total_samples / total_training_time if total_training_time > 0 else 0,
+                    "elapsed_time_mini_epoch": total_training_time,
                 })
                 logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time / 3600:.2f} hours")
+                self._log(TRAIN)
 
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
