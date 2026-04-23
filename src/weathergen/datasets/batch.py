@@ -28,12 +28,6 @@ class SampleMetaData:
 
 
 class Sample:
-    # keys: stream name, values: SampleMetaData
-    meta_info: dict[str | SampleMetaData]
-
-    # data for all streams
-    # keys: stream_name, values: StreamData
-    streams_data: dict[str, StreamData | None]
 
     def pin_memory(self):
         """Pin all tensors in this Sample to CPU pinned memory"""
@@ -273,24 +267,6 @@ class ModelBatch:
         output_idxs: Forecast step indices (including offset) for this batch.
         device: device of the tensors in this batch.
     """
-    # source samples (for model)
-    source_samples: BatchSamples
-
-    # target samples (for TargetAuxCalculator)
-    target_samples: BatchSamples
-
-    # index of corresponding target (for source samples) or source (for target samples)
-    # these are in 1-to-1 corresponding for classical training modes (e.g. MTM, forecasting) but
-    # can be more complex for strategies like student-teacher training
-    source2target_matching_idxs: np.typing.NDArray[np.int32]
-    target2source_matching_idxs: np.typing.NDArray[np.int32]
-
-    # indices of valid outputs
-    output_idxs: list[int]
-
-    # device of the tensors in the batch
-    device: str | torch.device
-
     def __init__(
         self,
         streams: list[Config],
