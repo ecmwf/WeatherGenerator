@@ -399,6 +399,17 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
 
+        # Log total training time
+        if is_root():
+            total_training_time = time.time() - self.t_training_start
+            total_samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
+            self.train_logger.log_metrics("train", {
+                "total_training_time_seconds": total_training_time,
+                "final_num_samples": total_samples,
+                "samples_per_second_total": total_samples / total_training_time if total_training_time > 0 else 0,
+            })
+            logger.info(f"Total training time: {total_training_time / 3600:.2f} hours")
+
     def validate_before_training(self):
         """
         Perform validation before training (eg. to check validation pipeline or data normalization)
@@ -736,20 +747,19 @@ class Trainer(TrainerBase):
         samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
 
         if is_root():
-            # Log elapsed training time and throughput metrics with every metric log
-            elapsed_time = time.time() - self.t_training_start
-            time_metrics = {
-                "elapsed_training_time_seconds": elapsed_time,
-                "num_samples": samples,
-                "samples_per_second_elapsed": samples / elapsed_time if elapsed_time > 0 else 0,
-            }
             
             # plain logger
             if stage == VAL:
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
-                self.train_logger.log_metrics("train", time_metrics)
 
             elif self.cf.general.istep >= 0:
+                # Log elapsed training time and throughput metrics with every metric log
+                elapsed_time = time.time() - self.t_training_start
+                time_metrics = {
+                    "elapsed_training_time_seconds": elapsed_time,
+                    "num_samples": samples,
+                    "samples_per_second_elapsed": samples / elapsed_time if elapsed_time > 0 else 0,
+                }
                 self.train_logger.add_logs(
                     stage,
                     samples,

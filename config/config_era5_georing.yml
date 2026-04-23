@@ -122,9 +122,9 @@ general:
 
 # logging frequency in the training loop (in number of batches)
 train_logging:
-  terminal: 10
-  metrics: 20
-  checkpoint: 250
+  terminal: 16
+  metrics: 16
+  checkpoint: 256
   log_grad_norms: False
 
 # parameters for data loading
