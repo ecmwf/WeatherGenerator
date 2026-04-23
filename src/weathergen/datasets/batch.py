@@ -253,8 +253,26 @@ class BatchSamples:
 class ModelBatch:
     """
     Container for all data and metadata for one training batch.
-    """
 
+    The data an instance contains is associated with one particular inital sampling window.
+    From this initial data multiple forecast windows are derived by offsetting the initial window.
+    Multiple samples for one forecast window can be generated
+    by sampling differently masked versions of the data.
+    Note that `output_offset` is the difference in forecast steps
+    between corresponding source and target samples.
+    Source and target samples are in 1-to-1 correspondance for classical training modes
+    (e.g. MTM, forecasting), but can be more complex for strategies like student-teacher training.
+    This relationship is expressed in `source2target_matching_idxs`
+    and `target2source_matching_idxs`.
+
+    Attributes:
+        source_samples: inputs for model
+        target_samples: inputs for TargetAuxCalculator that determines targets.
+        source2target_matching_idxs: index of corresponding target indices.
+        target2source_matching_idxs: index of corresponding source indices.
+        output_idxs: Forecast step indices (including offset) for this batch.
+        device: device of the tensors in this batch.
+    """
     # source samples (for model)
     source_samples: BatchSamples
 
@@ -281,7 +299,16 @@ class ModelBatch:
         output_offset: int,
         output_steps: int,
     ) -> None:
-        """ """
+        """
+        Initialize new ModelBatch.
+
+        Args:
+            streams: global StreamConfig.
+            num_source_samples: Number of differently masked source samples for one input window.
+            num_target_samples: Number of differently masked target samples for one input window.
+            output_offset: forecast offset for this batch.
+            output_steps: number of forecast steps for this batch.
+        """
 
         # define forecast indices
         self.output_offset = output_offset
