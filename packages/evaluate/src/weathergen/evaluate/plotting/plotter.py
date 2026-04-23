@@ -18,8 +18,8 @@ from cartopy.io import DownloadWarning
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from scipy.stats import wilcoxon
-from weathergen.common.config import _load_private_conf
 
+from weathergen.common.config import _load_private_conf
 from weathergen.evaluate.plotting.plot_utils import DefaultMarkerSize
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
