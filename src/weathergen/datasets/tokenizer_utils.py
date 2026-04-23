@@ -1,3 +1,5 @@
+import typing
+
 import numpy as np
 import pandas as pd
 import torch
@@ -5,6 +7,7 @@ from astropy_healpix.healpy import ang2pix
 from torch import Tensor
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.data_reader_base import NPDT64
 from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
     locs_to_ctr_coords,
@@ -123,7 +126,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
 
 def hpy_splits(
     coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
-) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
+) -> tuple[list[list[torch.Tensor | None]], list[list[int]]]:
     """Compute healpix cell for each data point and splitting information per cell;
        when the token_size is exceeded then splitting based on lat is used;
        tokens can be padded
@@ -174,11 +177,11 @@ def hpy_splits(
 
 
 def tokenize_space(
-    rdata,
-    token_size,
-    hl,
-    pad_tokens=True,
-    offset_step=0,
+    rdata: IOReaderData,
+    token_size: int,
+    hl: int,
+    pad_tokens: bool = True,
+    offset_step: int = 0
 ):
     """Process one window into tokens"""
 
@@ -189,7 +192,7 @@ def tokenize_space(
 
 
 def tokenize_spacetime(
-    rdata,
+    rdata: IOReaderData,
     token_size,
     hl,
     pad_tokens=True,
@@ -199,12 +202,13 @@ def tokenize_spacetime(
     """
 
     num_healpix_cells = 12 * 4**hl
-    idxs_cells = [[] for _ in range(num_healpix_cells)]
-    idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
+    idxs_cells: list[list[Tensor | None]] = [[] for _ in range(num_healpix_cells)]
+    idxs_cells_lens: list[list[int]] = [[] for _ in range(num_healpix_cells)]
 
     offset_step = 0
-    t_unique = np.unique(rdata.datetimes)
+    t_unique: typing.iterable[NPDT64] = np.unique(rdata.datetimes)
     for _, t in enumerate(t_unique):
+        t: NPDT64
         # data for current time step
         mask = t == rdata.datetimes
         rdata_cur = IOReaderData(

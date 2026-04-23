@@ -5,6 +5,7 @@ Provides clean separation between:
   - Model data (StreamData objects containing tensors)
   - View metadata (spatial masks, strategies, relationships)
 """
+from __future__ import annotations  # allow forward references in typehints
 
 import copy
 from dataclasses import dataclass
@@ -53,10 +54,9 @@ class Sample:
 
         return self
 
-    def __init__(self, streams: dict) -> None:
-        self.meta_info = {}
-
-        self.streams_data = {}
+    def __init__(self, streams: list[Config]) -> None:
+        self.meta_info: dict[str, SampleMetaData] = {}
+        self.streams_data: dict[str, StreamData | None] = {}
         for stream_info in streams:
             self.streams_data[stream_info["name"]] = None
 
@@ -146,7 +146,7 @@ class BatchSamples:
     output_idxs: list[int]
     device: str | None
 
-    def __init__(self, streams: dict, num_samples: int, output_steps, output_idxs) -> None:
+    def __init__(self, streams: list[Config], num_samples: int, output_steps, output_idxs) -> None:
         self.samples = [Sample(streams) for _ in range(num_samples)]
         self.tokens_lens = None
         self.output_steps = output_steps
@@ -275,18 +275,18 @@ class ModelBatch:
 
     def __init__(
         self,
-        streams: dict,
+        streams: list[Config],
         num_source_samples: int,
         num_target_samples: int,
-        output_offset,
-        output_steps,
+        output_offset: int,
+        output_steps: int,
     ) -> None:
         """ """
 
         # define forecast indices
         self.output_offset = output_offset
         self.output_steps = output_steps
-        self.output_idxs = list(range(output_offset, output_steps))
+        self.output_idxs: list[int] = list(range(output_offset, output_steps))
 
         self.source_samples = BatchSamples(
             streams, num_source_samples, output_steps, self.output_idxs
@@ -295,10 +295,15 @@ class ModelBatch:
             streams, num_target_samples, output_steps, self.output_idxs
         )
 
-        self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
-        self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+        self.source2target_matching_idxs: np.typing.NDArray[np.int32] = np.full(
+            num_source_samples, -1, dtype=np.int32
+        )
+        self.target2source_matching_idxs: np.typing.NDArray[np.int32] = [
+            [] for _ in range(num_target_samples)
+        ]
+        self.device: torch.device | None = None
 
-    def pin_memory(self):
+    def pin_memory(self) -> ModelBatch:
         """Pin all tensors in this batch to CPU pinned memory"""
 
         # pin source samples
@@ -309,15 +314,14 @@ class ModelBatch:
 
         return self
 
-    def to_device(self, device):  # -> ModelBatch
+    def to_device(self, device: str | torch.device) -> ModelBatch:
         """
         Move batch to device
         """
-
         self.source_samples.to_device(device)
         self.target_samples.to_device(device)
 
-        self.device = device
+        self.device = torch.device(device)
 
         return self
 

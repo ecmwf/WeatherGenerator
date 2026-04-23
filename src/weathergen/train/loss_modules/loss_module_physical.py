@@ -18,7 +18,9 @@ import torch
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
+from weathergen.model.model import ModelOutput
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
+from weathergen.train.target_and_aux_module_base import TargetAuxOutput
 from weathergen.train.utils import TRAIN, VAL, Stage
 
 _logger = logging.getLogger(__name__)
@@ -167,7 +169,7 @@ class LossPhysical(LossModuleBase):
 
         return loss_lfct, losses_chs
 
-    def compute_loss(self, preds: dict, targets: dict, metadata) -> LossValues:
+    def compute_loss(self, preds: ModelOutput, targets: TargetAuxOutput, metadata) -> LossValues:
         """
         Computes the total loss for a given batch of predictions and corresponding
         stream data.
