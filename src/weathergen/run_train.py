@@ -19,10 +19,10 @@ import time
 import traceback
 from pathlib import Path
 
-from weathergen.common.run_state import init_runstate, load_runstate
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
+from weathergen.common.run_state import init_runstate, load_runstate
 from weathergen.train.trainer import Trainer
 
 logger = logging.getLogger(__name__)

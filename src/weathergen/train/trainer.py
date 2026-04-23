@@ -22,9 +22,9 @@ from omegaconf import OmegaConf
 from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
+import weathergen.common.run_state as rs
 from weathergen.common.config import Config
 from weathergen.common.run_state import RunState
-import weathergen.common.run_state as rs
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
@@ -179,7 +179,13 @@ class Trainer(TrainerBase):
         target_and_aux_calculators = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
-                self.cf, loss_cfg, self.dataset, self.model, self.device, self.runstate.is_sharded, batch_size
+                self.cf,
+                loss_cfg,
+                self.dataset,
+                self.model,
+                self.device,
+                self.runstate.is_sharded,
+                batch_size
             ).to_device(self.device)
 
         return target_and_aux_calculators
@@ -791,7 +797,7 @@ class Trainer(TrainerBase):
                 if stage == VAL:
                     logger.info(
                         f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
-                        {np.nanmean(avg_loss)}"""
+                         {np.nanmean(avg_loss)}"""
                     )
 
                 elif stage == TRAIN:

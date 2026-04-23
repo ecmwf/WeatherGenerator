@@ -9,7 +9,14 @@ from weathergen.train.teacher_utils import load_encoder_from_checkpoint, prepare
 
 
 def get_target_aux_calculator(
-    cf: Config, loss_cfg: omegaconf.OmegaConf, dataset, model, device, is_sharded, batch_size_per_gpu, **kwargs
+    cf: Config,
+    loss_cfg: omegaconf.OmegaConf,
+    dataset,
+    model,
+    device,
+    is_sharded,
+    batch_size_per_gpu,
+    **kwargs
 ):
     """
     Create target aux calculator
