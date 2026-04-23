@@ -392,7 +392,7 @@ class Trainer(TrainerBase):
                     "completed_mini_epoch": mini_epoch,
                     "elapsed_time_mini_epoch": total_training_time,
                 })
-                logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time / 3600:.2f} hours")
+                logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds")
                 self._log(TRAIN)
 
             logger.info(
