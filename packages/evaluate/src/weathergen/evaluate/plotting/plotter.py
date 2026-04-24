@@ -84,6 +84,7 @@ class Plotter:
         _logger.info(f"Taking cartopy paths from {work_dir}")
 
         self.image_format = plotter_cfg.get("image_format")
+        self.animation_format = plotter_cfg.get("animation_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
