@@ -72,8 +72,6 @@ rope_mode: none  # one of: none, 2d, spherical
 # Optional spherical harmonic band for spherical RoPE. If null, the model picks one
 # conservative shared band that fits all spherical-RoPE attention modules.
 rope_spherical_band: null
-# Apply an extra q/k layer norm after Spherical RoPE modulation.
-rope_post_mod_qk_lnorm: False
 
 with_mixed_precision: True
 with_flash_attention: True
