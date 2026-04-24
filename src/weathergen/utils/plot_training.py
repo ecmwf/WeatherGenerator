@@ -489,6 +489,10 @@ def plot_loss_per_stream(
 
                 plt.grid(True, which="both", ls="-")
 
+                plt.yscale("log")
+                if x_scale_log:
+                    plt.xscale("log")
+
                 if y_lim is not None:
                     plt.ylim(y_lim)
                 else:
@@ -496,9 +500,6 @@ def plot_loss_per_stream(
                 if x_lim is not None:
                     plt.xlim(x_lim)
 
-                plt.yscale("log")
-                if x_scale_log:
-                    plt.xscale("log")
                 plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
