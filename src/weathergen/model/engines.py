@@ -33,6 +33,8 @@ from weathergen.model.positional_encoding import positional_encoding_harmonic as
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
+MAX_NUMBER_TOKENS_LOCAL_PER_CELL = 64
+
 
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
@@ -124,8 +126,12 @@ class EmbeddingEngine(torch.nn.Module):
             rows = rows.expand(tok_counts.shape[0], -1)
             pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
 
-            # actual scatter operation
-            tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
+            # if the assert is hit, MAX_NUMBER_TOKENS_LOCAL_PER_CELL needs to be increased
+            assert (
+                batch.tokens_lens.flatten(0, 2).sum(0).max() < MAX_NUMBER_TOKENS_LOCAL_PER_CELL
+            ), "max number of tokens per cell for positional encoding exceeded"
+            # actual scatter operation and apply per cell positional encoding
+            tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds)) + pe_embed[pe_idxs]
 
         return tokens_all
 
