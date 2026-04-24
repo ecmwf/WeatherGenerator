@@ -355,7 +355,7 @@ class Trainer(TrainerBase):
             mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu)
+                max(1, len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu))
             ) * self.batch_size_per_gpu
             mini_epoch_base = int(
                 self.cf.general.istep
