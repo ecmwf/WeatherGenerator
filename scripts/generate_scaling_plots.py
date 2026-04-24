@@ -1,120 +1,274 @@
 #!/usr/bin/env uv run python
-"""Generate strong scaling plots from parquet data. Single file with subplots per metric."""
+"""Generate scaling plots from parquet/ndjson data using matplotlib only.
+
+Two entrypoints:
+- standard: plots run-level metrics vs num_nodes
+- detailed: plots sample-level metrics vs total_num_samples
+"""
 
 import argparse
-import os
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import polars as pl
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-def create_scaling_plots(df: pl.DataFrame, output_path: Path, metrics: list[str]):
-    """Create a single plot with subplots for each metric."""
+SCRIPT_DIR = Path(__file__).resolve().parent
+VALID_IMAGE_SUFFIXES = {".png", ".pdf", ".svg", ".jpg", ".jpeg"}
+PALETTE = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+]
 
-    # Count valid metrics
+
+def resolve_input_path(path: Path) -> Path:
+    """Resolve relative input paths against cwd first, then the script directory."""
+    if path.is_absolute():
+        return path
+
+    cwd_candidate = Path.cwd() / path
+    if cwd_candidate.exists():
+        return cwd_candidate
+
+    script_candidate = SCRIPT_DIR / path
+    if script_candidate.exists():
+        return script_candidate
+
+    return cwd_candidate
+
+
+def resolve_output_path(path: Path) -> Path:
+    """Ensure the output path uses a supported image suffix."""
+    if path.suffix.lower() in VALID_IMAGE_SUFFIXES:
+        return path
+    return path.with_suffix(".png")
+
+
+def read_table(path: Path) -> pl.DataFrame:
+    """Read parquet or ndjson automatically."""
+    try:
+        print("Read as parquet")
+        return pl.read_parquet(path)
+    except Exception:
+        print("Read as NDJSON")
+        return pl.read_ndjson(path)
+
+
+def color_map_for_nodes(node_counts: list) -> dict:
+    return {node: PALETTE[i % len(PALETTE)] for i, node in enumerate(node_counts)}
+
+
+def save_figure(fig: plt.Figure, output_path: Path) -> None:
+    output_path = resolve_output_path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {output_path}")
+
+
+def plot_standard_scaling(
+    df: pl.DataFrame,
+    output_path: Path,
+    scaling_type: str,
+    metrics: list[str],
+    x_scale: str,
+    y_scale: str,
+) -> None:
+    """Plot run-level scaling data vs num_nodes."""
+    metric_labels = {
+        "training_time": "Training Time (seconds)",
+        "loss_avg_mean": "Average Loss",
+    }
+
     valid_metrics = [m for m in metrics if m in df.columns and df.filter(pl.col(m).is_not_null()).height > 0]
     if not valid_metrics:
         print("No valid metrics to plot")
         return
 
-    n_metrics = len(valid_metrics)
-
-    fig = make_subplots(
-        rows=n_metrics, cols=1,
-        subplot_titles=valid_metrics,
-        vertical_spacing=0.1,
-    )
+    fig, axes = plt.subplots(len(valid_metrics), 1, figsize=(12, 6 * len(valid_metrics)), squeeze=False)
 
     for idx, metric in enumerate(valid_metrics):
+        ax = axes[idx][0]
         df_plot = df.filter(pl.col(metric).is_not_null()).sort("num_nodes")
+        node_counts = df_plot["num_nodes"].unique().to_list() if "num_nodes" in df_plot.columns else []
+        colors = color_map_for_nodes(node_counts)
 
-        # Add scatter trace with lines and text labels
-        fig.add_trace(
-            go.Scatter(
-                x=df_plot["num_nodes"],
-                y=df_plot[metric],
-                mode="lines+markers+text",
-                text=df_plot["run_id"],
-                textposition="top center",
-                name=metric,
-                showlegend=False,
-                marker=dict(size=10, color="steelblue"),
-                line=dict(width=2),
-            ),
-            row=idx + 1, col=1,
+        ax.plot(
+            df_plot["num_nodes"],
+            df_plot[metric],
+            "o-",
+            color="steelblue",
+            markersize=8,
         )
 
-        # Add optimal scaling reference line for training_time
+        for x, y, label in zip(df_plot["num_nodes"], df_plot[metric], df_plot["run_id"]):
+            ax.text(x, y, label, ha="center", va="bottom", fontsize=8)
+
         if metric == "training_time" and "training_time" in df.columns:
-            # Find the 1-node training time
             one_node_data = df.filter(pl.col("num_nodes") == 1)
             if one_node_data.height > 0:
                 t1 = one_node_data["training_time"].item()
-                # Create optimal scaling line: t1 / n for each n
                 nodes = df_plot["num_nodes"].to_list()
-                optimal_y = [t1 / n for n in nodes]
-                fig.add_trace(
-                    go.Scatter(
-                        x=nodes,
-                        y=optimal_y,
-                        mode="lines",
-                        name="Optimal scaling",
-                        line=dict(width=1, color="red", dash="dash"),
-                        showlegend=True,
-                    ),
-                    row=idx + 1, col=1,
-                )
+                if scaling_type == "weak":
+                    optimal_y = [t1 for _ in nodes]
+                elif scaling_type == "strong":
+                    optimal_y = [t1 / n for n in nodes]
+                else:
+                    raise ValueError(f"Invalid scaling type: {scaling_type}")
+                ax.plot(nodes, optimal_y, "r--", linewidth=1, label="Optimal scaling")
+                ax.legend()
 
-        fig.update_xaxes(title_text="Number of Nodes (log scale)", type="log", row=idx + 1, col=1)
-        fig.update_yaxes(title_text=metric, row=idx + 1, col=1)
+        ax.set_xscale(x_scale)
+        if y_scale == "log":
+            ax.set_yscale("log")
+        ax.set_xlabel("Number of Nodes")
+        ax.set_ylabel(metric_labels.get(metric, metric))
+        ax.set_title(metric)
+        ax.grid(True, alpha=0.3)
 
-    fig.update_layout(
-        height=400 * n_metrics,
-        title_text="Scaling Analysis",
-        title_x=0.5,
-        template="plotly_white",
-    )
-
-    fig.write_html(output_path)
-    print(f"Saved: {output_path}")
+    fig.suptitle("Scaling Analysis", fontsize=16)
+    plt.tight_layout()
+    save_figure(fig, output_path)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate scaling plots from parquet data")
-    parser.add_argument("--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet file")
-    parser.add_argument("--output_dir", type=Path, default=Path("scaling_plots"), help="Output directory for HTML files")
-    parser.add_argument("--output_file_name", type=Path, default=Path("scaling_plots.html"), help="Output HTML file name")
-    parser.add_argument("--metrics", nargs="+", default=["training_time", "overall_time_seconds", "loss_avg_mean"], help="Metrics to plot")
-    parser.add_argument("--generate-dummy", action="store_true", help="Generate dummy test data")
-
-    args = parser.parse_args()
-
-    if args.generate_dummy:
-        print("Generating dummy test data...")
-        dummy_data = {
-            "run_id": ["run_1node", "run_2node", "run_4node", "run_8node", "run_16node"],
-            "num_nodes": [1, 2, 4, 8, 16],
-            "training_time": [1000, 520, 270, 140, 75],
-            "overall_time_seconds": [1100, 580, 310, 165, 90],
-            "loss_avg_mean": [0.45, 0.44, 0.44, 0.43, 0.43],
-        }
-        df = pl.DataFrame(dummy_data)
-        args.input.parent.mkdir(parents=True, exist_ok=True)
-        df.write_parquet(args.input)
-        print(f"Created dummy data: {args.input}")
-
-    if not args.input.exists():
-        print(f"Error: Input file not found: {args.input}")
-        print("Use --generate-dummy to create test data")
+def plot_detailed_scaling(
+    df: pl.DataFrame,
+    output_path: Path,
+    x_scale: str,
+    y_scale: str,
+) -> None:
+    """Plot sample-level detailed scaling data vs total_num_samples."""
+    required_cols = ["total_num_samples", "elapsed_training_time_seconds", "loss_avg_mean", "num_nodes"]
+    if not all(col in df.columns for col in required_cols):
+        print("Detailed metrics not available in this dataset")
+        print(f"Available columns: {df.columns}")
         return
 
-    print(f"Loading data from: {args.input}")
-    df = pl.read_parquet(args.input)
-    print(f"Loaded {len(df)} rows")
+    df_plot = df.filter(
+        pl.col("total_num_samples").is_not_null()
+        & (pl.col("total_num_samples") > 0)
+        & pl.col("elapsed_training_time_seconds").is_not_null()
+        & pl.col("loss_avg_mean").is_not_null()
+        & pl.col("num_nodes").is_not_null()
+    ).sort("num_nodes", "total_num_samples")
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    create_scaling_plots(df, os.path.join(args.output_dir, args.output_file_name), args.metrics)
+    if len(df_plot) == 0:
+        print("No valid data for detailed scaling plots")
+        return
+
+    node_counts = sorted(df_plot["num_nodes"].unique().to_list())
+    colors = color_map_for_nodes(node_counts)
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+
+    ax = axes[0]
+    for node_count in node_counts:
+        df_node = df_plot.filter(pl.col("num_nodes") == node_count).sort("total_num_samples")
+        ax.plot(
+            df_node["total_num_samples"],
+            df_node["elapsed_training_time_seconds"],
+            "o-",
+            color=colors[node_count],
+            markersize=6,
+            label=f"{node_count} nodes",
+        )
+    ax.set_xscale(x_scale)
+    if y_scale == "log":
+        ax.set_yscale("log")
+    ax.set_ylabel("Elapsed Training Time (seconds)")
+    ax.set_title("Elapsed Training Time vs Samples")
+    ax.grid(True, alpha=0.3)
+    ax.legend(title="Node Count")
+
+    ax = axes[1]
+    for node_count in node_counts:
+        df_node = df_plot.filter(pl.col("num_nodes") == node_count).sort("total_num_samples")
+        ax.plot(
+            df_node["total_num_samples"],
+            df_node["loss_avg_mean"],
+            "o-",
+            color=colors[node_count],
+            markersize=6,
+            label=f"{node_count} nodes",
+        )
+    ax.set_xscale(x_scale)
+    if y_scale == "log":
+        ax.set_yscale("log")
+    ax.set_xlabel("Total Number of Samples")
+    ax.set_ylabel("Average Loss")
+    ax.set_title("Loss vs Samples")
+    ax.grid(True, alpha=0.3)
+    ax.legend(title="Node Count")
+
+    fig.suptitle("Detailed Scaling Analysis", fontsize=16)
+    plt.tight_layout()
+    save_figure(fig, output_path)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Generate scaling plots from parquet or NDJSON data")
+    subparsers = parser.add_subparsers(dest="mode", required=True)
+
+    standard = subparsers.add_parser("standard", help="Plot run-level scaling metrics vs num_nodes")
+    standard.add_argument("--type", required=True, choices=["strong", "weak"], help="Scaling type")
+    standard.add_argument("--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file")
+    standard.add_argument("--output", type=Path, default=None, help="Output image path")
+    standard.add_argument("--metrics", nargs="+", default=["training_time", "loss_avg_mean"], help="Metrics to plot")
+    standard.add_argument("--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale")
+    standard.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
+
+    detailed = subparsers.add_parser("detailed", help="Plot sample-level detailed scaling metrics")
+    detailed.add_argument("--input", type=Path, default=Path("scaling_data_detailed.parquet"), help="Input detailed parquet/ndjson file")
+    detailed.add_argument("--output", type=Path, default=None, help="Output image path")
+    detailed.add_argument("--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale")
+    detailed.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
+
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.mode == "standard":
+        input_path = resolve_input_path(args.input)
+        if not input_path.exists():
+            print(f"Error: Input file not found: {input_path}")
+            return
+
+        output_path = args.output or input_path.with_suffix(".png")
+
+        print(f"Loading data from: {input_path}")
+        try:
+            df = read_table(input_path)
+        except Exception as e:
+            print("Error: Could not read input file as parquet or NDJSON")
+            print(str(e))
+            return
+        print(f"Loaded {len(df)} rows")
+        plot_standard_scaling(df, output_path, args.type, args.metrics, args.x_scale, args.y_scale)
+        return
+
+    if args.mode == "detailed":
+        input_path = resolve_input_path(args.input)
+        if not input_path.exists():
+            print(f"Error: Input file not found: {input_path}")
+            return
+
+        output_path = args.output or input_path.with_suffix(".png")
+
+        print(f"Loading detailed data from: {input_path}")
+        try:
+            df = read_table(input_path)
+        except Exception as e:
+            print("Error: Could not read detailed file as parquet or NDJSON")
+            print(str(e))
+            return
+        print(f"Loaded {len(df)} detailed rows")
+        plot_detailed_scaling(df, output_path, args.x_scale, args.y_scale)
+        return
+
+    raise ValueError(f"Unknown mode: {args.mode}")
+
 
 
 if __name__ == "__main__":
