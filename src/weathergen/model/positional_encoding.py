@@ -243,12 +243,9 @@ def _apply_complex_modulation(
     coeff_real: torch.Tensor,
     coeff_imag: torch.Tensor,
     unsqueeze_dim: int,
-    conjugate: bool = False,
 ) -> torch.Tensor:
     coeff_real = coeff_real.unsqueeze(unsqueeze_dim).to(dtype=x.dtype)
     coeff_imag = coeff_imag.unsqueeze(unsqueeze_dim).to(dtype=x.dtype)
-    if conjugate:
-        coeff_imag = -coeff_imag
     num_complex = coeff_real.shape[-1]
     max_complex = (x.shape[-1] - (x.shape[-1] % 2)) // 2
     if num_complex > max_complex:
@@ -260,11 +257,7 @@ def _apply_complex_modulation(
     if num_rotary_dims == 0:
         return x
 
-    num_pairs = num_rotary_dims // 2
-    coeff_real = coeff_real[..., :num_pairs]
-    coeff_imag = coeff_imag[..., :num_pairs]
-
-    x_rot = x[..., :num_rotary_dims].reshape(*x.shape[:-1], num_pairs, 2)
+    x_rot = x[..., :num_rotary_dims].reshape(*x.shape[:-1], num_complex, 2)
     x_real = x_rot[..., 0]
     x_imag = x_rot[..., 1]
     out_real = (x_real * coeff_real) - (x_imag * coeff_imag)
