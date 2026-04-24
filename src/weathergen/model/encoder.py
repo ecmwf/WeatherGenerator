@@ -17,6 +17,7 @@ from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
+    Local2GlobalSumEngine,
     LocalAssimilationEngine,
     QueryAggregationEngine,
 )
@@ -77,7 +78,11 @@ class EncoderModule(torch.nn.Module):
             )
 
         # local -> global assimilation engine adapter
-        self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
+        ae_adapter_type = cf.get("ae_adapter_type", "cross_attention")
+        if ae_adapter_type == "sum":
+            self.ae_local_global_engine = Local2GlobalSumEngine(cf)
+        else:
+            self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
 
         # learnable queries
         if cf.ae_local_queries_per_cell:

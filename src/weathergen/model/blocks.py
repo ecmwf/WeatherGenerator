@@ -213,6 +213,7 @@ class OriginalPredictionBlock(nn.Module):
                 dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                 with_flash=self.cf.with_flash_attention,
                 norm_type=attention_kwargs["norm_type"],
+                qk_norm_type=attention_kwargs["qk_norm_type"],
                 softcap=0.0,
                 dim_aux=dim_aux,
                 norm_eps=attention_kwargs["norm_eps"],
@@ -230,6 +231,7 @@ class OriginalPredictionBlock(nn.Module):
                     with_qk_lnorm=True,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
+                    qk_norm_type=self.cf.qk_norm_type,
                     dim_aux=dim_aux,
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
