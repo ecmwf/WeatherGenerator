@@ -13,6 +13,7 @@ import glob
 import logging
 from pathlib import Path
 
+import imageio
 import matplotlib
 import numpy as np
 import omegaconf as oc
@@ -257,6 +258,7 @@ def _build_single_animation(
     sa: object,
     fsteps: list,
     image_format: str,
+    animation_format: str,
     duration_ms: int,
 ) -> list[str]:
     """Build one GIF for a single (region, sample, variable) combination.
@@ -289,19 +291,24 @@ def _build_single_animation(
         return []
 
     image_paths = sorted(image_paths)
-    images = [Image.open(p) for p in image_paths]
-    out_path = f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.gif"
-    images[0].save(
-        out_path,
-        save_all=True,
-        append_images=images[1:],
-        duration=duration_ms,
-        loop=0,
+    out_path = (
+        f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.{animation_format}"
     )
-
-    for img in images:
-        img.close()
-
+    if animation_format.lower() == "mp4":
+        frames = [imageio.imread(p) for p in image_paths]
+        fps = 1000 / duration_ms if duration_ms > 0 else 2
+        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
+    else:
+        images = [Image.open(p) for p in image_paths]
+        images[0].save(
+            out_path,
+            save_all=True,
+            append_images=images[1:],
+            duration=duration_ms,
+            loop=0,
+        )
+        for img in images:
+            img.close()
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
 
@@ -345,6 +352,7 @@ def _dispatch_animations(
             "sa": sa,
             "fsteps": list(fsteps),
             "image_format": plotter.image_format,
+            "animation_format": plotter.animation_format,
             "duration_ms": duration_ms,
         }
         for region in plotter.regions
@@ -466,6 +474,7 @@ def plot_data(
 
     plotter_cfg = {
         "image_format": global_plotting_opts.get("image_format", "png"),
+        "animation_format": global_plotting_opts.get("animation_format", "gif"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
         "fps": global_plotting_opts.get("fps", 2),
