@@ -60,6 +60,69 @@ def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | No
         return None
 
 
+def extract_detailed_metrics(run_id: str, shared_work_dir: Path, output_path: Path) -> int:
+    """Extract detailed metrics pairing timing rows with preceding loss rows.
+    
+    For each row containing elapsed_training_time_seconds, pair it with the 
+    preceding row containing loss metrics. Returns the number of detailed entries extracted.
+    """
+    metrics_path = shared_work_dir / "results" / run_id / f"{run_id}_train_metrics.json"
+    if not metrics_path.exists():
+        return 0
+    
+    try:
+        df = pl.read_ndjson(metrics_path)
+        if len(df) == 0:
+            return 0
+        
+        # Find rows with elapsed_training_time_seconds (timing rows)
+        timing_mask = pl.col("elapsed_training_time_seconds").is_not_null()
+        timing_indices = df.with_row_index().filter(timing_mask).get_column("index").to_list()
+        
+        if len(timing_indices) == 0:
+            return 0
+        
+        # Get all row indices with loss data
+        loss_mask = pl.col("loss_avg_mean").is_not_null()
+        loss_rows_df = df.with_row_index().filter(loss_mask)
+        
+        detailed_records = []
+        
+        for timing_idx in timing_indices:
+            # Find the last loss row before this timing row
+            loss_rows_before = loss_rows_df.filter(pl.col("index") < timing_idx)
+            
+            if len(loss_rows_before) == 0:
+                continue
+            
+            # Get the last loss row before timing
+            loss_row = loss_rows_before.sort("index").tail(1)
+            timing_row = df.with_row_index().filter(pl.col("index") == timing_idx).drop("index")
+            
+            # Drop index column from loss_row for merging
+            loss_row = loss_row.drop("index")
+            
+            # Merge loss and timing data
+            merged = loss_row.join(timing_row, how="cross")
+            detailed_records.append(merged)
+        
+        if len(detailed_records) == 0:
+            return 0
+        
+        # Combine all records
+        detailed_df = pl.concat(detailed_records)
+        
+        # Write to output file
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        detailed_df.write_ndjson(output_path)
+        
+        return len(detailed_records)
+        
+    except Exception as e:
+        print(f"Error extracting detailed metrics for {run_id}: {e}")
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Extract strong scaling data from WeatherGenerator runs")
     parser.add_argument("--run-ids", nargs="+", help="List of run-ids to process")
@@ -74,6 +137,7 @@ def main():
         sys.exit("Error: No run-ids provided")
 
     results = []
+    detailed_files_created = []
     for run_id in run_ids:
         # Look for weathergen.*.err files (e.g., weathergen.part1.388004.err)
         log_dir = args.logs_base_dir / run_id
@@ -90,6 +154,16 @@ def main():
             "loss_avg_mean": metrics.get("loss_avg_mean"),
         }
         results.append(row)
+        
+        # Extract detailed metrics for this run
+        # Create output file with "detailed" suffix before the extension
+        output_stem = args.output.stem
+        output_suffix = args.output.suffix
+        detailed_output = args.output.with_name(f"{output_stem}_detailed{output_suffix}")
+        count = extract_detailed_metrics(run_id, args.shared_work_dir, detailed_output)
+        if count > 0:
+            detailed_files_created.append((detailed_output, count))
+            print(f"Extracted {count} detailed metric entries for {run_id}")
 
     if not results:
         sys.exit("No data extracted")
@@ -100,6 +174,12 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     df.write_parquet(args.output)
     df.write_csv(args.output.with_suffix(".csv"))
+    
+    print(f"\nSummary:")
+    print(f"  - Extracted {len(results)} run summaries to {args.output}")
+    if detailed_files_created:
+        total_detailed = sum(count for _, count in detailed_files_created)
+        print(f"  - Extracted {total_detailed} detailed metric entries to {detailed_files_created[0][0]}")
 
 
 if __name__ == "__main__":
