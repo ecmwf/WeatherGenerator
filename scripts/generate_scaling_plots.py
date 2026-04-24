@@ -115,6 +115,24 @@ def plot_standard_scaling(
                 else:
                     raise ValueError(f"Invalid scaling type: {scaling_type}")
                 ax.plot(nodes, optimal_y, "r--", linewidth=1, label="Optimal scaling")
+
+                # Show per-point efficiency loss as a vertical line and factor label.
+                for x, y, y_opt in zip(nodes, df_plot[metric].to_list(), optimal_y):
+                    if y_opt == 0:
+                        continue
+                    factor = y / y_opt
+                    ax.vlines(x, y_opt, y, colors="gray", linestyles=":", linewidth=1, alpha=0.7)
+                    y_mid = (y + y_opt) / 2
+                    ax.annotate(
+                        f"{factor:.2f}x",
+                        xy=(x, y_mid),
+                        xytext=(4, 0),
+                        textcoords="offset points",
+                        fontsize=9,
+                        fontweight="bold",
+                        color="dimgray",
+                        va="center",
+                    )
                 ax.legend()
 
         ax.set_xscale(x_scale)
