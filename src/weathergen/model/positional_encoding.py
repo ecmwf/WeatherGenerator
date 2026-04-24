@@ -189,24 +189,10 @@ def _max_supported_spherical_band(dim_embed: int, num_heads: int) -> int:
     return max(0, (max_complex - 1) // 2)
 
 
-def resolve_rope_mode(cf) -> str:
-    """Resolve and validate rope_mode from config."""
-
-    if cf.get("rope_2D", None) is not None:
-        raise ValueError(
-            "Config key 'rope_2D' is no longer supported. Use 'rope_mode' with one of: "
-            "none, 2d, spherical."
-        )
-    rope_mode = cf.get("rope_mode", "none")
-    rope_mode = "none" if rope_mode is None else str(rope_mode).lower()
-    assert rope_mode in {"none", "2d", "spherical"}, f"Unsupported rope_mode={rope_mode}"
-    return rope_mode
-
-
 def get_rope_spherical_band(cf) -> int | None:
     """Resolve spherical band index, supporting explicit config or automatic selection."""
 
-    rope_mode = resolve_rope_mode(cf)
+    rope_mode = cf.get("rope_mode", "none")
 
     if rope_mode != "spherical":
         rope_spherical_band = cf.get("rope_spherical_band", None)
@@ -225,7 +211,8 @@ def get_rope_spherical_band(cf) -> int | None:
     return min(candidates)
 
 
-def apply_rope(qs, ks, coords, rope_mode, rope_spherical_band, rope_healpix_level, unsqueeze_dim):
+def apply_rope(qs, ks, coords, rope_mode, unsqueeze_dim):
+    rope_mode = rope_mode or "none"
     if rope_mode == "none":
         return qs, ks
     if coords is None:

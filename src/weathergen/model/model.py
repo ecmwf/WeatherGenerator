@@ -39,7 +39,6 @@ from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.positional_encoding import (
     build_spherical_rope_coeff_tensors,
     get_rope_spherical_band,
-    resolve_rope_mode,
 )
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
@@ -112,7 +111,12 @@ class ModelParams(torch.nn.Module):
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         # RoPE coordinates
-        self.rope_mode = resolve_rope_mode(cf)
+        if cf.get("rope_2D", None) is not None:
+            raise ValueError(
+                "Config key 'rope_2D' is no longer supported. Use 'rope_mode' with one of: "
+                "none, 2d, spherical."
+            )
+        self.rope_mode = cf.get("rope_mode", "none") or "none"
         if self.rope_mode != "none":
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
             total_tokens = (

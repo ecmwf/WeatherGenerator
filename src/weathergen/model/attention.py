@@ -41,8 +41,6 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         rope_mode="none",
-        rope_spherical_band=None,
-        rope_healpix_level=0,
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -52,8 +50,6 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.softcap = softcap
         self.with_residual = with_residual
         self.rope_mode = rope_mode
-        self.rope_spherical_band = rope_spherical_band
-        self.rope_healpix_level = rope_healpix_level
         self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
         if self.rope_post_mod_qk_lnorm:
             assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
@@ -107,7 +103,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         vs = self.proj_heads_v(x).reshape(s)
 
         qs, ks = apply_rope(
-            qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 1
+            qs, ks, coords, self.rope_mode, 1
         )
         if self.rope_post_mod_qk_lnorm:
             qs = self.post_rope_lnorm_q(qs).to(self.dtype)
@@ -238,8 +234,6 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         rope_mode="none",
-        rope_spherical_band=None,
-        rope_healpix_level=0,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -248,8 +242,6 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.softcap = softcap
         self.with_residual = with_residual
         self.rope_mode = rope_mode
-        self.rope_spherical_band = rope_spherical_band
-        self.rope_healpix_level = rope_healpix_level
         self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
         if self.rope_post_mod_qk_lnorm:
             assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
@@ -311,7 +303,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
 
         qs, ks = apply_rope(
-            qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 1
+            qs, ks, coords, self.rope_mode, 1
         )
         if self.rope_post_mod_qk_lnorm:
             qs = self.post_rope_lnorm_q(qs).to(self.dtype)
@@ -565,8 +557,6 @@ class MultiSelfAttentionHead(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         rope_mode="none",
-        rope_spherical_band=None,
-        rope_healpix_level=0,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -576,8 +566,6 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
         self.rope_mode = rope_mode
-        self.rope_spherical_band = rope_spherical_band
-        self.rope_healpix_level = rope_healpix_level
         self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
         if self.rope_post_mod_qk_lnorm:
             assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
@@ -634,7 +622,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
 
         qs, ks = apply_rope(
-            qs, ks, coords, self.rope_mode, self.rope_spherical_band, self.rope_healpix_level, 2
+            qs, ks, coords, self.rope_mode, 2
         )
         if self.rope_post_mod_qk_lnorm:
             qs = self.post_rope_lnorm_q(qs).to(self.dtype)
