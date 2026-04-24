@@ -55,8 +55,7 @@ class NetcdfParser(CfParser):
         self,
         fstep_iterator_results: iter,
         ref_time: np.datetime64,
-        source_interval_start: np.datetime64 = None,
-        source_interval_end: np.datetime64 = None,
+        **kwargs,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.

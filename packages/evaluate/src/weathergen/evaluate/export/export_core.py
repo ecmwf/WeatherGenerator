@@ -380,7 +380,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                 processed_samples = []
 
                 for sample, _fstep, data in pool.imap_unordered(
-                    get_data_worker, batch_tasks, chunksize=max(1, n_fsteps)
+                    get_data_worker, batch_tasks, chunksize=1
                 ):
                     sample_results[sample].append(data)
                     pbar.update(1)
