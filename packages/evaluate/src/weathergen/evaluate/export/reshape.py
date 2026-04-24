@@ -76,6 +76,7 @@ def detect_grid_type(data: xr.DataArray) -> str:
             return "regular"
 
     # Otherwise it's Gaussian (irregular spacing or reduced grid)
+    # TODO: more checks e.g. CERRA is regional
     return "gaussian"
 
 
