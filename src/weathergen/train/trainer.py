@@ -623,6 +623,7 @@ class Trainer(TrainerBase):
                         # write output
                         write_output(
                             self.cf,
+                            self.runstate,
                             mode_cfg,
                             batch_size,
                             mini_epoch,

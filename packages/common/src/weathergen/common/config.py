@@ -681,15 +681,6 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
     return _get_shared_wg_path() / "models" / run_id
 
 
-def get_path_results(config: Config, mini_epoch: int) -> Path:
-    """Get the path to validation results for a specific mini_epoch and rank."""
-    ext = StoreType(config.zarr_store).value  # validate extension
-    base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
-
-    return base_path / fname
-
-
 @functools.cache
 def _get_shared_wg_path() -> Path:
     """Get the shared working directory for WeatherGenerator."""

@@ -14,6 +14,7 @@ import torch
 
 import weathergen.common.config as config
 import weathergen.common.io as io
+import weathergen.common.run_state as runstate
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
 
@@ -21,7 +22,7 @@ _logger = logging.getLogger(__name__)
 
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
+    cf, rs, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
 ):
     """
     Interface for writing model output
@@ -171,6 +172,6 @@ def write_output(
         sample_start,
         forecast_offset,
     )
-    with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
+    with zarrio_writer(runstate.get_path_results(rs, cf, mini_epoch)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)

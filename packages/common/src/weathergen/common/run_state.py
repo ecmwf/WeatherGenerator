@@ -14,7 +14,8 @@ from pathlib import Path
 
 from omegaconf import DictConfig, OmegaConf
 
-from weathergen.common.config import Config, get_path_model
+from weathergen.common.config import Config, get_path_model, get_path_run
+from weathergen.common.io import StoreType
 
 RunState = DictConfig
 
@@ -112,3 +113,14 @@ def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -
     assert isinstance(runstate, RunState)
 
     return runstate
+
+
+def get_path_results(runstate:RunState, config: Config, mini_epoch: int) -> Path:
+    """Get the path to validation results for a specific mini_epoch and rank."""
+    ext = StoreType(config.zarr_store).value  # validate extension
+    base_path = get_path_run(config)
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{runstate.rank:04d}.{ext}"
+
+    return base_path / fname
+
+
