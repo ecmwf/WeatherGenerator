@@ -29,7 +29,6 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.positional_encoding import positional_encoding_harmonic as peh
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -114,26 +113,35 @@ class EmbeddingEngine(torch.nn.Module):
 
         if batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
-            tokens_all = peh(torch.cat(x_embeds))
+            tokens_all = torch.cat(x_embeds)
 
         else:
             scatter_idxs = self.get_scatter_idxs_vectorized(batch)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
-
-            # per cell indices into positional encoding
-            tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
-            rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
-            rows = rows.expand(tok_counts.shape[0], -1)
-            pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
 
             # if the assert is hit, MAX_NUMBER_TOKENS_LOCAL_PER_CELL needs to be increased
             assert (
                 batch.tokens_lens.flatten(0, 2).sum(0).max() < MAX_NUMBER_TOKENS_LOCAL_PER_CELL
             ), "max number of tokens per cell for positional encoding exceeded"
             # actual scatter operation and apply per cell positional encoding
-            tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds)) + pe_embed[pe_idxs]
+            tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
+
+        pe_idxs = self.get_pe_idxs_vectorized(batch)
+        tokens_all = tokens_all + pe_embed[pe_idxs]
 
         return tokens_all
+
+    def get_pe_idxs_vectorized(self, batch):
+        """
+        Compute per cell indices into positional encoding
+        """
+
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+        rows = rows.expand(tok_counts.shape[0], -1)
+        pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
+
+        return pe_idxs
 
     def get_scatter_idxs(self, batch):
         """
@@ -144,7 +152,7 @@ class EmbeddingEngine(torch.nn.Module):
         """
 
         dev = batch.get_device()
-        # batch.tokens_lens : (num_samples, num_steps_input, num_streams, num_cells)
+        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
         tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
 
@@ -173,7 +181,7 @@ class EmbeddingEngine(torch.nn.Module):
         """
 
         dev = batch.get_device()
-        # batch.tokens_lens : (num_samples, num_steps_input, num_streams, num_cells)
+        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
         tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
 
