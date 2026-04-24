@@ -105,6 +105,7 @@ def main():
         df = df.sort("num_nodes")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     df.write_parquet(args.output)
+    df.write_csv(args.output.with_suffix(".csv"))
 
 
 if __name__ == "__main__":
