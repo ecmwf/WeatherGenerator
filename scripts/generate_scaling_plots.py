@@ -11,7 +11,6 @@ from plotly.subplots import make_subplots
 
 def create_scaling_plots(df: pl.DataFrame, output_path: Path, metrics: list[str]):
     """Create a single plot with subplots for each metric."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Count valid metrics
     valid_metrics = [m for m in metrics if m in df.columns and df.filter(pl.col(m).is_not_null()).height > 0]
