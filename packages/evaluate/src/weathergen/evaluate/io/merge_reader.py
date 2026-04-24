@@ -17,7 +17,7 @@ import xarray as xr
 # Local application / package
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.io.wegen_reader import WeatherGenJsonReader, WeatherGenZarrReader
-from weathergen.evaluate.utils.utils import merge
+from weathergen.evaluate.utils.dict_utils import merge
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)

@@ -26,6 +26,7 @@ from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
+    MAX_NUMBER_TOKENS_LOCAL_PER_CELL,
     BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
@@ -107,9 +108,10 @@ class ModelParams(torch.nn.Module):
         self.dtype = get_dtype(cf.attention_dtype)
 
         # Positional embeddings
-        len_token_seq = 1024
+        self.max_tokens_local_per_cell = MAX_NUMBER_TOKENS_LOCAL_PER_CELL
         self.pe_embed = torch.nn.Parameter(
-            torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
+            torch.zeros(self.max_tokens_local_per_cell, cf.ae_local_dim_embed, dtype=self.dtype),
+            requires_grad=False,
         )
 
         pe = torch.zeros(
@@ -194,12 +196,17 @@ class ModelParams(torch.nn.Module):
         # positional encodings
 
         dim_embed = cf.ae_local_dim_embed
-        len_token_seq = 1024
+        token_idx_bias = 16
+        freq_bias = 8
         self.pe_embed.data.fill_(0.0)
-        position = torch.arange(0, len_token_seq, device=self.pe_embed.device).unsqueeze(1)
+        position = torch.arange(
+            token_idx_bias,
+            token_idx_bias + self.max_tokens_local_per_cell,
+            device=self.pe_embed.device,
+        ).unsqueeze(1)
         div = torch.exp(
-            torch.arange(0, dim_embed, 2, device=self.pe_embed.device)
-            * -(math.log(len_token_seq) / dim_embed),
+            torch.arange(freq_bias, freq_bias + dim_embed, 2, device=self.pe_embed.device)
+            * -(math.log(self.max_tokens_local_per_cell) / dim_embed),
         )
         self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])
@@ -640,7 +647,7 @@ class Model(torch.nn.Module):
         num_params_q_cells = (
             np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
         )
-        num_params_ae_adapater = get_num_parameters(self.encoder.ae_local_global_engine.ae_adapter)
+        num_params_ae_adapter = get_num_parameters(self.encoder.ae_local_global_engine)
 
         num_params_ae_aggregation = get_num_parameters(
             self.encoder.ae_aggregation_engine.ae_aggregation_blocks
@@ -684,7 +691,7 @@ class Model(torch.nn.Module):
             for si, np in zip(cf.streams, num_params_embed, strict=False)
         ]
         print(f" Local assimilation engine: {num_params_ae_local:,}")
-        print(f" Local-global adapter: {num_params_ae_adapater:,}")
+        print(f" Local-global adapter: {num_params_ae_adapter:,}")
         print(f" Learnable queries: {num_params_q_cells:,}")
         print(f" Query Aggregation engine: {num_params_ae_aggregation:,}")
         print(f" Global assimilation engine: {num_params_ae_global:,}")

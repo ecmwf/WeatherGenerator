@@ -9,15 +9,14 @@
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 6
+fe_num_blocks: 16
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
-with_step_conditioning: True # False
 
 healpix_level: 5
 
@@ -111,9 +110,9 @@ training_config:
   learning_rate_scheduling :
     lr_start: 1e-6
     lr_max: 5e-5
-    lr_final_decay: 1e-6
+    lr_final_decay: 2e-6
     lr_final: 0.0
-    num_steps_warmup: 512
+    num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
@@ -126,7 +125,7 @@ training_config:
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.975
+      beta1 : 0.98125
       beta2 : 0.9875
       eps : 2e-08
 
@@ -160,7 +159,7 @@ training_config:
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
+      num_steps: 3
       offset: 1
       policy: "fixed"
 
@@ -176,14 +175,14 @@ validation_config:
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
-    enabled : False
+    enabled : True
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 8,
+    num_samples: 0,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
