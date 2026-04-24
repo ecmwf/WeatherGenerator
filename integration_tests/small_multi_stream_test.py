@@ -66,7 +66,7 @@ def test_train_multi_stream(setup, test_run_id):
             test_run_id,
         ]
     )
-   
+
     infer_multi_stream(test_run_id)
     evaluate_multi_stream_results(test_run_id)
     assert_metrics_file_exists(test_run_id)
@@ -81,22 +81,12 @@ def infer_multi_stream(run_id):
     main(
         [
             "inference",
-            "-start",
-            "2021-10-10",
-            "-end",
-            "2022-10-11",
-            "--samples",
-            "10",
             "--mini-epoch",
             "0",
             "--from-run-id",
             run_id,
             "--run-id",
             run_id,
-            "--streams-output",
-            "ERA5",
-            "SurfaceCombined",
-            "NPPATMS",
             "--config",
             f"{WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml",
         ]
@@ -164,7 +154,7 @@ def evaluate_multi_stream_results(run_id):
             },
         }
     )
-    evaluate_from_config(cfg, None, None)
+    evaluate_from_config(cfg, None)
 
 
 def load_metrics(run_id):
