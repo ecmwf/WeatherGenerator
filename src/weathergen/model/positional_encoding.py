@@ -189,15 +189,9 @@ def _max_supported_spherical_band(dim_embed: int, num_heads: int) -> int:
     return max(0, (max_complex - 1) // 2)
 
 
-def get_rope_spherical_band(cf) -> int | None:
+def get_rope_spherical_band(cf) -> int:
     """Resolve spherical band index, supporting explicit config or automatic selection."""
-
-    rope_mode = cf.get("rope_mode", "none")
-
-    if rope_mode != "spherical":
-        rope_spherical_band = cf.get("rope_spherical_band", None)
-        return None if rope_spherical_band is None else int(rope_spherical_band)
-
+    
     rope_spherical_band = cf.get("rope_spherical_band", None)
     if rope_spherical_band is not None:
         return int(rope_spherical_band)
@@ -296,9 +290,9 @@ def build_spherical_rope_coeff_tensors(
 ]:
     """Build spherical-RoPE coefficient tensors for cell-level, extra tokens, and packed tokens."""
 
-    cell_real, cell_imag = spherical_harmonics_band_all_pixels(
-        nside=nside, band=band, device=device, dtype=dtype
-    )
+    real_maps, imag_maps = _healpy_band_maps(nside, band)
+    cell_real = torch.as_tensor(real_maps, device=device, dtype=dtype)
+    cell_imag = torch.as_tensor(imag_maps, device=device, dtype=dtype)
 
     extra_real = torch.ones(
         num_extra_tokens, cell_real.shape[-1], device=cell_real.device, dtype=cell_real.dtype
@@ -321,17 +315,6 @@ def build_spherical_rope_coeff_tensors(
         (packed_real, packed_imag),
     )
 
-
-def spherical_harmonics_band_all_pixels(
-    nside: int, band: int, device=None, dtype=torch.float32
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return a full HEALPix-grid spherical harmonic band precomputed via healpy."""
-
-    real_maps, imag_maps = _healpy_band_maps(nside, band)
-    return (
-        torch.as_tensor(real_maps, device=device, dtype=dtype),
-        torch.as_tensor(imag_maps, device=device, dtype=dtype),
-    )
 
 
 @lru_cache(maxsize=32)
