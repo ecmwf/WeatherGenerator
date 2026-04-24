@@ -556,6 +556,9 @@ class Trainer(TrainerBase):
         noise_levels = list(mode_cfg.get("validation_noise_levels", [0.0]))
         if not is_diffusion:
             noise_levels = [0.0]
+        else:
+            # Always include a pass without fixed noise level (random sampling)
+            noise_levels = [None] + noise_levels
 
         # Accumulate losses across noise levels with suffixed keys so they are
         # logged as a single "val" entry (e.g. LossLatentDiff.LossLatentDiff.mse.eta0.03)
@@ -566,11 +569,15 @@ class Trainer(TrainerBase):
             if is_diffusion:
                 self._set_validation_noise_level(noise_level)
 
-            _d = Decimal(str(noise_level)).normalize()
-            _sign, _digits, _exp = _d.as_tuple()
-            eta_str = f"{'-' if _sign else ''}{''.join(map(str, _digits))}e{_exp}"
-            loss_suffix = f".eta{eta_str}" if len(noise_levels) > 1 else ""
-            stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
+            if noise_level is None:
+                loss_suffix = ""
+                stage_suffix = ""
+            else:
+                _d = Decimal(str(noise_level)).normalize()
+                _sign, _digits, _exp = _d.as_tuple()
+                eta_str = f"{'-' if _sign else ''}{''.join(map(str, _digits))}e{_exp}"
+                loss_suffix = f".eta{eta_str}" if len(noise_levels) > 1 else ""
+                stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
 
             dataset_val_iter = iter(self.data_loader_validation)
             num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
