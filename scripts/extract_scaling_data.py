@@ -51,13 +51,7 @@ def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | No
         if "elapsed_time_mini_epoch" in df.columns:
             overall_training_time = df.select(pl.col("elapsed_time_mini_epoch").drop_nulls().last()).item()
 
-        # Extract overall_time from last non-NaN row
-        overall_time = None
-        if "overall_time_seconds" in df.columns:
-            overall_time = df.select(pl.col("overall_time_seconds").drop_nulls().last()).item()
-        
         return {
-            "overall_time_seconds": overall_time,
             "startup_time_seconds": startup_time,
             "training_time": overall_training_time,
             "loss_avg_mean": loss_avg_mean,
@@ -91,8 +85,8 @@ def main():
         row = {
             "run_id": run_id,
             "num_nodes": num_nodes,
+            "startup_time_seconds": metrics.get("startup_time_seconds"),
             "training_time": metrics.get("training_time"),
-            "overall_time_seconds": metrics["overall_time_seconds"],
             "loss_avg_mean": metrics.get("loss_avg_mean"),
         }
         results.append(row)

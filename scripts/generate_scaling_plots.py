@@ -2,6 +2,7 @@
 """Generate strong scaling plots from parquet data. Single file with subplots per metric."""
 
 import argparse
+import os
 from pathlib import Path
 
 import polars as pl
@@ -71,7 +72,7 @@ def create_scaling_plots(df: pl.DataFrame, output_path: Path, metrics: list[str]
 
     fig.update_layout(
         height=400 * n_metrics,
-        title_text="Strong Scaling Analysis",
+        title_text="Scaling Analysis",
         title_x=0.5,
         template="plotly_white",
     )
@@ -81,9 +82,10 @@ def create_scaling_plots(df: pl.DataFrame, output_path: Path, metrics: list[str]
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate strong scaling plots from parquet data")
+    parser = argparse.ArgumentParser(description="Generate scaling plots from parquet data")
     parser.add_argument("--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet file")
-    parser.add_argument("--output", type=Path, default=Path("scaling_plots/strong_scaling.html"), help="Output HTML file")
+    parser.add_argument("--output_dir", type=Path, default=Path("scaling_plots"), help="Output directory for HTML files")
+    parser.add_argument("--output_file_name", type=Path, default=Path("scaling_plots.html"), help="Output HTML file name")
     parser.add_argument("--metrics", nargs="+", default=["training_time", "overall_time_seconds", "loss_avg_mean"], help="Metrics to plot")
     parser.add_argument("--generate-dummy", action="store_true", help="Generate dummy test data")
 
@@ -112,7 +114,8 @@ def main():
     df = pl.read_parquet(args.input)
     print(f"Loaded {len(df)} rows")
 
-    create_scaling_plots(df, args.output, args.metrics)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    create_scaling_plots(df, os.path.join(args.output_dir, args.output_file_name), args.metrics)
 
 
 if __name__ == "__main__":
