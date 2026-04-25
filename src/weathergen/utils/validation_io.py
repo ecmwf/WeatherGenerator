@@ -83,7 +83,9 @@ def write_output(
                     t_times = target_data["target_times"][i_batch]
 
                     idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
-                    if idxs_inv is not None:
+                    if idxs_inv is not None and (
+                        not isinstance(idxs_inv, torch.Tensor) or idxs_inv.numel() > 0
+                    ):
                         pred = pred[:, idxs_inv]
                         target = target[idxs_inv]
                         t_coords = t_coords[idxs_inv]
@@ -91,6 +93,11 @@ def write_output(
 
                     # denormalize data if requested and map to storage format
                     preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+                    # In inference_only mode, target tokens are empty (no channel dim); create a
+                    # properly shaped empty array so downstream code handles it gracefully.
+                    n_channels = pred.shape[-1]
+                    if target.ndim == 1 and target.numel() == 0:
+                        target = target.reshape(0, n_channels)
                     targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
 
                     # extract original target coords and times from target data
@@ -98,7 +105,11 @@ def write_output(
                     t_times_s += [t_times.astype("datetime64[ns]")]
 
             targets_lens[-1] += [[]]
-            targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
+            # Use coordinate count rather than target-value count so that in
+            # inference_only mode (where target tokens are empty but coords and
+            # predictions are non-empty) the correct number of output datapoints
+            # is indexed when writing predictions.
+            targets_lens[-1][-1] += [t.shape[0] for t in t_coords_s]
 
             preds_all[-1] += [np.concatenate(preds_s, axis=1)]
             targets_all[-1] += [np.concatenate(targets_s)]
