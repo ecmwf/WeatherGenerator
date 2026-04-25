@@ -314,7 +314,17 @@ def build_spherical_rope_coeff_tensors(
 def _healpy_band_maps(
     nside: int, band: int
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Precompute a spherical-harmonic band on the HEALPix grid using healpy."""
+    """Precompute one spherical-harmonic band on the HEALPix grid using healpy.
+
+    The returned columns store the complex coefficients Y_lm(omega) for fixed l=band and
+    m=-l,...,+l. These are the position factors used in spherical RoPE:
+
+        q_m^omega = Y_lm(omega) q_m,    k_m^omega = Y_lm(omega) k_m.
+
+    The following attention dot product then implicitly forms
+    Y_lm(omega_r) Y_lm*(omega_s), matching the spherical harmonics addition-theorem
+    structure.
+    """
 
     num_pixels = hp.nside2npix(nside)
     real_maps = np.zeros((num_pixels, 2 * band + 1), dtype=np.float64)
@@ -322,12 +332,17 @@ def _healpy_band_maps(
     alm_size = hp.sphtfunc.Alm.getsize(band, band)
 
     for m in range(0, band + 1):
+        # healpy stores alm only for m >= 0 and alm2map reconstructs a real field. Setting
+        # a_lm=1 gives 2 Re[Y_lm] for m>0, while a_lm=i gives -2 Im[Y_lm]. We combine these
+        # two real maps below to recover the complex coefficient Y_lm itself.
         alm_real = np.zeros(alm_size, dtype=np.complex128)
         alm_real[hp.sphtfunc.Alm.getidx(band, band, m)] = 1.0
         real_map = hp.alm2map(alm_real, nside=nside, lmax=band, mmax=band, pol=False)
         real_map = hp.reorder(real_map, r2n=True)
 
         if m == 0:
+            # Y_l0 is real, and healpy returns it directly because there is no -m counterpart
+            # to merge into the real map.
             real_maps[:, band] = real_map
             continue
 
@@ -340,6 +355,9 @@ def _healpy_band_maps(
         neg_idx = band - m
         sign = -1.0 if m % 2 else 1.0
 
+        # Columns are ordered as m=-l,...,+l, hence band+m for +m and band-m for -m.
+        # The negative-order mode follows the standard convention
+        # Y_l,-m = (-1)^m Y_lm*.
         real_maps[:, pos_idx] = real_map / 2.0
         imag_maps[:, pos_idx] = -imag_map / 2.0
         real_maps[:, neg_idx] = sign * real_map / 2.0
