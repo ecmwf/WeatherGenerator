@@ -543,15 +543,11 @@ class Trainer(TrainerBase):
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
 
-            # save model checkpoint (with designation _latest)
-            # if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
-                # self.save_model(-1)
-
             self.cf.general.istep += 1
 
             # log metrics at last iteration (keep barrier for now)
             if bidx == len(self.data_loader) - 1:
-                # torch.distributed.barrier()
+                torch.distributed.barrier()
                 if is_root():
                     total_training_time = time.time() - self.t_training_start
                     self.train_logger.log_metrics("train", {
@@ -559,7 +555,6 @@ class Trainer(TrainerBase):
                         "elapsed_time_mini_epoch": total_training_time,
                     })
                     logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds")
-                self._log(TRAIN)
 
         self.dataset.advance()
 
