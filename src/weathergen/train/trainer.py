@@ -354,6 +354,7 @@ class Trainer(TrainerBase):
         if self.world_size_original is None:
             mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
         else:
+            # to avoid zero-division for small datasets
             len_per_rank = (
                 max(1, len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu))
             ) * self.batch_size_per_gpu
@@ -398,7 +399,6 @@ class Trainer(TrainerBase):
         # log final model
         self.save_model(self.training_cfg.num_mini_epochs)
 
-       
     def validate_before_training(self):
         """
         Perform validation before training (eg. to check validation pipeline or data normalization)
@@ -544,27 +544,24 @@ class Trainer(TrainerBase):
                     self._log_collapse_metrics(TRAIN)
 
             # save model checkpoint (with designation _latest)
-            if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
-                self.save_model(-1)
+            # if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
+                # self.save_model(-1)
 
             self.cf.general.istep += 1
 
-        torch.distributed.barrier()
-        if is_root():
-            total_training_time = time.time() - self.t_training_start
-            self.train_logger.log_metrics("train", {
-                "completed_mini_epoch": mini_epoch,
-                "elapsed_time_mini_epoch": total_training_time,
-            })
-            logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds")
-        self._log(TRAIN)
+            # log metrics at last iteration (keep barrier for now)
+            if bidx == len(self.data_loader) - 1:
+                torch.distributed.barrier()
+                if is_root():
+                    total_training_time = time.time() - self.t_training_start
+                    self.train_logger.log_metrics("train", {
+                        "completed_mini_epoch": mini_epoch,
+                        "elapsed_time_mini_epoch": total_training_time,
+                    })
+                    logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds")
+                self._log(TRAIN)
 
-        time_before_advance = time.time()
         self.dataset.advance()
-        time_after_advance = time.time()
-        time_for_advance = time_after_advance - time_before_advance
-        if is_root():
-            logger.info(f"Time to advance dataset after mini epoch {mini_epoch}: {time_for_advance} seconds")
 
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
@@ -751,7 +748,6 @@ class Trainer(TrainerBase):
         samples = self.cf.general.istep * self.get_batch_size_total(self.batch_size_per_gpu)
 
         if is_root():
-            
             # plain logger
             if stage == VAL:
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
@@ -774,7 +770,7 @@ class Trainer(TrainerBase):
                         "total_num_samples": samples,
                         "average_samples_per_second": samples / elapsed_time if elapsed_time > 0 else 0,
                     }
-                                              )
+                )
 
         loss_calculator.loss_hist = []
         loss_calculator.losses_unweighted_hist = []
