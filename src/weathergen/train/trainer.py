@@ -537,7 +537,7 @@ class Trainer(TrainerBase):
                 )
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
-            if bidx % self.train_logging.metrics == 0:
+            if bidx % self.train_logging.metrics == 0 or bidx == len(self.data_loader) - 1:
                 self._log(TRAIN)
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
@@ -551,7 +551,7 @@ class Trainer(TrainerBase):
 
             # log metrics at last iteration (keep barrier for now)
             if bidx == len(self.data_loader) - 1:
-                torch.distributed.barrier()
+                # torch.distributed.barrier()
                 if is_root():
                     total_training_time = time.time() - self.t_training_start
                     self.train_logger.log_metrics("train", {
