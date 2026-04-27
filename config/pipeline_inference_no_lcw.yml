@@ -1,0 +1,25 @@
+stages:
+  - name: finetune
+    stage: train
+    from_run_id: ul86i32n   # optional; use STAGE.<name> to reference a previous stage's run_id
+    config_files:
+      - config/config_forecasting_finetuning_lcw.yml
+    chain_jobs: 2
+    nodes: 2
+    slurm_args:
+      - "--time=23:59:00"
+
+  - name: inferencenolcw
+    stage: inference
+    from_run_id: STAGE.finetune
+    options:
+      - streams_directory=config/streams/era5_1deg_forecasting_no_lcw/
+      - training_config.forecast.num_steps=120
+      - test_config.start_date=202310010000
+      - test_config.end_date=202312300000
+      - test_config.samples_per_mini_epoch=128
+      - test_config.output.num_samples=10
+    chain_jobs: 2
+    nodes: 1
+    slurm_args:
+      - "--time=23:59:00"
