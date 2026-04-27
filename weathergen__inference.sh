@@ -12,5 +12,5 @@
 
 source .venv/bin/activate
 
-srun uv --offline run inference --from-run-id $1 --options validation_config.samples_per_mini_epoch=1 validation_config.output.num_samples=1  training_config.forecast.num_steps=10 training_config.forecast.forecast_chunk_size=5 validation_config.start_date=2022-10-01T00:00
+srun uv --offline run inference --from-run-id $1 --options validation_config.samples_per_mini_epoch=1 validation_config.output.num_samples=1  training_config.forecast.num_steps=7 training_config.forecast.forecast_chunk_size=2 validation_config.start_date=2022-10-01T00:00 'validation_config.output.streams=[ERA5_winter, ERA5_summer, ERA5_spring, ERA5_autumn]'
 
