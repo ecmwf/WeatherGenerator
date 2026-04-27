@@ -313,7 +313,7 @@ class Trainer(TrainerBase):
         # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
         # aiming for beta2 = 0.95 at one node, ie B=4
-        beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
+        beta2 = max(0.9, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2))
         eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
         self.optimizer = torch.optim.AdamW(
