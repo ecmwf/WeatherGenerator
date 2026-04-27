@@ -96,7 +96,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells: int = 12 * 4**self.healpix_level
 
         self.mode_cfg = mode_cfg
-        self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
+        self.isteps = mode_cfg.num_isteps
         self.shuffle = mode_cfg.shuffle
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.len_timedelta: np.timedelta64 = mode_cfg.time_window_len
@@ -136,7 +136,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         forecast_len = (self.time_step * (fsm + 1)) // self.step_timedelta
         perms_len = perms_len - (forecast_len + self.output_offset)
 
-        self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
+        self.repeat_data = cf.data_loading.get("repeat_data", False)
 
         self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
         for _, stream_info in enumerate(cf.streams):
@@ -202,21 +202,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # length of dataset; check the repeat data flag and adjust len accordingly
         self.len = int(index_range.end - index_range.start)
-        if not self.repeat_data:
-            if self.samples_per_mini_epoch:
-                if self.samples_per_mini_epoch <= self.len:
-                    self.len = self.samples_per_mini_epoch
-                else:
-                    msg = (
-                        f"WARNING: Adjusted length of data sampler to {self.len} "
-                        f"(<samples_per_mini_epoch={self.samples_per_mini_epoch}) "
-                        "due to insufficient number of data samples. "
-                        "Enable repeat_data_in_mini_epoch to instead duplicate samples "
-                        "to fill samples_per_mini_epoch."
-                    )
-                    logger.warning(msg)
-        else:
-            self.len = self.samples_per_mini_epoch
+        if self.isteps <= self.len:
+            self.len = self.isteps
 
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         len_chunk = ((self.len // cf.world_size) // self.batch_size) * self.batch_size

@@ -193,7 +193,7 @@ class Trainer(TrainerBase):
         self.dataset_val = self.dataset
 
         # make sure number of loaders does not exceed requested samples
-        loader_num_workers = min(self.test_cfg.samples_per_mini_epoch, cf.data_loading.num_workers)
+        loader_num_workers = cf.data_loading.num_workers
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
@@ -519,9 +519,10 @@ class Trainer(TrainerBase):
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
 
-            # save model checkpoint (with designation _latest)
+            # save two model checkpoints (with designation _latest and named by step)
             if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
+                self.save_model(self.cf.general.istep)
 
             self.cf.general.istep += 1
 
