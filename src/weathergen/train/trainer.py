@@ -589,7 +589,7 @@ class Trainer(TrainerBase):
                         forecast_chunk_size = cf.training_config.forecast.forecast_chunk_size
                         for step in batch.get_source_samples().get_output_idxs():
                             if self.model.forecast_engine:
-                                tokens = self.model.forecast_engine(tokens, step, coords=self.model_params.rope_coords)
+                                tokens = self.model.forecast_engine(tokens, batch.get_source_samples().conditions[step], coords=self.model_params.rope_coords)
                             output = self.model.predict_decoders(self.model_params, step, tokens, batch.get_source_samples(), output)
                             output = self.model.predict_latent(self.model_params, step, tokens, batch.get_source_samples(), output)
                             forecast_max +=1
