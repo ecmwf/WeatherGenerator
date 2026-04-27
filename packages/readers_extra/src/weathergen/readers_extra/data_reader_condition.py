@@ -62,6 +62,7 @@ class DataReaderCondition(DataReaderTimestep):
         self.variables: list[str] = list(
             stream_info.get("variables", ["start_day", "start_time", "end_day", "end_time"])
         )
+        self.emb_dimension: int = stream_info.get("emb_dimension", 64)
         self.num_channels: int = self._compute_num_channels(stream_info)
         self.source_idx = []
 
@@ -80,9 +81,9 @@ class DataReaderCondition(DataReaderTimestep):
             return len(self.variables)
         elif self.transform == "cos_sin":
             return 2 * len(self.variables)
-        elif self.transform == "fourier":
+        elif self.transform in ("fourier", "fourier_amplified"):
             assert "emb_dimension" in stream_info, "Fourier transform requires 'emb_dimension' in stream_info"
-            return stream_info.get("emb_dimension")* len(self.variables)
+            return stream_info.get("emb_dimension") * len(self.variables)
         else:
             raise ValueError(f"Unknown transform: {self.transform!r}")
 
@@ -116,35 +117,59 @@ class DataReaderCondition(DataReaderTimestep):
         encoded_condtions = self._encode(dtr, self.variables)
         return encoded_condtions 
 
-    def _encode(self, dtr: DTRange, variables: list[str]) -> np.ndarray:
+    def _encode(self, dtr: DTRange, variables: list[str]) -> list[float]:
         """
         Encode start/end datetimes into condition variable values.
 
         Parameters
         ----------
-        start_dt :
-            start of time window
-        end_dt :
-            end of time window
+        dtr :
+            time window date range
+        variables :
+            list of variable names to encode
 
         Returns
         -------
-        np.ndarray of shape (num_channels,)
+        list of floats of length num_channels
         """
+        _RAW: dict[str, float] = {
+            "start_day":  _day_of_year(dtr.start),
+            "start_time": _hour_of_day(dtr.start),
+            "end_day":    _day_of_year(dtr.end),
+            "end_time":   _hour_of_day(dtr.end),
+        }
 
         values: list[float] = []
-        # Right now we only support absolute encoding, fourier or sin_cosine is not supported yet
-        for var in self.variables:
-            if var == "start_day":
-                values.append(_day_of_year(dtr.start))
-            elif var == "start_time":
-                values.append(_hour_of_day(dtr.start))
-            elif var == "end_day":  # noqa: PLR200
-                values.append(_day_of_year(dtr.end))
-            elif var == "end_time":  # noqa: PLR200
-                values.append(_hour_of_day(dtr.end))
+        for var in variables:
+            raw = _RAW[var]
+            if self.transform == "absolute":
+                values.append(raw)
+            elif self.transform == "cos_sin":
+                values.extend(self._cos_sin_embed(raw))
+            elif self.transform == "fourier":
+                values.extend(self._fourier_embed(raw))
+            elif self.transform == "fourier_amplified":
+                values.extend(self._fourier_embed_amplified(raw))
 
-        return  values
+        return values
+
+    def _cos_sin_embed(self, value: float) -> list[float]:
+        angle = 2.0 * np.pi * value
+        return [float(np.sin(angle)), float(np.cos(angle))]
+
+    def _fourier_embed(self, value: float) -> np.ndarray:
+        """Sinusoidal Fourier embedding of a scalar into emb_dimension dims."""
+        half = self.emb_dimension // 2
+        freqs = np.arange(1, half + 1, dtype=np.float64)
+        angles = 2.0 * np.pi * freqs * value
+        return np.concatenate([np.sin(angles), np.cos(angles)])
+
+    def _fourier_embed_amplified(self, value: float) -> np.ndarray:
+        """Fourier embedding scaled by value as amplitude — larger inputs dominate."""
+        half = self.emb_dimension // 2
+        freqs = np.arange(1, half + 1, dtype=np.float64)
+        angles = 2.0 * np.pi * freqs * value
+        return value * np.concatenate([np.sin(angles), np.cos(angles)])
 
 
 def _day_of_year(dt: np.datetime64) -> float:
