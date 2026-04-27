@@ -60,27 +60,27 @@ def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | No
         return None
 
 
-def extract_detailed_metrics(run_id: str, shared_work_dir: Path, output_path: Path) -> int:
+def extract_detailed_metrics(run_id: str, shared_work_dir: Path, num_nodes: int | None = None) -> list:
     """Extract detailed metrics pairing timing rows with preceding loss rows.
     
     For each row containing elapsed_training_time_seconds, pair it with the 
-    preceding row containing loss metrics. Returns the number of detailed entries extracted.
+    preceding row containing loss metrics. Returns a list of detailed record DataFrames.
     """
     metrics_path = shared_work_dir / "results" / run_id / f"{run_id}_train_metrics.json"
     if not metrics_path.exists():
-        return 0
+        return []
     
     try:
         df = pl.read_ndjson(metrics_path)
         if len(df) == 0:
-            return 0
+            return []
         
         # Find rows with elapsed_training_time_seconds (timing rows)
         timing_mask = pl.col("elapsed_training_time_seconds").is_not_null()
         timing_indices = df.with_row_index().filter(timing_mask).get_column("index").to_list()
         
         if len(timing_indices) == 0:
-            return 0
+            return []
         
         # Get all row indices with loss data
         loss_mask = pl.col("loss_avg_mean").is_not_null()
@@ -96,31 +96,36 @@ def extract_detailed_metrics(run_id: str, shared_work_dir: Path, output_path: Pa
                 continue
             
             # Get the last loss row before timing
-            loss_row = loss_rows_before.sort("index").tail(1)
+            loss_row = loss_rows_before.sort("index").tail(1).drop("index")
+            
+            # Get the timing row
             timing_row = df.with_row_index().filter(pl.col("index") == timing_idx).drop("index")
             
-            # Drop index column from loss_row for merging
-            loss_row = loss_row.drop("index")
+            # Select only the columns we need
+            timing_cols = ["elapsed_training_time_seconds", "total_num_samples", "average_samples_per_second"]
+            timing_available_cols = [c for c in timing_cols if c in timing_row.columns]
+            timing_row = timing_row.select(timing_available_cols)
+            
+            # Keep only loss_avg_mean from loss_row
+            loss_row = loss_row.select("loss_avg_mean")
             
             # Merge loss and timing data
-            merged = loss_row.join(timing_row, how="cross")
+            merged = loss_row.hstack(timing_row)
+            
+            # Add run_id and num_nodes
+            merged = merged.with_columns(pl.lit(run_id).alias("run_id"))
+            if num_nodes is not None:
+                merged = merged.with_columns(pl.lit(num_nodes).alias("num_nodes"))
+            
             detailed_records.append(merged)
         
-        if len(detailed_records) == 0:
-            return 0
-        
-        # Combine all records
-        detailed_df = pl.concat(detailed_records)
-        
-        # Write to output file
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        detailed_df.write_ndjson(output_path)
-        
-        return len(detailed_records)
+        return detailed_records
         
     except Exception as e:
         print(f"Error extracting detailed metrics for {run_id}: {e}")
-        return 0
+        import traceback
+        traceback.print_exc()
+        return []
 
 
 def main():
@@ -137,7 +142,7 @@ def main():
         sys.exit("Error: No run-ids provided")
 
     results = []
-    detailed_files_created = []
+    all_detailed_records = []
     for run_id in run_ids:
         # Look for weathergen.*.err files (e.g., weathergen.part1.388004.err)
         log_dir = args.logs_base_dir / run_id
@@ -156,14 +161,10 @@ def main():
         results.append(row)
         
         # Extract detailed metrics for this run
-        # Create output file with "detailed" suffix before the extension
-        output_stem = args.output.stem
-        output_suffix = args.output.suffix
-        detailed_output = args.output.with_name(f"{output_stem}_detailed{output_suffix}")
-        count = extract_detailed_metrics(run_id, args.shared_work_dir, detailed_output)
-        if count > 0:
-            detailed_files_created.append((detailed_output, count))
-            print(f"Extracted {count} detailed metric entries for {run_id}")
+        detailed_records = extract_detailed_metrics(run_id, args.shared_work_dir, num_nodes)
+        if detailed_records:
+            all_detailed_records.extend(detailed_records)
+            print(f"Extracted {len(detailed_records)} detailed metric entries for {run_id}")
 
     if not results:
         sys.exit("No data extracted")
@@ -175,11 +176,25 @@ def main():
     df.write_parquet(args.output)
     df.write_csv(args.output.with_suffix(".csv"))
     
+    # Write detailed metrics if any were collected
+    if all_detailed_records:
+        detailed_df = pl.concat(all_detailed_records)
+        # Reorder columns for clarity
+        desired_cols = ["run_id", "num_nodes", "elapsed_training_time_seconds", "total_num_samples", "average_samples_per_second", "loss_avg_mean"]
+        available_cols = [c for c in desired_cols if c in detailed_df.columns]
+        detailed_df = detailed_df.select(available_cols)
+        
+        output_stem = args.output.stem
+        output_suffix = args.output.suffix
+        detailed_output = args.output.with_name(f"{output_stem}_detailed{output_suffix}")
+        
+        detailed_df.write_parquet(detailed_output)
+        detailed_df.write_csv(detailed_output.with_suffix(".csv"))
+    
     print(f"\nSummary:")
     print(f"  - Extracted {len(results)} run summaries to {args.output}")
-    if detailed_files_created:
-        total_detailed = sum(count for _, count in detailed_files_created)
-        print(f"  - Extracted {total_detailed} detailed metric entries to {detailed_files_created[0][0]}")
+    if all_detailed_records:
+        print(f"  - Extracted {len(all_detailed_records)} detailed metric entries to {detailed_output}")
 
 
 if __name__ == "__main__":
