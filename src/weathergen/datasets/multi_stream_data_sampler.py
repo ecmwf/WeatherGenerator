@@ -774,12 +774,20 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 mode = self.mode_cfg.get("training_mode")
                 sources_empty = batch.sources_empty()
                 sources_nan = batch.is_nan()
-                not_valid = sources_empty or sources_nan
-                if not self.inference_only:
-                    not_valid = not_valid or (
-                        batch.targets_empty() if "masking" in mode else False
-                    )
-
+                targets_empty = (
+                    not self.inference_only and "masking" in mode and batch.targets_empty()
+                )
+                not_valid = sources_empty or sources_nan or targets_empty
+                if not_valid:
+                    if sources_empty:
+                        logger.info(f"Skipping batch at idx={idx}: sources are empty.")
+                    if sources_nan:
+                        logger.info(f"Skipping batch at idx={idx}: sources contain NaN values.")
+                    if targets_empty:
+                        logger.info(
+                            f"Skipping batch at idx={idx}: targets are empty "
+                            "(inference_only=False, training_mode includes masking)."
+                        )
                 # Skip invalid batches or raise an error if no valid batch is found after max_attempts.
                 if not_valid:
                     if num_attempts > max_attempts:
@@ -787,11 +795,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                             f"Could not find a valid non-empty batch after {num_attempts} attempts. "
                             "All data may be missing or targets unavailable for this epoch."
                         )
-                    reason = "sources_empty" if sources_empty else ("sources_nan" if sources_nan else "targets_empty")
-                    if self.inference_only:
-                        logger.debug(f"Skipping empty batch with idx={idx} (reason={reason}).")
-                    else:
-                        logger.warning(f"Skipping empty batch with idx={idx} (reason={reason}).")
                 else:
                     break
 
