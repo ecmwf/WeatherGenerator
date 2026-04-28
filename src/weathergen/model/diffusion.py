@@ -293,6 +293,10 @@ class DiffusionForecastEngine(torch.nn.Module):
             "x": [x.cpu()],
         }
 
+        # Per-step intermediate denoised states (one per ODE step).
+        # Returned to the caller so they can be treated as a forecast-step dimension.
+        intermediate_x: list[torch.Tensor] = []
+
         # Main sampling loop.
         x_next = x * t_steps[0]
         for i, (t_cur, t_next) in enumerate(
@@ -332,9 +336,13 @@ class DiffusionForecastEngine(torch.nn.Module):
                 if self.cur_token is not None:
                     track["l2_to_target"].append((x_next - self.cur_token).norm().item())
                     track["x"].append(self.cur_token.cpu())
+
+            # Record intermediate denoised state for this ODE step.
+            intermediate_x.append(x_next)
+
         self._plot_sampling_diagnostics(track, num_steps)
 
-        return x_next
+        return intermediate_x
 
     def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
         """Save a diagnostic plot of the sampling trajectory."""
