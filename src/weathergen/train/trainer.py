@@ -11,6 +11,7 @@
 import copy
 import logging
 import time
+from math import sqrt
 
 import numpy as np
 import torch
@@ -199,6 +200,8 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": loader_num_workers,
+            "pin_memory": cf.data_loading.get("memory_pinning", False),
+            "persistent_workers": cf.data_loading.get("persistent_workers", False),
         }
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset, **loader_params, sampler=None
@@ -757,7 +760,9 @@ class Trainer(TrainerBase):
         grad_norms = {"grad_norm.total": self.last_grad_norm}
         for name, param in self.model.named_parameters():
             if param.grad is not None:
-                grad_norms["grad_norm." + name] = self._get_tensor_item(param.grad.norm())
+                grad_norms["grad_norm." + name] = self._get_tensor_item(
+                    param.grad.norm() / sqrt(param.numel())
+                )
 
         if is_root():
             self.train_logger.log_metrics(stage, grad_norms)

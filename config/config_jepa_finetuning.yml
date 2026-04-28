@@ -218,7 +218,7 @@ validation_config:
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 8,
+    num_samples: 0,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
