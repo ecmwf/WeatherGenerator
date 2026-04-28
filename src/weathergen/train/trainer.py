@@ -612,7 +612,7 @@ class Trainer(TrainerBase):
                                 # is_spoof to False so write_output writes actual predictions
                                 # rather than discarding them as corrupted validation data.
                                 for step_dict in tao.physical:
-                                    for sname, step_data in step_dict.items():
+                                    for _sname, step_data in step_dict.items():
                                         step_data["is_spoof"] = [False] * len(
                                             step_data["is_spoof"]
                                         )
