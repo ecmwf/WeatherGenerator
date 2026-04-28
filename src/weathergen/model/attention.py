@@ -14,7 +14,7 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.layers import LinearNormConditioning
-from weathergen.model.norms import AdaLayerNorm, AdaLNZero, RMSNorm
+from weathergen.model.norms import AdaLayerNorm, RMSNorm
 from weathergen.model.positional_encoding import rotary_pos_emb_2d
 
 """
@@ -258,7 +258,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
         else:
             self.lnorm = norm(dim_embed, eps=norm_eps)
-        
+
         self.proj_heads_q = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_k = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
         self.proj_heads_v = torch.nn.Linear(dim_embed, num_heads * self.dim_head_proj, bias=False)
@@ -292,7 +292,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
     def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
-        
+
         # Handle ada_ln_aux conditioning
         if self.is_dit:
             x = self.lnorm(x)
@@ -560,7 +560,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
-        is_dit = False, # should only be True for diffusion model
+        is_dit=False,  # should only be True for diffusion model
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -573,7 +573,6 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
-
 
         if norm_type == "LayerNorm":
             norm = partial(torch.nn.LayerNorm, elementwise_affine=False, eps=norm_eps)
@@ -588,7 +587,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
             self.lnorm = norm(dim_embed, eps=norm_eps)
             self.noise_conditioning = LinearNormConditioning(
                 latent_space_dim=dim_embed, dtype=attention_dtype
-            ) #TODO: Do I need to pass dtype?
+            )  # TODO: Do I need to pass dtype?
         elif dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_embed, dim_aux, norm_eps=norm_eps)
         else:
@@ -621,14 +620,13 @@ class MultiSelfAttentionHead(torch.nn.Module):
     def forward(self, x, coords=None, emb=None, ada_ln_aux=None):
         if self.with_residual:
             x_in = x
-        
+
         # Handle ada_ln_aux conditioning
         if self.is_dit:
             x = self.lnorm(x)
             x, gate = self.noise_conditioning(x, emb)
         else:
             x = self.lnorm(x, ada_ln_aux) if ada_ln_aux is not None else self.lnorm(x)
-
 
         # project onto heads and q,k,v and
         # ensure these are 4D tensors as required for flash attention

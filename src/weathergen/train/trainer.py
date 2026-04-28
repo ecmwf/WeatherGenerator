@@ -615,7 +615,10 @@ class Trainer(TrainerBase):
                                 )
 
                             targets_and_auxs = {}
-                            for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                            for (
+                                loss_name,
+                                target_aux,
+                            ) in self.target_and_aux_calculators_val.items():
                                 target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                                 targets_and_auxs[loss_name] = target_aux.compute(
                                     self.cf.general.istep,
@@ -649,8 +652,10 @@ class Trainer(TrainerBase):
                                 batch,
                                 preds,
                                 targets_and_auxs,
-                                noise_level=noise_level if is_diffusion and len(noise_levels) > 1 else None,
-                                write_zarr=False, #(noise_idx == 0),
+                                noise_level=noise_level
+                                if is_diffusion and len(noise_levels) > 1
+                                else None,
+                                write_zarr=False,  # (noise_idx == 0),
                             )
 
                         pbar.update(batch_size)

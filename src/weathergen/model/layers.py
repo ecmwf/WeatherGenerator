@@ -28,7 +28,7 @@
 import torch
 import torch.nn as nn
 
-from weathergen.model.norms import AdaLNZero, AdaLayerNorm, RMSNorm
+from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
 class NamedLinear(torch.nn.Module):
@@ -90,7 +90,7 @@ class MLP(torch.nn.Module):
         else:
             self.lnorm = norm(dim_in, eps=norm_eps)
 
-        #TODO: The below should be consolidated – implementing in layer list for backward compatibility
+        # TODO: The below should be consolidated – implementing in layer list for backward compatibility
         if not is_dit:
             self.layers.append(self.lnorm)
         self.layers.append(torch.nn.Linear(dim_in, dim_hidden))
@@ -103,7 +103,6 @@ class MLP(torch.nn.Module):
             self.layers.append(torch.nn.Dropout(p=dropout_rate))
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
-
 
     # TODO: expanded args, must check dependencies (previously aux = args[-1])
     def forward(self, *args):
@@ -172,4 +171,3 @@ class LinearNormConditioning(torch.nn.Module):
         return (inputs * scale + offset).to(
             self.dtype
         ), gate  # TODO: check if to(self.dtype) needed here
-

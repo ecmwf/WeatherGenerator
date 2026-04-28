@@ -8,68 +8,28 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from math import exp
-import re
 
-import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
 import numpy as np
 import torch
-import xarray as xr
 
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
-from weathergen.evaluate.plotting.plotter import Plotter
 
 _logger = logging.getLogger(__name__)
 
-# TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-i = 0
-
-
-# TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-def _normalize_channel_name(name: str) -> str:
-    return str(name).lower().replace("_", "").replace(" ", "")
-
-
-# TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-def _resolve_channel_names(stream_info, raw_channels):
-    if not raw_channels:
-        return raw_channels
-    if isinstance(raw_channels[0], str):
-        return list(raw_channels)
-
-    channel_names = None
-    if hasattr(stream_info, "val_target_channels") and stream_info.val_target_channels:
-        if isinstance(stream_info.val_target_channels[0], str):
-            channel_names = list(stream_info.val_target_channels)
-
-    if channel_names is None:
-        target_weights = getattr(stream_info, "target_channel_weights", None)
-        if isinstance(target_weights, dict):
-            channel_names = list(target_weights.keys())
-
-    if channel_names is None:
-        channel_weights = getattr(stream_info, "channel_weights", None)
-        if isinstance(channel_weights, dict):
-            channel_names = list(channel_weights.keys())
-
-    if channel_names is None:
-        return [f"ch{idx}" for idx in raw_channels]
-
-    resolved = []
-    for idx in raw_channels:
-        if 0 <= int(idx) < len(channel_names):
-            resolved.append(channel_names[int(idx)])
-        else:
-            resolved.append(f"ch{idx}")
-    return resolved
-
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out, 
+    cf,
+    val_cfg,
+    batch_size,
+    mini_epoch,
+    batch_idx,
+    dn_data,
+    batch,
+    model_output,
+    target_aux_out,
     noise_level=None,
     write_zarr=True,
 ):
@@ -85,8 +45,6 @@ def write_output(
         Whether to write zarr output. Default True. Set to False to only
         generate plots without writing zarr data.
     """
-    # TODO: REMOVE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-    global i
 
     # TODO: how to handle multiple physical loss terms
     outputs_physical = [
@@ -100,7 +58,6 @@ def write_output(
     # collect all target / prediction-related information
     fp32 = torch.float32
     preds_all, targets_all, targets_coords_all, targets_times_all = [], [], [], []
-    noised_preds_all = []  # decoded noised tokens (diffusion models only)
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
@@ -112,9 +69,8 @@ def write_output(
         targets_all += [[]]
         targets_coords_all += [[]]
         targets_times_all += [[]]
-        noised_preds_all += [[]]
         targets_lens += [[]]
-        for stream_idx, stream_info in enumerate(cf.streams):
+        for stream_info in cf.streams:
             sname = stream_info["name"]
 
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
@@ -132,7 +88,7 @@ def write_output(
             else:
                 preds = model_output.get_physical_prediction(t_idx, sname)
                 targets = target_aux_out.physical[t_idx][sname]["target"]
-                
+
                 preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
 
                 # handle forcing streams or if sample is empty
@@ -160,7 +116,6 @@ def write_output(
                     # extract original target coords and times from target data
                     t_coords_s += [t_coords.cpu().numpy()]
                     t_times_s += [t_times.astype("datetime64[ns]")]
-                    
 
             targets_lens[-1] += [[]]
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]
@@ -169,19 +124,6 @@ def write_output(
             targets_all[-1] += [np.concatenate(targets_s)]
             targets_coords_all[-1] += [np.concatenate(t_coords_s)]
             targets_times_all[-1] += [np.concatenate(t_times_s)]
-
-            # collect decoded noised tokens (diffusion models only)
-            noised_preds = model_output.get_noised_physical_prediction(t_idx, sname)
-            if noised_preds is not None:
-                noised_s = []
-                for i_batch, npred in enumerate(noised_preds):
-                    idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
-                    if idxs_inv is not None:
-                        npred = npred[:, idxs_inv]
-                    noised_s += [dn_data(sname, npred).detach().to(fp32).cpu().numpy()]
-                noised_preds_all[-1] += [np.concatenate(noised_s, axis=1)]
-            else:
-                noised_preds_all[-1] += [np.array([])]
 
     if len(preds_all) == 0 or np.array([p.shape[1] for pp in preds_all for p in pp]).sum() == 0:
         _logger.warning("Writing no data since predictions are empty.")
@@ -254,157 +196,7 @@ def write_output(
             for subset in data.items():
                 zio.write_zarr(subset)
 
-
     # Free arrays no longer needed after zarr writing
     del targets_all, targets_lens, sources, data
 
-    # TODO: REMOVE EVERYTHING BELOW THIS LINE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-
-    # Prepare prediction data for Plotter (scatter plot expects lat/lon coords on ipoint).
-    base_plot_dir = config.get_path_run(cf) / "plots" / "validation"
-    base_plot_dir.mkdir(parents=True, exist_ok=True)
-    plotter = Plotter({"image_format": "png", "dpi_val": 150}, base_plot_dir)
-    # headline_channels = {"2t", "z500", "q850", "10u", "10v"}
-    # headline_channels = {"2t", "q850"}
-    # headline_channels = {"z500"}
-    headline_channels = {"2t", "z500"}
-
-    t_idx = 0
-    for stream_idx, stream_info in enumerate(cf.streams):
-        stream_name = stream_info["name"]
-        preds_stream = preds_all[t_idx][stream_idx]
-        noised_stream = noised_preds_all[t_idx][stream_idx]
-        coords_stream = targets_coords_all[t_idx][stream_idx]
-        times_stream = targets_times_all[t_idx][stream_idx]
-
-        if preds_stream.size == 0 or coords_stream.size == 0:
-            _logger.warning(f"No prediction data to plot for stream {stream_name}.")
-            continue
-
-        # Expected shape is (ens, ipoint, channel). Select first ensemble if present.
-        if preds_stream.ndim == 3:
-            preds_stream = preds_stream[0]
-        elif preds_stream.ndim != 2:
-            _logger.warning(
-                f"Unsupported prediction shape {preds_stream.shape} for stream {stream_name}."
-            )
-            continue
-
-        has_noised = (
-            noised_stream.size > 0 and noised_stream.ndim >= 2
-        )
-        if has_noised and noised_stream.ndim == 3:
-            noised_stream = noised_stream[0]
-
-        channels = _resolve_channel_names(stream_info, target_channels[stream_idx])
-        selected_channels = [
-            ch for ch in channels if _normalize_channel_name(ch) in headline_channels
-        ]
-        if not selected_channels:
-            _logger.warning(f"No headline channels available for plotting stream {stream_name}.")
-            continue
-
-        ch_to_col = {ch: idx for idx, ch in enumerate(channels)}
-
-        lat = coords_stream[:, 0]
-        lon = coords_stream[:, 1]
-
-        run_id = config.get_run_id_from_config(cf)
-        num_samples = len(preds)
-        len_per_sample = preds_stream.shape[0] // num_samples
-
-        for sample in range(num_samples):
-            s_start = sample * len_per_sample
-            s_end = (sample + 1) * len_per_sample
-
-            # Extract sample date from target times
-            sample_times = times_stream[s_start:s_end]
-            sample_date = np.unique(sample_times)
-            if len(sample_date) > 0 and not np.isnat(sample_date[0]):
-                date_str = str(sample_date[0].astype("datetime64[h]"))
-            else:
-                date_str = "unknown date"
-
-            for varname in selected_channels:
-                col = ch_to_col[varname]
-                pred_vals = preds_stream[s_start:s_end, col]
-                sample_lat = lat[s_start:s_end]
-                sample_lon = lon[s_start:s_end]
-
-                # Drop NaN points (use pred mask for both panels)
-                valid = ~np.isnan(pred_vals)
-                pred_vals = pred_vals[valid]
-                plot_lat = sample_lat[valid]
-                plot_lon = sample_lon[valid]
-
-                channel_dir = base_plot_dir / varname
-                channel_dir.mkdir(parents=True, exist_ok=True)
-
-                eta_str = str(noise_level) if noise_level is not None else None
-                eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
-                epoch_tag = f"epoch_{mini_epoch:03d}_{i % 3}{eta_tag}"
-
-                # Determine number of panels
-                ncols = 2 if has_noised else 1
-                proj = ccrs.Robinson()
-                fig, axes = plt.subplots(
-                    1, ncols, figsize=(8 * ncols, 5),
-                    subplot_kw={"projection": proj}, dpi=150,
-                )
-                if ncols == 1:
-                    axes = [axes]
-
-                # Shared color limits across panels
-                vmin, vmax = np.nanmin(pred_vals), np.nanmax(pred_vals)
-
-                # Panel 1: noised (if available)
-                if has_noised:
-                    noised_vals = noised_stream[s_start:s_end, col][valid]
-                    vmin = min(vmin, np.nanmin(noised_vals))
-                    vmax = max(vmax, np.nanmax(noised_vals))
-                    ax_noised = axes[0]
-                    ax_noised.coastlines()
-                    ax_noised.set_global()
-                    sc_n = ax_noised.scatter(
-                        plot_lon, plot_lat, c=noised_vals,
-                        vmin=vmin, vmax=vmax, cmap="coolwarm",
-                        s=4.0, marker="o", transform=ccrs.PlateCarree(), linewidths=0.0,
-                    )
-                    ax_noised.set_title("Noised", fontsize=10)
-                    ax_denoised = axes[1]
-                else:
-                    ax_denoised = axes[0]
-
-                # Panel 2 (or only panel): denoised prediction
-                ax_denoised.coastlines()
-                ax_denoised.set_global()
-                sc_d = ax_denoised.scatter(
-                    plot_lon, plot_lat, c=pred_vals,
-                    vmin=vmin, vmax=vmax, cmap="coolwarm",
-                    s=4.0, marker="o", transform=ccrs.PlateCarree(), linewidths=0.0,
-                )
-                ax_denoised.set_title("Denoised", fontsize=10)
-
-                # Shared colorbar
-                fig.colorbar(sc_d, ax=axes, orientation="horizontal",
-                             label=varname, shrink=0.6, pad=0.05)
-
-                # Suptitle with date
-                eta_info = f" | noise_level={eta_str}" if eta_str else ""
-                fig.suptitle(
-                    f"{stream_name} - {varname} (fstep {forecast_offset})"
-                    f" | sample {sample + 1} | {date_str}{eta_info}",
-                    fontsize=11,
-                )
-
-                fname = channel_dir / f"{epoch_tag}_{sample}.{plotter.image_format}"
-                fig.savefig(fname, bbox_inches="tight")
-                plt.close(fig)
-
-                del pred_vals, plot_lat, plot_lon, valid
-
-        del preds_stream, coords_stream
-
     del targets_times_all
-
-    i += 1

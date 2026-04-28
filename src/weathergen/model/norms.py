@@ -69,36 +69,34 @@ class AdaLNZero(torch.nn.Module):
         self.norm = torch.nn.LayerNorm(dim_embed, elementwise_affine=False, eps=norm_eps)
         self.gate_proj = torch.nn.Linear(dim_aux, dim_embed)
         self.shift_proj = torch.nn.Linear(dim_aux, dim_embed)
-        
+
         with torch.no_grad():
             self.gate_proj.weight.zero_()
             self.gate_proj.bias.zero_()
             self.shift_proj.weight.zero_()
             self.shift_proj.bias.zero_()
 
-    def forward(
-        self, x: torch.Tensor, aux: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, aux: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns (x_normalized_and_scaled, gate_signal) for residual modulation."""
         x_norm = self.norm(x)
-        
+
         if aux.dim() == 0:
             aux = aux.unsqueeze(0)
-        
+
         gate_params = self.gate_proj(aux)
         shift_params = self.shift_proj(aux)
-        
+
         while gate_params.dim() < x_norm.dim():
             gate_params = gate_params.unsqueeze(-2)
             shift_params = shift_params.unsqueeze(-2)
-        
+
         gate = 1 + gate_params
         x_out = gate * x_norm + shift_params
         gate_signal = gate.mean(dim=-1, keepdim=True)
-        
+
         return x_out, gate_signal
 
-    
+
 class AdaLayerNorm(torch.nn.Module):
     """
     AdaLayerNorm for embedding auxiliary information
@@ -126,8 +124,10 @@ class AdaLayerNorm(torch.nn.Module):
 
         return x
 
+
 def modulate(x, shift, scale):
     return x * (1 + scale) + shift
+
 
 class SwiGLU(nn.Module):
     def __init__(self):
@@ -137,7 +137,7 @@ class SwiGLU(nn.Module):
         x1, x2 = x.chunk(2, dim=-1)
         return x2 * F.silu(x1)
 
-    
+
 class AdaLayerNormLayer(torch.nn.Module):
     """
     AdaLayerNorm for embedding auxiliary information as done in DiT (Peebles & Xie) with zero
@@ -193,6 +193,7 @@ class AdaLayerNormLayer(torch.nn.Module):
             )
             + x
         )
+
 
 class SaturateEncodings(nn.Module):
     """A common alternative to a KL regularisation prevent outliers in the latent space when
