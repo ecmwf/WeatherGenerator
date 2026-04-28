@@ -770,7 +770,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 batch = self._get_batch(idx, num_forecast_steps)
 
-                # Check for invalid batches: empty sources, NaN values, or empty targets (if applicable).
+                # Check for invalid batches: empty sources, NaN values, or empty targets
+                # (if applicable).
                 mode = self.mode_cfg.get("training_mode")
                 sources_empty = batch.sources_empty()
                 sources_nan = batch.is_nan()
@@ -788,12 +789,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                             f"Skipping batch at idx={idx}: targets are empty "
                             "(inference_only=False, training_mode includes masking)."
                         )
-                # Skip invalid batches or raise an error if no valid batch is found after max_attempts.
+                # Skip invalid batches or raise an error if no valid batch is found
+                # after max_attempts.
                 if not_valid:
                     if num_attempts > max_attempts:
                         raise RuntimeError(
-                            f"Could not find a valid non-empty batch after {num_attempts} attempts. "
-                            "All data may be missing or targets unavailable for this epoch."
+                            f"Could not find a valid non-empty batch after {num_attempts} "
+                            "attempts. All data may be missing or targets unavailable"
+                            " for this epoch."
                         )
                 else:
                     break
