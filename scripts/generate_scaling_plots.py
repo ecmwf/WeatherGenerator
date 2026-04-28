@@ -72,11 +72,13 @@ def plot_standard_scaling(
     metrics: list[str],
     x_scale: str,
     y_scale: str,
+    y_metric: str,
 ) -> None:
     """Plot run-level scaling data vs num_nodes."""
     metric_labels = {
         "training_time": "Training Time (seconds)",
         "loss_avg_mean": "Average Loss",
+        "normalized_throughput": "Normalized Throughput (T1 / T)",
     }
 
     valid_metrics = [m for m in metrics if m in df.columns and df.filter(pl.col(m).is_not_null()).height > 0]
@@ -92,32 +94,58 @@ def plot_standard_scaling(
         node_counts = df_plot["num_nodes"].unique().to_list() if "num_nodes" in df_plot.columns else []
         colors = color_map_for_nodes(node_counts)
 
+        # Handle normalized_throughput metric
+        if y_metric == "normalized_throughput" and metric == "training_time":
+            # Calculate normalized throughput: T1 / T
+            one_node_data = df.filter(pl.col("num_nodes") == 1)
+            if one_node_data.height > 0:
+                t1 = one_node_data["training_time"].item()
+                # Create a new dataframe with normalized throughput
+                df_plot = df_plot.with_columns(
+                    (t1 / pl.col("training_time")).alias("normalized_throughput")
+                )
+                plot_y = df_plot["normalized_throughput"]
+            else:
+                print("Warning: No 1-node data found for normalized throughput calculation")
+                continue
+        else:
+            plot_y = df_plot[metric]
+
         ax.plot(
             df_plot["num_nodes"],
-            df_plot[metric],
+            plot_y,
             "o-",
             color="steelblue",
             markersize=8,
         )
 
-        for x, y, label in zip(df_plot["num_nodes"], df_plot[metric], df_plot["run_id"]):
+        for x, y, label in zip(df_plot["num_nodes"], plot_y.to_list(), df_plot["run_id"]):
             ax.text(x, y, label, ha="center", va="bottom", fontsize=8)
 
-        if metric == "training_time" and "training_time" in df.columns:
+        if metric == "training_time" and y_metric == "time" and "training_time" in df.columns:
             one_node_data = df.filter(pl.col("num_nodes") == 1)
             if one_node_data.height > 0:
                 t1 = one_node_data["training_time"].item()
                 nodes = df_plot["num_nodes"].to_list()
                 if scaling_type == "weak":
-                    optimal_y = [t1 for _ in nodes]
+                    if y_metric == "normalized_throughput":
+                        # For normalized throughput, optimal is 1.0 (no speedup loss)
+                        optimal_y = [1.0 for _ in nodes]
+                    else:
+                        optimal_y = [t1 for _ in nodes]
                 elif scaling_type == "strong":
-                    optimal_y = [t1 / n for n in nodes]
+                    if y_metric == "normalized_throughput":
+                        # For normalized throughput, optimal is n (linear speedup)
+                        optimal_y = [float(n) for n in nodes]
+                    else:
+                        optimal_y = [t1 / n for n in nodes]
                 else:
                     raise ValueError(f"Invalid scaling type: {scaling_type}")
                 ax.plot(nodes, optimal_y, "r--", linewidth=1, label="Optimal scaling")
 
                 # Show per-point efficiency loss as a vertical line and factor label.
-                for x, y, y_opt in zip(nodes, df_plot[metric].to_list(), optimal_y):
+                # Use plot_y (normalized throughput if applicable) instead of df_plot[metric]
+                for x, y, y_opt in zip(nodes, plot_y.to_list(), optimal_y):
                     if y_opt == 0:
                         continue
                     factor = y / y_opt
@@ -139,8 +167,11 @@ def plot_standard_scaling(
         if y_scale == "log":
             ax.set_yscale("log")
         ax.set_xlabel("Number of Nodes")
-        ax.set_ylabel(metric_labels.get(metric, metric))
-        ax.set_title(metric)
+        if y_metric == "normalized_throughput" and metric == "training_time":
+            ax.set_ylabel("Normalized Throughput (T1 / T)")
+        else:
+            ax.set_ylabel(metric_labels.get(metric, metric))
+        ax.set_title(metric if y_metric != "normalized_throughput" or metric != "training_time" else "Normalized Throughput")
         ax.grid(True, alpha=0.3)
 
     fig.suptitle("Scaling Analysis", fontsize=16)
@@ -230,9 +261,17 @@ def build_parser() -> argparse.ArgumentParser:
     standard.add_argument("--type", required=True, choices=["strong", "weak"], help="Scaling type")
     standard.add_argument("--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file")
     standard.add_argument("--output", type=Path, default=None, help="Output image path")
-    standard.add_argument("--metrics", nargs="+", default=["training_time", "loss_avg_mean"], help="Metrics to plot")
-    standard.add_argument("--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale")
+    standard.add_argument("--y-scale", choices=["linear", "log"], default="linear", help="Y-axis scale")
     standard.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
+    standard.add_argument("--y-metric", choices=["time", "normalized_throughput"], default="normalized_throughput", help="Y-axis metric: 'time' for time-to-solution or 'normalized_throughput' for T1/T")
+
+    # Subparser for loss-only plots (separate entry point)
+    loss_only = subparsers.add_parser("loss", help="Plot loss metrics vs num_nodes (separate from throughput)")
+    loss_only.add_argument("--type", required=True, choices=["strong", "weak"], help="Scaling type")
+    loss_only.add_argument("--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file")
+    loss_only.add_argument("--output", type=Path, default=None, help="Output image path")
+    loss_only.add_argument("--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale")
+    loss_only.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
 
     detailed = subparsers.add_parser("detailed", help="Plot sample-level detailed scaling metrics")
     detailed.add_argument("--input", type=Path, default=Path("scaling_data_detailed.parquet"), help="Input detailed parquet/ndjson file")
@@ -263,7 +302,30 @@ def main() -> None:
             print(str(e))
             return
         print(f"Loaded {len(df)} rows")
-        plot_standard_scaling(df, output_path, args.type, args.metrics, args.x_scale, args.y_scale)
+        # Standard mode: only plot training_time with normalized throughput or time
+        metrics_to_plot = ["training_time"]
+        plot_standard_scaling(df, output_path, args.type, metrics_to_plot, args.x_scale, args.y_scale, args.y_metric)
+        return
+
+    if args.mode == "loss":
+        input_path = resolve_input_path(args.input)
+        if not input_path.exists():
+            print(f"Error: Input file not found: {input_path}")
+            return
+
+        output_path = args.output or input_path.with_suffix(".loss.png")
+
+        print(f"Loading data from: {input_path}")
+        try:
+            df = read_table(input_path)
+        except Exception as e:
+            print("Error: Could not read input file as parquet or NDJSON")
+            print(str(e))
+            return
+        print(f"Loaded {len(df)} rows")
+        # Loss mode: only plot loss_avg_mean
+        metrics_to_plot = ["loss_avg_mean"]
+        plot_standard_scaling(df, output_path, args.type, metrics_to_plot, args.x_scale, args.y_scale, "time")
         return
 
     if args.mode == "detailed":
