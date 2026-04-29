@@ -30,20 +30,9 @@ def write_output(
     batch,
     model_output,
     target_aux_out,
-    noise_level=None,
-    write_zarr=True,
 ):
     """
     Interface for writing model output
-
-    Parameters
-    ----------
-    noise_level : float | None
-        Fixed diffusion noise level (eta) used for this validation pass.
-        When not None the value is embedded in plot filenames and titles.
-    write_zarr : bool
-        Whether to write zarr output. Default True. Set to False to only
-        generate plots without writing zarr data.
     """
 
     # TODO: how to handle multiple physical loss terms
@@ -191,10 +180,9 @@ def write_output(
         sample_start,
         forecast_offset,
     )
-    if write_zarr:
-        with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
-            for subset in data.items():
-                zio.write_zarr(subset)
+    with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
+        for subset in data.items():
+            zio.write_zarr(subset)
 
     # Free arrays no longer needed after zarr writing
     del targets_all, targets_lens, sources, data

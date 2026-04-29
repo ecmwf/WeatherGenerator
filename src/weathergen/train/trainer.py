@@ -634,29 +634,26 @@ class Trainer(TrainerBase):
                         )
 
                         # log output
-                        if bidx < num_samples_write:
-                            # denormalization function for data
-                            denormalize_data_fct = (
-                                (lambda x0, x1: x1)
-                                if mode_cfg.get("output", {}).get("normalized_samples", False)
-                                else self.dataset_val.denormalize_target_channels
-                            )
-                            # write output (zarr only for first noise level, plots for all)
-                            write_output(
-                                self.cf,
-                                mode_cfg,
-                                batch_size,
-                                mini_epoch,
-                                bidx,
-                                denormalize_data_fct,
-                                batch,
-                                preds,
-                                targets_and_auxs,
-                                noise_level=noise_level
-                                if is_diffusion and len(noise_levels) > 1
-                                else None,
-                                write_zarr=False,  # (noise_idx == 0),
-                            )
+                        if noise_idx == 0:
+                            if bidx < num_samples_write:
+                                # denormalization function for data
+                                denormalize_data_fct = (
+                                    (lambda x0, x1: x1)
+                                    if mode_cfg.get("output", {}).get("normalized_samples", False)
+                                    else self.dataset_val.denormalize_target_channels
+                                )
+                                # write output (zarr only for first noise level, plots for all)
+                                write_output(
+                                    self.cf,
+                                    mode_cfg,
+                                    batch_size,
+                                    mini_epoch,
+                                    bidx,
+                                    denormalize_data_fct,
+                                    batch,
+                                    preds,
+                                    targets_and_auxs,
+                                )
 
                         pbar.update(batch_size)
 
