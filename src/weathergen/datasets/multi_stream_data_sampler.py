@@ -109,6 +109,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.output_offset = forecast_cfg["offset"]
         self.time_step = forecast_cfg["time_step"]
         self.forecast_policy = forecast_cfg["policy"]
+        self.fstep_probabilities = forecast_cfg.get("fstep_probabilities", None)
         steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
         self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
 
@@ -140,7 +141,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         nw = cf.data_loading.num_workers
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
+        # store base seed before rank-specific modification in worker_workset();
+        # used to create a rank-independent RNG for forecast step sampling so that
+        # all ranks agree on num_forecast_steps (required by FSDP)
+        self._base_rng_seed = self.data_loader_rng_seed
+
         self.rng = None
+        self.forecast_rng = None
 
     def check_samples(self, fsm: int):
         """Check if samples_per_mini_epoch is suitable
@@ -269,10 +276,21 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         Returns: permutation index, forecast steps index
         """
+
+        worker_info = torch.utils.data.get_worker_info()
+        worker_id = worker_info.id if worker_info is not None else 0
         self.rng = np.random.default_rng(self.data_loader_rng_seed)
         fsm = self._get_fsm()
         self.check_samples(fsm)
         perms = self._calc_baseperms(fsm)
+
+        # Use a rank-independent RNG so that all FSDP ranks generate the same
+        # num_forecast_steps schedule; self.rng is rank-specific (seeded from
+        # data_loader_rng_seed which includes the rank factor). The same
+        # worker_workset seed formula is used to  but exclude the rank component.
+
+        forecast_seed = self._mix_rng_seed(self._base_rng_seed, worker_id, self.mini_epoch)
+        self.forecast_rng = np.random.default_rng(forecast_seed)
 
         # rng changed, repeat if needed
         n_requested_idxs = self.samples_per_mini_epoch // self.batch_size
@@ -298,12 +316,25 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             fs = fsm * np.ones(len_dt, dtype=np.int64)
 
         elif self.forecast_policy in ("random", "sequential_random"):
-            fs = self.rng.integers(
+            fs = self.forecast_rng.integers(
                 low=self.list_num_forecast_steps.min(),
                 high=fsm + 1,
                 size=len_dt,
                 dtype=np.int64,
             )
+
+        elif self.forecast_policy in ("sequential_prob"):
+            assert np.isclose(sum(self.fstep_probabilities), 1.0), "Probabilities must sum to 1.0"
+
+            # Sample steps, then clamp to <= fsm
+            sampled_steps = self.forecast_rng.choice(
+                self.list_num_forecast_steps,
+                size=len_dt,
+                p=self.fstep_probabilities,
+                replace=True,
+            )
+            fs = np.clip(sampled_steps, 0, fsm).astype(np.int64)
+
         else:
             raise ValueError(f"Unknown forecast policy {self.forecast_policy}")
 
@@ -314,11 +345,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _get_fsm(self) -> int:
         """Obtain maximum number of forecast steps for current mini epoch."""
         # fixed number of forecast steps for this run
-        if self.forecast_policy != "random":
+        if self.forecast_policy == "random" or self.forecast_policy == "sequential_prob":
+            fsm = self.list_num_forecast_steps.max()
+        else:
             idx = min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
             fsm = self.list_num_forecast_steps[idx]
-        else:
-            fsm = self.list_num_forecast_steps.max()
 
         if fsm > 0:
             logger.info(f"forecast_steps : {fsm}")
