@@ -254,7 +254,7 @@ def compute_mslp(obs: xr.DataArray, time: np.datetime64) -> np.typing.NDArray:
 
 
 def compute_precip(
-    obs_data: xr.Dataset, zarr_dt: np.timedelta64, frt: np.datetime64
+    obs_data: xr.Dataset, zarr_dt: np.timedelta64, valid_time: np.datetime64
 ) -> np.typing.NDArray:
     """
     Compute accumulated precipitation over the forecast time step.
@@ -264,7 +264,7 @@ def compute_precip(
         Input data containing precipitation observations.
     zarr_dt : np.timedelta64
         Time difference between forecast steps in hours.
-    frt : np.datetime64
+    valid_time : np.datetime64
         Forecast reference time for which to compute accumulated precipitation.
     Returns
     -------
@@ -272,15 +272,23 @@ def compute_precip(
         Accumulated precipitation values for the forecast time step."""
     obs_dt = obs_data.time.values[1] - obs_data.time.values[0]
     obs_dt = obs_dt.astype("timedelta64[h]")
-
-    if obs_dt >= zarr_dt:
-        return obs_data["precipitation_amount_1h"].values
+    if zarr_dt == 0:
+        # indicates nowcasting
+        return obs_data["precipitation_amount_1h"].sel(time=valid_time).values
+    elif obs_dt >= zarr_dt:
+        if obs_dt % zarr_dt == np.timedelta64(0):
+            return obs_data["precipitation_amount_1h"].sel(time=valid_time).values
+        else:
+            # return empty data
+            empty = np.empty(obs_data.location.shape[0])
+            empty[:] = np.nan
+            return empty
     else:
         accumulate = np.zeros(obs_data.location.shape[0])
         int_factor = int(zarr_dt / obs_dt)
 
         for i in range(int_factor):
-            back_time = frt - zarr_dt + (i + 1) * obs_dt
+            back_time = valid_time - zarr_dt + (i + 1) * obs_dt
             accumulate += (
                 obs_data.data_vars["precipitation_amount_1h"].sel(time=back_time).squeeze()
             )
