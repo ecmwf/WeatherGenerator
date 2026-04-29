@@ -269,7 +269,11 @@ class Regridder:
         pos = dims.index("ncells")
         dims[pos : pos + 1] = ["latitude", "longitude"]
         dims = tuple(dims)
-        ordered_dims = ["valid_time", "pressure", "latitude", "longitude"] if len(dims) == 4 else ["valid_time", "latitude", "longitude"]
+        ordered_dims = (
+            ["valid_time", "pressure", "latitude", "longitude"]
+            if len(dims) == 4
+            else ["valid_time", "latitude", "longitude"]
+        )
         permutation_indices = [dims.index(o_dim) for o_dim in ordered_dims]
         regridded_values = np.transpose(regridded_values, axes=permutation_indices)
         regrid_data = xr.DataArray(
