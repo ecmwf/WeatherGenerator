@@ -89,6 +89,7 @@ class StreamData:
 
         # initialize empty members
         self.sample_idx = idx
+        self.target_geoinfos = [torch.tensor([]) for _ in range(output_steps)]
         self.target_coords = [torch.tensor([]) for _ in range(output_steps)]
         self.target_coords_raw = [[] for _ in range(output_steps)]
         self.target_times_raw = [np.array([], dtype="datetime64[ns]") for _ in range(output_steps)]
@@ -246,11 +247,8 @@ class StreamData:
     def add_target_values(
         self,
         fstep: int,
-        targets: list,
-        target_coords_raw: torch.Tensor,
-        times_raw: torch.Tensor,
+        targets_raw: IOReaderData,
         idxs_inv: torch.Tensor,
-        is_spoof: bool,
     ) -> None:
         """
         Add data for target for one input.
@@ -259,17 +257,7 @@ class StreamData:
         ----------
         fstep : int
             forecast step
-        targets : torch.tensor( number of healpix cells )
-            [ torch.tensor( num tokens, channels) ]
-              Target data for loss computation
-        targets_lens : torch.tensor( number of healpix cells)
-            length of targets per cell
-        target_coords : list( number of healpix cells)
-            [ torch.tensor( points per cell, 105) ]
-              target coordinates
-        target_times : list( number of healpix cells)
-            [ torch.tensor( points per cell) ]
-              absolute target times
+        targets_raw : Masked and shuffled targets.
         idxs_inv:
             Indices to reorder targets back to order in input
 
@@ -277,13 +265,13 @@ class StreamData:
         -------
         None
         """
-
-        self.target_tokens[fstep] = targets
-        self.target_times_raw[fstep] = times_raw
-        self.target_coords_raw[fstep] = target_coords_raw
+        self.target_tokens[fstep] = targets_raw.data
+        self.target_times_raw[fstep] = targets_raw.datetimes
+        self.target_coords_raw[fstep] = targets_raw.coords
+        self.target_geoinfos[fstep] = targets_raw.geoinfos
         self.idxs_inv[fstep] = idxs_inv
 
-        self.target_is_spoof[fstep] = is_spoof
+        self.target_is_spoof[fstep] = targets_raw.is_spoof
 
     def add_target_coords(
         self,

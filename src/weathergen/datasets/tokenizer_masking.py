@@ -166,7 +166,7 @@ class TokenizerMasking(Tokenizer):
         )
 
         # TODO: split up
-        _, _, _, coords_local, coords_per_cell = tokenize_apply_mask_target(
+        _, coords_local, coords_per_cell = tokenize_apply_mask_target(
             stream_info["stream_id"],
             self.hl_target,
             idxs_cells,
@@ -190,7 +190,7 @@ class TokenizerMasking(Tokenizer):
         token_data,
         time_win: tuple,
         cell_mask,
-    ):
+    ) -> tuple[IOReaderData, torch.Tensor | None]:
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = token_data
 
@@ -198,7 +198,7 @@ class TokenizerMasking(Tokenizer):
             idxs_cells, idxs_cells_lens, cell_mask
         )
 
-        data, datetimes, coords, _, _ = tokenize_apply_mask_target(
+        masked_rdata, _, _ = tokenize_apply_mask_target(
             stream_info["stream_id"],
             self.hl_target,
             idxs_cells,
@@ -214,10 +214,10 @@ class TokenizerMasking(Tokenizer):
         )
 
         idxs_ord_inv = None
-        if data.numel() > 0:
+        if masked_rdata.data.numel() > 0:
             # flatten per-token indices into one flat list
             idxs_flat = torch.cat([idxs for idxs_cell in idxs_cells for idxs in idxs_cell])
             # compute indices for inversion
             _, idxs_ord_inv = torch.sort(idxs_flat)
 
-        return (data, datetimes, coords, idxs_ord_inv)
+        return (masked_rdata, idxs_ord_inv)
