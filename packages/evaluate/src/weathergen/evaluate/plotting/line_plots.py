@@ -1,3 +1,12 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 """Line plot classes for the evaluation plotting subpackage."""
 
 import logging
@@ -12,6 +21,7 @@ import xarray as xr
 from weathergen.evaluate.plotting.plot_utils import (
     align_labels,
     channel_sort_key,
+    clean_label,
     lower_is_better,
 )
 
@@ -79,8 +89,6 @@ class LinePlots:
             "Compare::plot - Labels should be of type str or list"
         )
 
-        # convert to lists
-
         data_list = [data] if isinstance(data, xr.DataArray) else data
         label_list = [labels] if isinstance(labels, str) else labels
 
@@ -89,6 +97,17 @@ class LinePlots:
         return data_list, label_list
 
     def print_all_points_from_graph(self, fig: plt.Figure) -> None:
+        """Log all data points from every line in a matplotlib figure.
+
+        Parameters
+        ----------
+        fig : matplotlib.figure.Figure
+            Figure whose axes and lines will be iterated.
+
+        Returns
+        -------
+        None
+        """
         for ax in fig.get_axes():
             for line in ax.get_lines():
                 ydata = line.get_ydata()
@@ -102,7 +121,9 @@ class LinePlots:
                 _logger.info("--------------------------")
         return
 
-    def _plot_ensemble(self, data: xr.DataArray, x_dim: str, label: str) -> None:
+    def _plot_ensemble(
+        self, data: xr.DataArray, x_dim: str, label: str, color: str | None = None
+    ) -> None:
         """
         Plot ensemble spread for a data array.
 
@@ -114,6 +135,8 @@ class LinePlots:
             Dimension to be used for the x-axis.
         label: str
             Label for the dataset
+        color: str or None
+            Color for the line. If None, matplotlib auto-cycles.
         Returns
         -------
             None
@@ -122,12 +145,20 @@ class LinePlots:
             x_dim
         )
 
+        plot_kwargs = dict(
+            label=label,
+            marker="o",
+            markersize=4,
+            linewidth=1.2,
+            linestyle="-",
+        )
+        if color is not None:
+            plot_kwargs["color"] = color
+
         lines = plt.plot(
             averaged[x_dim],
             averaged.values,
-            label=label,
-            marker="o",
-            linestyle="-",
+            **plot_kwargs,
         )
         line = lines[0]
         color = line.get_color()
@@ -218,6 +249,8 @@ class LinePlots:
         x_dim: str = "lead_time",
         y_dim: str = "value",
         print_summary: bool = False,
+        title: str | None = None,
+        colors: list[str | None] | None = None,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -249,31 +282,41 @@ class LinePlots:
         )
 
         fig = plt.figure(figsize=(12, 6), dpi=self.dpi_val)
+        ax = fig.add_subplot(111)
 
         for i, data in enumerate(data_list):
             non_zero_dims = [dim for dim in data.dims if dim != x_dim and data[dim].shape[0] > 1]
+            color = colors[i] if colors and i < len(colors) else None
 
             if self.plot_ensemble and "ens" in non_zero_dims:
                 _logger.info(f"LinePlot:: Plotting ensemble with option {self.plot_ensemble}.")
-                self._plot_ensemble(data, x_dim, label_list[i])
+                self._plot_ensemble(data, x_dim, label_list[i], color=color)
             else:
                 averaged = self._preprocess_data(data, x_dim)
 
-                plt.plot(
-                    averaged[x_dim],
-                    averaged.values,
+                plot_kwargs = dict(
                     label=label_list[i],
                     marker="o",
+                    markersize=4,
+                    linewidth=1.2,
                     linestyle="-",
+                )
+                if color is not None:
+                    plot_kwargs["color"] = color
+
+                ax.plot(
+                    averaged[x_dim],
+                    averaged.values,
+                    **plot_kwargs,
                 )
 
         parts = ["compare", tag]
         name = "_".join(filter(None, parts))
 
-        # TODO: generalise this for other x_dims by instroducing a "units"
+        # TODO: generalise this for other x_dims by introducing a "units"
         # entry in the function if needed
         xunits = "hr" if x_dim == "lead_time" else None
-        self._plot_base(fig, name, x_dim, y_dim, print_summary, xunits=xunits)
+        self._plot_base(fig, name, x_dim, y_dim, print_summary, xunits=xunits, title=title)
 
     def _plot_base(
         self,
@@ -317,34 +360,45 @@ class LinePlots:
             None
         """
 
-        plt.xlabel(
-            "".join(c if c.isalnum() else " " for c in x_dim) + (f" [{xunits}]" if xunits else "")
-        )
-        plt.ylabel(
-            "".join(c if c.isalnum() else " " for c in y_dim) + (f" [{yunits}]" if yunits else "")
-        )
+        xlabel = clean_label(x_dim) + (f" [{xunits}]" if xunits else "")
+        ylabel = clean_label(y_dim).upper() + (f" [{yunits}]" if yunits else "")
 
-        plt.title(title if title is not None else " ".join(c if c.isalnum() else " " for c in name))
-        plt.legend(frameon=False)
+        ax = fig.gca()
+
+        ax.set_xlabel(xlabel, fontsize=10)
+        ax.set_ylabel(ylabel, fontsize=10)
+
+        clean_title = title if title is not None else clean_label(name)
+        ax.set_title(
+            clean_title,
+            fontsize=11,
+            fontweight="medium",
+        )
+        ax.legend(frameon=False, fancybox=False, edgecolor="0.6", fontsize=8)
+        ax.tick_params(axis="both", labelsize=9, direction="in", top=True, right=True)
+
+        # Thin spines
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.6)
 
         if self.add_grid:
-            plt.grid(True, linestyle="--", color="gray", alpha=0.5)
+            ax.grid(True, linestyle="--", color="gray", alpha=0.3, linewidth=0.5)
 
         if self.log_scale:
-            plt.yscale("log")
+            ax.set_yscale("log")
 
         if print_summary:
             _logger.info(f"Summary values for {name}")
             self.print_all_points_from_graph(fig)
 
         if line:
-            plt.axhline(y=line, color="black", linestyle="--", linewidth=1, zorder=1)
+            ax.axhline(y=line, color="black", linestyle="--", linewidth=0.8, zorder=1)
 
         if vlines:
             vlines = []
             last_prefix = None
 
-            channels = [t.get_text() for t in fig.gca().get_xticklabels() if t.get_text()]
+            channels = [t.get_text() for t in ax.get_xticklabels() if t.get_text()]
 
             for idx, ch in enumerate(channels):
                 m = re.match(r"([a-zA-Z]+)_\d+", ch)
@@ -353,7 +407,7 @@ class LinePlots:
                     vlines.append(idx - 0.5)
                 last_prefix = prefix
             for vl in vlines:
-                plt.axvline(x=vl, color="#001f3f", linestyle="-", linewidth=0.5, zorder=1)
+                ax.axvline(x=vl, color="#001f3f", linestyle="-", linewidth=0.5, zorder=1)
 
         plt.tight_layout()
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
@@ -368,28 +422,36 @@ class LinePlots:
         x_dim: str = "forecast_step",
         y_dim: str = "value",
         print_summary: bool = False,
+        colors: list[str | None] | None = None,
     ) -> None:
-        """
-        Plot a ratio plot comparing multiple datasets to the first dataset.
+        """Plot a ratio plot comparing multiple datasets to a baseline.
+
+        Each non-baseline dataset is divided element-wise by the baseline,
+        and the resulting ratio is plotted per channel.
+
         Parameters
         ----------
-        data:
-            DataArray or list of DataArrays to be plotted
-        run_ids:
-            List of run IDs corresponding to each dataset
-        labels:
-            Label or list of labels for each dataset
-        tag:
-            Tag to be added to the plot title and filename
-        x_dim:
-            Dimension to be used for the x-axis. The code will average over all other dimensions.
-        y_dim:
-            Name of the dimension to be used for the y-axis.
-        print_summary:
-            If True, print a summary of the values from the graph.
+        data : xr.DataArray or list
+            DataArray or list of DataArrays to be compared.
+        run_ids : list of str
+            Run identifiers corresponding to each element in *data*.
+        labels : str or list
+            Label or list of labels for the legend.
+        tag : str
+            Tag appended to the plot title and filename.
+        x_dim : str
+            Dimension used for the x-axis (default ``'forecast_step'``).
+        y_dim : str
+            Dimension used for the y-axis label (default ``'value'``).
+        print_summary : bool
+            If ``True``, print data-point values to the log.
+        colors : list of str or None, optional
+            Per-run colour overrides. Entries that are ``None`` fall back to
+            matplotlib's default colour cycle.
+
         Returns
         -------
-            None
+        None
         """
 
         data_list, label_list = self._check_lengths(data, labels)
@@ -405,7 +467,6 @@ class LinePlots:
             if baseline_idx is not None:
                 _logger.info(f"Using baseline run ID '{self.baseline}' for ratio plot.")
                 baseline = data_list[baseline_idx]
-
             else:
                 baseline_name = run_ids[0]
                 baseline = data_list[0]
@@ -413,32 +474,39 @@ class LinePlots:
         ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
 
         channel_names = set(ref_raw.channel.values)
-        # Merge channels from remaining datasets
         for data in data_list[1:]:
-            channel_names.update(data.channel.values)  # add new channels
+            channel_names.update(data.channel.values)
 
-        # Sort the merged list
         ref_channel_names = sorted(channel_names, key=channel_sort_key)
 
         ref = align_labels(ref_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
 
         fig = plt.figure(figsize=(max(12, len(ref_channel_names) * 0.25), 6))
 
+        # Build a run_id → color map, skipping the baseline
+        color_map = {}
+        if colors:
+            for rid, c in zip(run_ids, colors, strict=False):
+                if c is not None:
+                    color_map[rid] = c
+
         for data, run_id, lbl in zip(data_list, run_ids, label_list, strict=False):
             if run_id == baseline_name:
-                continue  # skip baseline
+                continue
 
             num_raw = self._preprocess_data(data, x_dim, verbose=False)
             num = align_labels(num_raw, ref_channel_names, x_dim).reindex(channel=ref_channel_names)
 
             ratio = num.sel(channel=ref_channel_names) / ref.sel(channel=ref_channel_names)
 
+            plot_kwargs = dict(label=lbl, marker="o", linestyle="-")
+            if run_id in color_map:
+                plot_kwargs["color"] = color_map[run_id]
+
             plt.plot(
                 ref_channel_names,
                 ratio.values,
-                label=lbl,
-                marker="o",
-                linestyle="-",
+                **plot_kwargs,
             )
 
         parts = [descr, tag]
@@ -459,23 +527,27 @@ class LinePlots:
         x_dim,
         tag: str = "",
     ) -> None:
-        """
-        Plot a heat map comparing multiple datasets.
+        """Plot a heat map comparing multiple datasets across forecast steps.
+
+        For each run a heat map is drawn showing the ratio of each
+        forecast-step score to the first forecast-step score, per channel.
+
         Parameters
         ----------
-        data:
-            DataArray or list of DataArrays to be plotted
-        labels:
-            Label or list of labels for each dataset
-        metric:
-            Metric for which we are plotting
-        x_dim:
-            Dimension to be used for the x-axis. The code will average over all other dimensions.
-        tag:
-            Tag to be added to the plot title and filename
+        data : xr.DataArray or list
+            DataArray or list of DataArrays to be plotted.
+        labels : str or list
+            Label or list of labels for each dataset.
+        metric : str
+            Metric name used to select the colourmap direction.
+        x_dim : str
+            Dimension used for the x-axis (e.g. ``'forecast_step'``).
+        tag : str
+            Tag appended to the filename.
+
         Returns
         -------
-            None
+        None
         """
 
         data_list, label_list = self._check_lengths(data, labels)
@@ -500,7 +572,6 @@ class LinePlots:
         for ax, data, label in zip(axes[0], data_list, labels, strict=False):
             time_steps = sorted(data[x_dim].values)
 
-            # Use the first time step as reference
             ref = data.reindex(channel=ref_ticks_names).sel({x_dim: time_steps[0]})
             ref = self._preprocess_data(ref, "channel", verbose=False)
 
@@ -511,7 +582,6 @@ class LinePlots:
                 )
                 continue
 
-            # Compute ratio for all time steps
             num = self._preprocess_data(data, [x_dim, "channel"], verbose=False)
             num = num.reindex(channel=ref_ticks_names).sel({x_dim: time_steps})
 
@@ -539,7 +609,11 @@ class LinePlots:
             plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
         cbar = fig.colorbar(
-            last_hm.collections[0], ax=axes.ravel().tolist(), shrink=0.6, location="right", pad=0.02
+            last_hm.collections[0],
+            ax=axes.ravel().tolist(),
+            shrink=0.6,
+            location="right",
+            pad=0.02,
         )
         cbar.set_label(rf"{metric} - $t_{{\mathrm{{step}}}}[0] / t_{{\mathrm{{step}}}}[x]$")
         parts = ["heat_map", metric, tag]

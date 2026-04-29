@@ -1,3 +1,12 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import datetime
 import logging
 import os
@@ -14,6 +23,14 @@ import xarray as xr
 from astropy_healpix import HEALPix as HEALPixGrid
 from cartopy.io import DownloadWarning
 from matplotlib.collections import LineCollection
+
+try:
+    import datashader as ds
+    import pandas as pd
+
+    HAS_DATASHADER = True
+except ImportError:
+    HAS_DATASHADER = False
 
 from weathergen.common.config import _load_private_conf
 from weathergen.evaluate.plotting.plot_utils import DefaultMarkerSize, format_datetime
@@ -316,7 +333,7 @@ class Plotter:
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving histogram to {fname}")
-        plt.savefig(fname)
+        plt.savefig(fname, bbox_inches="tight")
         plt.close()
 
         return name
@@ -425,100 +442,205 @@ class Plotter:
 
         return plot_names
 
-    def scatter_plot(
-        self,
-        data: xr.DataArray,
-        map_output_dir: Path,
-        varname: str,
-        regionname: str | None,
-        tag: str = "",
-        map_kwargs: dict | None = None,
-        title: str | None = None,
-    ):
-        """
-        Plot a 2D map for a data array using scatter plot.
+    # map_kwargs parsing
+    @staticmethod
+    def _parse_map_kwargs(map_kwargs: dict | None, stream: str | None) -> dict:
+        """Extract known plotting keys from *map_kwargs*, returning a structured dict.
+
+        Unknown keys are kept under ``"extra"`` and forwarded to ``ax.scatter``.
 
         Parameters
         ----------
-        data: xr.DataArray
-            DataArray to be plotted
-        map_output_dir: Path
-            Directory where the map will be saved
-        varname: str
-            Name of the variable to be plotted
-        regionname: str
-            Name of the region to be plotted
-        tag: str
-            Any tag you want to add to the plot
-        map_kwargs: dict | None
-            Additional keyword arguments for the map.
-        title: str | None
-            Title for the plot.
+        map_kwargs : dict or None
+            Raw keyword arguments from the caller. Known keys (``marker_size``,
+            ``scale_marker_size``, ``marker``, ``vmin``, ``vmax``, ``colormap``,
+            ``use_datashader``, ``levels``, and HEALPix-related keys) are extracted;
+            remaining keys are collected under ``"extra"``.
+        stream : str or None
+            Stream name used to look up the default marker size when
+            ``marker_size`` is not provided in *map_kwargs*.
 
         Returns
         -------
-            Name of the saved plot file.
+        dict
+            Structured dictionary with the following keys:
+                - marker_size_base (float)
+                - scale_marker_size (bool)
+                - marker (str)
+                - vmin, vmax (float or None)
+                - cmap (matplotlib.colors.Colormap)
+                - use_datashader (bool)
+                - norm (matplotlib.colors.Normalize or BoundaryNorm)
+                - add_healpix_grid (bool) and related healpix_* keys
+                - extra (dict) – leftover kwargs for ``ax.scatter``
         """
-        # check for known keys in map_kwargs
-        map_kwargs_save = map_kwargs.copy() if map_kwargs is not None else {}
-        marker_size_base = map_kwargs_save.pop(
-            "marker_size", DefaultMarkerSize.get_marker_size(self.stream)
-        )
-        scale_marker_size = map_kwargs_save.pop("scale_marker_size", False)
-        marker = map_kwargs_save.pop("marker", "o")
-        vmin = map_kwargs_save.pop("vmin", None)
-        vmax = map_kwargs_save.pop("vmax", None)
-        cmap = plt.get_cmap(map_kwargs_save.pop("colormap", "coolwarm"))
+        kw = map_kwargs.copy() if map_kwargs is not None else {}
 
-        # Healpix grid configuration
-        add_healpix_grid = map_kwargs_save.pop("add_healpix_grid", False)
-        healpix_nside = map_kwargs_save.pop("healpix_nside", 4)
-        healpix_color = map_kwargs_save.pop("healpix_color", "black")
-        healpix_linewidth = map_kwargs_save.pop("healpix_linewidth", 0.2)
-        healpix_step = map_kwargs_save.pop("healpix_step", 64)
-        healpix_linestyle = map_kwargs_save.pop("healpix_linestyle", "-")
+        parsed = {
+            "marker_size_base": kw.pop(
+                "marker_size", DefaultMarkerSize.get_marker_size(stream) if stream else 0.5
+            ),
+            "scale_marker_size": kw.pop("scale_marker_size", False),
+            "marker": kw.pop("marker", "o"),
+            "vmin": kw.pop("vmin", None),
+            "vmax": kw.pop("vmax", None),
+            "cmap": plt.get_cmap(kw.pop("colormap", "coolwarm")),
+            "use_datashader": kw.pop("use_datashader", False),
+            # HEALPix grid
+            "add_healpix_grid": kw.pop("add_healpix_grid", False),
+            "healpix_nside": kw.pop("healpix_nside", 4),
+            "healpix_color": kw.pop("healpix_color", "black"),
+            "healpix_linewidth": kw.pop("healpix_linewidth", 0.2),
+            "healpix_step": kw.pop("healpix_step", 64),
+            "healpix_linestyle": kw.pop("healpix_linestyle", "-"),
+        }
 
-        if isinstance(map_kwargs_save.get("levels", False), oc.listconfig.ListConfig):
-            norm = mpl.colors.BoundaryNorm(
-                map_kwargs_save.pop("levels", None), cmap.N, extend="both"
+        # Colour normalisation
+        if isinstance(kw.get("levels", False), oc.listconfig.ListConfig):
+            parsed["norm"] = mpl.colors.BoundaryNorm(
+                kw.pop("levels", None), parsed["cmap"].N, extend="both"
             )
         else:
-            norm = mpl.colors.Normalize(
-                vmin=vmin,
-                vmax=vmax,
-                clip=False,
+            parsed["norm"] = mpl.colors.Normalize(
+                vmin=parsed["vmin"], vmax=parsed["vmax"], clip=False
             )
 
-        # scale marker size
-        marker_size = marker_size_base
-        if scale_marker_size:
-            marker_size = np.clip(
-                marker_size / np.cos(np.radians(data["lat"])) ** 2,
-                a_max=marker_size * 10.0,
-                a_min=marker_size,
-            )
+        parsed["extra"] = kw  # remaining kwargs forwarded to scatter
+        return parsed
 
-        # Create figure and axis objects
-        fig = plt.figure(dpi=self.dpi_val)
+    # rendering backends
+    @staticmethod
+    def _render_datashader(ax, proj, data, norm, cmap, marker_size_base):
+        """Rasterise points with datashader and display via imshow.
 
-        proj = ccrs.PlateCarree()
-        if regionname == "global":
-            proj = ccrs.Robinson()
+        Bypasses ``dsshow`` because it calls ``get_xlim()``/``get_ylim()``
+        which return infinity on cartopy GeoAxes with non-PlateCarree
+        projections. Instead rasterises manually with ``ds.Canvas``.
 
-        ax = fig.add_subplot(1, 1, 1, projection=proj)
-        try:
-            ax.coastlines()
-        except Exception:
-            _logger.warning("Could not add coastlines to plot; continuing without them.")
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            GeoAxes on which to render the rasterised image.
+        proj : cartopy.crs.Projection
+            The map projection used by *ax*.
+        data : xr.DataArray
+            DataArray with ``lon``, ``lat`` coordinates and scalar values.
+        norm : matplotlib.colors.Normalize
+            Colour normalisation instance.
+        cmap : matplotlib.colors.Colormap
+            Colourmap for the rendered image.
+        marker_size_base : float
+            Base marker size (reserved for future tuning).
 
-        data = data.squeeze()
-
-        assert data["lon"].shape == data["lat"].shape == data.shape, (
-            f"Scatter plot:: Data shape do not match. Shapes: "
-            f"lon {data['lon'].shape}, lat {data['lat'].shape}, data {data.shape}."
+        Returns
+        -------
+        matplotlib.image.AxesImage
+            The artist returned by ``ax.imshow``, suitable for ``plt.colorbar``.
+        """
+        projected = proj.transform_points(
+            ccrs.PlateCarree(),
+            np.asarray(data["lon"], dtype=np.float64),
+            np.asarray(data["lat"], dtype=np.float64),
         )
+        df = pd.DataFrame(
+            {
+                "x": projected[:, 0],
+                "y": projected[:, 1],
+                "val": np.asarray(data.values, dtype=np.float64),
+            }
+        )
+        df = df.dropna(subset=["x", "y"])
 
-        scatter_plt = ax.scatter(
+        x_range = (float(df["x"].min()), float(df["x"].max()))
+        y_range = (float(df["y"].min()), float(df["y"].max()))
+
+        # Determine raster resolution from the figure size + dpi
+        fig = ax.get_figure()
+        bbox = ax.get_position()
+        plot_width = int(fig.get_figwidth() * fig.dpi * bbox.width)
+        plot_height = int(fig.get_figheight() * fig.dpi * bbox.height)
+
+        # Adapt resolution to point density so every pixel is filled.
+        n_pts = len(df)
+        effective_side = max(int(0.8 * np.sqrt(n_pts)), 100)
+
+        # The canvas should not exceed the effective grid resolution —
+        # going higher creates empty pixels that show as white bands.
+        plot_width = min(plot_width, effective_side * 2)
+        plot_height = min(plot_height, effective_side)
+
+        cvs = ds.Canvas(
+            plot_width=plot_width,
+            plot_height=plot_height,
+            x_range=x_range,
+            y_range=y_range,
+        )
+        agg = cvs.points(df, "x", "y", agg=ds.mean("val"))
+
+        # Fill small NaN gaps (isolated empty pixels between data rows)
+        # with nearest-neighbour interpolation so no white bands remain.
+
+        raw = agg.values.astype(np.float64)
+        mask = np.isnan(raw)
+        if mask.any() and not mask.all():
+            from scipy.interpolate import NearestNDInterpolator
+
+            yy, xx = np.where(~mask)
+            interp = NearestNDInterpolator(list(zip(xx, yy, strict=False)), raw[~mask])
+            yy_m, xx_m = np.where(mask)
+            # Only fill pixels whose nearest valid neighbour is within 2 pixels
+            filled = raw.copy()
+            filled[mask] = interp(xx_m, yy_m)
+            # Limit fill distance: re-mask pixels far from any data
+            from scipy.ndimage import binary_dilation
+
+            data_mask = ~mask
+            dilated = binary_dilation(data_mask, iterations=2)
+            filled[~dilated] = np.nan
+            raw = filled
+
+        vals = np.flipud(raw)
+        masked = np.ma.masked_invalid(vals)
+
+        artist = ax.imshow(
+            masked,
+            extent=[x_range[0], x_range[1], y_range[0], y_range[1]],
+            origin="upper",
+            aspect="auto",
+            transform=proj,
+            interpolation="bilinear",
+            norm=norm,
+            cmap=cmap,
+        )
+        return artist
+
+    @staticmethod
+    def _render_scatter(ax, data, norm, cmap, marker_size, marker, extra_kwargs):
+        """Render points with matplotlib scatter and return the artist.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            GeoAxes on which to render the scatter points.
+        data : xr.DataArray
+            DataArray with ``lon``, ``lat`` coordinates and scalar values.
+        norm : matplotlib.colors.Normalize
+            Colour normalisation instance.
+        cmap : matplotlib.colors.Colormap
+            Colourmap for the scatter points.
+        marker_size : float or np.ndarray
+            Marker size(s) in matplotlib scatter units (pt²).
+        marker : str
+            Marker style (e.g. ``'o'``, ``'s'``).
+        extra_kwargs : dict
+            Additional keyword arguments forwarded to ``ax.scatter``.
+
+        Returns
+        -------
+        matplotlib.collections.PathCollection
+            The scatter artist, suitable for ``plt.colorbar``.
+        """
+        return ax.scatter(
             data["lon"],
             data["lat"],
             c=data,
@@ -527,33 +649,31 @@ class Plotter:
             s=marker_size,
             marker=marker,
             transform=ccrs.PlateCarree(),
-            linewidths=0.0,  # only markers, avoids aliasing for very small markers
-            **map_kwargs_save,
+            linewidths=0.0,
+            rasterized=True,
+            **extra_kwargs,
         )
 
-        # Add Healpix grid (optimized with LineCollection)
-        if add_healpix_grid:
-            lc = self.healpixlines(
-                healpix_nside, healpix_color, healpix_linewidth, healpix_step, healpix_linestyle
-            )
-            ax.add_collection(lc)
-        else:
-            ax.gridlines(draw_labels=False, linestyle="--", color="black", linewidth=0.2)
+    # filename builder
+    def _build_map_filename(self, varname: str, regionname: str, tag: str, data: xr.DataArray):
+        """Build the canonical filename parts list for a map plot.
 
-        plt.colorbar(scatter_plt, ax=ax, orientation="horizontal", label=f"Variable: {varname}")
-        plt.title(title, fontsize=9.5)
-        if regionname == "global":
-            ax.set_global()
-        else:
-            region_extent = [
-                data["lon"].min().item(),
-                data["lon"].max().item(),
-                data["lat"].min().item(),
-                data["lat"].max().item(),
-            ]
-            ax.set_extent(region_extent, crs=ccrs.PlateCarree())
+        Parameters
+        ----------
+        varname : str
+            Name of the variable being plotted.
+        regionname : str
+            Name of the geographical region.
+        tag : str
+            Additional tag inserted into the filename.
+        data : xr.DataArray
+            DataArray used to extract ``valid_time`` for the filename.
 
-        # TODO: make this nicer
+        Returns
+        -------
+        str
+            Joined filename string (without extension).
+        """
         parts = ["map", self.run_id, tag]
 
         if self.sample is not None:
@@ -562,13 +682,11 @@ class Plotter:
         if "valid_time" in data.coords:
             valid_time = data["valid_time"][0].values
             if ~np.isnat(valid_time):
-                valid_time = (
+                parts.append(
                     valid_time.astype("datetime64[m]")
                     .astype(datetime.datetime)
                     .strftime("%Y-%m-%dT%H%M")
                 )
-
-                parts.append(valid_time)
 
         if self.stream:
             parts.append(self.stream)
@@ -579,11 +697,149 @@ class Plotter:
         if self.fstep is not None:
             parts.extend(["fstep", f"{self.fstep:03d}"])
 
-        name = "_".join(filter(None, parts))
-        fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
+        return "_".join(filter(None, parts))
 
+    def scatter_plot(
+        self,
+        data: xr.DataArray,
+        map_output_dir: Path,
+        varname: str,
+        regionname: str | None,
+        tag: str = "",
+        map_kwargs: dict | None = None,
+        title: str | None = None,
+    ):
+        """Plot a 2D map for a data array using scatter (or datashader).
+
+        Parameters
+        ----------
+        data : xr.DataArray
+            DataArray to be plotted.
+        map_output_dir : Path
+            Directory where the map will be saved.
+        varname : str
+            Name of the variable to be plotted.
+        regionname : str
+            Name of the region to be plotted.
+        tag : str
+            Any tag you want to add to the plot.
+        map_kwargs : dict | None
+            Additional keyword arguments for the map.
+        title : str | None
+            Title for the plot.
+
+        Returns
+        -------
+        str
+            Name of the saved plot file (without directory or extension).
+        """
+        # parse kwargs
+        opts = self._parse_map_kwargs(map_kwargs, self.stream)
+
+        data = data.squeeze()
+        assert data["lon"].shape == data["lat"].shape == data.shape, (
+            f"Scatter plot:: Data shape do not match. Shapes: "
+            f"lon {data['lon'].shape}, lat {data['lat'].shape}, data {data.shape}."
+        )
+
+        # Pick figure size: for dense grids (>=200 K points) use a larger
+        # canvas so fine structure is visible; sparse grids use the default.
+        figsize = self.fig_size
+        if figsize is None and data.size >= 200_000:
+            figsize = (15, 7)
+
+        proj = ccrs.Robinson() if regionname == "global" else ccrs.PlateCarree()
+        fig = plt.figure(figsize=figsize, dpi=self.dpi_val)
+        ax = fig.add_subplot(1, 1, 1, projection=proj)
+        try:
+            ax.coastlines(linewidth=0.3)
+        except Exception:
+            _logger.warning("Could not add coastlines to plot; continuing without them.")
+
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.3)
+
+        if opts["vmin"] is None or opts["vmax"] is None:
+            valid_vals = data.values[np.isfinite(data.values)]
+            if valid_vals.size > 0:
+                p_lo, p_hi = np.percentile(valid_vals, [5, 95])
+                if opts["vmin"] is None:
+                    opts["vmin"] = float(p_lo)
+                if opts["vmax"] is None:
+                    opts["vmax"] = float(p_hi)
+                # Rebuild norm with the robust limits
+                opts["norm"] = mpl.colors.Normalize(
+                    vmin=opts["vmin"], vmax=opts["vmax"], clip=False
+                )
+
+        if regionname == "global":
+            ax.set_global()
+        else:
+            ax.set_extent(
+                [
+                    data["lon"].min().item(),
+                    data["lon"].max().item(),
+                    data["lat"].min().item(),
+                    data["lat"].max().item(),
+                ],
+                crs=ccrs.PlateCarree(),
+            )
+
+        # render points
+        if opts["use_datashader"] and HAS_DATASHADER:
+            artist = self._render_datashader(
+                ax, proj, data, opts["norm"], opts["cmap"], opts["marker_size_base"]
+            )
+        else:
+            if opts["use_datashader"] and not HAS_DATASHADER:
+                _logger.warning(
+                    "use_datashader=True but datashader is not installed. "
+                    "Falling back to scatter. Install with: pip install datashader"
+                )
+            marker_size = DefaultMarkerSize.auto_marker_size(
+                n_points=data.size,
+                fig_width_in=fig.get_figwidth(),
+                fig_height_in=fig.get_figheight(),
+                stream_default=opts["marker_size_base"],
+                scale=opts["scale_marker_size"],
+                lat=data["lat"],
+            )
+
+            artist = self._render_scatter(
+                ax, data, opts["norm"], opts["cmap"], marker_size, opts["marker"], opts["extra"]
+            )
+
+        # overlays
+        if opts["add_healpix_grid"]:
+            lc = self.healpixlines(
+                opts["healpix_nside"],
+                opts["healpix_color"],
+                opts["healpix_linewidth"],
+                opts["healpix_step"],
+                opts["healpix_linestyle"],
+            )
+            ax.add_collection(lc)
+        else:
+            ax.gridlines(draw_labels=False, linestyle="--", color="gray", linewidth=0.6, alpha=0.7)
+
+        cbar = plt.colorbar(
+            artist,
+            ax=ax,
+            fraction=0.03,
+            pad=0.02,
+            shrink=0.6,
+            orientation="horizontal",
+        )
+        cbar.set_label(f"Variable: {varname}", fontsize=7)
+        cbar.ax.tick_params(labelsize=6)
+        cbar.outline.set_linewidth(0.3)
+        plt.title(title, fontsize=8)
+
+        # save
+        name = self._build_map_filename(varname, regionname, tag, data)
+        fname = f"{map_output_dir.joinpath(name)}.{self.image_format}"
         _logger.debug(f"Saving map to {fname}")
-        plt.savefig(fname)
+        plt.savefig(fname, bbox_inches="tight")
         plt.close()
 
         return name
@@ -591,6 +847,27 @@ class Plotter:
     def healpixlines(
         self, healpix_nside, healpix_color, healpix_linewidth, healpix_step, healpix_linestyle
     ):
+        """Create a LineCollection of HEALPix pixel boundaries for overlay on a map.
+
+        Parameters
+        ----------
+        healpix_nside : int
+            HEALPix ``nside`` parameter controlling grid resolution.
+        healpix_color : str
+            Colour of the grid lines.
+        healpix_linewidth : float
+            Width of the grid lines in points.
+        healpix_step : int
+            Number of interpolation points per boundary edge.
+        healpix_linestyle : str
+            Line style (e.g. ``'-'``, ``'--'``).
+
+        Returns
+        -------
+        matplotlib.collections.LineCollection
+            Collection of HEALPix boundary polygons, ready to be added to a
+            cartopy GeoAxes via ``ax.add_collection``.
+        """
         hp_grid = HEALPixGrid(nside=healpix_nside, order="ring")
         lon_all, lat_all = hp_grid.boundaries_lonlat(np.arange(hp_grid.npix), step=healpix_step)
         # Ensure closure of polygons
@@ -611,9 +888,39 @@ class Plotter:
         return lc
 
     def get_map_output_dir(self, tag):
+        """Return the output directory path for map plots.
+
+        Parameters
+        ----------
+        tag : str
+            Sub-directory tag (e.g. ``'target'``, ``'prediction'``).
+
+        Returns
+        -------
+        Path
+            Resolved directory path: ``<out_plot_basedir>/<stream>/maps/<tag>``.
+        """
         return self.out_plot_basedir / self.stream / "maps" / tag
 
     def get_map_title(self, var, valid_time, data):
+        """Build the title string for a map plot.
+
+        Parameters
+        ----------
+        var : str
+            Variable name to include in the title.
+        valid_time : numpy.datetime64 or None
+            Single valid time for the plot. If ``None``, the range is
+            extracted from *data*.
+        data : xr.DataArray
+            DataArray from which to extract ``valid_time`` range when
+            *valid_time* is ``None``.
+
+        Returns
+        -------
+        str
+            Formatted title string.
+        """
         title = f"{self.stream}, {var} : fstep = {self.fstep:03}"
         if valid_time is not None:
             title += f" ({format_datetime(valid_time)})"
