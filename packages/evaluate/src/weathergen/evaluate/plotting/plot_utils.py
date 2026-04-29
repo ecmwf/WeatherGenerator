@@ -7,7 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import logging
+import re
 from collections.abc import Iterable, Sequence
 
 import numpy as np
@@ -606,3 +608,86 @@ def create_filename(
         )
 
     return sep.join(prefix + truncated_middle + suffix)
+def calculate_average_over_dim(
+    x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """
+    Calculate average over xarray dimensions that are larger than 1. Those might be the
+    forecast-steps or the samples.
+
+    Parameters
+    ----------
+    xdim: str
+        The dimension for which an average will not be calculated.
+    baseline_var: xr.DataArray
+        xarray DataArray with the scores of the baseline model for a specific channel/variable
+    data_var: xr.DataArray
+        xarray DataArray with the scores of the comparison model for a specific channel/variable
+
+    Returns
+    -------
+    baseline_score: xarray DataArray
+        The baseline average scores over the dimensions not specified by xdim
+    model_score: xarray DataArray
+        The model average scores over the dimensions not specified by xdim
+    """
+    non_zero_dims = [
+        dim for dim in baseline_var.dims if dim != x_dim and baseline_var[dim].shape[0] > 1
+    ]
+
+    if non_zero_dims:
+        _logger.info(f"Found multiple entries for dimensions: {non_zero_dims}. Averaging...")
+
+    baseline_score = baseline_var.mean(
+        dim=[dim for dim in baseline_var.dims if dim != x_dim], skipna=True
+    )
+    model_score = data_var.mean(dim=[dim for dim in data_var.dims if dim != x_dim], skipna=True)
+
+    return baseline_score, model_score
+
+
+def lower_is_better(metric: str) -> bool:
+    # Determine whether lower or higher is better
+    return metric in {"l1", "l2", "mae", "mse", "rmse", "vrmse", "bias", "crps", "spread"}
+
+
+def compute_offsets(n, spacing=0.11):
+    idx = np.arange(n)
+    return (idx - (n - 1) / 2.0) * spacing
+
+
+def align_labels(da: xr.DataArray, labels: list[str], x_dim: str) -> xr.DataArray:
+    """
+    Reindex a DataArray to include all labels in the canonical order.
+    Missing variables are filled with NaN.
+    """
+    # Convert labels → index format expected by xarray
+    labels = np.array(labels, dtype=object)
+
+    # Reindex, inserting NaN for missing labels
+    return da.reindex({x_dim: labels})
+
+
+def format_datetime(dt):
+    return dt.astype("datetime64[m]").astype(datetime.datetime).strftime("%Y-%m-%d T%H:%M:%S")
+
+
+def channel_sort_key(name: str) -> tuple[int, str, int]:
+    """
+    Sorting key for channel names like 't_850', 'z_500', etc.
+    Splits the name into a prefix and a number suffix for sorting.
+    Parameters
+    ----------
+    name : str
+        Channel name to be sorted.
+    Returns
+    -------
+    tuple[int, str, int]
+        Sorting key: (0, prefix, number) if pattern matches, else (1,
+    """
+    m = re.match(r"(.+?)_(\d+)$", name)
+    if m:
+        prefix, number = m.groups()
+        return (0, prefix, int(number))
+    else:
+        return (1, name, float("inf"))
