@@ -274,10 +274,10 @@ def compute_precip(
     obs_dt = obs_dt.astype("timedelta64[h]")
     if zarr_dt == 0:
         # indicates nowcasting
-        return obs_data["precipitation_amount_1h"].sel(time=valid_time).values
+        return obs_data["precipitation_amount_1h"].sel(time=valid_time).values.squeeze()
     elif obs_dt >= zarr_dt:
         if obs_dt % zarr_dt == np.timedelta64(0):
-            return obs_data["precipitation_amount_1h"].sel(time=valid_time).values
+            return obs_data["precipitation_amount_1h"].sel(time=valid_time).values.squeeze()
         else:
             # return empty data
             empty = np.empty(obs_data.location.shape[0])
