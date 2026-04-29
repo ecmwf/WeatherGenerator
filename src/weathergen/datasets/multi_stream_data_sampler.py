@@ -400,6 +400,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 rdata = input_data[-(step + 1)]
                 token_data = input_tokens[-(step + 1)]
 
+                if token_data[0] is None and token_data[1] is None:
+                    continue
+
                 # preprocess data for model input
                 (source_cells, source_cells_lens) = self.tokenizer.get_source(
                     stream_info,
@@ -439,6 +442,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # collect all targets for current stream
             rdata = output_data[step]
             token_data = output_tokens[step]
+
+            if token_data[0] is None and token_data[1] is None:
+                continue
 
             if "target_coords" in mode:
                 (tc, tc_l) = self.tokenizer.get_target_coords(
