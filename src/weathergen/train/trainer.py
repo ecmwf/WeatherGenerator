@@ -11,8 +11,8 @@
 import copy
 import logging
 import time
-from math import sqrt
 from collections.abc import Iterable
+from math import sqrt
 
 import numpy as np
 import torch

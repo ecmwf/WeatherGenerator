@@ -21,6 +21,7 @@ class TargetAuxOutput:
     """
     A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
     """
+
     def __init__(self, len_target: int, output_idxs: list) -> None:
         self.output_idxs: list[int] = output_idxs
         self.physical: list[

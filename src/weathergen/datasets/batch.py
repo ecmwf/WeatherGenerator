@@ -5,6 +5,7 @@ Provides clean separation between:
   - Model data (StreamData objects containing tensors)
   - View metadata (spatial masks, strategies, relationships)
 """
+
 from __future__ import annotations  # allow forward references in typehints
 
 import copy
@@ -28,7 +29,6 @@ class SampleMetaData:
 
 
 class Sample:
-
     def pin_memory(self):
         """Pin all tensors in this Sample to CPU pinned memory"""
 
@@ -267,6 +267,7 @@ class ModelBatch:
         output_idxs: Forecast step indices (including offset) for this batch.
         device: device of the tensors in this batch.
     """
+
     def __init__(
         self,
         streams: list[Config],
