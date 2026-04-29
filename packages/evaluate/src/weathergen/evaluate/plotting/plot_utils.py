@@ -608,6 +608,8 @@ def create_filename(
         )
 
     return sep.join(prefix + truncated_middle + suffix)
+
+
 def calculate_average_over_dim(
     x_dim: str, baseline_var: xr.DataArray, data_var: xr.DataArray
 ) -> tuple[xr.DataArray, xr.DataArray]:

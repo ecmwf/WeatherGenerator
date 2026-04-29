@@ -628,5 +628,3 @@ class Plotter:
                 title += f" ({format_datetime(valid_time_start)})"
 
         return title
-
-
