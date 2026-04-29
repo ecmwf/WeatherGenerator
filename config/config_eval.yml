@@ -1,0 +1,86 @@
+#optional: if commented out all is taken care of by the default settings
+# NB. global options apply to all run_ids 
+global_plotting_options:
+#  regions: ["europe", "global"]
+  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+  dpi_val : 300
+  fps: 2
+  ERA5:
+    marker_size: 3
+    scale_marker_size: 1
+    marker: "o"
+    alpha: 0.5
+    add_healpix_grid: false
+    healpix_nside: 4
+    2t: 
+      vmin: 205
+      vmax: 315
+    10u:
+      vmin: -23
+      vmax: 23
+    10v:
+      vmin: -23
+      vmax: 23
+    z_500:
+      vmin: 4700
+      vmax: 6000
+    t_850:
+      vmin: 230
+      vmax: 310
+    u_850:
+      vmin: -40
+      vmax: 40
+    v_850:
+      vmin: -40
+      vmax: 40
+    q_850:
+      vmin: 0
+      vmax: 0.02
+  
+
+evaluation:
+  metrics: ["rmse", "froct", "acc"]
+  regions: ["global", "nhem"]
+  summary_plots : true
+  ratio_plots : false
+  heat_maps : false
+  summary_dir: "./plots/"
+  plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: true
+  score_cards: false
+  bar_plots: false
+
+
+default_streams:
+  ERA5:
+    climatology_path: "/iopsstor/scratch/cscs/thunter/shared_work/assets/climatology/aifs-ea-an-oper-0001-mars-o96-1980-2020-6h-v6_climatology.zarr"
+    channels: ["2t", "10u", "10v", "z_500", "t_850", "u_850", "v_850", "q_850"]
+    # channels: ["2t", "z_500", "q_850"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
+    plotting:
+      sample: [0]
+      forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      plot_maps: true
+      plot_histograms: false
+      plot_animations: true
+  # CERRA:
+  #   channels: ["z_500", "t_850", "u_850"] #, "blah"]
+  #   evaluation:
+  #     forecast_step: "all"
+  #     sample: "all"
+  #   plotting:
+  #     sample: [0]
+  #     forecast_step: "all"
+  #     plot_maps: true
+  #     plot_bias: false
+  #     plot_target: false
+  #     plot_histograms: true
+  #     plot_animations: true
+
+run_ids :
