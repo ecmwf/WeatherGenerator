@@ -9,15 +9,32 @@ from pathlib import Path
 import pandas as pd
 
 
-def extract_num_nodes(err_log_path: Path) -> int | None:
-    if not err_log_path.exists():
+def extract_num_nodes_from_output(run_id: str, logs_base_dir: Path) -> int | None:
+    """Extract num_nodes from output.*.txt file in the run directory.
+    
+    Looks for 'nNodes' pattern in output files.
+    """
+    run_log_dir = logs_base_dir / run_id
+    if not run_log_dir.exists():
         return None
-    try:
-        content = err_log_path.read_text()
-        match = re.search(r"number\s+of\s+nodes\s*:\s*(\d+)", content, re.IGNORECASE)
-        return int(match.group(1)) if match else None
-    except Exception:
-        return None
+    
+    # Look for output.*.txt files
+    output_files = list(run_log_dir.glob("output.*.txt"))
+    if not output_files:
+        # Fallback to err files if no output files found
+        output_files = list(run_log_dir.glob("weathergen.*.err"))
+    
+    for output_file in output_files:
+        try:
+            content = output_file.read_text()
+            # Look for nNodes pattern: "nNodes 128" (space-separated, as in NCCL logs)
+            match = re.search(r"nNodes\s+(\d+)", content, re.IGNORECASE)
+            if match:
+                return int(match.group(1))
+        except Exception:
+            continue
+    
+    return None
 
 
 def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | None:
@@ -124,26 +141,92 @@ def extract_detailed_metrics(run_id: str, shared_work_dir: Path, num_nodes: int 
         return []
 
 
+def parse_run_ids(run_ids_str: list[str]) -> list[tuple[int | None, str]]:
+    """Parse run-ids argument which can be:
+    1. A list of run-ids (old format): ["run1", "run2"] -> [(None, "run1"), (None, "run2")]
+    2. A dict mapping num_nodes to run-ids (new format): "{1: run1, 4: run2}" -> [(1, "run1"), (4, "run2")]
+    
+    Returns list of (num_nodes, run_id) tuples.
+    """
+    if len(run_ids_str) == 1:
+        # Check if it looks like a dict: "{key: value, ...}"
+        stripped = run_ids_str[0].strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            # Parse as dict format: {num_nodes: run_id, ...}
+            import ast
+            try:
+                parsed = ast.literal_eval(stripped)
+                if isinstance(parsed, dict):
+                    # Convert string keys to int if needed
+                    result = []
+                    for k, v in parsed.items():
+                        key = int(k) if isinstance(k, str) and k.isdigit() else k
+                        result.append((key, str(v)))
+                    return result
+            except (ValueError, SyntaxError):
+                pass
+        
+        # Single run-id or comma-separated list
+        run_ids = [r.strip() for r in run_ids_str[0].split(",") if r.strip()]
+        return [(None, run_id) for run_id in run_ids]
+    
+    # Multiple arguments - treat as list of run-ids
+    return [(None, run_id) for run_id in run_ids_str]
+
+
+def extract_num_nodes_from_output(run_id: str, logs_base_dir: Path) -> int | None:
+    """Extract num_nodes from output.*.txt file in the run directory.
+    
+    Looks for 'nNodes' pattern in output files.
+    """
+    run_log_dir = logs_base_dir / run_id
+    if not run_log_dir.exists():
+        return None
+    
+    # Look for output.*.txt files
+    output_files = list(run_log_dir.glob("output.*.txt"))
+    if not output_files:
+        # Fallback to err files if no output files found
+        output_files = list(run_log_dir.glob("weathergen.*.err"))
+    
+    for output_file in output_files:
+        try:
+            content = output_file.read_text()
+            # Look for nNodes pattern: "nNodes 128" (space-separated, as in NCCL logs)
+            match = re.search(r"nNodes\s+(\d+)", content, re.IGNORECASE)
+            if match:
+                return int(match.group(1))
+        except Exception:
+            continue
+    
+    return None
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Extract strong scaling data from WeatherGenerator runs")
-    parser.add_argument("--run-ids", nargs="+", help="List of run-ids to process")
+    parser = argparse.ArgumentParser(
+        description="Extract strong scaling data from WeatherGenerator runs. "
+        "Run-ids can be provided as a list (--run-ids run1 run2) or as a dict mapping num_nodes to run-ids "
+        "(--run-ids '{1: run1, 4: run2}'). If num_nodes is not provided in the dict, it will be extracted from output.*.txt files."
+    )
+    parser.add_argument("--run-ids", nargs="+", help="Run-ids to process. Can be: (1) list: run1 run2 run3, or (2) dict: '{1: run1, 4: run2, 8: run3}'")
     parser.add_argument("--logs-base-dir", type=Path, default=Path("logs"), help="Base directory for run logs (default: logs relative to current dir)")
     parser.add_argument("--shared-work-dir", type=Path, default=Path("/e/scratch/weatherai/shared_work"), help="Base directory for shared work/results")
     parser.add_argument("--output", type=Path, default=Path("scaling_data.parquet"), help="Output parquet file path")
 
     args = parser.parse_args()
 
-    run_ids = args.run_ids
-    if not run_ids:
+    run_id_mapping = parse_run_ids(args.run_ids)
+    if not run_id_mapping:
         sys.exit("Error: No run-ids provided")
 
     results = []
     all_detailed_records = []
 
-    for run_id in run_ids:
-        log_dir = args.logs_base_dir / run_id
-        err_files = list(log_dir.glob("weathergen.*.err")) if log_dir.exists() else []
-        num_nodes = extract_num_nodes(err_files[0]) if err_files else None
+    for num_nodes, run_id in run_id_mapping:
+        # If num_nodes not provided, extract from output.*.txt file
+        if num_nodes is None:
+            num_nodes = extract_num_nodes_from_output(run_id, args.logs_base_dir)
+        
         metrics = extract_metrics_from_run_id(run_id, args.shared_work_dir)
         if metrics is None:
             continue
@@ -160,7 +243,7 @@ def main():
         detailed_records = extract_detailed_metrics(run_id, args.shared_work_dir, num_nodes)
         if detailed_records:
             all_detailed_records.extend(detailed_records)
-            print(f"Extracted {len(detailed_records)} detailed metric entries for {run_id}")
+            print(f"Extracted {len(detailed_records)} detailed metric entries for {run_id} ({num_nodes} nodes)")
 
     if not results:
         sys.exit("No data extracted")
