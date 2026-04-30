@@ -68,6 +68,7 @@ class TokenizerMasking(Tokenizer):
         for rdata in data:
             # skip empty data
             if rdata.is_empty():
+                tokens += [(None, None)]
                 continue
             # tokenize data
             idxs_cells, idxs_cells_lens = tok(
