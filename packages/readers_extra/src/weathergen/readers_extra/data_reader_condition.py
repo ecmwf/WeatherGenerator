@@ -118,7 +118,7 @@ class DataReaderCondition(DataReaderTimestep):
         encoded_condtions = self._encode(dtr, self.variables)
         return encoded_condtions
 
-    def _encode(self, dtr: DTRange, variables: list[str]) -> np.ndarray:
+    def _encode(self, dtr: DTRange, variables: list[str]):
         """
         Encode start/end datetimes into condition variable values.
 

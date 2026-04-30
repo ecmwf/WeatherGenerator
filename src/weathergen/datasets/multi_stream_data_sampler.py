@@ -554,7 +554,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         condition_ds: AnyDataReader,
         base_idx: TIndex,
         num_output_steps: int,
-    ) -> np.ndarray:
+    ):
         """
         Collect encoded condition values for every forecast step.
 
@@ -770,8 +770,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 ]
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
 
-        # for condition streama
-        for stream_info, (stream_name, condition_ds) in zip(
+        # for condition streams
+        for _, (_, condition_ds) in zip(
             self.condition_streams, self.condition_datasets.items(), strict=True
         ):
             self._build_condition_data(batch, condition_ds[0], idx, num_output_steps)
