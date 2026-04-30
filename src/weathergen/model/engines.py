@@ -56,12 +56,12 @@ class EmbeddingEngine(torch.nn.Module):
             if stream_cfg.get("type") != "condition"
         ]
 
-        self.data_streams = [
-            stream for stream in cf.streams if stream.get("type") != "condition"
-        ]
+        self.data_streams = [stream for stream in cf.streams if stream.get("type") != "condition"]
 
-        for i, (si, stream_name) in enumerate(zip(self.data_streams, self.data_stream_names, strict=True)):
-            if si.get("diagnostic", False) or self.sources_size[i] == 0 :
+        for i, (si, stream_name) in enumerate(
+            zip(self.data_streams, self.data_stream_names, strict=True)
+        ):
+            if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
 
@@ -624,7 +624,11 @@ class ForecastingEngine(torch.nn.Module):
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-        aux_info = None if len(fstep) == 0 else torch.tensor(fstep, dtype=tokens.dtype, device=tokens.device)
+        aux_info = (
+            None
+            if len(fstep) == 0
+            else torch.tensor(fstep, dtype=tokens.dtype, device=tokens.device)
+        )
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = checkpoint(block, tokens, use_reentrant=False)

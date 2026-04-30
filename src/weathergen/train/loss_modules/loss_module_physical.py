@@ -207,7 +207,7 @@ class LossPhysical(LossModuleBase):
         # TODO: iterate over batch dimension
 
         self.data_streams = [stream for stream in self.cf.streams if stream["type"] != "condition"]
-        
+
         for stream_info in self.data_streams:
             stream_name = stream_info["name"]
             # TODO: avoid this

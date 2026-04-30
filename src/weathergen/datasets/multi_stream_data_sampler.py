@@ -19,7 +19,6 @@ from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
-from weathergen.readers_extra.data_reader_condition import DataReaderCondition
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
@@ -33,6 +32,7 @@ from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     get_tokens_lens,
 )
+from weathergen.readers_extra.data_reader_condition import DataReaderCondition
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
@@ -97,7 +97,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mask_value = 0.0
         self.streams, self.condition_streams = (
             [s for s in cf.streams if s.get("type") != "condition"],
-            [s for s in cf.streams if s.get("type") == "condition"]
+            [s for s in cf.streams if s.get("type") == "condition"],
         )
         self.rank = cf.rank
         self.world_size = cf.world_size
@@ -143,7 +143,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             if stream_info["type"] == "condition":
                 self._init_condition_stream(stream_info)
             else:
-                self._init_data_stream(stream_info, cf.data_paths)        
+                self._init_data_stream(stream_info, cf.data_paths)
         # RNG seed setup
         rs = cf.data_loading.rng_seed
         nw = cf.data_loading.num_workers
@@ -252,7 +252,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     f"Opening dataset with type: {stream_info['type']}"
                     + f" from stream config {stream_info['name']}.",
                 )
-            ds = dataset(filename=filename, tw_handler=self.time_window_handler, stream_info=stream_info)
+            ds = dataset(
+                filename=filename, tw_handler=self.time_window_handler, stream_info=stream_info
+            )
             self._register_stream_channels(stream_info, ds)
             self.streams_datasets[stream_info["name"]] += [ds]
 
@@ -265,7 +267,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             tw_handler=self.time_window_handler, stream_info=stream_info, filename=None
         )
         self.condition_datasets[stream_info["name"]] += [ds]
-    
+
     def reset(self) -> tuple[Sequence[int], Sequence[int]]:
         """
         Reset RNG, return shuffled perms adn forecast steps for this mini epoch.
@@ -570,13 +572,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         np.ndarray of shape (num_output_steps - output_offset, num_channels)
         """
 
-
-        for i in range(num_output_steps):    
-            
+        for i in range(num_output_steps):
             condition_data = condition_ds.get_condition(
-                    base_idx + (self.time_step * i) // self.step_timedelta)
+                base_idx + (self.time_step * i) // self.step_timedelta
+            )
             batch.get_source_samples().conditions[i] += condition_data
-    
 
     def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
         """
@@ -770,13 +770,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 ]
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
 
-        # for condition streama 
+        # for condition streama
         for stream_info, (stream_name, condition_ds) in zip(
             self.condition_streams, self.condition_datasets.items(), strict=True
         ):
-            self._build_condition_data(
-                batch, condition_ds[0], idx, num_output_steps
-            )
+            self._build_condition_data(batch, condition_ds[0], idx, num_output_steps)
 
         source_in_steps = input_steps.max().item()
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])

@@ -15,10 +15,10 @@ import numpy as np
 
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
+    DTRange,
     ReaderData,
     TimeWindowHandler,
     TIndex,
-    DTRange
 )
 
 _logger = logging.getLogger(__name__)
@@ -81,8 +81,10 @@ class DataReaderCondition(DataReaderTimestep):
         elif self.transform == "cos_sin":
             return 2 * len(self.variables)
         elif self.transform == "fourier":
-            assert "emb_dimension" in stream_info, "Fourier transform requires 'emb_dimension' in stream_info"
-            return stream_info.get("emb_dimension")* len(self.variables)
+            assert "emb_dimension" in stream_info, (
+                "Fourier transform requires 'emb_dimension' in stream_info"
+            )
+            return stream_info.get("emb_dimension") * len(self.variables)
         else:
             raise ValueError(f"Unknown transform: {self.transform!r}")
 
@@ -114,7 +116,7 @@ class DataReaderCondition(DataReaderTimestep):
 
         dtr = self.time_window_handler.window(idx)
         encoded_condtions = self._encode(dtr, self.variables)
-        return encoded_condtions 
+        return encoded_condtions
 
     def _encode(self, dtr: DTRange, variables: list[str]) -> np.ndarray:
         """
@@ -144,7 +146,7 @@ class DataReaderCondition(DataReaderTimestep):
             elif var == "end_time":  # noqa: PLR200
                 values.append(_hour_of_day(dtr.end))
 
-        return  values
+        return values
 
 
 def _day_of_year(dt: np.datetime64) -> float:
