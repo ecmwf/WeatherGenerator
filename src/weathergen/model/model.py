@@ -335,6 +335,7 @@ class Model(torch.nn.Module):
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
         self.target_token_engines = None
+        self.data_streams: list = None
         self.forecast_aux_infos = condition_num_channels
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
