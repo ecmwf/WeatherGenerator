@@ -131,16 +131,18 @@ class Regridder:
     def find_lat_lon_ordering(self) -> list[int]:
         """
         Find all the the latitude and longitude ordering for CF-parsed WeatherGenerator data
-        Ordering from North West to South East.
+        Values start at North-West and follow in consecutive rows from West to East,
+        where West is always the 0° meridian.
         Returns the indices required to reorder the data.
         Returns
         -------
             indices: list of indices to reorder the data from original to lat/lon ordered.
         """
         ds = self.dataset
-        x = ds["longitude"].values[:, 0]
+        # 0 -> 180 then -180 -> 0
+        x = (ds["longitude"].values[:, 0]) % 360  # convert to 0-360 range
         y = ds["latitude"].values[:, 0]
-        indices = np.lexsort((x, -y))
+        indices = np.lexsort((x, y))
         return indices
 
     def detect_input_grid_type(self) -> str:

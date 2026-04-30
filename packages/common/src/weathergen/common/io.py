@@ -583,6 +583,9 @@ class OutputBatchData:
     sample_start: int
     forecast_offset: int
 
+    forecast_min: int
+    forecast_max: int
+
     @functools.cached_property
     def samples(self):
         """Continous indices of all samples accross all batches."""
@@ -595,7 +598,7 @@ class OutputBatchData:
         """Indices of all forecast steps adjusted by the forecast offset"""
         # forecast offset should be either 1 for forecasting or 0 for MTM
         assert self.forecast_offset in (0, 1)
-        return np.arange(len(self.targets) + self.forecast_offset)
+        return np.arange(self.forecast_min, len(self.targets) + self.forecast_min)
 
     def items(self) -> typing.Generator[OutputItem, None, None]:
         """Iterate over possible output items"""
@@ -664,8 +667,8 @@ class OutputBatchData:
             target_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
             preds_data = np.zeros((0, len(self.target_channels[stream_idx])), dtype=np.float32)
         else:
-            target_data = self.targets[offset_key.forecast_step][stream_idx][datapoints]
-            preds_data = self.predictions[offset_key.forecast_step][stream_idx].transpose(1, 2, 0)[
+            target_data = self.targets[offset_key.forecast_step - self.forecast_min][stream_idx][datapoints]
+            preds_data = self.predictions[offset_key.forecast_step - self.forecast_min][stream_idx].transpose(1, 2, 0)[
                 datapoints
             ]
 
@@ -694,7 +697,7 @@ class OutputBatchData:
         return target_dataset, prediction_dataset
 
     def _get_datapoints_per_sample(self, offset_key, stream_idx):
-        lens = self.targets_lens[offset_key.forecast_step][stream_idx]
+        lens = self.targets_lens[offset_key.forecast_step - self.forecast_min][stream_idx]
 
         # empty target/prediction
         if len(lens) == 0:
@@ -712,7 +715,7 @@ class OutputBatchData:
         return slice(start, start + n_samples)
 
     def _extract_coordinates(self, stream_idx, offset_key, datapoints) -> DataCoordinates:
-        _coords = self.targets_coords[offset_key.forecast_step][stream_idx][datapoints]
+        _coords = self.targets_coords[offset_key.forecast_step - self.forecast_min][stream_idx][datapoints]
 
         # ensure _coords has size (?,2)
         if len(_coords) == 0:
@@ -726,7 +729,7 @@ class OutputBatchData:
                 "geoinformation channels are not implemented yet."
                 + "will be truncated to be of size 0."
             )
-        times = self.targets_times[offset_key.forecast_step][stream_idx][
+        times = self.targets_times[offset_key.forecast_step - self.forecast_min][stream_idx][
             datapoints
         ]  # make conversion to datetime64[ns] here?
         channels = self.target_channels[stream_idx]

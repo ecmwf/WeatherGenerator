@@ -341,6 +341,7 @@ class DataReaderBase(metaclass=ABCMeta):
         self.source_channels = []
         self.target_channels = []
         self.geoinfo_channels = []
+        self.condition_idx = []
         self.source_idx = []
         self.target_idx = []
         self.geoinfo_idx = []
@@ -370,7 +371,25 @@ class DataReaderBase(metaclass=ABCMeta):
         """
 
         return self.length()
+    
+    def get_condition(self, idx: TIndex) -> ReaderData:
+        """
+        Get source data for idx
 
+        Parameters
+        ----------
+        idx : int
+            Index of temporal window
+
+        Returns
+        -------
+        condition data (data for aux info )
+        """
+
+        rdata = self._get(idx, self.condition_idx)
+
+        return rdata
+    
     def get_source(self, idx: TIndex) -> ReaderData:
         """
         Get source data for idx

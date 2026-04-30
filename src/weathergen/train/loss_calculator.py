@@ -83,6 +83,8 @@ class LossCalculator:
         preds: ModelOutput,
         targets_and_aux: TargetAuxOutput,
         metadata: dict,
+        forecast_min,
+        forecast_max
     ):
         losses_all = defaultdict(dict)
         stddev_all = defaultdict(dict)

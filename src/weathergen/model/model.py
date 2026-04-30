@@ -81,6 +81,11 @@ class ModelOutput:
     def get_latent_prediction(self, fstep: int):
         return self.latent[fstep]
 
+    def empty_physical_prediction(self, forecast_steps):
+        self.physical = [{} for _ in range(forecast_steps)]
+
+    def empty_latent_prediction(self, forecast_steps):
+        self.latent = [{} for _ in range(forecast_steps)]
 
 class ModelParams(torch.nn.Module):
     """Creation of query and embedding parameters of the model."""
@@ -301,7 +306,7 @@ class Model(torch.nn.Module):
         coordinates to its physical space.
     """
 
-    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
+    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size, condition_num_channels) -> None:
         """
         Args:
             cf : Configuration with model parameters
@@ -323,7 +328,7 @@ class Model(torch.nn.Module):
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
-
+        self.aux_info = condition_num_channels
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
@@ -332,6 +337,7 @@ class Model(torch.nn.Module):
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
         self.target_token_engines = None
+        self.forecast_aux_infos = condition_num_channels
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
             "Local attention not adapted for register tokens"
@@ -387,7 +393,9 @@ class Model(torch.nn.Module):
         mode_cfg = cf.training_config
         self.forecast_engine = None
         if cf.fe_num_blocks > 0:
-            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            self.forecast_engine = ForecastingEngine(
+                cf, mode_cfg, self.num_healpix_cells, self.forecast_aux_infos if self.forecast_aux_infos > 0 else None
+            )
             if cf.get("fe_diffusion_model", False):
                 self.forecast_engine = DiffusionForecastEngine(
                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
@@ -400,9 +408,10 @@ class Model(torch.nn.Module):
         self.pred_heads = torch.nn.ModuleDict()
 
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
-
-        for i_stream, _ in enumerate(cf.streams):
+        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams if stream_cfg.get("type") != "condition"]
+        self.data_streams = [stream_cfg for stream_cfg in cf.streams if stream_cfg.get("type") != "condition"]
+        
+        for i_stream, _ in enumerate(self.data_streams):
             stream_name = self.stream_names[i_stream]
 
         loss_terms = [
@@ -414,7 +423,7 @@ class Model(torch.nn.Module):
             ]
 
         if "LossPhysical" in loss_terms:
-            for i_stream, si in enumerate(cf.streams):
+            for i_stream, si in enumerate(self.data_streams):
                 stream_name = self.stream_names[i_stream]
 
                 # skip decoder if channels are empty
@@ -507,7 +516,7 @@ class Model(torch.nn.Module):
                     )
 
             # iterate again to setup shared spatial pred heads if specified in config
-            for i_stream, si in enumerate(cf.streams):
+            for i_stream, si in enumerate(self.data_streams):
                 stream_name = self.stream_names[i_stream]
 
                 # skip decoder if channels are empty
@@ -701,6 +710,30 @@ class Model(torch.nn.Module):
             z_pre_norm=tokens,
         )
 
+    def forward_latent(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
+        """Forward pass of the model
+
+        Tokens are processed through the model components, which were defined in the create method.
+        Args:
+            model_params : Query and embedding parameters
+            batch
+        Returns:
+            A list containing all prediction results
+        """
+
+        output = ModelOutput(batch.get_output_len())
+
+        tokens, posteriors = self.encoder(model_params, batch)
+        output.add_latent_prediction(0, "posteriors", posteriors)
+
+        # recover batch dimension and separate input_steps
+
+        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+        # collapse along input step dimension
+        tokens = tokens.reshape(shape).sum(axis=1)
+
+        return tokens, output
+
     def forward(self, model_params: ModelParams, batch: ModelBatch) -> ModelOutput:
         """Forward pass of the model
 
@@ -726,12 +759,7 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = self.forecast_engine(
-                    tokens,
-                    step,
-                    meta_info=batch.samples[0].meta_info,
-                    coords=model_params.rope_coords,
-                )
+                tokens = self.forecast_engine(tokens, batch.conditions[step], coords=model_params.rope_coords)
 
             # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a
             # list. Treat each intermediate state as its own forecast step in the output so the
