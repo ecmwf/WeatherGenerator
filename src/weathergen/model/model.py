@@ -300,7 +300,7 @@ class Model(torch.nn.Module):
         coordinates to its physical space.
     """
 
-    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
+    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size, condition_num_channels):
         """
         Args:
             cf : Configuration with model parameters
