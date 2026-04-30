@@ -340,14 +340,14 @@ def _parallel_read(
         return results, True
 
 
-def _extract_source_interval_starts(results: list, samples: list[int]) -> NDArray:
-    """Build a (n_samples,) datetime64[ns] array of source_interval_start values."""
+def _extract_init_times(results: list, samples: list[int]) -> NDArray:
+    """Build a (n_samples,) datetime64[ns] array of initialisation times (last source time)."""
     si_list = []
     for i in range(len(samples)):
         si = results[i][3].get("source_interval", {})
-        start_str = si.get("start", None)
+        last_str = si.get("end", si.get("start", None))
         si_list.append(
-            np.datetime64(start_str, "ns") if start_str is not None else np.datetime64("NaT", "ns")
+            np.datetime64(last_str, "ns") if last_str is not None else np.datetime64("NaT", "ns")
         )
     return np.array(si_list)
 
@@ -358,7 +358,7 @@ def _assemble_substep(
     tars_list: list[NDArray],
     preds_list: list[NDArray],
     per_sample_valid_times: list,
-    source_interval_starts: NDArray,
+    init_times: NDArray,
     forecast_step_val: int,
     fstep_idx: int,  # index into results[i][2] for scatter obs_times
 ) -> tuple[xr.DataArray, xr.DataArray]:
@@ -372,7 +372,7 @@ def _assemble_substep(
             state.lat,
             state.lon,
             per_sample_valid_times,
-            source_interval_starts,
+            init_times,
             forecast_step_val,
             state.ens_select,
         )
@@ -390,7 +390,7 @@ def _assemble_substep(
             state.samples,
             state.read_channels,
             per_sample_valid_times,
-            source_interval_starts,
+            init_times,
             forecast_step_val,
             state.ens_select,
             per_sample_coords,
@@ -467,7 +467,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
     da_tars_dict: dict = {}
     da_preds_dict: dict = {}
     fstep_counter = 1
-    source_interval_starts: NDArray | None = None
+    init_times: NDArray | None = None
     n_workers = state.n_workers
 
     for fi, fs in enumerate(state.fsteps):
@@ -493,8 +493,8 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
         if fell_back:
             n_workers = 1
 
-        if source_interval_starts is None:
-            source_interval_starts = _extract_source_interval_starts(results, state.samples)
+        if init_times is None:
+            init_times = _extract_init_times(results, state.samples)
 
         n_sub = results[0][3]["n_substeps"][0]
 
@@ -510,7 +510,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
                 tars_list,
                 preds_list,
                 per_sample_valid_times,
-                source_interval_starts,
+                init_times,
                 fs_val,
                 0,
             )
@@ -576,7 +576,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     # --- Re-group: flat_results[sample_idx * n_fsteps + fstep_idx] --------
     n_fsteps = len(state.fsteps)
     # Gather per-sample results in the same shape as get_data_dirstore expects
-    source_interval_starts = _extract_source_interval_starts(
+    init_times = _extract_init_times(
         [flat_results[si * n_fsteps] for si in range(len(state.samples))],
         state.samples,
     )
@@ -618,7 +618,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
                 tars_list,
                 preds_list,
                 per_sample_valid_times,
-                source_interval_starts,
+                init_times,
                 fs_val,
                 0,  # fstep_idx is always 0 since each result has a single fstep
             )

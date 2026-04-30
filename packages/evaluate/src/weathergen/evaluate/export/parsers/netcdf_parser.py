@@ -9,7 +9,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import Regridder, find_pl
+from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_points
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -55,6 +55,7 @@ class NetcdfParser(CfParser):
         self,
         fstep_iterator_results: iter,
         ref_time: np.datetime64,
+        **kwargs,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -85,6 +86,11 @@ class NetcdfParser(CfParser):
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
 
         if da_fs:
+            if len(da_fs) > 1:
+                assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
+                    "Grid points between forecast steps are not consistent."
+                    "Check that inference was not performed with masking"
+                )
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
