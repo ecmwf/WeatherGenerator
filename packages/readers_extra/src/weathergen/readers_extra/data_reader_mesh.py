@@ -59,6 +59,11 @@ class DataReaderMesh(DataReaderTimestep):
         self._dask_arrays_trg = {}
 
         self.sampling_mode = stream_info.get("sampling_mode", "patch")
+        self.patch_stability_window = stream_info.get("patch_stability_window", 1)
+
+        # Auto-enable staircase mode if window is defined and we are in patch mode
+        auto_use_counter = self.sampling_mode == "patch" and "patch_stability_window" in stream_info
+        self.patch_use_counter = stream_info.get("patch_use_counter", auto_use_counter)
 
         if self.filename_source != self.filename_target and self.sampling_mode != "patch":
             _logger.error(
@@ -82,6 +87,7 @@ class DataReaderMesh(DataReaderTimestep):
         self.col_map = {}
         self.stats_means = {}
         self.stats_vars = {}
+        self.patch_counter = 0
 
         # 1. Probe Source
         meta_src = self._probe_file(self.filename_source, is_source=True)
@@ -282,14 +288,25 @@ class DataReaderMesh(DataReaderTimestep):
         start_t, end_t = t_idxs[0], t_idxs[-1] + 1
         n_steps = len(t_idxs)
 
-        lats_ref = self.lats_src if is_source else self.lats_trg
         spatial_indices_ref = self.spatial_indices_src if is_source else self.spatial_indices_trg
         coords_ref = self.coords_src if is_source else self.coords_trg
         ds_ref = self.ds_source if is_source else self.ds_target
         arr_cache = self._dask_arrays_src if is_source else self._dask_arrays_trg
 
-        local_seed = int(idx) + 12345
+        # Patching Seed Logic:
+        # Use internal counter for 'staircase' stability OR sample index for variety.
+        if self.patch_use_counter:
+            patch_idx = self.patch_counter // self.patch_stability_window
+            local_seed = patch_idx + 12345
+        else:
+            # Fallback to time-based index (Warning: sampler often seeds this per-rank!)
+            local_seed = int(idx) + 12345
+            patch_idx = int(idx)
+
         patch_rng = np.random.default_rng(local_seed)
+
+        # Increment counter for next fetch
+        self.patch_counter += 1
 
         if self.sampling_mode == "global_sparse":
             total_points = len(spatial_indices_ref)
@@ -306,41 +323,24 @@ class DataReaderMesh(DataReaderTimestep):
             lon_range = max(0.0, (self.roi_max_lon - self.roi_min_lon) - self.patch_size_deg)
 
             patch_indices_local = np.array([])
-            attempts = 0
 
-            lat_0_candidates = self.roi_min_lat + patch_rng.random(100) * lat_range
-            lon_0_candidates = self.roi_min_lon + patch_rng.random(100) * lon_range
+            lat_0 = self.roi_min_lat + patch_rng.random() * lat_range
+            lon_0 = self.roi_min_lon + patch_rng.random() * lon_range
 
-            while attempts < 100:
-                lat_0 = lat_0_candidates[attempts]
-                lon_0 = lon_0_candidates[attempts]
+            mask_src = (
+                (self.lats_src >= lat_0)
+                & (self.lats_src < lat_0 + self.patch_size_deg)
+                & (self.lons_src >= lon_0)
+                & (self.lons_src < lon_0 + self.patch_size_deg)
+            )
+            mask_trg = (
+                (self.lats_trg >= lat_0)
+                & (self.lats_trg < lat_0 + self.patch_size_deg)
+                & (self.lons_trg >= lon_0)
+                & (self.lons_trg < lon_0 + self.patch_size_deg)
+            )
 
-                mask_src = (
-                    (self.lats_src >= lat_0)
-                    & (self.lats_src < lat_0 + self.patch_size_deg)
-                    & (self.lons_src >= lon_0)
-                    & (self.lons_src < lon_0 + self.patch_size_deg)
-                )
-                mask_trg = (
-                    (self.lats_trg >= lat_0)
-                    & (self.lats_trg < lat_0 + self.patch_size_deg)
-                    & (self.lons_trg >= lon_0)
-                    & (self.lons_trg < lon_0 + self.patch_size_deg)
-                )
-
-                pts_src = np.count_nonzero(mask_src)
-                pts_trg = np.count_nonzero(mask_trg)
-
-                if pts_src >= MIN_PATCH_POINTS and pts_trg >= MIN_PATCH_POINTS:
-                    patch_indices_local = np.where(mask_src if is_source else mask_trg)[0]
-                    break
-                attempts += 1
-
-            if len(patch_indices_local) < MIN_PATCH_POINTS:
-                req_points = min(MIN_PATCH_POINTS, len(lats_ref))
-                patch_indices_local = patch_rng.choice(
-                    len(lats_ref), size=req_points, replace=False
-                )
+            patch_indices_local = np.where(mask_src if is_source else mask_trg)[0]
 
             patch_coords_base = (
                 self.coords_src[patch_indices_local]
@@ -358,6 +358,12 @@ class DataReaderMesh(DataReaderTimestep):
             final_disk_indices = self.spatial_indices_src if is_source else self.spatial_indices_trg
             patch_coords_base = self.coords_src if is_source else self.coords_trg
             use_contiguous_read = True
+
+        if len(final_disk_indices) == 0:
+            _logger.warning(
+                f"[Stream {self._stream_info.get('name')}] NO POINTS FOUND for patch! Skipping."
+            )
+            return ReaderData.empty(len(channels), n_steps)
 
         if use_contiguous_read:
             disk_start, disk_stop = np.min(final_disk_indices), np.max(final_disk_indices) + 1

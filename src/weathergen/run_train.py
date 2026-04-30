@@ -96,6 +96,7 @@ def run_inference(args):
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
+    cf.stage = args.stage
 
     devices = Trainer.init_torch()
     cf = Trainer.init_ddp(cf)
@@ -134,6 +135,7 @@ def run_continue(args):
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
+    cf.stage = args.stage
 
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
@@ -168,6 +170,7 @@ def run_train(args):
     )
     cf = config.set_run_id(cf, args.run_id, False)
     cf.data_loading.rng_seed = int(time.time())
+    cf.stage = args.stage
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
     cf = Trainer.init_ddp(cf)

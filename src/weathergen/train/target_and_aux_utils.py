@@ -4,8 +4,8 @@ import torch
 from weathergen.common.config import Config, merge_configs
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import init_model_and_shard
-from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_diffusion import DiffusionLatentTargetEncoder
+from weathergen.train.target_and_aux_module_base import PhysicalTargetAndAux
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher, FrozenTeacher
 from weathergen.train.teacher_utils import load_encoder_from_checkpoint, prepare_encoder_teacher
 
@@ -48,8 +48,14 @@ def get_target_aux_calculator(
             overrides=target_and_aux_calc_params.get("model_param_overrides", {}),
         )
         # Free components not needed by DiffusionLatentTargetEncoder (only uses the encoder)
-        for attr in ("forecast_engine", "pred_heads", "target_token_engines",
-                     "embed_target_coords", "latent_heads", "latent_pre_norm"):
+        for attr in (
+            "forecast_engine",
+            "pred_heads",
+            "target_token_engines",
+            "embed_target_coords",
+            "latent_heads",
+            "latent_pre_norm",
+        ):
             if hasattr(model, attr) and getattr(model, attr) is not None:
                 delattr(model, attr)
                 setattr(model, attr, None)
@@ -102,7 +108,7 @@ def get_target_aux_calculator(
 
     elif target_and_aux_calc == "FrozenTeacher":
         target_aux = FrozenTeacher.from_pretrained(cf, dataset, device, target_and_aux_calc_params)
-        
+
     else:
         raise NotImplementedError(f"{target_and_aux_calc} is not implemented")
 

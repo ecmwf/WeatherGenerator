@@ -28,16 +28,12 @@ class MaskData:
         return len(self.masks)
 
     def add_mask(self, mask, params, cfg, losses, idx, correspondence, relationship):
-        # TODO: REVERT TO ORIGINAL CODE LATER. ONLY FOR SINGLE-SAMPLE OVERFITTING EXPERIMENTS.
-        # If noise_level_rn exists in params, also add it to global_params for easier downstream access
         global_params = {
             "idx": idx,
             "correspondence": correspondence,
             "loss": losses,
             "relationship": relationship,
         }
-        if "noise_level_rn" in params:
-            global_params["noise_level_rn"] = params["noise_level_rn"]
         self.masks += [mask]
         self.metadata += [
             SampleMetaData(
@@ -561,8 +557,6 @@ class Masker:
 
             if "diffusion_rn" in masking_strategy_config:
                 masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
-
-            
 
         elif strategy == "healpix":
             # prepare healpix-based masking
