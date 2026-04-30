@@ -65,6 +65,95 @@ def save_figure(fig: plt.Figure, output_path: Path) -> None:
     print(f"Saved: {output_path}")
 
 
+def generate_scaling_table(df: pl.DataFrame, input_path: Path, show_run_ids: bool = False) -> None:
+    """Generate a PNG table image with scaling metrics from the parquet file.
+    
+    Columns: num_nodes, training_time, ideal_time, efficiency (optionally run_id)
+    """
+    # Check if required columns exist
+    if "num_nodes" not in df.columns or "training_time" not in df.columns:
+        print("Warning: Required columns (num_nodes, training_time) not found in data")
+        return
+    
+    # Filter out rows with null values in required columns
+    df_filtered = df.filter(
+        pl.col("num_nodes").is_not_null() & pl.col("training_time").is_not_null()
+    ).sort("num_nodes")
+    
+    if len(df_filtered) == 0:
+        print("No valid data for scaling table")
+        return
+    
+    # Get the 1-node training time for ideal time calculation
+    one_node_data = df_filtered.filter(pl.col("num_nodes") == 1)
+    if one_node_data.height == 0:
+        print("Warning: No 1-node data found for ideal time calculation")
+        return
+    
+    t1 = one_node_data["training_time"].item()
+    
+    # Derive scaling type from input filename
+    input_name_lower = input_path.name.lower()
+    if "weak" in input_name_lower:
+        scaling_type = "Weak"
+    elif "strong" in input_name_lower:
+        scaling_type = "Strong"
+    else:
+        scaling_type = "Strong"  # Default to strong
+    
+    # Build table data with proper formatting
+    has_run_id = "run_id" in df_filtered.columns
+    col_names = ["# Nodes", "Training Time (seconds)", "Ideal Time (seconds)", "Efficiency"]
+    if show_run_ids and has_run_id:
+        col_names.insert(0, "run_id")
+    
+    table_data = []
+    for row in df_filtered.iter_rows(named=True):
+        num_nodes = row["num_nodes"]
+        training_time = row["training_time"]
+        
+        if num_nodes == 1:
+            ideal_time = "-"
+            efficiency = "-"
+        else:
+            if scaling_type == "Strong":
+                # Strong scaling: ideal time = t1 / num_nodes
+                ideal_val = t1 / num_nodes
+                efficiency_val = ideal_val / training_time
+            else:
+                # Weak scaling: ideal time = t1 (same work per node)
+                ideal_val = t1
+                efficiency_val = min(1.0, t1 / training_time)
+            
+            ideal_time = f"{ideal_val:.2f}"
+            efficiency = f"{efficiency_val:.2f}"
+        
+        row_data = []
+        if show_run_ids and has_run_id:
+            row_data.append(str(row.get("run_id", "")))
+        row_data.extend([
+            str(num_nodes),
+            f"{training_time:.2f}",
+            ideal_time,
+            efficiency
+        ])
+        table_data.append(row_data)
+    
+    # Generate output filename: input_stem_table.csv
+    output_path = input_path.with_name(input_path.stem + "_table.csv")
+    
+    # Build DataFrame for CSV output
+    df_table_data = {}
+    for i, col in enumerate(col_names):
+        df_table_data[col] = [row[i] for row in table_data]
+    
+    df_table = pl.DataFrame(df_table_data)
+    
+    # Write to CSV
+    df_table.write_csv(output_path)
+    print(f"Saved scaling table: {output_path}")
+
+
 def plot_standard_scaling(
     df: pl.DataFrame,
     output_path: Path,
@@ -73,12 +162,14 @@ def plot_standard_scaling(
     x_scale: str,
     y_scale: str,
     y_metric: str,
+    show_run_ids: bool = False,
 ) -> None:
     """Plot run-level scaling data vs num_nodes."""
     metric_labels = {
         "training_time": "Training Time (seconds)",
         "loss_avg_mean": "Average Loss",
-        "normalized_throughput": "Normalized Throughput (T1 / T)",
+        "normalized_throughput": "Speedup",
+        "efficiency": "Scaling Efficiency",
     }
 
     valid_metrics = [m for m in metrics if m in df.columns and df.filter(pl.col(m).is_not_null()).height > 0]
@@ -94,7 +185,7 @@ def plot_standard_scaling(
         node_counts = df_plot["num_nodes"].unique().to_list() if "num_nodes" in df_plot.columns else []
         colors = color_map_for_nodes(node_counts)
 
-        # Handle normalized_throughput metric
+        # Handle normalized_throughput and efficiency metrics
         if y_metric == "normalized_throughput" and metric == "training_time":
             # Calculate normalized throughput: T1 / T
             one_node_data = df.filter(pl.col("num_nodes") == 1)
@@ -108,6 +199,25 @@ def plot_standard_scaling(
             else:
                 print("Warning: No 1-node data found for normalized throughput calculation")
                 continue
+        elif y_metric == "efficiency" and metric == "training_time":
+            # Calculate efficiency based on scaling type
+            one_node_data = df.filter(pl.col("num_nodes") == 1)
+            if one_node_data.height > 0:
+                t1 = one_node_data["training_time"].item()
+                if scaling_type == "strong":
+                    # Strong scaling: efficiency = (t1 / num_nodes) / training_time
+                    df_plot = df_plot.with_columns(
+                        ((t1 / pl.col("num_nodes")) / pl.col("training_time")).alias("efficiency")
+                    )
+                else:
+                    # Weak scaling: efficiency = min(1.0, t1 / training_time)
+                    df_plot = df_plot.with_columns(
+                        pl.min_horizontal(pl.lit(1.0), t1 / pl.col("training_time")).alias("efficiency")
+                    )
+                plot_y = df_plot["efficiency"]
+            else:
+                print("Warning: No 1-node data found for efficiency calculation")
+                continue
         else:
             plot_y = df_plot[metric]
 
@@ -119,15 +229,19 @@ def plot_standard_scaling(
             markersize=8,
         )
 
-        for x, y, label in zip(df_plot["num_nodes"], plot_y.to_list(), df_plot["run_id"]):
-            ax.text(x, y, label, ha="center", va="bottom", fontsize=8)
+        if show_run_ids:
+            for x, y, label in zip(df_plot["num_nodes"], plot_y.to_list(), df_plot["run_id"]):
+                ax.text(x, y, label, ha="center", va="bottom", fontsize=8)
 
-        if metric == "training_time" and y_metric == "time" and "training_time" in df.columns:
+        if metric == "training_time" and y_metric in ("time", "normalized_throughput", "efficiency") and "training_time" in df.columns:
             one_node_data = df.filter(pl.col("num_nodes") == 1)
             if one_node_data.height > 0:
                 t1 = one_node_data["training_time"].item()
                 nodes = df_plot["num_nodes"].to_list()
-                if scaling_type == "weak":
+                if y_metric == "efficiency":
+                    # For efficiency, optimal is always 1.0 (100% efficiency)
+                    optimal_y = [1.0 for _ in nodes]
+                elif scaling_type == "weak":
                     if y_metric == "normalized_throughput":
                         # For normalized throughput, optimal is 1.0 (no speedup loss)
                         optimal_y = [1.0 for _ in nodes]
@@ -152,11 +266,11 @@ def plot_standard_scaling(
                     ax.vlines(x, y_opt, y, colors="gray", linestyles=":", linewidth=1, alpha=0.7)
                     y_mid = (y + y_opt) / 2
                     ax.annotate(
-                        f"{factor:.2f}x",
+                        f"{factor:.2f}",
                         xy=(x, y_mid),
                         xytext=(4, 0),
                         textcoords="offset points",
-                        fontsize=9,
+                        fontsize=14,
                         fontweight="bold",
                         color="dimgray",
                         va="center",
@@ -166,15 +280,16 @@ def plot_standard_scaling(
         ax.set_xscale(x_scale)
         if y_scale == "log":
             ax.set_yscale("log")
-        ax.set_xlabel("Number of Nodes")
+        ax.set_xlabel("Number of Nodes", fontsize=16)
         if y_metric == "normalized_throughput" and metric == "training_time":
-            ax.set_ylabel("Normalized Throughput (T1 / T)")
+            ax.set_ylabel("Speedup", fontsize=16)
+        elif y_metric == "efficiency" and metric == "training_time":
+            ax.set_ylabel("Scaling Efficiency", fontsize=16)
         else:
-            ax.set_ylabel(metric_labels.get(metric, metric))
-        ax.set_title(metric if y_metric != "normalized_throughput" or metric != "training_time" else "Normalized Throughput")
+            ax.set_ylabel(metric_labels.get(metric, metric), fontsize=16)
+        ax.tick_params(axis='both', which='major', labelsize=14)
         ax.grid(True, alpha=0.3)
 
-    fig.suptitle("Scaling Analysis", fontsize=16)
     plt.tight_layout()
     save_figure(fig, output_path)
 
@@ -223,8 +338,9 @@ def plot_detailed_scaling(
     ax.set_xscale(x_scale)
     if y_scale == "log":
         ax.set_yscale("log")
-    ax.set_ylabel("Elapsed Training Time (seconds)")
-    ax.set_title("Elapsed Training Time vs Samples")
+    ax.set_ylabel("Elapsed Training Time (seconds)", fontsize=16)
+    ax.set_title("Elapsed Training Time vs Samples", fontsize=16)
+    ax.tick_params(axis='both', which='major', labelsize=14)
     ax.grid(True, alpha=0.3)
     ax.legend(title="Node Count")
 
@@ -242,9 +358,10 @@ def plot_detailed_scaling(
     ax.set_xscale(x_scale)
     if y_scale == "log":
         ax.set_yscale("log")
-    ax.set_xlabel("Total Number of Samples")
-    ax.set_ylabel("Average Loss")
-    ax.set_title("Loss vs Samples")
+    ax.set_xlabel("Total Number of Samples", fontsize=16)
+    ax.set_ylabel("Average Loss", fontsize=16)
+    ax.set_title("Loss vs Samples", fontsize=16)
+    ax.tick_params(axis='both', which='major', labelsize=14)
     ax.grid(True, alpha=0.3)
     ax.legend(title="Node Count")
 
@@ -263,15 +380,16 @@ def build_parser() -> argparse.ArgumentParser:
     standard.add_argument("--output", type=Path, default=None, help="Output image path")
     standard.add_argument("--y-scale", choices=["linear", "log"], default="linear", help="Y-axis scale")
     standard.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
-    standard.add_argument("--y-metric", choices=["time", "normalized_throughput"], default="normalized_throughput", help="Y-axis metric: 'time' for time-to-solution or 'normalized_throughput' for T1/T")
+    standard.add_argument("--y-metric", choices=["time", "normalized_throughput", "efficiency"], default="normalized_throughput", help="Y-axis metric: 'time' for time-to-solution, 'normalized_throughput' for T1/T, or 'efficiency' for scaling efficiency")
+    standard.add_argument("--show-run-ids", action="store_true", help="Show run_id labels on the plot and in the output table")
 
-    # Subparser for loss-only plots (separate entry point)
     loss_only = subparsers.add_parser("loss", help="Plot loss metrics vs num_nodes (separate from throughput)")
     loss_only.add_argument("--type", required=True, choices=["strong", "weak"], help="Scaling type")
     loss_only.add_argument("--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file")
     loss_only.add_argument("--output", type=Path, default=None, help="Output image path")
     loss_only.add_argument("--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale")
     loss_only.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
+    loss_only.add_argument("--show-run-ids", action="store_true", help="Show run_id labels on the plot and in the output table")
 
     detailed = subparsers.add_parser("detailed", help="Plot sample-level detailed scaling metrics")
     detailed.add_argument("--input", type=Path, default=Path("scaling_data_detailed.parquet"), help="Input detailed parquet/ndjson file")
@@ -304,7 +422,9 @@ def main() -> None:
         print(f"Loaded {len(df)} rows")
         # Standard mode: only plot training_time with normalized throughput or time
         metrics_to_plot = ["training_time"]
-        plot_standard_scaling(df, output_path, args.type, metrics_to_plot, args.x_scale, args.y_scale, args.y_metric)
+        plot_standard_scaling(df, output_path, args.type, metrics_to_plot, args.x_scale, args.y_scale, args.y_metric, args.show_run_ids)
+        # Generate scaling table
+        generate_scaling_table(df, input_path, show_run_ids=args.show_run_ids)
         return
 
     if args.mode == "loss":
@@ -325,7 +445,9 @@ def main() -> None:
         print(f"Loaded {len(df)} rows")
         # Loss mode: only plot loss_avg_mean
         metrics_to_plot = ["loss_avg_mean"]
-        plot_standard_scaling(df, output_path, args.type, metrics_to_plot, args.x_scale, args.y_scale, "time")
+        plot_standard_scaling(df, output_path, args.type, metrics_to_plot, args.x_scale, args.y_scale, "time", args.show_run_ids)
+        # Generate scaling table
+        generate_scaling_table(df, input_path, show_run_ids=args.show_run_ids)
         return
 
     if args.mode == "detailed":
