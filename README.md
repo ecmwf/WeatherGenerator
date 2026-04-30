@@ -15,7 +15,7 @@ More details coming soon. Please open an issue if you are interested in using th
 <hr>
 
 <p align="center">
-  <img src="assets/weathergenerator_partner.png" alt="Partners" width="1000px">
+  <img src="assets/weathergenerator_partner.png" alt="Partners" width="600px">
 </p>
 
 # How to use the WeatherGenerator project
