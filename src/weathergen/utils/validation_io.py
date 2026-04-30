@@ -50,6 +50,15 @@ def write_output(
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
+
+    # Diffusion inference inflates the model output's fstep dimension to one entry per
+    # ODE denoising step (the trajectory). The batch only has the original physical
+    # forecast indices, so synthesize a contiguous run of indices starting at the
+    # original first index to cover every entry in model_output / target_aux_out.
+    n_pred_steps = len(model_output.physical)
+    if n_pred_steps > len(timestep_idxs):
+        timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
+
     targets_lens = []
 
     # TODO Maybe stopping at forecast_steps explained #1657
