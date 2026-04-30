@@ -536,6 +536,39 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
+    def _build_condition_data(
+        self,
+        batch: ModelBatch,
+        condition_ds: AnyDataReader,
+        base_idx: TIndex,
+        num_output_steps: int,
+    ) -> np.ndarray:
+        """
+        Collect encoded condition values for every forecast step.
+
+        Parameters
+        ----------
+        condition_ds :
+            The condition reader (DataReaderCondition instance).
+        base_idx :
+            Base time index for this sample.
+        num_output_steps :
+            Total number of output/forecast steps.
+
+        Returns
+        -------
+        np.ndarray of shape (num_output_steps - output_offset, num_channels)
+        """
+
+
+        for i in range(num_output_steps):    
+            
+            condition_data = condition_ds.get_condition(
+                    base_idx + (self.time_step * i) // self.step_timedelta)
+            batch.get_source_samples().conditions[i] += condition_ds.get_condition(
+                 base_idx + (self.time_step * i) // self.step_timedelta)
+    
+
     def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
         """
         Collect all data needed for current stream to potentially amortize costs by

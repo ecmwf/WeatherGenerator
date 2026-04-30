@@ -205,7 +205,10 @@ class LossPhysical(LossModuleBase):
         source2target_idxs, output_info, target2source_idxs, target_info = metadata
 
         # TODO: iterate over batch dimension
-        for stream_info in self.cf.streams:
+
+        self.data_streams = [stream for stream in self.cf.streams if stream["type"] != "condition"]
+        
+        for stream_info in self.data_streams:
             stream_name = stream_info["name"]
             # TODO: avoid this
             target_channels = (
