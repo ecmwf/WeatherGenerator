@@ -167,6 +167,33 @@ def init_model_and_shard(
     return model, model_params
 
 
+def _resolve_checkpoint_path(path_run, run_id: str, istep) -> str:
+    """Resolve checkpoint filename with backward compatibility for older naming conventions.
+
+    Tries candidate filename formats from newest to oldest and returns the first that exists.
+    Formats tried (for a specific istep):
+      1. current   : {run_id}_chkpt{istep:07d}.chkpt
+      2. 5-digit   : {run_id}_chkpt{istep:05d}.chkpt  (old mini_epoch format)
+    """
+    if istep == -1 or istep is None:
+        return f"{run_id}_latest.chkpt"
+
+    candidates = [
+        f"{run_id}_chkpt{istep:07d}.chkpt",
+        f"{run_id}_chkpt{istep:05d}.chkpt",
+    ]
+    for filename in candidates:
+        if (path_run / filename).exists():
+            if filename != candidates[0]:
+                logger.warning(
+                    f"Checkpoint not found in current format; loaded using legacy format: {filename}"
+                )
+            return filename
+
+    # fall back to current format so the caller raises a descriptive FileNotFoundError
+    return candidates[0]
+
+
 def load_model(cf, model, device, run_id: str, istep=-1):
     """Loads model state from checkpoint and checks for missing and unused keys.
     Args:
@@ -175,10 +202,7 @@ def load_model(cf, model, device, run_id: str, istep=-1):
     """
 
     path_run = get_path_model(run_id=run_id)
-    istep_id = (
-        f"chkpt{istep:07d}" if istep != -1 and istep is not None else "latest"
-    )
-    filename = f"{run_id}_{istep_id}.chkpt"
+    filename = _resolve_checkpoint_path(path_run, run_id, istep)
 
     params = torch.load(
         path_run / filename, map_location=torch.device("cpu"), mmap=True, weights_only=True

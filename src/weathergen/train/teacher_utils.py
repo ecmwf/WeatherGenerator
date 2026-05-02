@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 
 from weathergen.common.config import get_path_model
+from weathergen.model.model_interface import _resolve_checkpoint_path
 from weathergen.model.engines import (
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
@@ -107,12 +108,7 @@ def load_encoder_from_checkpoint(
     strict=False. Moves the model to the given device afterwards.
     """
     path_run = Path(cf.get("model_path", get_path_model(run_id=teacher_run_id))) / teacher_run_id
-    istep_id = (
-        f"chkpt{teacher_istep:07d}"
-        if teacher_istep is not None and teacher_istep != -1
-        else "latest"
-    )
-    filename = f"{teacher_run_id}_{istep_id}.chkpt"
+    filename = _resolve_checkpoint_path(path_run, teacher_run_id, teacher_istep)
 
     params = torch.load(path_run / filename, map_location="cpu", mmap=True, weights_only=True)
 

@@ -96,7 +96,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.num_healpix_cells: int = 12 * 4**self.healpix_level
 
         self.mode_cfg = mode_cfg
-        self.isteps = mode_cfg.num_isteps
+        self.isteps = mode_cfg.get("num_isteps", mode_cfg.get("num_mini_epochs", None))  # backwards compatibility
         self.shuffle = mode_cfg.shuffle
         self.batch_size = get_batch_size_from_config(mode_cfg)
         self.len_timedelta: np.timedelta64 = mode_cfg.time_window_len

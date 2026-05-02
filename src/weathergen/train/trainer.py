@@ -114,6 +114,9 @@ class Trainer(TrainerBase):
         assert len(self.training_cfg.model_input.keys()) != 0, (
             "You probably have no loss term enabled"
         )
+        # backward compatibility for loading mini-epoch-based configs, which had num_mini_epochs instead of num_isteps
+        if self.training_cfg.get("num_mini_epochs", None) is not None:
+            self.training_cfg.num_isteps = self.training_cfg.num_mini_epochs * self.training_cfg.samples_per_mini_epoch
 
         # validation and test configs are training configs, updated by specified keys
         self.validation_cfg = get_active_stage_config(
@@ -326,7 +329,7 @@ class Trainer(TrainerBase):
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
         len_ds = len(self.dataset)
-        lr_steps = self.training_cfg.num_isteps
+        lr_steps = self.training_cfg.get("num_isteps")
         self.lr_scheduler = LearningRateScheduler(
             self.optimizer,
             self.batch_size_per_gpu,
