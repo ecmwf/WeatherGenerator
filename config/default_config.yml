@@ -124,7 +124,7 @@ general:
 train_logging:
   terminal: 10
   metrics: 20
-  checkpoint: 250
+  checkpoint: 1000
   log_grad_norms: False
 
 # parameters for data loading

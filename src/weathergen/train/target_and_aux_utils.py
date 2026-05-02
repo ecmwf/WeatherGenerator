@@ -69,9 +69,9 @@ def get_target_aux_calculator(
         # Optional: warm start encoder from checkpoint
         teacher_run_id = target_and_aux_calc_params.get("teacher_run_id")
         if teacher_run_id is not None:
-            teacher_mini_epoch = target_and_aux_calc_params.get("teacher_mini_epoch", -1)
+            teacher_istep = target_and_aux_calc_params.get("teacher_istep", -1)
             load_encoder_from_checkpoint(
-                ema_model.ema_model, cf, teacher_run_id, teacher_mini_epoch, device
+                ema_model.ema_model, cf, teacher_run_id, teacher_istep, device
             )
 
     elif target_and_aux_calc == "FrozenTeacher":

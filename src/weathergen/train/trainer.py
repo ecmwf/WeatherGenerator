@@ -520,7 +520,7 @@ class Trainer(TrainerBase):
                     self._log_collapse_metrics(TRAIN)
 
             # save two model checkpoints (with designation _latest and named by step)
-            if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
+            if self.cf.general.istep % self.train_logging.checkpoint == 0 and bidx > 0:
                 self.save_model(-1)
                 self.save_model(self.cf.general.istep)
 
@@ -671,7 +671,7 @@ class Trainer(TrainerBase):
                 [
                     self.cf.general.run_id,
                     "_",
-                    "latest" if istep == -1 else f"chkpt{istep:06d}",
+                    "latest" if istep == -1 else f"chkpt{istep:07d}",
                     ("_" + name) if name is not None else "",
                 ]
             )
@@ -762,7 +762,7 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation ({self.cf.general.run_id}) : {istep:04d} : 
+                        f"""validation ({self.cf.general.run_id}) : {istep:07d} : 
                         {np.nanmean(avg_loss)}"""
                     )
 
@@ -771,8 +771,8 @@ class Trainer(TrainerBase):
                     dt = time.time() - self.t_start
                     len_dataset = len(self.data_loader) // self.batch_size_per_gpu
                     pstr = (
-                        f"{istep:04d} : {bidx:05d}/{len_dataset:05d} : "
-                        + f"{self.cf.general.istep:06d} : loss = {np.nanmean(avg_loss):.4E} "
+                        f"{bidx:07d} : "
+                        + f"{self.cf.general.istep:07d}/{len_dataset:07d} : loss = {np.nanmean(avg_loss):.4E} "
                         + f"(lr={self.lr_scheduler.get_lr():.2E}, "
                     )
                     if self.log_grad_norms:

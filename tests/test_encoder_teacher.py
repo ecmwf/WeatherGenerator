@@ -276,8 +276,8 @@ class TestLoadEncoderFromCheckpoint:
         # Load - should not raise despite extra keys
         load_encoder_from_checkpoint(model, cf, run_id, -1, "cpu")
 
-    def test_mini_epoch_filename(self, tmp_path):
-        """Test that specific mini_epoch generates correct filename."""
+    def test_istep_filename(self, tmp_path):
+        """Test that specific istep generates correct filename."""
         model = nn.Module()
         model.encoder = nn.Linear(10, 20)
 
@@ -293,7 +293,7 @@ class TestLoadEncoderFromCheckpoint:
         load_encoder_from_checkpoint(model, cf, run_id, 42, "cpu")
 
     def test_latest_filename(self, tmp_path):
-        """Test that mini_epoch=-1 generates 'latest' filename."""
+        """Test that istep=-1 generates 'latest' filename."""
         model = nn.Module()
         model.encoder = nn.Linear(10, 20)
 
@@ -308,8 +308,8 @@ class TestLoadEncoderFromCheckpoint:
         cf = OmegaConf.create({"model_path": str(tmp_path)})
         load_encoder_from_checkpoint(model, cf, run_id, -1, "cpu")
 
-    def test_none_mini_epoch_uses_latest(self, tmp_path):
-        """Test that mini_epoch=None generates 'latest' filename."""
+    def test_none_istep_uses_latest(self, tmp_path):
+        """Test that istep=None generates 'latest' filename."""
         model = nn.Module()
         model.encoder = nn.Linear(10, 20)
 

@@ -564,7 +564,7 @@ def metric_list_to_json(
                 # Match the expected filename pattern
                 save_path = (
                     reader.metrics_dir
-                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.istep:06d}.json"
+                    / f"{run_id}_{stream}_{region}_{metric}_chkpt{reader.istep:07d}.json"
                 )
                 metric_data_dict = metric_data.to_dict()
 

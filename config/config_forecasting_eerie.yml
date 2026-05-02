@@ -120,7 +120,7 @@ general:
 train_logging:
   terminal: 10
   metrics: 20
-  checkpoint: 250
+  checkpoint: 1000
 
 # parameters for data loading
 data_loading :

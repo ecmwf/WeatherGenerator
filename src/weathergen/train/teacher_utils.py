@@ -98,7 +98,7 @@ def load_encoder_from_checkpoint(
     model: nn.Module,
     cf,
     teacher_run_id: str,
-    teacher_mini_epoch: int | None,
+    teacher_istep: int | None,
     device: torch.device | str,
 ) -> None:
     """Load only encoder weights from a checkpoint into a model.
@@ -107,12 +107,12 @@ def load_encoder_from_checkpoint(
     strict=False. Moves the model to the given device afterwards.
     """
     path_run = Path(cf.get("model_path", get_path_model(run_id=teacher_run_id))) / teacher_run_id
-    mini_epoch_id = (
-        f"chkpt{teacher_mini_epoch:05d}"
-        if teacher_mini_epoch is not None and teacher_mini_epoch != -1
+    istep_id = (
+        f"chkpt{teacher_istep:07d}"
+        if teacher_istep is not None and teacher_istep != -1
         else "latest"
     )
-    filename = f"{teacher_run_id}_{mini_epoch_id}.chkpt"
+    filename = f"{teacher_run_id}_{istep_id}.chkpt"
 
     params = torch.load(path_run / filename, map_location="cpu", mmap=True, weights_only=True)
 

@@ -177,7 +177,7 @@ general:
 train_logging:
   terminal: 10
   metrics: 20
-  checkpoint: 250
+  checkpoint: 1000
 
 # parameters for data loading
 data_loading :
@@ -193,8 +193,8 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  # num_isteps: 262144 # 64 epochs * 4096 samples = 262144 isteps
-  num_isteps : 1024
+  num_isteps: 262144 # 64 epochs * 4096 samples = 262144 isteps
+  # num_isteps : 1024
   shuffle: True
 
   start_date: 1979-01-01T00:00

@@ -78,7 +78,7 @@ class WeatherGenReader(Reader):
             Configuration file from the inference run
         """
         config = {}
-
+        
         if self.private_paths:
             _logger.info(
                 f"Loading config for run {self.run_id} from private paths: {self.private_paths}"
@@ -214,7 +214,7 @@ class WeatherGenReader(Reader):
             parameters = {}
         score_path = (
             Path(self.metrics_dir)
-            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.istep:06d}.json"
+            / f"{self.run_id}_{stream}_{region}_{metric}_chkpt{self.istep:07d}.json"
         )
         _logger.debug(f"Looking for: {score_path}")
 
@@ -344,7 +344,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         # For backwards compatibility, assume zarr store is local (.zarr format).
 
         fname_zarr = self.results_dir.joinpath(
-            f"validation_chkpt{self.istep:06d}_rank{self.rank:04d}.{zarr_ext}"
+            f"validation_chkpt{self.istep:07d}_rank{self.rank:04d}.{zarr_ext}"
         )
 
         assert fname_zarr.exists(), f"Zarr file {fname_zarr} does not exist."

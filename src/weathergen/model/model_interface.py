@@ -176,7 +176,7 @@ def load_model(cf, model, device, run_id: str, istep=-1):
 
     path_run = get_path_model(run_id=run_id)
     istep_id = (
-        f"chkpt{istep:06d}" if istep != -1 and istep is not None else "latest"
+        f"chkpt{istep:07d}" if istep != -1 and istep is not None else "latest"
     )
     filename = f"{run_id}_{istep_id}.chkpt"
 

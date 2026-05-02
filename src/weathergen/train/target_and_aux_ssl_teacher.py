@@ -134,20 +134,20 @@ class FrozenTeacher(EncoderTeacher):
             cf: Full training config
             dataset: Dataset for model creation
             device: Target device
-            params: Dict with 'teacher_run_id' and optional 'teacher_mini_epoch'
+            params: Dict with 'teacher_run_id' and optional 'teacher_istep' keys specifying the checkpoint to load
         """
 
         teacher_run_id = params["teacher_run_id"]
-        teacher_mini_epoch = params.get("teacher_mini_epoch", -1)
+        teacher_istep = params.get("teacher_istep", -1)
 
         # Load teacher's config, create model with teacher's architecture
-        teacher_config = load_run_config(teacher_run_id, teacher_mini_epoch, model_path=None)
+        teacher_config = load_run_config(teacher_run_id, teacher_istep, model_path=None)
         teacher_config = merge_configs(teacher_config, {"with_ddp": False, "with_fsdp": False})
 
         teacher_model = get_model(teacher_config, "student", dataset, {})
 
         # Load only encoder weights
-        load_encoder_from_checkpoint(teacher_model, cf, teacher_run_id, teacher_mini_epoch, device)
+        load_encoder_from_checkpoint(teacher_model, cf, teacher_run_id, teacher_istep, device)
 
         # Strip to encoder + create fresh heads
         prepare_encoder_teacher(teacher_model, cf.training_config, teacher_config)

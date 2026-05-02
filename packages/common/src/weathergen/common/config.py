@@ -268,7 +268,7 @@ def _get_model_config_file_write_name(run_id: str, istep: int | None):
     elif istep == -1:
         istep_str = "_latest"
     else:
-        istep_str = f"_chkpt{istep:06d}"
+        istep_str = f"_chkpt{istep:07d}"
 
     return f"model_{run_id}{istep_str}.json"
 
@@ -280,7 +280,7 @@ def _get_model_config_file_read_name(run_id: str, istep: int | None):
     elif istep == -1:
         istep_str = "_latest"
     else:
-        istep_str = f"_chkpt{istep:06d}"
+        istep_str = f"_chkpt{istep:07d}"
 
     return f"model_{run_id}{istep_str}.json"
 
@@ -292,7 +292,7 @@ def get_model_results(run_id: str, istep: int, rank: int) -> Path:
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
 
     for ext in StoreType.extensions():
-        zarr_path = run_results / f"validation_chkpt{istep:06d}_rank{rank:04d}.{ext}"
+        zarr_path = run_results / f"validation_chkpt{istep:07d}_rank{rank:04d}.{ext}"
 
         if zarr_path.exists() or zarr_path.is_dir():
             return zarr_path
@@ -650,7 +650,7 @@ def get_path_results(config: Config, istep: int) -> Path:
     """Get the path to validation results for a specific istep and rank."""
     ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config)
-    fname = f"validation_chkpt{istep:06d}_rank{config.rank:04d}.{ext}"
+    fname = f"validation_chkpt{istep:07d}_rank{config.rank:04d}.{ext}"
 
     return base_path / fname
 
