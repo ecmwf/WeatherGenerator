@@ -166,21 +166,24 @@ def generate_scaling_table(
         if show_run_ids and has_run_id:
             col_names.insert(0, "run_id")
 
-    table_data = []
+    table_rows = []
     for row in df_filtered.iter_rows(named=True):
         num_nodes = row["num_nodes"]
         training_time = row["training_time"]
 
-        row_data = []
-        if show_run_ids and has_run_id:
-            row_data.append(str(row.get("run_id", "")))
-
         if is_combined:
             # Combined table: add metrics for each type
-            row_data.append(str(num_nodes))
+            row_data = {}
+            if show_run_ids and has_run_id:
+                row_data["run_id"] = str(row.get("run_id", ""))
+            row_data["# Nodes"] = str(num_nodes)
+
             for stype in scaling_types:
+                time_col = f"{stype.capitalize()} Training Time (seconds)"
+                eff_col = f"{stype.capitalize()} Efficiency"
+                row_data[time_col] = f"{training_time:.2f}"
                 if num_nodes == 1:
-                    efficiency = "-"
+                    row_data[eff_col] = "-"
                 else:
                     if stype == "strong":
                         # Strong scaling: ideal time = t1 / num_nodes
@@ -191,15 +194,18 @@ def generate_scaling_table(
                         ideal_val = t1
                         efficiency_val = min(1.0, t1 / training_time)
 
-                    efficiency = f"{efficiency_val:.2f}"
-
-                row_data.extend([f"{training_time:.2f}", efficiency])
+                    row_data[eff_col] = f"{efficiency_val:.2f}"
         else:
             # Single type table (original format)
             scaling_type = scaling_types[0]
+            row_data = {}
+            if show_run_ids and has_run_id:
+                row_data["run_id"] = str(row.get("run_id", ""))
+            row_data["# Nodes"] = str(num_nodes)
+            row_data["Training Time (seconds)"] = f"{training_time:.2f}"
             if num_nodes == 1:
-                ideal_time = "-"
-                efficiency = "-"
+                row_data["Ideal Time (seconds)"] = "-"
+                row_data["Efficiency"] = "-"
             else:
                 if scaling_type == "strong":
                     # Strong scaling: ideal time = t1 / num_nodes
@@ -210,22 +216,18 @@ def generate_scaling_table(
                     ideal_val = t1
                     efficiency_val = min(1.0, t1 / training_time)
 
-                ideal_time = f"{ideal_val:.2f}"
-                efficiency = f"{efficiency_val:.2f}"
+                row_data["Ideal Time (seconds)"] = f"{ideal_val:.2f}"
+                row_data["Efficiency"] = f"{efficiency_val:.2f}"
 
-            row_data.extend([f"{training_time:.2f}", ideal_time, efficiency])
-
-        table_data.append(row_data)
+        table_rows.append(row_data)
 
     # Generate output filename: input_stem_table.csv
     output_path = input_path.with_name(input_path.stem + "_table.csv")
 
-    # Build DataFrame for CSV output
-    df_table_data = {}
-    for i, col in enumerate(col_names):
-        df_table_data[col] = [row[i] for row in table_data]
-
-    df_table = pl.DataFrame(df_table_data)
+    # Build DataFrame for CSV output from named columns.
+    df_table = pl.DataFrame(
+        [{col: row.get(col, "-") for col in col_names} for row in table_rows]
+    )
 
     # Write to CSV
     df_table.write_csv(output_path)
@@ -324,9 +326,9 @@ def generate_combined_scaling_table(
         else {}
     )
 
-    table_data = []
+    table_rows = []
     for num_nodes in all_nodes:
-        row_data = []
+        row_data = {}
 
         # Get run_id if available
         if show_run_ids and has_run_id:
@@ -335,47 +337,47 @@ def generate_combined_scaling_table(
                     num_nodes, weak_run_id_lookup.get(num_nodes, "")
                 )
             )
-            row_data.append(run_id)
+            row_data["run_id"] = run_id
 
         # Add num_nodes
-        row_data.append(str(num_nodes))
+        row_data["# Nodes"] = str(num_nodes)
 
         # Strong scaling metrics
         if num_nodes in strong_lookup:
             training_time_strong = strong_lookup[num_nodes]
+            row_data["Strong Training Time (seconds)"] = f"{training_time_strong:.2f}"
             if num_nodes == 1:
-                efficiency_strong = "-"
+                row_data["Strong Efficiency"] = "-"
             else:
                 ideal_strong = t1_strong / num_nodes
-                efficiency_strong = f"{ideal_strong / training_time_strong:.2f}"
-            row_data.extend([f"{training_time_strong:.2f}", efficiency_strong])
+                row_data["Strong Efficiency"] = f"{ideal_strong / training_time_strong:.2f}"
         else:
-            row_data.extend(["-", "-"])
+            row_data["Strong Training Time (seconds)"] = "-"
+            row_data["Strong Efficiency"] = "-"
 
         # Weak scaling metrics
         if num_nodes in weak_lookup:
             training_time_weak = weak_lookup[num_nodes]
+            row_data["Weak Training Time (seconds)"] = f"{training_time_weak:.2f}"
             if num_nodes == 1:
-                efficiency_weak = "-"
+                row_data["Weak Efficiency"] = "-"
             else:
                 ideal_weak = t1_weak  # Weak scaling: ideal is same as 1-node time
-                efficiency_weak = f"{min(1.0, ideal_weak / training_time_weak):.2f}"
-            row_data.extend([f"{training_time_weak:.2f}", efficiency_weak])
+                row_data["Weak Efficiency"] = f"{min(1.0, ideal_weak / training_time_weak):.2f}"
         else:
-            row_data.extend(["-", "-"])
+            row_data["Weak Training Time (seconds)"] = "-"
+            row_data["Weak Efficiency"] = "-"
 
-        table_data.append(row_data)
+        table_rows.append(row_data)
 
     # Ensure output path has .csv suffix
     if output_path.suffix.lower() != ".csv":
         output_path = output_path.with_suffix(".csv")
 
-    # Build DataFrame for CSV output
-    df_table_data = {}
-    for i, col in enumerate(col_names):
-        df_table_data[col] = [row[i] for row in table_data]
-
-    df_table = pl.DataFrame(df_table_data)
+    # Build DataFrame for CSV output from named columns.
+    df_table = pl.DataFrame(
+        [{col: row.get(col, "-") for col in col_names} for row in table_rows]
+    )
 
     # Write to CSV
     df_table.write_csv(output_path)
@@ -383,8 +385,11 @@ def generate_combined_scaling_table(
 
     # Generate PNG visualization of the table
     png_path = output_path.with_suffix(".png")
-    _save_table_as_image(table_data, col_names, png_path)
-    print(f"Saved scaling table PNG: {png_path}")
+    _save_table_as_image(
+        [[row.get(col, "-") for col in col_names] for row in table_rows],
+        col_names,
+        png_path,
+    )
 
 
 def _save_table_as_image(table_data: list, col_names: list, output_path: Path) -> None:
