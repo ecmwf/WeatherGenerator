@@ -40,7 +40,7 @@ def init_runstate() -> RunState:
 
 
 def _get_runstate_file_write_name(run_id: str, mini_epoch: int | None):
-    """Generate the filename for writing a model run state file."""
+    """Generate the filename for writing a run state file."""
     if mini_epoch is None:
         mini_epoch_str = ""
     elif mini_epoch == -1:
@@ -69,7 +69,16 @@ def save_runstate(runstate: RunState, config: Config, mini_epoch: int | None):
 
 def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -> RunState:
     """
-    Load runstate
+    Load a state file from a given run_id and mini_epoch.
+    If run_id is a full path, loads it from the full path.
+
+    Args:
+        run_id: Run ID of the pretrained WeatherGenerator model
+        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
+        model_path: Path to the model directory. If None, uses the model_path from private config.
+
+    Returns:
+        RunState object loaded from the specified run and mini_epoch.
     """
 
     # Loading path
