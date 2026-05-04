@@ -86,6 +86,7 @@ class Trainer(TrainerBase):
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
         self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
+        self.t_training_start: float = 0
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
