@@ -1,0 +1,52 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# logging config
+train_logging:
+
+  # performance metrics:
+  track_performance_metrics: True
+
+# config for training
+training_config:
+  metrics: 2
+
+  num_mini_epochs: 10
+  samples_per_mini_epoch: 8192
+  shuffle: True
+  
+  model_input: {
+    "random_easy" : {
+      num_samples: 2,
+    },
+  }
+
+  losses : {
+    "student-teacher": {
+        enabled: True,
+        type: LossLatentSSLStudentTeacher,
+        weight: 1.0,
+        loss_fcts : {
+          "JEPA": {
+            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
+            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+            "dropout_rate": 0.1,
+            target_source_correspondence: {0 : {0 : "subset", 1: "subset"} },
+        },
+        },
+        target_and_aux_calc: { "EMATeacher" : 
+          { ema_ramp_up_ratio : null,
+            ema_halflife_in_thousands: 1e-1,
+            model_param_overrides : { 
+              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
+            },
+          }
+        }
+      }
+  }
