@@ -128,7 +128,11 @@ case "$1" in
       # 1. Get the path of the private config of the cluster
       # 2. Read the yaml and extract the path of the shared conf
       # This uses the yq command. It is a python package so uvx (bundled with uv) will donwload and create the right venv
-      export working_dir=$(cat $("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config) | uvx yq .path_shared_working_dir)
+      # The 'yq' command is used in a separate virtual environment, because the cache 
+      # around that tool can get corrupted. 
+      # See https://github.com/ecmwf/WeatherGenerator/issues/2298
+      export working_dir=$(cat "$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config)" |
+        UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV=""  uvx yq .path_shared_working_dir)      
       # Remove quotes
       export working_dir=$(echo "$working_dir" | sed 's/[\"\x27]//g')
       # If the working directory does not exist, exit with an error
