@@ -320,6 +320,10 @@ class StreamData:
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
+    
+    # Forecast conditions have been moved to batch-level and are no longer
+    # stored per-stream in StreamData. This method was intentionally removed.
+    
 
         self.target_is_spoof[fstep] = is_spoof
 
