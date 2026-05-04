@@ -12,7 +12,6 @@ import logging
 import numpy as np
 import torch
 
-import weathergen.common.config as config
 import weathergen.common.io as io
 import weathergen.common.run_state as runstate
 from weathergen.common.io import TimeRange, zarrio_writer
