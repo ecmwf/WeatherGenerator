@@ -151,6 +151,9 @@ def calc_scores_per_stream(
     local_scores = {}
 
     available_data = reader.check_availability(stream, mode="evaluation")
+    if not available_data.score_availability:
+        _logger.warning(f"RUN {reader.run_id} - {stream}: Skipping scoring.")
+        return {}
     fsteps = available_data.fsteps
     samples = available_data.samples
     channels = available_data.channels

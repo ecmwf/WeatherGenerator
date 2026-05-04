@@ -126,10 +126,6 @@ def build_gridded_dataarrays(
 
     # valid_time must be 2D (sample, ipoint) to match the shape produced by
     # get_data() → _force_consistent_grids → xr.concat(dim="sample").
-    # _add_lead_time_coord computes lead_time = valid_time - source_interval_start
-    # and needs both arrays to broadcast as (sample, ipoint).
-    # Each sample has its OWN valid_time (different initialisation dates),
-    # so we build a 2D array where row i is filled with sample i's time.
     vt_col = np.array(per_sample_valid_times, dtype="datetime64[ns]")  # (n_samples,)
     valid_time_2d = np.broadcast_to(
         vt_col[:, np.newaxis],  # (n_samples, 1)

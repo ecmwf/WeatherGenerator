@@ -48,6 +48,7 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
+from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -86,6 +87,7 @@ class Trainer(TrainerBase):
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
+        self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -167,6 +169,13 @@ class Trainer(TrainerBase):
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
+
+        if cf.train_logging.get("track_performance_metrics"):
+            self.perf_tracker = ThroughputTracker(
+                device=torch.device(self.devices[0]),
+                warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
+                batch_size_per_gpu=self.batch_size_per_gpu,
+            )
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -531,6 +540,13 @@ class Trainer(TrainerBase):
             if self.validate_with_ema:
                 self.ema_model.update(step, batch_size_total)
 
+            self.perf_tracker.step(
+                batch,
+                self.cf.general.istep,
+                log_fn=lambda m: self.train_logger.log_metrics(
+                    TRAIN, m, step=self.cf.general.istep
+                ),
+            )
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.runstate.istep):
                 self.collapse_monitor._compute_collapse_metrics(

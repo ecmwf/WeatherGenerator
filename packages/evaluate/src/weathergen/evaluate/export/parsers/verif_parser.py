@@ -76,6 +76,8 @@ class VerifParser(CfParser):
         self,
         fstep_iterator_results: iter,
         ref_time: np.datetime64,
+        source_interval_start: np.datetime64 = None,
+        source_interval_end: np.datetime64 = None,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -83,6 +85,8 @@ class VerifParser(CfParser):
         ----------
             fstep_iterator_results : Iterator over results from get_data_worker.
             ref_time : Forecast reference time for the sample.
+            source_interval_start : Start of the source (conditioning) window.
+            source_interval_end : End of the source (conditioning) window.
         Returns
         -------
             None
@@ -111,7 +115,7 @@ class VerifParser(CfParser):
         if da_fs:
             if self.zarr_coords is None:
                 self.zarr_coords = get_grid_points(da_fs[0])
-                self.zarr_dt = self.get_zarr_dt(da_fs[0])
+                self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end)
             # check consistency of grid points across forecast steps
             if len(da_fs) > 1:
                 assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
@@ -135,20 +139,25 @@ class VerifParser(CfParser):
                 vars_to_merge[verif_var] = merged
         return vars_to_merge
 
-    def get_zarr_dt(self, ds: xr.Dataset) -> np.timedelta64:
+    def get_zarr_dt(
+        self,
+        source_interval_start: np.datetime64,
+        source_interval_end: np.datetime64,
+    ) -> np.timedelta64:
         """
-        Compute the time difference between forecast steps in hours from the WG output dataset.
+        Compute the time difference between source interval start and end in hours.
         Parameters
         ----------
-            ds : xr.Dataset
-                Input dataset from which to compute the time difference.
+            source_interval_start : np.datetime64
+                Start of the source (conditioning) window.
+            source_interval_end : np.datetime64
+                End of the source (conditioning) window.
         Returns
         -------
             np.timedelta64
-                Time difference between forecast steps in hours.
+                Time difference between source interval start and end in hours.
         """
-        zarr_dt = ds.source_interval_end.values - ds.source_interval_start.values
-        zarr_dt = zarr_dt.astype("timedelta64[h]")
+        zarr_dt = (source_interval_end - source_interval_start).astype("timedelta64[h]")
 
         return zarr_dt
 
