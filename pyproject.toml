@@ -173,6 +173,7 @@ exclude-newer = "2026-02-27T00:00:00Z"
 # over revisions, causing reformats to happen without reason.
 # Also, relatively recent versions are required to support workspaces.
 required-version = ">=0.7.0"
+link-mode = "copy"
 
 # The supported environments
 # TODO: add macos and windows (CPU only, for running tests)
