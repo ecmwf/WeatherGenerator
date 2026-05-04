@@ -47,6 +47,10 @@ WEATHERGEN_HOME = Path(__file__).parent.parent
 @pytest.fixture()
 def setup(test_run_id):
     logger.info(f"setup fixture with {test_run_id}")
+
+    assert (WEATHERGEN_HOME/"results").exists(), "no results directory, did you run create-links?"
+    assert (WEATHERGEN_HOME/"models").exists(), "no models directory, did you run create-links?"
+
     shutil.rmtree(WEATHERGEN_HOME / "results" / test_run_id, ignore_errors=True)
     shutil.rmtree(WEATHERGEN_HOME / "models" / test_run_id, ignore_errors=True)
     yield
