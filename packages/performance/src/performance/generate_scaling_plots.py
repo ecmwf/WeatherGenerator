@@ -1,28 +1,28 @@
 #!/usr/bin/env uv run python
 """Generate scaling plots from parquet/ndjson data using matplotlib only.
 
-Two entrypoints:
+Entry points:
 - standard: plots run-level metrics vs num_nodes
 - detailed: plots sample-level metrics vs total_num_samples
 - combined: generates a comparison table from separate strong and weak scaling input files
 
 Usage:
   # Single scaling type (original behavior)
-  python generate_scaling_plots.py standard --type strong --input strong_data.parquet
+  python -m performance.generate_scaling_plots standard --type strong --input strong_data.parquet
   
   # Combined table from single file with both types
-  python generate_scaling_plots.py standard --type strong,weak --input data.parquet
+  python -m performance.generate_scaling_plots standard --type strong,weak --input data.parquet
   
   # Combined table from separate strong and weak input files (new)
-  python generate_scaling_plots.py combined \
+  python -m performance.generate_scaling_plots combined \
     --strong-input strong_data.parquet \
     --weak-input weak_data.parquet
   
   # Loss plot
-  python generate_scaling_plots.py loss --type strong --input data.parquet
+  python -m performance.generate_scaling_plots loss --type strong --input data.parquet
   
   # Detailed scaling plot
-  python generate_scaling_plots.py detailed --input detailed_data.parquet
+  python -m performance.generate_scaling_plots detailed --input detailed_data.parquet
 """
 
 import argparse
@@ -34,8 +34,16 @@ import polars as pl
 SCRIPT_DIR = Path(__file__).resolve().parent
 VALID_IMAGE_SUFFIXES = {".png", ".pdf", ".svg", ".jpg", ".jpeg"}
 PALETTE = [
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    "#1f77b4",
+    "#ff7f0e",
+    "#2ca02c",
+    "#d62728",
+    "#9467bd",
+    "#8c564b",
+    "#e377c2",
+    "#7f7f7f",
+    "#bcbd22",
+    "#17becf",
 ]
 
 
@@ -84,9 +92,11 @@ def save_figure(fig: plt.Figure, output_path: Path) -> None:
     print(f"Saved: {output_path}")
 
 
-def generate_scaling_table(df: pl.DataFrame, input_path: Path, show_run_ids: bool = False, scaling_types: list[str] = None) -> None:
+def generate_scaling_table(
+    df: pl.DataFrame, input_path: Path, show_run_ids: bool = False, scaling_types: list[str] = None
+) -> None:
     """Generate a PNG table image with scaling metrics from the parquet file.
-    
+
     Columns: num_nodes, training_time, ideal_time, efficiency (optionally run_id)
     If scaling_types has multiple types, generates a combined table with columns per type.
     """
@@ -94,24 +104,24 @@ def generate_scaling_table(df: pl.DataFrame, input_path: Path, show_run_ids: boo
     if "num_nodes" not in df.columns or "training_time" not in df.columns:
         print("Warning: Required columns (num_nodes, training_time) not found in data")
         return
-    
+
     # Filter out rows with null values in required columns
     df_filtered = df.filter(
         pl.col("num_nodes").is_not_null() & pl.col("training_time").is_not_null()
     ).sort("num_nodes")
-    
+
     if len(df_filtered) == 0:
         print("No valid data for scaling table")
         return
-    
+
     # Get the 1-node training time for ideal time calculation
     one_node_data = df_filtered.filter(pl.col("num_nodes") == 1)
     if one_node_data.height == 0:
         print("Warning: No 1-node data found for ideal time calculation")
         return
-    
+
     t1 = one_node_data["training_time"].item()
-    
+
     # Determine scaling types to include
     if scaling_types is None or len(scaling_types) == 0:
         # Derive scaling type from input filename
@@ -122,21 +132,23 @@ def generate_scaling_table(df: pl.DataFrame, input_path: Path, show_run_ids: boo
             scaling_types = ["strong"]
         else:
             scaling_types = ["strong"]  # Default to strong
-    
+
     # Build table data with proper formatting
     has_run_id = "run_id" in df_filtered.columns
-    
+
     # Check if we're generating a combined table (multiple types)
     is_combined = len(scaling_types) > 1
-    
+
     if is_combined:
         # Combined table: columns per type
         col_names = ["# Nodes"]
         for stype in scaling_types:
-            col_names.extend([
-                f"{stype.capitalize()} Training Time (seconds)",
-                f"{stype.capitalize()} Efficiency"
-            ])
+            col_names.extend(
+                [
+                    f"{stype.capitalize()} Training Time (seconds)",
+                    f"{stype.capitalize()} Efficiency",
+                ]
+            )
         if show_run_ids and has_run_id:
             col_names.insert(0, "run_id")
     else:
@@ -145,16 +157,16 @@ def generate_scaling_table(df: pl.DataFrame, input_path: Path, show_run_ids: boo
         col_names = ["# Nodes", "Training Time (seconds)", "Ideal Time (seconds)", "Efficiency"]
         if show_run_ids and has_run_id:
             col_names.insert(0, "run_id")
-    
+
     table_data = []
     for row in df_filtered.iter_rows(named=True):
         num_nodes = row["num_nodes"]
         training_time = row["training_time"]
-        
+
         row_data = []
         if show_run_ids and has_run_id:
             row_data.append(str(row.get("run_id", "")))
-        
+
         if is_combined:
             # Combined table: add metrics for each type
             row_data.append(str(num_nodes))
@@ -170,13 +182,10 @@ def generate_scaling_table(df: pl.DataFrame, input_path: Path, show_run_ids: boo
                         # Weak scaling: ideal time = t1 (same work per node)
                         ideal_val = t1
                         efficiency_val = min(1.0, t1 / training_time)
-                    
+
                     efficiency = f"{efficiency_val:.2f}"
-                
-                row_data.extend([
-                    f"{training_time:.2f}",
-                    efficiency
-                ])
+
+                row_data.extend([f"{training_time:.2f}", efficiency])
         else:
             # Single type table (original format)
             scaling_type = scaling_types[0]
@@ -192,28 +201,24 @@ def generate_scaling_table(df: pl.DataFrame, input_path: Path, show_run_ids: boo
                     # Weak scaling: ideal time = t1 (same work per node)
                     ideal_val = t1
                     efficiency_val = min(1.0, t1 / training_time)
-                
+
                 ideal_time = f"{ideal_val:.2f}"
                 efficiency = f"{efficiency_val:.2f}"
-            
-            row_data.extend([
-                f"{training_time:.2f}",
-                ideal_time,
-                efficiency
-            ])
-        
+
+            row_data.extend([f"{training_time:.2f}", ideal_time, efficiency])
+
         table_data.append(row_data)
-    
+
     # Generate output filename: input_stem_table.csv
     output_path = input_path.with_name(input_path.stem + "_table.csv")
-    
+
     # Build DataFrame for CSV output
     df_table_data = {}
     for i, col in enumerate(col_names):
         df_table_data[col] = [row[i] for row in table_data]
-    
+
     df_table = pl.DataFrame(df_table_data)
-    
+
     # Write to CSV
     df_table.write_csv(output_path)
     print(f"Saved scaling table: {output_path}")
@@ -225,13 +230,13 @@ def generate_combined_scaling_table(
     strong_path: Path,
     weak_path: Path,
     output_path: Path,
-    show_run_ids: bool = False
+    show_run_ids: bool = False,
 ) -> None:
     """Generate a combined table comparing strong and weak scaling from two separate input files.
-    
+
     Rows: num_nodes
     Columns: # Nodes, Strong Training Time, Strong Efficiency, Weak Training Time, Weak Efficiency
-    
+
     Also generates a PNG visualization of the table.
     """
     # Validate required columns
@@ -239,61 +244,80 @@ def generate_combined_scaling_table(
         if "num_nodes" not in df.columns or "training_time" not in df.columns:
             print(f"Warning: Required columns (num_nodes, training_time) not found in {name} data")
             return
-    
+
     # Filter and sort both datasets
     strong_filtered = strong_df.filter(
         pl.col("num_nodes").is_not_null() & pl.col("training_time").is_not_null()
     ).sort("num_nodes")
-    
+
     weak_filtered = weak_df.filter(
         pl.col("num_nodes").is_not_null() & pl.col("training_time").is_not_null()
     ).sort("num_nodes")
-    
+
     if len(strong_filtered) == 0 or len(weak_filtered) == 0:
         print("No valid data for combined scaling table")
         return
-    
+
     # Get 1-node training times for efficiency calculation
     strong_one_node = strong_filtered.filter(pl.col("num_nodes") == 1)
     weak_one_node = weak_filtered.filter(pl.col("num_nodes") == 1)
-    
+
     if strong_one_node.height == 0 or weak_one_node.height == 0:
         print("Warning: No 1-node data found for efficiency calculation")
         return
-    
+
     t1_strong = strong_one_node["training_time"].item()
     t1_weak = weak_one_node["training_time"].item()
-    
+
     # Check for run_id in either dataset
     has_run_id = "run_id" in strong_filtered.columns or "run_id" in weak_filtered.columns
-    
+
     # Build column names
-    col_names = ["# Nodes", "Strong Training Time (seconds)", "Strong Efficiency", 
-                 "Weak Training Time (seconds)", "Weak Efficiency"]
+    col_names = [
+        "# Nodes",
+        "Strong Training Time (seconds)",
+        "Strong Efficiency",
+        "Weak Training Time (seconds)",
+        "Weak Efficiency",
+    ]
     if show_run_ids and has_run_id:
         col_names.insert(0, "run_id")
-    
+
     # Get all unique num_nodes from both datasets
-    all_nodes = sorted(set(strong_filtered["num_nodes"].to_list()) | set(weak_filtered["num_nodes"].to_list()))
-    
+    all_nodes = sorted(
+        set(strong_filtered["num_nodes"].to_list()) | set(weak_filtered["num_nodes"].to_list())
+    )
+
     # Create lookup dictionaries for easy access
-    strong_lookup = {row["num_nodes"]: row["training_time"] for row in strong_filtered.iter_rows(named=True)}
-    weak_lookup = {row["num_nodes"]: row["training_time"] for row in weak_filtered.iter_rows(named=True)}
-    strong_run_id_lookup = {row["num_nodes"]: row["run_id"] for row in strong_filtered.iter_rows(named=True)} if "run_id" in strong_filtered.columns else {}
-    weak_run_id_lookup = {row["num_nodes"]: row["run_id"] for row in weak_filtered.iter_rows(named=True)} if "run_id" in weak_filtered.columns else {}
-    
+    strong_lookup = {
+        row["num_nodes"]: row["training_time"] for row in strong_filtered.iter_rows(named=True)
+    }
+    weak_lookup = {
+        row["num_nodes"]: row["training_time"] for row in weak_filtered.iter_rows(named=True)
+    }
+    strong_run_id_lookup = (
+        {row["num_nodes"]: row["run_id"] for row in strong_filtered.iter_rows(named=True)}
+        if "run_id" in strong_filtered.columns
+        else {}
+    )
+    weak_run_id_lookup = (
+        {row["num_nodes"]: row["run_id"] for row in weak_filtered.iter_rows(named=True)}
+        if "run_id" in weak_filtered.columns
+        else {}
+    )
+
     table_data = []
     for num_nodes in all_nodes:
         row_data = []
-        
+
         # Get run_id if available
         if show_run_ids and has_run_id:
             run_id = str(strong_run_id_lookup.get(num_nodes, weak_run_id_lookup.get(num_nodes, "")))
             row_data.append(run_id)
-        
+
         # Add num_nodes
         row_data.append(str(num_nodes))
-        
+
         # Strong scaling metrics
         if num_nodes in strong_lookup:
             training_time_strong = strong_lookup[num_nodes]
@@ -305,7 +329,7 @@ def generate_combined_scaling_table(
             row_data.extend([f"{training_time_strong:.2f}", efficiency_strong])
         else:
             row_data.extend(["-", "-"])
-        
+
         # Weak scaling metrics
         if num_nodes in weak_lookup:
             training_time_weak = weak_lookup[num_nodes]
@@ -317,24 +341,24 @@ def generate_combined_scaling_table(
             row_data.extend([f"{training_time_weak:.2f}", efficiency_weak])
         else:
             row_data.extend(["-", "-"])
-        
+
         table_data.append(row_data)
-    
+
     # Ensure output path has .csv suffix
     if output_path.suffix.lower() != ".csv":
         output_path = output_path.with_suffix(".csv")
-    
+
     # Build DataFrame for CSV output
     df_table_data = {}
     for i, col in enumerate(col_names):
         df_table_data[col] = [row[i] for row in table_data]
-    
+
     df_table = pl.DataFrame(df_table_data)
-    
+
     # Write to CSV
     df_table.write_csv(output_path)
     print(f"Saved scaling table CSV: {output_path}")
-    
+
     # Generate PNG visualization of the table
     png_path = output_path.with_suffix(".png")
     _save_table_as_image(table_data, col_names, png_path)
@@ -343,44 +367,47 @@ def generate_combined_scaling_table(
 
 def _save_table_as_image(table_data: list, col_names: list, output_path: Path) -> None:
     """Save table data as a PNG image using matplotlib.
-    
+
     Automatically sizes the figure to fit all content.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Calculate figure size based on content
     num_cols = len(col_names)
     num_rows = len(table_data) + 1  # +1 for header
-    
+
     # Width: base + per-column width, Height: base + per-row height
     fig_width = max(8, num_cols * 2.5)
     fig_height = max(3, num_rows * 0.5)
-    
+
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    ax.axis('off')
-    
+    ax.axis("off")
+
     # Create table
     table = ax.table(
         cellText=table_data,
         colLabels=col_names,
-        cellLoc='center',
-        loc='center',
-        colColours=['#2E5C8A'] * num_cols,
-        cellColours=[['#E8ECEF' if i % 2 == 0 else 'white' for _ in range(num_cols)] for i in range(len(table_data))]
+        cellLoc="center",
+        loc="center",
+        colColours=["#2E5C8A"] * num_cols,
+        cellColours=[
+            ["#E8ECEF" if i % 2 == 0 else "white" for _ in range(num_cols)]
+            for i in range(len(table_data))
+        ],
     )
-    
+
     # Style the table
     table.auto_set_font_size(False)
     table.set_fontsize(9)
     table.auto_set_column_width(col=list(range(num_cols)))
-    
+
     # Style header cells
     for i in range(num_cols):
-        table[(0, i)].set_text_props(color='white', fontweight='bold')
-    
+        table[(0, i)].set_text_props(color="white", fontweight="bold")
+
     # Adjust layout and save
     plt.tight_layout()
-    fig.savefig(output_path, dpi=150, bbox_inches='tight')
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -402,17 +429,23 @@ def plot_standard_scaling(
         "efficiency": "Scaling Efficiency",
     }
 
-    valid_metrics = [m for m in metrics if m in df.columns and df.filter(pl.col(m).is_not_null()).height > 0]
+    valid_metrics = [
+        m for m in metrics if m in df.columns and df.filter(pl.col(m).is_not_null()).height > 0
+    ]
     if not valid_metrics:
         print("No valid metrics to plot")
         return
 
-    fig, axes = plt.subplots(len(valid_metrics), 1, figsize=(12, 6 * len(valid_metrics)), squeeze=False)
+    fig, axes = plt.subplots(
+        len(valid_metrics), 1, figsize=(12, 6 * len(valid_metrics)), squeeze=False
+    )
 
     for idx, metric in enumerate(valid_metrics):
         ax = axes[idx][0]
         df_plot = df.filter(pl.col(metric).is_not_null()).sort("num_nodes")
-        node_counts = df_plot["num_nodes"].unique().to_list() if "num_nodes" in df_plot.columns else []
+        node_counts = (
+            df_plot["num_nodes"].unique().to_list() if "num_nodes" in df_plot.columns else []
+        )
         colors = color_map_for_nodes(node_counts)
 
         # Handle normalized_throughput and efficiency metrics
@@ -442,7 +475,9 @@ def plot_standard_scaling(
                 else:
                     # Weak scaling: efficiency = min(1.0, t1 / training_time)
                     df_plot = df_plot.with_columns(
-                        pl.min_horizontal(pl.lit(1.0), t1 / pl.col("training_time")).alias("efficiency")
+                        pl.min_horizontal(pl.lit(1.0), t1 / pl.col("training_time")).alias(
+                            "efficiency"
+                        )
                     )
                 plot_y = df_plot["efficiency"]
             else:
@@ -460,10 +495,14 @@ def plot_standard_scaling(
         )
 
         if show_run_ids:
-            for x, y, label in zip(df_plot["num_nodes"], plot_y.to_list(), df_plot["run_id"]):
+            for x, y, label in zip(df_plot["num_nodes"], plot_y.to_list(), df_plot["run_id"], strict=False):
                 ax.text(x, y, label, ha="center", va="bottom", fontsize=8)
 
-        if metric == "training_time" and y_metric in ("time", "normalized_throughput", "efficiency") and "training_time" in df.columns:
+        if (
+            metric == "training_time"
+            and y_metric in ("time", "normalized_throughput", "efficiency")
+            and "training_time" in df.columns
+        ):
             one_node_data = df.filter(pl.col("num_nodes") == 1)
             if one_node_data.height > 0:
                 t1 = one_node_data["training_time"].item()
@@ -489,7 +528,7 @@ def plot_standard_scaling(
 
                 # Show per-point efficiency loss as a vertical line and factor label.
                 # Use plot_y (normalized throughput if applicable) instead of df_plot[metric]
-                for x, y, y_opt in zip(nodes, plot_y.to_list(), optimal_y):
+                for x, y, y_opt in zip(nodes, plot_y.to_list(), optimal_y, strict=False):
                     if y_opt == 0:
                         continue
                     factor = y / y_opt
@@ -517,7 +556,7 @@ def plot_standard_scaling(
             ax.set_ylabel("Scaling Efficiency", fontsize=16)
         else:
             ax.set_ylabel(metric_labels.get(metric, metric), fontsize=16)
-        ax.tick_params(axis='both', which='major', labelsize=14)
+        ax.tick_params(axis="both", which="major", labelsize=14)
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -531,7 +570,12 @@ def plot_detailed_scaling(
     y_scale: str,
 ) -> None:
     """Plot sample-level detailed scaling data vs total_num_samples."""
-    required_cols = ["total_num_samples", "elapsed_training_time_seconds", "loss_avg_mean", "num_nodes"]
+    required_cols = [
+        "total_num_samples",
+        "elapsed_training_time_seconds",
+        "loss_avg_mean",
+        "num_nodes",
+    ]
     if not all(col in df.columns for col in required_cols):
         print("Detailed metrics not available in this dataset")
         print(f"Available columns: {df.columns}")
@@ -570,7 +614,7 @@ def plot_detailed_scaling(
         ax.set_yscale("log")
     ax.set_ylabel("Elapsed Training Time (seconds)", fontsize=16)
     ax.set_title("Elapsed Training Time vs Samples", fontsize=16)
-    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.tick_params(axis="both", which="major", labelsize=14)
     ax.grid(True, alpha=0.3)
     ax.legend(title="Node Count")
 
@@ -591,7 +635,7 @@ def plot_detailed_scaling(
     ax.set_xlabel("Total Number of Samples", fontsize=16)
     ax.set_ylabel("Average Loss", fontsize=16)
     ax.set_title("Loss vs Samples", fontsize=16)
-    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.tick_params(axis="both", which="major", labelsize=14)
     ax.grid(True, alpha=0.3)
     ax.legend(title="Node Count")
 
@@ -601,37 +645,95 @@ def plot_detailed_scaling(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate scaling plots from parquet or NDJSON data")
+    parser = argparse.ArgumentParser(
+        description="Generate scaling plots from parquet or NDJSON data"
+    )
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
     standard = subparsers.add_parser("standard", help="Plot run-level scaling metrics vs num_nodes")
-    standard.add_argument("--type", required=True, help="Scaling type(s): 'strong', 'weak', or 'strong,weak' for combined table")
-    standard.add_argument("--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file")
+    standard.add_argument(
+        "--type",
+        required=True,
+        help="Scaling type(s): 'strong', 'weak', or 'strong,weak' for combined table",
+    )
+    standard.add_argument(
+        "--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file"
+    )
     standard.add_argument("--output", type=Path, default=None, help="Output image path")
-    standard.add_argument("--y-scale", choices=["linear", "log"], default="linear", help="Y-axis scale")
-    standard.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
-    standard.add_argument("--y-metric", choices=["time", "normalized_throughput", "efficiency"], default="normalized_throughput", help="Y-axis metric: 'time' for time-to-solution, 'normalized_throughput' for T1/T, or 'efficiency' for scaling efficiency")
-    standard.add_argument("--show-run-ids", action="store_true", help="Show run_id labels on the plot and in the output table")
+    standard.add_argument(
+        "--y-scale", choices=["linear", "log"], default="linear", help="Y-axis scale"
+    )
+    standard.add_argument(
+        "--x-scale", choices=["linear", "log"], default="log", help="X-axis scale"
+    )
+    standard.add_argument(
+        "--y-metric",
+        choices=["time", "normalized_throughput", "efficiency"],
+        default="normalized_throughput",
+        help="Y-axis metric: 'time' for time-to-solution, 'normalized_throughput' for T1/T, or 'efficiency' for scaling efficiency",
+    )
+    standard.add_argument(
+        "--show-run-ids",
+        action="store_true",
+        help="Show run_id labels on the plot and in the output table",
+    )
 
-    loss_only = subparsers.add_parser("loss", help="Plot loss metrics vs num_nodes (separate from throughput)")
-    loss_only.add_argument("--type", required=True, help="Scaling type(s): 'strong', 'weak', or 'strong,weak' for combined table")
-    loss_only.add_argument("--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file")
+    loss_only = subparsers.add_parser(
+        "loss", help="Plot loss metrics vs num_nodes (separate from throughput)"
+    )
+    loss_only.add_argument(
+        "--type",
+        required=True,
+        help="Scaling type(s): 'strong', 'weak', or 'strong,weak' for combined table",
+    )
+    loss_only.add_argument(
+        "--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file"
+    )
     loss_only.add_argument("--output", type=Path, default=None, help="Output image path")
-    loss_only.add_argument("--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale")
-    loss_only.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
-    loss_only.add_argument("--show-run-ids", action="store_true", help="Show run_id labels on the plot and in the output table")
+    loss_only.add_argument(
+        "--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale"
+    )
+    loss_only.add_argument(
+        "--x-scale", choices=["linear", "log"], default="log", help="X-axis scale"
+    )
+    loss_only.add_argument(
+        "--show-run-ids",
+        action="store_true",
+        help="Show run_id labels on the plot and in the output table",
+    )
 
-    combined = subparsers.add_parser("combined", help="Generate combined table comparing strong and weak scaling from separate input files")
-    combined.add_argument("--strong-input", type=Path, required=True, help="Input parquet/ndjson file for strong scaling")
-    combined.add_argument("--weak-input", type=Path, required=True, help="Input parquet/ndjson file for weak scaling")
+    combined = subparsers.add_parser(
+        "combined",
+        help="Generate combined table comparing strong and weak scaling from separate input files",
+    )
+    combined.add_argument(
+        "--strong-input",
+        type=Path,
+        required=True,
+        help="Input parquet/ndjson file for strong scaling",
+    )
+    combined.add_argument(
+        "--weak-input", type=Path, required=True, help="Input parquet/ndjson file for weak scaling"
+    )
     combined.add_argument("--output", type=Path, default=None, help="Output table path (CSV)")
-    combined.add_argument("--show-run-ids", action="store_true", help="Show run_id labels in the output table")
+    combined.add_argument(
+        "--show-run-ids", action="store_true", help="Show run_id labels in the output table"
+    )
 
     detailed = subparsers.add_parser("detailed", help="Plot sample-level detailed scaling metrics")
-    detailed.add_argument("--input", type=Path, default=Path("scaling_data_detailed.parquet"), help="Input detailed parquet/ndjson file")
+    detailed.add_argument(
+        "--input",
+        type=Path,
+        default=Path("scaling_data_detailed.parquet"),
+        help="Input detailed parquet/ndjson file",
+    )
     detailed.add_argument("--output", type=Path, default=None, help="Output image path")
-    detailed.add_argument("--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale")
-    detailed.add_argument("--x-scale", choices=["linear", "log"], default="log", help="X-axis scale")
+    detailed.add_argument(
+        "--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale"
+    )
+    detailed.add_argument(
+        "--x-scale", choices=["linear", "log"], default="log", help="X-axis scale"
+    )
 
     return parser
 
@@ -656,21 +758,34 @@ def main() -> None:
             print(str(e))
             return
         print(f"Loaded {len(df)} rows")
-        
+
         # Parse scaling types from --type argument
         scaling_types = [t.strip().lower() for t in args.type.split(",")]
         for stype in scaling_types:
             if stype not in ("strong", "weak"):
-                print(f"Error: Invalid scaling type '{stype}'. Use 'strong', 'weak', or 'strong,weak'")
+                print(
+                    f"Error: Invalid scaling type '{stype}'. Use 'strong', 'weak', or 'strong,weak'"
+                )
                 return
-        
+
         # Standard mode: only plot training_time with normalized throughput or time
         metrics_to_plot = ["training_time"]
         # Use the first type for plotting (or strong if combined)
         plot_type = scaling_types[0]
-        plot_standard_scaling(df, output_path, plot_type, metrics_to_plot, args.x_scale, args.y_scale, args.y_metric, args.show_run_ids)
+        plot_standard_scaling(
+            df,
+            output_path,
+            plot_type,
+            metrics_to_plot,
+            args.x_scale,
+            args.y_scale,
+            args.y_metric,
+            args.show_run_ids,
+        )
         # Generate scaling table
-        generate_scaling_table(df, input_path, show_run_ids=args.show_run_ids, scaling_types=scaling_types)
+        generate_scaling_table(
+            df, input_path, show_run_ids=args.show_run_ids, scaling_types=scaling_types
+        )
         return
 
     if args.mode == "loss":
@@ -689,21 +804,34 @@ def main() -> None:
             print(str(e))
             return
         print(f"Loaded {len(df)} rows")
-        
+
         # Parse scaling types from --type argument
         scaling_types = [t.strip().lower() for t in args.type.split(",")]
         for stype in scaling_types:
             if stype not in ("strong", "weak"):
-                print(f"Error: Invalid scaling type '{stype}'. Use 'strong', 'weak', or 'strong,weak'")
+                print(
+                    f"Error: Invalid scaling type '{stype}'. Use 'strong', 'weak', or 'strong,weak'"
+                )
                 return
-        
+
         # Loss mode: only plot loss_avg_mean
         metrics_to_plot = ["loss_avg_mean"]
         # Use the first type for plotting (or strong if combined)
         plot_type = scaling_types[0]
-        plot_standard_scaling(df, output_path, plot_type, metrics_to_plot, args.x_scale, args.y_scale, "time", args.show_run_ids)
+        plot_standard_scaling(
+            df,
+            output_path,
+            plot_type,
+            metrics_to_plot,
+            args.x_scale,
+            args.y_scale,
+            "time",
+            args.show_run_ids,
+        )
         # Generate scaling table
-        generate_scaling_table(df, input_path, show_run_ids=args.show_run_ids, scaling_types=scaling_types)
+        generate_scaling_table(
+            df, input_path, show_run_ids=args.show_run_ids, scaling_types=scaling_types
+        )
         return
 
     if args.mode == "detailed":
@@ -728,7 +856,7 @@ def main() -> None:
     if args.mode == "combined":
         strong_path = resolve_input_path(args.strong_input)
         weak_path = resolve_input_path(args.weak_input)
-        
+
         if not strong_path.exists():
             print(f"Error: Strong scaling input file not found: {strong_path}")
             return
@@ -765,13 +893,11 @@ def main() -> None:
 
         # Generate combined table
         generate_combined_scaling_table(
-            strong_df, weak_df, strong_path, weak_path, output_path, 
-            show_run_ids=args.show_run_ids
+            strong_df, weak_df, strong_path, weak_path, output_path, show_run_ids=args.show_run_ids
         )
         return
 
     raise ValueError(f"Unknown mode: {args.mode}")
-
 
 
 if __name__ == "__main__":

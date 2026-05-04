@@ -28,7 +28,7 @@ dependencies = [
  "weathergen-common",
  "weathergen-evaluate",
  "weathergen-readers-extra",
- "pyarrow>=23.0.1",
+
 ]
 
 
@@ -75,6 +75,10 @@ dev = [
 # x86_64: cpu (unit tests) + gpu 
 # aarch64: gpu
 [project.optional-dependencies]
+
+performance = [
+  "weathergen-performance",
+]
 
 cpu = [
   'torch==2.6.0',
@@ -229,6 +233,7 @@ weathergen-common = { workspace = true }
 weathergen-evaluate = { workspace = true }
 weathergen-metrics = { workspace = true }
 weathergen-readers-extra = { workspace = true }
+weathergen-performance = { workspace = true }
 
 
 flash-attn = [
@@ -273,5 +278,6 @@ members = [
    "packages/readers_extra",
 # Explicitly not depending on 'packages/dashboard' : this causes issues when deploying
 # the streamlit dashboard.
+   "packages/performance",
 ]
 
