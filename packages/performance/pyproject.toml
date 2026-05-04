@@ -3,9 +3,6 @@ name = "weathergen-performance"
 version = "0.1.0"
 description = "Performance analysis tools for WeatherGenerator"
 readme = "README.md"
-authors = [
-    { name = "WeatherGenerator collaboration" }
-]
 
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -26,9 +23,6 @@ packages = ["src/performance"]
 extract_scaling_data = "performance.extract_scaling_data:main"
 generate_scaling_plots = "performance.generate_scaling_plots:main"
 
-[tool.ruff]
-line-length = 100
-
 [tool.ruff.lint]
 select = [
     "E",
@@ -37,10 +31,5 @@ select = [
     "B",
     "SIM",
     "I",
-]
-ignore = [
-    "SIM108",
-    "N817",
-    "E731",
-    "N812",
+    "N"
 ]

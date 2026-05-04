@@ -234,7 +234,10 @@ def main():
         help="Base directory for shared work/results",
     )
     parser.add_argument(
-        "--output", type=Path, default=Path("scaling_data.parquet"), help="Output parquet file path"
+        "--output",
+        type=Path,
+        default=Path("scaling_data.parquet"),
+        help="Output parquet file path",
     )
 
     args = parser.parse_args()
@@ -264,7 +267,9 @@ def main():
         }
         results.append(row)
 
-        detailed_records = extract_detailed_metrics(run_id, args.shared_work_dir, num_nodes)
+        detailed_records = extract_detailed_metrics(
+            run_id, args.shared_work_dir, num_nodes
+        )
         if detailed_records:
             all_detailed_records.extend(detailed_records)
             print(
@@ -298,7 +303,9 @@ def main():
         detailed_df = detailed_df[available_cols]
 
         output_stem = args.output.stem
-        detailed_output = args.output.with_name(f"{output_stem}_detailed{args.output.suffix}")
+        detailed_output = args.output.with_name(
+            f"{output_stem}_detailed{args.output.suffix}"
+        )
 
         detailed_df.to_parquet(detailed_output, index=False)
         detailed_df.to_csv(detailed_output.with_suffix(".csv"), index=False)

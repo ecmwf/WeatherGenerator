@@ -241,8 +241,9 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None, t_start: float | None = None):
-
+    def run(
+        self, cf, devices, run_id_contd=None, mini_epoch_contd=None, t_start: float | None = None
+    ):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
@@ -566,11 +567,16 @@ class Trainer(TrainerBase):
                 torch.distributed.barrier()
                 if is_root():
                     total_training_time = time.time() - self.t_training_start
-                    self.train_logger.log_metrics("train", {
-                        "completed_mini_epoch": mini_epoch,
-                        "elapsed_time_mini_epoch": total_training_time,
-                    })
-                    logger.info(f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds")
+                    self.train_logger.log_metrics(
+                        "train",
+                        {
+                            "completed_mini_epoch": mini_epoch,
+                            "elapsed_time_mini_epoch": total_training_time,
+                        },
+                    )
+                    logger.info(
+                        f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds"
+                    )
 
         self.dataset.advance()
 
@@ -775,12 +781,14 @@ class Trainer(TrainerBase):
                     lr=self.lr_scheduler.get_lr(),
                 )
                 self.train_logger.log_metrics(
-                    "train", 
+                    "train",
                     {
                         "elapsed_training_time_seconds": elapsed_time,
                         "total_num_samples": samples,
-                        "average_samples_per_second": samples / elapsed_time if elapsed_time > 0 else 0,
-                    }
+                        "average_samples_per_second": samples / elapsed_time
+                        if elapsed_time > 0
+                        else 0,
+                    },
                 )
 
         loss_calculator.loss_hist = []

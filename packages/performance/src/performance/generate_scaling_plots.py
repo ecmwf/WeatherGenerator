@@ -93,7 +93,10 @@ def save_figure(fig: plt.Figure, output_path: Path) -> None:
 
 
 def generate_scaling_table(
-    df: pl.DataFrame, input_path: Path, show_run_ids: bool = False, scaling_types: list[str] = None
+    df: pl.DataFrame,
+    input_path: Path,
+    show_run_ids: bool = False,
+    scaling_types: list[str] = None,
 ) -> None:
     """Generate a PNG table image with scaling metrics from the parquet file.
 
@@ -154,7 +157,12 @@ def generate_scaling_table(
     else:
         # Single type table (original format)
         scaling_type = scaling_types[0].capitalize()
-        col_names = ["# Nodes", "Training Time (seconds)", "Ideal Time (seconds)", "Efficiency"]
+        col_names = [
+            "# Nodes",
+            "Training Time (seconds)",
+            "Ideal Time (seconds)",
+            "Efficiency",
+        ]
         if show_run_ids and has_run_id:
             col_names.insert(0, "run_id")
 
@@ -242,7 +250,9 @@ def generate_combined_scaling_table(
     # Validate required columns
     for name, df in [("strong", strong_df), ("weak", weak_df)]:
         if "num_nodes" not in df.columns or "training_time" not in df.columns:
-            print(f"Warning: Required columns (num_nodes, training_time) not found in {name} data")
+            print(
+                f"Warning: Required columns (num_nodes, training_time) not found in {name} data"
+            )
             return
 
     # Filter and sort both datasets
@@ -270,7 +280,9 @@ def generate_combined_scaling_table(
     t1_weak = weak_one_node["training_time"].item()
 
     # Check for run_id in either dataset
-    has_run_id = "run_id" in strong_filtered.columns or "run_id" in weak_filtered.columns
+    has_run_id = (
+        "run_id" in strong_filtered.columns or "run_id" in weak_filtered.columns
+    )
 
     # Build column names
     col_names = [
@@ -285,18 +297,24 @@ def generate_combined_scaling_table(
 
     # Get all unique num_nodes from both datasets
     all_nodes = sorted(
-        set(strong_filtered["num_nodes"].to_list()) | set(weak_filtered["num_nodes"].to_list())
+        set(strong_filtered["num_nodes"].to_list())
+        | set(weak_filtered["num_nodes"].to_list())
     )
 
     # Create lookup dictionaries for easy access
     strong_lookup = {
-        row["num_nodes"]: row["training_time"] for row in strong_filtered.iter_rows(named=True)
+        row["num_nodes"]: row["training_time"]
+        for row in strong_filtered.iter_rows(named=True)
     }
     weak_lookup = {
-        row["num_nodes"]: row["training_time"] for row in weak_filtered.iter_rows(named=True)
+        row["num_nodes"]: row["training_time"]
+        for row in weak_filtered.iter_rows(named=True)
     }
     strong_run_id_lookup = (
-        {row["num_nodes"]: row["run_id"] for row in strong_filtered.iter_rows(named=True)}
+        {
+            row["num_nodes"]: row["run_id"]
+            for row in strong_filtered.iter_rows(named=True)
+        }
         if "run_id" in strong_filtered.columns
         else {}
     )
@@ -312,7 +330,11 @@ def generate_combined_scaling_table(
 
         # Get run_id if available
         if show_run_ids and has_run_id:
-            run_id = str(strong_run_id_lookup.get(num_nodes, weak_run_id_lookup.get(num_nodes, "")))
+            run_id = str(
+                strong_run_id_lookup.get(
+                    num_nodes, weak_run_id_lookup.get(num_nodes, "")
+                )
+            )
             row_data.append(run_id)
 
         # Add num_nodes
@@ -430,7 +452,9 @@ def plot_standard_scaling(
     }
 
     valid_metrics = [
-        m for m in metrics if m in df.columns and df.filter(pl.col(m).is_not_null()).height > 0
+        m
+        for m in metrics
+        if m in df.columns and df.filter(pl.col(m).is_not_null()).height > 0
     ]
     if not valid_metrics:
         print("No valid metrics to plot")
@@ -444,7 +468,9 @@ def plot_standard_scaling(
         ax = axes[idx][0]
         df_plot = df.filter(pl.col(metric).is_not_null()).sort("num_nodes")
         node_counts = (
-            df_plot["num_nodes"].unique().to_list() if "num_nodes" in df_plot.columns else []
+            df_plot["num_nodes"].unique().to_list()
+            if "num_nodes" in df_plot.columns
+            else []
         )
         colors = color_map_for_nodes(node_counts)
 
@@ -460,7 +486,9 @@ def plot_standard_scaling(
                 )
                 plot_y = df_plot["normalized_throughput"]
             else:
-                print("Warning: No 1-node data found for normalized throughput calculation")
+                print(
+                    "Warning: No 1-node data found for normalized throughput calculation"
+                )
                 continue
         elif y_metric == "efficiency" and metric == "training_time":
             # Calculate efficiency based on scaling type
@@ -470,14 +498,16 @@ def plot_standard_scaling(
                 if scaling_type == "strong":
                     # Strong scaling: efficiency = (t1 / num_nodes) / training_time
                     df_plot = df_plot.with_columns(
-                        ((t1 / pl.col("num_nodes")) / pl.col("training_time")).alias("efficiency")
+                        ((t1 / pl.col("num_nodes")) / pl.col("training_time")).alias(
+                            "efficiency"
+                        )
                     )
                 else:
                     # Weak scaling: efficiency = min(1.0, t1 / training_time)
                     df_plot = df_plot.with_columns(
-                        pl.min_horizontal(pl.lit(1.0), t1 / pl.col("training_time")).alias(
-                            "efficiency"
-                        )
+                        pl.min_horizontal(
+                            pl.lit(1.0), t1 / pl.col("training_time")
+                        ).alias("efficiency")
                     )
                 plot_y = df_plot["efficiency"]
             else:
@@ -495,7 +525,9 @@ def plot_standard_scaling(
         )
 
         if show_run_ids:
-            for x, y, label in zip(df_plot["num_nodes"], plot_y.to_list(), df_plot["run_id"], strict=False):
+            for x, y, label in zip(
+                df_plot["num_nodes"], plot_y.to_list(), df_plot["run_id"], strict=False
+            ):
                 ax.text(x, y, label, ha="center", va="bottom", fontsize=8)
 
         if (
@@ -528,11 +560,21 @@ def plot_standard_scaling(
 
                 # Show per-point efficiency loss as a vertical line and factor label.
                 # Use plot_y (normalized throughput if applicable) instead of df_plot[metric]
-                for x, y, y_opt in zip(nodes, plot_y.to_list(), optimal_y, strict=False):
+                for x, y, y_opt in zip(
+                    nodes, plot_y.to_list(), optimal_y, strict=False
+                ):
                     if y_opt == 0:
                         continue
                     factor = y / y_opt
-                    ax.vlines(x, y_opt, y, colors="gray", linestyles=":", linewidth=1, alpha=0.7)
+                    ax.vlines(
+                        x,
+                        y_opt,
+                        y,
+                        colors="gray",
+                        linestyles=":",
+                        linewidth=1,
+                        alpha=0.7,
+                    )
                     y_mid = (y + y_opt) / 2
                     ax.annotate(
                         f"{factor:.2f}",
@@ -600,7 +642,9 @@ def plot_detailed_scaling(
 
     ax = axes[0]
     for node_count in node_counts:
-        df_node = df_plot.filter(pl.col("num_nodes") == node_count).sort("total_num_samples")
+        df_node = df_plot.filter(pl.col("num_nodes") == node_count).sort(
+            "total_num_samples"
+        )
         ax.plot(
             df_node["total_num_samples"],
             df_node["elapsed_training_time_seconds"],
@@ -620,7 +664,9 @@ def plot_detailed_scaling(
 
     ax = axes[1]
     for node_count in node_counts:
-        df_node = df_plot.filter(pl.col("num_nodes") == node_count).sort("total_num_samples")
+        df_node = df_plot.filter(pl.col("num_nodes") == node_count).sort(
+            "total_num_samples"
+        )
         ax.plot(
             df_node["total_num_samples"],
             df_node["loss_avg_mean"],
@@ -650,14 +696,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
-    standard = subparsers.add_parser("standard", help="Plot run-level scaling metrics vs num_nodes")
+    standard = subparsers.add_parser(
+        "standard", help="Plot run-level scaling metrics vs num_nodes"
+    )
     standard.add_argument(
         "--type",
         required=True,
         help="Scaling type(s): 'strong', 'weak', or 'strong,weak' for combined table",
     )
     standard.add_argument(
-        "--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file"
+        "--input",
+        type=Path,
+        default=Path("scaling_data.parquet"),
+        help="Input parquet/ndjson file",
     )
     standard.add_argument("--output", type=Path, default=None, help="Output image path")
     standard.add_argument(
@@ -687,9 +738,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Scaling type(s): 'strong', 'weak', or 'strong,weak' for combined table",
     )
     loss_only.add_argument(
-        "--input", type=Path, default=Path("scaling_data.parquet"), help="Input parquet/ndjson file"
+        "--input",
+        type=Path,
+        default=Path("scaling_data.parquet"),
+        help="Input parquet/ndjson file",
     )
-    loss_only.add_argument("--output", type=Path, default=None, help="Output image path")
+    loss_only.add_argument(
+        "--output", type=Path, default=None, help="Output image path"
+    )
     loss_only.add_argument(
         "--y-scale", choices=["linear", "log"], default="log", help="Y-axis scale"
     )
@@ -713,14 +769,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Input parquet/ndjson file for strong scaling",
     )
     combined.add_argument(
-        "--weak-input", type=Path, required=True, help="Input parquet/ndjson file for weak scaling"
+        "--weak-input",
+        type=Path,
+        required=True,
+        help="Input parquet/ndjson file for weak scaling",
     )
-    combined.add_argument("--output", type=Path, default=None, help="Output table path (CSV)")
     combined.add_argument(
-        "--show-run-ids", action="store_true", help="Show run_id labels in the output table"
+        "--output", type=Path, default=None, help="Output table path (CSV)"
+    )
+    combined.add_argument(
+        "--show-run-ids",
+        action="store_true",
+        help="Show run_id labels in the output table",
     )
 
-    detailed = subparsers.add_parser("detailed", help="Plot sample-level detailed scaling metrics")
+    detailed = subparsers.add_parser(
+        "detailed", help="Plot sample-level detailed scaling metrics"
+    )
     detailed.add_argument(
         "--input",
         type=Path,
@@ -871,7 +936,9 @@ def main() -> None:
                 output_path = output_path.with_suffix(".csv")
         else:
             # Default output: strong_input_stem_combined_table.csv
-            output_path = strong_path.with_name(strong_path.stem + "_combined_table.csv")
+            output_path = strong_path.with_name(
+                strong_path.stem + "_combined_table.csv"
+            )
 
         print(f"Loading strong scaling data from: {strong_path}")
         try:
@@ -893,7 +960,12 @@ def main() -> None:
 
         # Generate combined table
         generate_combined_scaling_table(
-            strong_df, weak_df, strong_path, weak_path, output_path, show_run_ids=args.show_run_ids
+            strong_df,
+            weak_df,
+            strong_path,
+            weak_path,
+            output_path,
+            show_run_ids=args.show_run_ids,
         )
         return
 
