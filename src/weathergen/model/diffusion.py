@@ -99,6 +99,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         Raises:
             ValueError: If required arguments are missing for current mode
         """
+        # called during training in training mode
         if self.training:
             if tokens is None or fstep is None or meta_info is None:
                 raise ValueError(
@@ -112,23 +113,27 @@ class DiffusionForecastEngine(torch.nn.Module):
                 coords=coords,
             )
         else:
-            # NOTE: temporary for analysing denoising
-            return self.training_forward(
-                tokens=tokens,
-                fstep=fstep,
-                meta_info=meta_info,
-                coords=coords,
-            )
-
-            if fstep is None:
-                raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
-            
-            return self.inference_forward(
-                fstep=fstep,
-                num_steps=num_steps,
-                meta_info=meta_info,
-                coords=coords,
-            )
+            # called in evaluation mode :
+            # decide btw pure noise generation (inference) vs denoising a sample for
+            # evaluation (train) using the stage variable
+            if self.cf.stage == 'train' or self.cf.stage == 'train_continue':
+                # NOTE: temporary for analysing denoising
+                return self.training_forward(
+                    tokens=tokens,
+                    fstep=fstep,
+                    meta_info=meta_info,
+                    coords=coords,
+                )
+            elif self.cf.stage == 'inference':
+                if fstep is None:
+                    raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
+                
+                return self.inference_forward(
+                    fstep=fstep,
+                    num_steps=num_steps,
+                    meta_info=meta_info,
+                    coords=coords,
+                )
 
     def training_forward(
         self,
