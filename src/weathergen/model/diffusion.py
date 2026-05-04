@@ -100,6 +100,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             ValueError: If required arguments are missing for current mode
         """
         # called during training in training mode
+        # called during training in training mode
         if self.training:
             if tokens is None or fstep is None or meta_info is None:
                 raise ValueError(
