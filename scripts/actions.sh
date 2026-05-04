@@ -8,13 +8,15 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
+      # --refresh --reinstall : LUSTRE may clean up some pieces of the cache.
+      # This ensures basic integrity.
       # If we are running on a mac, use the cpu extra
       if [[ "$(uname)" == "Darwin" ]]; then
-        uv sync --all-packages --extra cpu
+        uv sync --all-packages --extra cpu --refresh --reinstall
         exit 0
       fi
       # Otherwise, use the gpu extra
-      uv sync --all-packages --extra gpu
+      uv sync --all-packages --extra gpu --refresh --reinstall
     )
     ;;
   lint)
