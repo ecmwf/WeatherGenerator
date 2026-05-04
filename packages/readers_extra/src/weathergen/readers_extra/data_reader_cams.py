@@ -1,13 +1,12 @@
-# Organize imports
 import json
 import logging
 from pathlib import Path
+from typing import override
 
 import numpy as np
 import torch
 import xarray as xr
 from numpy.typing import NDArray
-from typing import override
 
 from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
 from weathergen.datasets.data_reader_base import (
@@ -55,8 +54,12 @@ class DataReaderCams(DataReaderTimestep):
 
         # ======= Reading the Dataset ================
         # open groups
-        ds_surface = xr.open_zarr(filename, group="surface", chunks={"time": 24}, decode_timedelta=False)
-        ds_profiles = xr.open_zarr(filename, group="profiles", chunks={"time": 24}, decode_timedelta=False)
+        ds_surface = xr.open_zarr(
+            filename, group="surface", chunks={"time": 24}, decode_timedelta=False
+        )
+        ds_profiles = xr.open_zarr(
+            filename, group="profiles", chunks={"time": 24}, decode_timedelta=False
+        )
 
         # merge along variables
         self.ds = xr.merge([ds_surface, ds_profiles])
@@ -67,7 +70,9 @@ class DataReaderCams(DataReaderTimestep):
         self.cols_idx = np.array(list(np.arange(len(self.colnames))))
 
         # Load associated statistics file for normalization
-        stats_filename = Path(filename).with_name(Path(filename).stem + "_clipped_log_norm_stats_new.json")
+        stats_filename = Path(filename).with_name(
+            Path(filename).stem + "_clipped_log_norm_stats_new.json"
+        )
         with open(stats_filename) as stats_file:
             self.stats = json.load(stats_file)
 
@@ -159,7 +164,7 @@ class DataReaderCams(DataReaderTimestep):
 
         new_colnames: list[str] = []
         ch_list_loop = ch_list if ch_list else self.colnames
-        
+
         for ch in ch_list_loop:
             if ch not in channels_exclude:
                 if ch in self.colnames:
@@ -343,10 +348,10 @@ class DataReaderCams(DataReaderTimestep):
         for i, ch_idx in enumerate(self.source_idx):
             x = source[..., i]
             scale_v = self.max[ch_idx]
-            
+
             # Step 1: Normalize by scale
             x_scaled = x / scale_v
-            
+
             # Step 2: Apply transformation (Equation B9)
             if torch.is_tensor(x_scaled):
                 linear_term = c1 * torch.clamp(x_scaled, max=2.5)
@@ -388,10 +393,10 @@ class DataReaderCams(DataReaderTimestep):
         for i, ch_idx in enumerate(self.target_idx):
             x = target[..., i]
             scale_v = self.max[ch_idx]
-            
+
             # Step 1: Normalize by scale
             x_scaled = x / scale_v
-            
+
             # Step 2: Apply transformation (Equation B9)
             if torch.is_tensor(x_scaled):
                 linear_term = c1 * torch.clamp(x_scaled, max=2.5)
@@ -433,7 +438,7 @@ class DataReaderCams(DataReaderTimestep):
         for i, ch_idx in enumerate(self.source_idx):
             y = source[..., i]
             scale_v = self.max[ch_idx]
-            
+
             # Step 1: Reverse transformation to get x_scaled
             # Use iterative method to find x_scaled such that: y = c1*min(x_scaled,2.5) + \
             #    c2*(log(max(x_scaled,ε))-log(ε))/(-log(ε))
@@ -449,11 +454,10 @@ class DataReaderCams(DataReaderTimestep):
                     error = y - y_pred
                     x_scaled = x_scaled + 0.1 * error * x_scaled  # Scaled update
                     x_scaled = torch.clamp(x_scaled, min=epsilon)  # Keep positive
-                
+
                 # Step 2: Unscale
                 denormalized = x_scaled * scale_v
                 source[..., i] = denormalized
-                
 
             else:
                 # Initial guess: assume log term dominates
@@ -467,11 +471,10 @@ class DataReaderCams(DataReaderTimestep):
                     error = y - y_pred
                     x_scaled = x_scaled + 0.1 * error * x_scaled
                     x_scaled = np.maximum(x_scaled, epsilon)
-                
+
                 # Step 2: Unscale
                 denormalized = x_scaled * scale_v
                 source[..., i] = denormalized
-                
 
         return source
 
@@ -501,7 +504,7 @@ class DataReaderCams(DataReaderTimestep):
         for i, ch_idx in enumerate(self.target_idx):
             y = data[..., i]
             scale_v = self.max[ch_idx]
-            
+
             # Step 1: Reverse transformation to get x_scaled
             # Use iterative method to find x_scaled such that: y = c1*min(x_scaled,2.5) + \
             #    c2*(log(max(x_scaled,ε))-log(ε))/(-log(ε))
@@ -517,11 +520,11 @@ class DataReaderCams(DataReaderTimestep):
                     error = y - y_pred
                     x_scaled = x_scaled + 0.1 * error * x_scaled  # Scaled update
                     x_scaled = torch.clamp(x_scaled, min=epsilon)  # Keep positive
-                
+
                 # Step 2: Unscale
                 denormalized = x_scaled * scale_v
                 data[..., i] = denormalized
-                
+
             else:
                 # Initial guess: assume log term dominates
                 x_scaled = np.exp(y / c2 * (-log_epsilon) + log_epsilon)
@@ -534,10 +537,9 @@ class DataReaderCams(DataReaderTimestep):
                     error = y - y_pred
                     x_scaled = x_scaled + 0.1 * error * x_scaled
                     x_scaled = np.maximum(x_scaled, epsilon)
-                
+
                 # Step 2: Unscale
                 denormalized = x_scaled * scale_v
                 data[..., i] = denormalized
-        
 
         return data
