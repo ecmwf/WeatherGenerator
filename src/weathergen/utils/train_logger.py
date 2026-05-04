@@ -102,9 +102,10 @@ class TrainLogger:
         stddev_all: dict,
         avg_loss: list[float] = None,
         lr: float = None,
+        elapsed_training_time_seconds: float | None = None,
     ) -> None:
         """
-        Log training or validation data
+        Log training or validation data.
         """
         metrics: dict[str, float] = dict(num_samples=samples)
 
@@ -112,6 +113,14 @@ class TrainLogger:
             metrics["loss_avg_mean"] = np.nanmean(avg_loss)
             metrics["learning_rate"] = lr
             metrics["num_samples"] = int(samples)
+            if elapsed_training_time_seconds is not None:
+                metrics["elapsed_training_time_seconds"] = elapsed_training_time_seconds
+                metrics["total_num_samples"] = samples
+                metrics["average_samples_per_second"] = (
+                    samples / elapsed_training_time_seconds
+                    if elapsed_training_time_seconds > 0
+                    else 0
+                )
 
         for key, value in losses_all.items():
             metrics[key] = np.nanmean(value)

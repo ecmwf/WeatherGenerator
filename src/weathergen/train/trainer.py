@@ -554,31 +554,31 @@ class Trainer(TrainerBase):
                 )
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
-            if bidx % self.train_logging.metrics == 0 or bidx == len(self.data_loader) - 1:
+            if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
 
+            # save model checkpoint (with designation _latest)
+            if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
+                self.save_model(-1)
+
             self.cf.general.istep += 1
-
-            # log metrics at last iteration (keep barrier for now)
-            if bidx == len(self.data_loader) - 1:
-                torch.distributed.barrier()
-                if is_root():
-                    total_training_time = time.time() - self.t_training_start
-                    self.train_logger.log_metrics(
-                        "train",
-                        {
-                            "completed_mini_epoch": mini_epoch,
-                            "elapsed_time_mini_epoch": total_training_time,
-                        },
-                    )
-                    logger.info(
-                        f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds"
-                    )
-
         self.dataset.advance()
+        
+        if is_root():
+            total_training_time = time.time() - self.t_training_start
+            self.train_logger.log_metrics(
+                "train",
+                {
+                    "completed_mini_epoch": mini_epoch,
+                    "elapsed_time_mini_epoch": total_training_time,
+                },
+            )
+            logger.info(
+                f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds"
+            )
 
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
@@ -779,16 +779,7 @@ class Trainer(TrainerBase):
                     stddev_all,
                     avg_loss=avg_loss,
                     lr=self.lr_scheduler.get_lr(),
-                )
-                self.train_logger.log_metrics(
-                    "train",
-                    {
-                        "elapsed_training_time_seconds": elapsed_time,
-                        "total_num_samples": samples,
-                        "average_samples_per_second": samples / elapsed_time
-                        if elapsed_time > 0
-                        else 0,
-                    },
+                    elapsed_training_time_seconds=elapsed_time,
                 )
 
         loss_calculator.loss_hist = []
