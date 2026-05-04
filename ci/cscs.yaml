@@ -27,6 +27,8 @@ test_job:
     ./scripts/actions.sh create-links
     echo "Activate the environment"
     source .venv/bin/activate
+    which python3
+    which pytest
     echo "Run tests"
     ./scripts/actions.sh integration-test${STAGE_TYPE:-}
   variables:
