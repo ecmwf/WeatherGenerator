@@ -4,25 +4,30 @@
 Entry points:
 - standard: plots run-level metrics vs num_nodes
 - detailed: plots sample-level metrics vs total_num_samples
-- combined: generates a comparison table from separate strong and weak scaling input files
+- combined: generates a comparison table from separate strong and weak
+  scaling input files
 
 Usage:
   # Single scaling type (original behavior)
-  python -m performance.generate_scaling_plots standard --type strong --input strong_data.parquet
-  
+  python -m performance.generate_scaling_plots standard --type strong \
+    --input strong_data.parquet
+
   # Combined table from single file with both types
-  python -m performance.generate_scaling_plots standard --type strong,weak --input data.parquet
-  
+  python -m performance.generate_scaling_plots standard \
+    --type strong,weak --input data.parquet
+
   # Combined table from separate strong and weak input files (new)
   python -m performance.generate_scaling_plots combined \
     --strong-input strong_data.parquet \
     --weak-input weak_data.parquet
-  
+
   # Loss plot
-  python -m performance.generate_scaling_plots loss --type strong --input data.parquet
-  
+  python -m performance.generate_scaling_plots loss --type strong \
+    --input data.parquet
+
   # Detailed scaling plot
-  python -m performance.generate_scaling_plots detailed --input detailed_data.parquet
+  python -m performance.generate_scaling_plots detailed \
+    --input detailed_data.parquet
 """
 
 import argparse
@@ -101,7 +106,8 @@ def generate_scaling_table(
     """Generate a PNG table image with scaling metrics from the parquet file.
 
     Columns: num_nodes, training_time, ideal_time, efficiency (optionally run_id)
-    If scaling_types has multiple types, generates a combined table with columns per type.
+    If scaling_types has multiple types, generates a combined table with
+    columns per type.
     """
     # Check if required columns exist
     if "num_nodes" not in df.columns or "training_time" not in df.columns:
@@ -242,10 +248,12 @@ def generate_combined_scaling_table(
     output_path: Path,
     show_run_ids: bool = False,
 ) -> None:
-    """Generate a combined table comparing strong and weak scaling from two separate input files.
+    """Generate a combined table comparing strong and weak scaling from two
+    separate input files.
 
     Rows: num_nodes
-    Columns: # Nodes, Strong Training Time, Strong Efficiency, Weak Training Time, Weak Efficiency
+    Columns: # Nodes, Strong Training Time, Strong Efficiency,
+             Weak Training Time, Weak Efficiency
 
     Also generates a PNG visualization of the table.
     """
@@ -253,7 +261,8 @@ def generate_combined_scaling_table(
     for name, df in [("strong", strong_df), ("weak", weak_df)]:
         if "num_nodes" not in df.columns or "training_time" not in df.columns:
             print(
-                f"Warning: Required columns (num_nodes, training_time) not found in {name} data"
+                f"Warning: Required columns (num_nodes, training_time) not found "
+                f"in {name} data"
             )
             return
 
@@ -476,12 +485,7 @@ def plot_standard_scaling(
     for idx, metric in enumerate(valid_metrics):
         ax = axes[idx][0]
         df_plot = df.filter(pl.col(metric).is_not_null()).sort("num_nodes")
-        node_counts = (
-            df_plot["num_nodes"].unique().to_list()
-            if "num_nodes" in df_plot.columns
-            else []
-        )
-        colors = color_map_for_nodes(node_counts)
+        # node_counts removed - was only used for colors which is also removed
 
         # Handle normalized_throughput and efficiency metrics
         if y_metric == "normalized_throughput" and metric == "training_time":
@@ -496,7 +500,8 @@ def plot_standard_scaling(
                 plot_y = df_plot["normalized_throughput"]
             else:
                 print(
-                    "Warning: No 1-node data found for normalized throughput calculation"
+                    "Warning: No 1-node data found for normalized throughput "
+                    "calculation"
                 )
                 continue
         elif y_metric == "efficiency" and metric == "training_time":
@@ -567,8 +572,9 @@ def plot_standard_scaling(
                     raise ValueError(f"Invalid scaling type: {scaling_type}")
                 ax.plot(nodes, optimal_y, "r--", linewidth=1, label="Optimal scaling")
 
-                # Show per-point efficiency loss as a vertical line and factor label.
-                # Use plot_y (normalized throughput if applicable) instead of df_plot[metric]
+                # Show per-point efficiency loss as a vertical line and factor
+                # label. Use plot_y (normalized throughput if applicable) instead
+                # of df_plot[metric]
                 for x, y, y_opt in zip(
                     nodes, plot_y.to_list(), optimal_y, strict=False
                 ):
@@ -730,7 +736,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--y-metric",
         choices=["time", "normalized_throughput", "efficiency"],
         default="normalized_throughput",
-        help="Y-axis metric: 'time' for time-to-solution, 'normalized_throughput' for T1/T, or 'efficiency' for scaling efficiency",
+        help=(
+            "Y-axis metric: 'time' for time-to-solution, "
+            "'normalized_throughput' for T1/T, or 'efficiency' for scaling efficiency"
+        ),
     )
     standard.add_argument(
         "--show-run-ids",
@@ -769,7 +778,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     combined = subparsers.add_parser(
         "combined",
-        help="Generate combined table comparing strong and weak scaling from separate input files",
+        help=(
+            "Generate combined table comparing strong and weak scaling "
+            "from separate input files"
+        ),
     )
     combined.add_argument(
         "--strong-input",
@@ -838,7 +850,8 @@ def main() -> None:
         for stype in scaling_types:
             if stype not in ("strong", "weak"):
                 print(
-                    f"Error: Invalid scaling type '{stype}'. Use 'strong', 'weak', or 'strong,weak'"
+                    f"Error: Invalid scaling type '{stype}'. Use 'strong', "
+                    "'weak', or 'strong,weak'"
                 )
                 return
 
@@ -884,7 +897,8 @@ def main() -> None:
         for stype in scaling_types:
             if stype not in ("strong", "weak"):
                 print(
-                    f"Error: Invalid scaling type '{stype}'. Use 'strong', 'weak', or 'strong,weak'"
+                    f"Error: Invalid scaling type '{stype}'. Use 'strong', "
+                    "'weak', or 'strong,weak'"
                 )
                 return
 

@@ -1,5 +1,10 @@
 #!/usr/bin/env uv run python
-"""Extract strong scaling data from WeatherGenerator runs. Outputs parquet with run_id, num_nodes, training_time, overall_time_seconds, loss_avg_mean."""
+"""Extract strong scaling data from WeatherGenerator runs.
+
+Outputs parquet with:
+- run_id, num_nodes, training_time
+- overall_time_seconds, loss_avg_mean
+"""
 
 import argparse
 import re
@@ -150,8 +155,11 @@ def extract_detailed_metrics(
 
 def parse_run_ids(run_ids_str: list[str]) -> list[tuple[int | None, str]]:
     """Parse run-ids argument which can be:
-    1. A list of run-ids (old format): ["run1", "run2"] -> [(None, "run1"), (None, "run2")]
-    2. A dict mapping num_nodes to run-ids (new format): "{1: run1, 4: run2}" -> [(1, "run1"), (4, "run2")]
+
+    1. A list of run-ids (old format):
+       ["run1", "run2"] -> [(None, "run1"), (None, "run2")]
+    2. A dict mapping num_nodes to run-ids (new format):
+       "{1: run1, 4: run2}" -> [(1, "run1"), (4, "run2")]
 
     Returns list of (num_nodes, run_id) tuples.
     """
@@ -182,44 +190,23 @@ def parse_run_ids(run_ids_str: list[str]) -> list[tuple[int | None, str]]:
     return [(None, run_id) for run_id in run_ids_str]
 
 
-def extract_num_nodes_from_output(run_id: str, logs_base_dir: Path) -> int | None:
-    """Extract num_nodes from output.*.txt file in the run directory.
-
-    Looks for 'nNodes' pattern in output files.
-    """
-    run_log_dir = logs_base_dir / run_id
-    if not run_log_dir.exists():
-        return None
-
-    # Look for output.*.txt files
-    output_files = list(run_log_dir.glob("output.*.txt"))
-    if not output_files:
-        # Fallback to err files if no output files found
-        output_files = list(run_log_dir.glob("weathergen.*.err"))
-
-    for output_file in output_files:
-        try:
-            content = output_file.read_text()
-            # Look for nNodes pattern: "nNodes 128" (space-separated, as in NCCL logs)
-            match = re.search(r"nNodes\s+(\d+)", content, re.IGNORECASE)
-            if match:
-                return int(match.group(1))
-        except Exception:
-            continue
-
-    return None
-
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract strong scaling data from WeatherGenerator runs. "
-        "Run-ids can be provided as a list (--run-ids run1 run2) or as a dict mapping num_nodes to run-ids "
-        "(--run-ids '{1: run1, 4: run2}'). If num_nodes is not provided in the dict, it will be extracted from output.*.txt files."
+        description=(
+            "Extract strong scaling data from WeatherGenerator runs. "
+            "Run-ids can be provided as a list (--run-ids run1 run2) or as a dict "
+            "mapping num_nodes to run-ids (--run-ids '{1: run1, 4: run2}'). "
+            "If num_nodes is not provided in the dict, it will be extracted "
+            "from output.*.txt files."
+        )
     )
     parser.add_argument(
         "--run-ids",
         nargs="+",
-        help="Run-ids to process. Can be: (1) list: run1 run2 run3, or (2) dict: '{1: run1, 4: run2, 8: run3}'",
+        help=(
+            "Run-ids to process. Can be: (1) list: run1 run2 run3, or "
+            "(2) dict: '{1: run1, 4: run2, 8: run3}'"
+        ),
     )
     parser.add_argument(
         "--logs-base-dir",
@@ -273,7 +260,8 @@ def main():
         if detailed_records:
             all_detailed_records.extend(detailed_records)
             print(
-                f"Extracted {len(detailed_records)} detailed metric entries for {run_id} ({num_nodes} nodes)"
+                f"Extracted {len(detailed_records)} detailed metric entries "
+                f"for {run_id} ({num_nodes} nodes)"
             )
 
     if not results:
@@ -314,7 +302,8 @@ def main():
     print(f"  - Extracted {len(results)} run summaries to {args.output}")
     if all_detailed_records:
         print(
-            f"  - Extracted {len(all_detailed_records)} detailed metric entries to {detailed_output}"
+            f"  - Extracted {len(all_detailed_records)} detailed metric entries "
+            f"to {detailed_output}"
         )
 
 
