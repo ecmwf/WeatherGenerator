@@ -1,12 +1,13 @@
+# Organize imports
 import json
 import logging
 from pathlib import Path
-from typing import override
-from numpy.typing import NDArray
-import torch
 
 import numpy as np
+import torch
 import xarray as xr
+from numpy.typing import NDArray
+from typing import override
 
 from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon
 from weathergen.datasets.data_reader_base import (
@@ -320,7 +321,8 @@ class DataReaderCams(DataReaderTimestep):
         """
         Normalize source channels using two-step process:
         Step 1: Normalize by scale (max): x_scaled = x / scale_v
-        Step 2: Apply transformation: c1 * min(x_scaled, 2.5) + c2 * (log(max(x_scaled, 10^-4)) - log(10^-4)) / (-log(10^-4))
+        Step 2: Apply transformation: c1 * min(x_scaled, 2.5) + \
+            c2 * (log(max(x_scaled, 10^-4)) - log(10^-4)) / (-log(10^-4))
 
         Parameters
         ----------
@@ -331,6 +333,7 @@ class DataReaderCams(DataReaderTimestep):
         -------
         Normalized data
         """
+
         if source.shape[-1] != len(self.source_idx):
             raise ValueError(
                 f"incorrect number of source channels: expected {len(self.source_idx)}, "
@@ -363,7 +366,8 @@ class DataReaderCams(DataReaderTimestep):
         """
         Normalize target channels using two-step process:
         Step 1: Normalize by scale (max): x_scaled = x / scale_v
-        Step 2: Apply transformation: c1 * min(x_scaled, 2.5) + c2 * (log(max(x_scaled, 10^-4)) - log(10^-4)) / (-log(10^-4))
+        Step 2: Apply transformation: c1 * min(x_scaled, 2.5) + \
+            c2 * (log(max(x_scaled, 10^-4)) - log(10^-4)) / (-log(10^-4))
 
         Parameters
         ----------
@@ -374,6 +378,7 @@ class DataReaderCams(DataReaderTimestep):
         -------
         Normalized data
         """
+
         if target.shape[-1] != len(self.target_idx):
             raise ValueError(
                 f"incorrect number of target channels: expected {len(self.target_idx)}, "
@@ -418,6 +423,7 @@ class DataReaderCams(DataReaderTimestep):
         -------
         Denormalized data
         """
+
         if source.shape[-1] != len(self.source_idx):
             raise ValueError(
                 f"incorrect number of source channels: expected {len(self.source_idx)}, "
@@ -429,7 +435,8 @@ class DataReaderCams(DataReaderTimestep):
             scale_v = self.max[ch_idx]
             
             # Step 1: Reverse transformation to get x_scaled
-            # Use iterative method to find x_scaled such that: y = c1*min(x_scaled,2.5) + c2*(log(max(x_scaled,ε))-log(ε))/(-log(ε))
+            # Use iterative method to find x_scaled such that: y = c1*min(x_scaled,2.5) + \
+            #    c2*(log(max(x_scaled,ε))-log(ε))/(-log(ε))
             if torch.is_tensor(y):
                 # Initial guess: assume log term dominates
                 x_scaled = torch.exp(y / c2 * (-log_epsilon) + log_epsilon)
@@ -496,7 +503,8 @@ class DataReaderCams(DataReaderTimestep):
             scale_v = self.max[ch_idx]
             
             # Step 1: Reverse transformation to get x_scaled
-            # Use iterative method to find x_scaled such that: y = c1*min(x_scaled,2.5) + c2*(log(max(x_scaled,ε))-log(ε))/(-log(ε))
+            # Use iterative method to find x_scaled such that: y = c1*min(x_scaled,2.5) + \
+            #    c2*(log(max(x_scaled,ε))-log(ε))/(-log(ε))
             if torch.is_tensor(y):
                 # Initial guess: assume log term dominates
                 x_scaled = torch.exp(y / c2 * (-log_epsilon) + log_epsilon)
