@@ -78,7 +78,7 @@ def build_gridded_dataarrays(
     lat: NDArray,
     lon: NDArray,
     per_sample_valid_times: list[np.datetime64],
-    source_interval_starts: NDArray,
+    init_times: NDArray,
     forecast_step_val: int,
     ens_select: EnsembleSelect,
 ) -> tuple[xr.DataArray, xr.DataArray]:
@@ -104,7 +104,7 @@ def build_gridded_dataarrays(
         One valid_time per sample.  Each sample represents a different
         forecast initialisation, so valid_time differs across samples
         even for the same forecast step.
-    source_interval_starts : np.ndarray
+    init_times : np.ndarray
         Per-sample source interval start times, shape (n_samples,).
     forecast_step_val : int
         Forecast step value to assign as coordinate.
@@ -126,10 +126,6 @@ def build_gridded_dataarrays(
 
     # valid_time must be 2D (sample, ipoint) to match the shape produced by
     # get_data() → _force_consistent_grids → xr.concat(dim="sample").
-    # _add_lead_time_coord computes lead_time = valid_time - source_interval_start
-    # and needs both arrays to broadcast as (sample, ipoint).
-    # Each sample has its OWN valid_time (different initialisation dates),
-    # so we build a 2D array where row i is filled with sample i's time.
     vt_col = np.array(per_sample_valid_times, dtype="datetime64[ns]")  # (n_samples,)
     valid_time_2d = np.broadcast_to(
         vt_col[:, np.newaxis],  # (n_samples, 1)
@@ -143,7 +139,7 @@ def build_gridded_dataarrays(
         "lat": ("ipoint", sub_lat),
         "lon": ("ipoint", sub_lon),
         "valid_time": (("sample", "ipoint"), valid_time_2d),
-        "source_interval_start": ("sample", source_interval_starts.copy()),
+        "source_interval_start": ("sample", init_times.copy()),
         "forecast_step": forecast_step_val,
     }
 
@@ -164,7 +160,7 @@ def build_scatter_dataarrays(
     samples: list[int],
     read_channels: list[str],
     per_sample_valid_times: list[np.datetime64],
-    source_interval_starts: NDArray,
+    init_times: NDArray,
     forecast_step_val: int,
     ens_select: EnsembleSelect,
     per_sample_coords: list[NDArray | None],
@@ -189,7 +185,7 @@ def build_scatter_dataarrays(
     per_sample_valid_times : list[np.datetime64]
         One representative valid_time per sample (used as fallback when
         per-observation times are not available).
-    source_interval_starts : np.ndarray
+    init_times : np.ndarray
         Per-sample source interval start times.
     forecast_step_val : int
         Forecast step value to assign as coordinate.
@@ -235,7 +231,7 @@ def build_scatter_dataarrays(
             if per_sample_obs_times is not None and si < len(per_sample_obs_times)
             else np.full(n_ip, per_sample_valid_times[si], dtype="datetime64[ns]")
         )
-        si_start = source_interval_starts[si]
+        si_start = init_times[si]
 
         sample_coords = {
             "ipoint": np.arange(n_ip),

@@ -25,6 +25,7 @@ from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
+    MAX_NUMBER_TOKENS_LOCAL_PER_CELL,
     BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
@@ -93,9 +94,10 @@ class ModelParams(torch.nn.Module):
         self.dtype = get_dtype(cf.attention_dtype)
 
         # Positional embeddings
-        len_token_seq = 1024
+        self.max_tokens_local_per_cell = MAX_NUMBER_TOKENS_LOCAL_PER_CELL
         self.pe_embed = torch.nn.Parameter(
-            torch.zeros(len_token_seq, cf.ae_local_dim_embed, dtype=self.dtype), requires_grad=False
+            torch.zeros(self.max_tokens_local_per_cell, cf.ae_local_dim_embed, dtype=self.dtype),
+            requires_grad=False,
         )
 
         pe = torch.zeros(
@@ -180,12 +182,17 @@ class ModelParams(torch.nn.Module):
         # positional encodings
 
         dim_embed = cf.ae_local_dim_embed
-        len_token_seq = 1024
+        token_idx_bias = 16
+        freq_bias = 8
         self.pe_embed.data.fill_(0.0)
-        position = torch.arange(0, len_token_seq, device=self.pe_embed.device).unsqueeze(1)
+        position = torch.arange(
+            token_idx_bias,
+            token_idx_bias + self.max_tokens_local_per_cell,
+            device=self.pe_embed.device,
+        ).unsqueeze(1)
         div = torch.exp(
-            torch.arange(0, dim_embed, 2, device=self.pe_embed.device)
-            * -(math.log(len_token_seq) / dim_embed),
+            torch.arange(freq_bias, freq_bias + dim_embed, 2, device=self.pe_embed.device)
+            * -(math.log(self.max_tokens_local_per_cell) / dim_embed),
         )
         self.pe_embed.data[:, 0::2] = torch.sin(position * div[: self.pe_embed[:, 0::2].shape[1]])
         self.pe_embed.data[:, 1::2] = torch.cos(position * div[: self.pe_embed[:, 1::2].shape[1]])

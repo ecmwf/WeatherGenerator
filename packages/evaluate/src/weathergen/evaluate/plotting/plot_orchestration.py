@@ -13,6 +13,7 @@ import glob
 import logging
 from pathlib import Path
 
+import imageio
 import matplotlib
 import numpy as np
 import omegaconf as oc
@@ -23,6 +24,8 @@ from tqdm import tqdm
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
+from weathergen.evaluate.plotting.bar_plots import BarPlots
+from weathergen.evaluate.plotting.line_plots import LinePlots
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     heat_maps_metric_region,
@@ -31,13 +34,9 @@ from weathergen.evaluate.plotting.plot_utils import (
     ratio_plot_metric_region,
     score_card_metric_region,
 )
-from weathergen.evaluate.plotting.plotter import (
-    BarPlots,
-    LinePlots,
-    Plotter,
-    QuantilePlots,
-    ScoreCards,
-)
+from weathergen.evaluate.plotting.plotter import Plotter
+from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
+from weathergen.evaluate.plotting.score_cards import ScoreCards
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.scores.score_orchestration import get_next_fstep_data
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
@@ -83,6 +82,11 @@ def plot_score_maps_per_stream(
     _logger.info(f"RUN {reader.run_id} - {stream}: Saving score maps to {map_dir}")
 
     available_data = reader.check_availability(stream, mode="evaluation")
+    if not available_data.score_availability:
+        _logger.warning(
+            f"RUN {reader.run_id} - {stream}: No evaluation config. Skipping score maps."
+        )
+        return
     fsteps = available_data.fsteps
     samples = available_data.samples
     channels = available_data.channels
@@ -107,7 +111,7 @@ def plot_score_maps_per_stream(
     plotter_cfg = {
         "image_format": cfg.get("image_format", "png"),
         "dpi_val": cfg.get("dpi_val", 300),
-        "fig_size": cfg.get("fig_size", (8, 10)),
+        "fig_size": cfg.get("fig_size", None),
     }
     output_basedir = str(reader.runplot_dir)
     run_id = reader.run_id
@@ -257,6 +261,7 @@ def _build_single_animation(
     sa: object,
     fsteps: list,
     image_format: str,
+    animation_format: str,
     duration_ms: int,
 ) -> list[str]:
     """Build one GIF for a single (region, sample, variable) combination.
@@ -285,23 +290,28 @@ def _build_single_animation(
         image_paths += glob.glob(fname)
 
     if not image_paths:
-        _logger.warning(f"No images found for animation {var} sample {sa} region {region}")
+        _logger.debug(f"No images found for animation {var} sample {sa} region {region}")
         return []
 
     image_paths = sorted(image_paths)
-    images = [Image.open(p) for p in image_paths]
-    out_path = f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.gif"
-    images[0].save(
-        out_path,
-        save_all=True,
-        append_images=images[1:],
-        duration=duration_ms,
-        loop=0,
+    out_path = (
+        f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.{animation_format}"
     )
-
-    for img in images:
-        img.close()
-
+    if animation_format.lower() == "mp4":
+        frames = [imageio.imread(p) for p in image_paths]
+        fps = 1000 / duration_ms if duration_ms > 0 else 2
+        imageio.mimsave(out_path, frames, fps=fps, ffmpeg_params=["-crf", "18"])
+    else:
+        images = [Image.open(p) for p in image_paths]
+        images[0].save(
+            out_path,
+            save_all=True,
+            append_images=images[1:],
+            duration=duration_ms,
+            loop=0,
+        )
+        for img in images:
+            img.close()
     _logger.debug(f"Saved animation to {out_path}")
     return image_paths
 
@@ -345,6 +355,7 @@ def _dispatch_animations(
             "sa": sa,
             "fsteps": list(fsteps),
             "image_format": plotter.image_format,
+            "animation_format": plotter.animation_format,
             "duration_ms": duration_ms,
         }
         for region in plotter.regions
@@ -466,8 +477,9 @@ def plot_data(
 
     plotter_cfg = {
         "image_format": global_plotting_opts.get("image_format", "png"),
+        "animation_format": global_plotting_opts.get("animation_format", "gif"),
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
-        "fig_size": global_plotting_opts.get("fig_size", (8, 10)),
+        "fig_size": global_plotting_opts.get("fig_size"),
         "fps": global_plotting_opts.get("fps", 2),
         "regions": global_plotting_opts.get("regions", ["global"]),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
@@ -476,6 +488,9 @@ def plot_data(
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")
+    if not available_data.score_availability:
+        _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
+        return
 
     plot_maps = plot_settings.get("plot_maps", False)
     if not isinstance(plot_maps, bool):
@@ -651,15 +666,17 @@ def plot_data(
                 max_workers=max_wk,
             )
         if plot_bias:
-            _dispatch_animations(
-                plotter,
-                plot_samples,
-                plot_fsteps,
-                plot_chs,
-                data_selection,
-                "bias",
-                max_workers=max_wk,
-            )
+            for ens in available_data.ensemble:
+                bias_tag = "bias" if "ens" not in last_preds.dims else f"bias_ens_{ens}"
+                _dispatch_animations(
+                    plotter,
+                    plot_samples,
+                    plot_fsteps,
+                    plot_chs,
+                    data_selection,
+                    bias_tag,
+                    max_workers=max_wk,
+                )
 
 
 # ---------------------------------------------------------------------------

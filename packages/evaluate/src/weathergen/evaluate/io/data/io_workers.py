@@ -146,17 +146,17 @@ def _read_sample(
     n_substeps = []  # track how many sub-steps per fstep
     source_interval = None
 
+    # Derive source interval from the source group's times at fstep 0.
+    try:
+        source_times = np.asarray(ds[f"{sample}/{stream}/0/source/times"])
+        source_window_start = str(np.min(source_times))
+        source_window_end = str(np.max(source_times))
+        source_interval = {"start": source_window_start, "end": source_window_end}
+    except (KeyError, AttributeError):
+        source_interval = {}
+
     for fs in fsteps:
         base = f"{sample}/{stream}/{fs}"
-
-        # Read source_interval from prediction group attributes (once)
-        if source_interval is None:
-            try:
-                pred_group = ds[f"{base}/prediction"]
-                attrs = dict(pred_group.attrs)
-                source_interval = attrs.get("source_interval", {})
-            except (KeyError, AttributeError):
-                source_interval = {}
 
         # Direct array access — bypasses OutputDataset/as_xarray/dask entirely
         pred_data = np.asarray(ds[f"{base}/prediction/data"])
