@@ -161,7 +161,7 @@ enable = ["W0201", "W0141"]
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
 # Also, trying to resolve some permissions issue, see 44.
-link-mode = "symlink"
+link-mode = "copy"
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
@@ -173,7 +173,6 @@ exclude-newer = "2026-02-27T00:00:00Z"
 # over revisions, causing reformats to happen without reason.
 # Also, relatively recent versions are required to support workspaces.
 required-version = ">=0.7.0"
-link-mode = "copy"
 
 # The supported environments
 # TODO: add macos and windows (CPU only, for running tests)
