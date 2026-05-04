@@ -2,42 +2,42 @@
 
 This package contains tools for extracting and analyzing scaling performance data from WeatherGenerator training runs.
 
+## Installation
+
+Install the optional performance tools:
+
+```bash
+uv sync --extra performance
+```
+
 ## Scripts
 
 ### extract_scaling_data.py
 
-Extracts strong scaling metrics from WeatherGenerator training runs.
+Extracts scaling metrics from WeatherGenerator training runs and writes parquet output.
 
 ```bash
-extract_scaling_data --logs-dir /path/to/logs --work-dir /path/to/work
+extract_scaling_data --run-ids RUN_ID1 RUN_ID2 --output scaling.parquet
 ```
 
 ### generate_scaling_plots.py
 
-Generates scaling plots and tables from parquet/NDJSON data.
+Generates scaling plots and tables from parquet/NDJSON data using named columns from the input files.
 
 ```bash
-# Standard mode (single type)
-generate_scaling_plots standard --type strong --input data.parquet
-
-# Combined mode (separate files)
-generate_scaling_plots combined \
-  --strong-input strong.parquet \
-  --weak-input weak.parquet
-
-# Combined mode (single file with both types)
-generate_scaling_plots standard --type strong,weak --input data.parquet
+generate_scaling_plots standard --input scaling.parquet --type strong --y-scale log
 ```
 
-## Installation
+## Suggested workflow
 
-This package is part of the WeatherGenerator workspace. To install:
+1. Extract the scaling data into a parquet file (on your HPC).
+2. Copy the parquet file to your local machine.
+3. Generate plots from the parquet file.
+
+Example:
 
 ```bash
-# In the root WeatherGenerator directory
-uv sync --extra performance
+extract_scaling_data --run-ids RUN_ID1 RUN_ID2 --output scaling.parquet
+scp user@remote:/path/to/scaling.parquet .
+generate_scaling_plots standard --input scaling.parquet --type strong --y-scale log
 ```
-
-The scripts will be available as console scripts:
-- `extract_scaling_data`
-- `generate_scaling_plots`
