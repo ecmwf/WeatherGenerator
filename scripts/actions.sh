@@ -8,8 +8,21 @@ case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
+      # Creates a virtual environment without checking the integrity of the cache.
+      # If we are running on a mac, use the cpu extra
+      if [[ "$(uname)" == "Darwin" ]]; then
+        uv sync --all-packages --extra cpu
+        exit 0
+      fi
+      # Otherwise, use the gpu extra
+      uv sync --all-packages --extra gpu
+    )
+    ;;
+  sync-safe)
+    (
+      cd "$SCRIPT_DIR" || exit 1
       # --refresh --reinstall : LUSTRE may clean up some pieces of the cache.
-      # This ensures basic integrity.
+      # This ensures basic integrity but it is too slow (adds 60 seconds to the sync) to do it on every sync. So we only do it on mac, where the cache is more likely to get corrupted.
       # If we are running on a mac, use the cpu extra
       if [[ "$(uname)" == "Darwin" ]]; then
         uv sync --all-packages --extra cpu --refresh --reinstall
