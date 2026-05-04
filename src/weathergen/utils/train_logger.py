@@ -115,7 +115,6 @@ class TrainLogger:
             metrics["num_samples"] = int(samples)
             if elapsed_training_time_seconds is not None:
                 metrics["elapsed_training_time_seconds"] = elapsed_training_time_seconds
-                metrics["total_num_samples"] = samples
                 metrics["average_samples_per_second"] = (
                     samples / elapsed_training_time_seconds
                     if elapsed_training_time_seconds > 0
