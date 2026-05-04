@@ -350,7 +350,9 @@ def generate_combined_scaling_table(
                 row_data["Strong Efficiency"] = "-"
             else:
                 ideal_strong = t1_strong / num_nodes
-                row_data["Strong Efficiency"] = f"{ideal_strong / training_time_strong:.2f}"
+                row_data["Strong Efficiency"] = (
+                    f"{ideal_strong / training_time_strong:.2f}"
+                )
         else:
             row_data["Strong Training Time (seconds)"] = "-"
             row_data["Strong Efficiency"] = "-"
@@ -363,7 +365,9 @@ def generate_combined_scaling_table(
                 row_data["Weak Efficiency"] = "-"
             else:
                 ideal_weak = t1_weak  # Weak scaling: ideal is same as 1-node time
-                row_data["Weak Efficiency"] = f"{min(1.0, ideal_weak / training_time_weak):.2f}"
+                row_data["Weak Efficiency"] = (
+                    f"{min(1.0, ideal_weak / training_time_weak):.2f}"
+                )
         else:
             row_data["Weak Training Time (seconds)"] = "-"
             row_data["Weak Efficiency"] = "-"

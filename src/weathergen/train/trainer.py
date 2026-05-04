@@ -364,7 +364,6 @@ class Trainer(TrainerBase):
         if self.world_size_original is None:
             mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
         else:
-            # to avoid zero-division for small datasets
             len_per_rank = (
                 max(1, len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu))
             ) * self.batch_size_per_gpu
@@ -565,8 +564,9 @@ class Trainer(TrainerBase):
                 self.save_model(-1)
 
             self.cf.general.istep += 1
+
         self.dataset.advance()
-        
+
         if is_root():
             total_training_time = time.time() - self.t_training_start
             self.train_logger.log_metrics(
@@ -770,7 +770,6 @@ class Trainer(TrainerBase):
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.general.istep >= 0:
-                # Log elapsed training time and throughput metrics with every metric log
                 elapsed_time = time.time() - self.t_training_start
                 self.train_logger.add_logs(
                     stage,
