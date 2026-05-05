@@ -23,6 +23,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
+from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     MAX_NUMBER_TOKENS_LOCAL_PER_CELL,
@@ -312,6 +313,8 @@ class Model(torch.nn.Module):
         """
         super(Model, self).__init__()
 
+        self._noise = None
+
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
 
@@ -324,6 +327,7 @@ class Model(torch.nn.Module):
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | None = None
+
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
@@ -342,6 +346,9 @@ class Model(torch.nn.Module):
         self.register_token_idxs = list(range(cf.num_register_tokens))
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
         self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
+        # One-shot flag to avoid log spam when warning about an unsupported
+        # diffusion-inference + multi-step-rollout combination.
+        self._warned_diffusion_multi_step = False
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -376,10 +383,15 @@ class Model(torch.nn.Module):
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
 
+        # Initialize forecasting engine: standard or diffusion-wrapped
         mode_cfg = cf.training_config
         self.forecast_engine = None
         if cf.fe_num_blocks > 0:
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            if cf.get("fe_diffusion_model", False):
+                self.forecast_engine = DiffusionForecastEngine(
+                    cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                )
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -623,7 +635,13 @@ class Model(torch.nn.Module):
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
         num_params_fe = (
-            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
+            get_num_parameters(
+                self.forecast_engine.net.fe_blocks
+                if cf.fe_diffusion_model
+                else self.forecast_engine.fe_blocks
+            )
+            if self.forecast_engine
+            else 0
         )
 
         mdict = self.embed_target_coords
@@ -708,14 +726,64 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             # apply forecasting engine (if present)
             if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+                tokens = self.forecast_engine(
+                    tokens,
+                    step,
+                    meta_info=batch.samples[0].meta_info,
+                    coords=model_params.rope_coords,
+                )
+
+            # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a
+            # list. Treat each intermediate state as its own forecast step in the output so the
+            # full denoising trajectory can be inspected downstream. The original `step` is
+            # still used to look up target coordinates (they share the same physical timestamp).
+            if isinstance(tokens, list):
+                # Diffusion inference currently only supports a single physical forecast
+                # step (forecast.num_steps=1); the per-ODE-step trajectory consumes the
+                # ModelOutput fstep dimension. Multi-step autoregressive rollouts on top of
+                # diffusion are not implemented yet.
+                if (
+                    len(batch.get_output_idxs()) > 1
+                    and not self._warned_diffusion_multi_step
+                ):
+                    logger.warning(
+                        "Diffusion inference is being run with forecast.num_steps=%d (>1). "
+                        "Only a single forecast step is supported in this mode; the "
+                        "per-ODE-step denoising trajectory will overwrite later forecast "
+                        "steps in the model output.",
+                        len(batch.get_output_idxs()),
+                    )
+                    self._warned_diffusion_multi_step = True
+                # Resize output to fit the diffusion trajectory.
+                output = self._reindex_output_for_trajectory(output, len(tokens))
+                for i, toks in enumerate(tokens):
+                    output = self.predict_decoders(
+                        model_params, step, toks, batch, output, out_step=i
+                    )
+                    output = self.predict_latent(
+                        model_params, step, toks, batch, output, out_step=i
+                    )
+                continue
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
+
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
 
         return output
+
+    @staticmethod
+    def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
+        """
+        Resize a ModelOutput to hold ``n_steps`` forecast steps, preserving any latent entries
+        that were already attached to fstep 0 (e.g. encoder posteriors).
+        """
+        new_output = ModelOutput(n_steps)
+        if len(output.latent) > 0:
+            for k, v in output.latent[0].items():
+                new_output.add_latent_prediction(0, k, v)
+        return new_output
 
     def predict_latent(
         self,
@@ -724,19 +792,23 @@ class Model(torch.nn.Module):
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
+        out_step: int | None = None,
     ) -> ModelOutput:
         """
         Compute latent predictions
         """
 
+        if out_step is None:
+            out_step = step
+
         # safe latent prediction
         tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
-        output.add_latent_prediction(step, "latent_state", latent_state)
+        output.add_latent_prediction(out_step, "latent_state", latent_state)
 
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
-            output.add_latent_prediction(step, name, head(latent_state))
+            output.add_latent_prediction(out_step, name, head(latent_state))
 
         return output
 
@@ -747,6 +819,7 @@ class Model(torch.nn.Module):
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
+        out_step: int | None = None,
     ) -> ModelOutput:
         """
         Compute decoder-based predictions
@@ -765,8 +838,12 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
         # Empty dicts evaluate to False in python
+        # breakpoint()
         if not self.pred_heads:
             return output
+
+        if out_step is None:
+            out_step = step
 
         # remove register  and class tokens
         tokens = tokens[:, self.num_aux_tokens :]
@@ -782,6 +859,8 @@ class Model(torch.nn.Module):
         )
         tokens_nbors_lens[0] = 0
 
+        # breakpoint()
+
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
@@ -792,6 +871,7 @@ class Model(torch.nn.Module):
             t_coords_lens = [len(t) for t in t_coords]
             t_coords = torch.cat(t_coords)
 
+            # breakpoint()
             if len(t_coords) == 0:
                 continue
 
@@ -843,6 +923,7 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-            output.add_physical_prediction(step, stream_name, pred)
+
+            output.add_physical_prediction(out_step, stream_name, pred)
 
         return output

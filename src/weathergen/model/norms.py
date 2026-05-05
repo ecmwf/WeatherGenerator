@@ -61,6 +61,42 @@ class RMSNorm(torch.nn.Module):
         return output * self.weight
 
 
+class AdaLNZero(torch.nn.Module):
+    """DiT-style adaptive layer norm with zero initialization for diffusion models."""
+
+    def __init__(self, dim_embed: int, dim_aux: int, norm_eps: float = 1e-5):
+        super().__init__()
+        self.norm = torch.nn.LayerNorm(dim_embed, elementwise_affine=False, eps=norm_eps)
+        self.gate_proj = torch.nn.Linear(dim_aux, dim_embed)
+        self.shift_proj = torch.nn.Linear(dim_aux, dim_embed)
+
+        with torch.no_grad():
+            self.gate_proj.weight.zero_()
+            self.gate_proj.bias.zero_()
+            self.shift_proj.weight.zero_()
+            self.shift_proj.bias.zero_()
+
+    def forward(self, x: torch.Tensor, aux: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Returns (x_normalized_and_scaled, gate_signal) for residual modulation."""
+        x_norm = self.norm(x)
+
+        if aux.dim() == 0:
+            aux = aux.unsqueeze(0)
+
+        gate_params = self.gate_proj(aux)
+        shift_params = self.shift_proj(aux)
+
+        while gate_params.dim() < x_norm.dim():
+            gate_params = gate_params.unsqueeze(-2)
+            shift_params = shift_params.unsqueeze(-2)
+
+        gate = 1 + gate_params
+        x_out = gate * x_norm + shift_params
+        gate_signal = gate.mean(dim=-1, keepdim=True)
+
+        return x_out, gate_signal
+
+
 class AdaLayerNorm(torch.nn.Module):
     """
     AdaLayerNorm for embedding auxiliary information

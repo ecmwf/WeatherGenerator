@@ -11,6 +11,8 @@ ERA5 :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   stream_id : 0
+  # source : ["z_500"]
+  # target : ["z_500"]
   source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
   target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
   loss_weight : 1.
@@ -23,12 +25,12 @@ ERA5 :
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 8
-    dim_embed : 512
+    num_heads : 4
+    dim_embed : 32
     num_blocks : 2
   embed_target_coords :
     net : linear
-    dim_embed : 512
+    dim_embed : 32
   target_readout :
     num_layers : 2
     num_heads : 4

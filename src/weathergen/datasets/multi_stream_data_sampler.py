@@ -600,6 +600,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 self.num_healpix_cells,
                 stream_info,
             )
+
             # identical for all streams
             num_target_samples = len(masks[stream_info["name"]][0])
             num_source_samples = len(masks[stream_info["name"]][1])
@@ -720,6 +721,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     input_mask=target_mask,
                 )
                 target_metadata = target_masks.metadata[tidx]
+
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
                 # Map target to all source students
