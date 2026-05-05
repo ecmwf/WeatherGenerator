@@ -35,6 +35,7 @@ class SampleMetaData:
             self.params = {}
         self.params.update(params)
 
+
 class Sample:
     # keys: stream name, values: SampleMetaData
     meta_info: dict[str | SampleMetaData]

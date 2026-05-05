@@ -28,7 +28,7 @@
 import torch
 import torch.nn as nn
 
-from weathergen.model.norms import AdaLNZero, AdaLayerNorm, RMSNorm
+from weathergen.model.norms import AdaLayerNorm, RMSNorm
 
 
 class NamedLinear(torch.nn.Module):
@@ -61,7 +61,6 @@ class MLP(torch.nn.Module):
         norm_eps=1e-5,
         name: str | None = None,
         is_dit=False,
-        dit_is_cond=False,
     ):
         """Constructor"""
 
@@ -75,7 +74,6 @@ class MLP(torch.nn.Module):
         self.with_residual = with_residual
         self.with_aux = dim_aux is not None
         self.is_dit = is_dit
-        self.dit_is_cond = dit_is_cond
         dim_hidden = int(dim_in * hidden_factor)
 
         self.layers = torch.nn.ModuleList()
@@ -83,17 +81,16 @@ class MLP(torch.nn.Module):
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
 
         if is_dit:
-            if dit_is_cond:
-                assert dim_aux is not None, "For DIT, need to provide dim_aux for ada layer norm"
+            assert dim_aux is None, "conditioning not yet implemented for DIT attention"
             assert with_residual, "DIT attention should always have residual connection"
-            self.lnorm = AdaLNZero(dim_in, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_in, eps=norm_eps)
+            self.lnorm = norm(dim_in, eps=norm_eps)
             self.noise_conditioning = LinearNormConditioning(dim_in)
         elif dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps)
         else:
             self.lnorm = norm(dim_in, eps=norm_eps)
 
-        #TODO: The below should be consolidated – implementing in layer list for backward compatibility
+        # TODO: The below should be consolidated – implementing in layer list for backward compatibility
         if not is_dit:
             self.layers.append(self.lnorm)
         self.layers.append(torch.nn.Linear(dim_in, dim_hidden))
@@ -106,7 +103,6 @@ class MLP(torch.nn.Module):
             self.layers.append(torch.nn.Dropout(p=dropout_rate))
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
-
 
     # TODO: expanded args, must check dependencies (previously aux = args[-1])
     def forward(self, *args):
@@ -136,12 +132,7 @@ class MLP(torch.nn.Module):
                 x = self.lnorm(x)
                 cond_gate = 1
             assert noise_emb is not None, "Need noise embedding for noise conditioning in DIT"
-            x, noise_gate = self.noise_conditioning(x, noise_emb)
-            gate = cond_gate * noise_gate
-        # elif self.dim_aux is not None:
-        #     x = self.lnorm(x, ada_ln_aux)
-        # else:
-        #     x = self.lnorm(x, ada_ln_aux) if ada_ln_aux is not None else self.lnorm(x)
+            x, gate = self.noise_conditioning(x, noise_emb)
 
         for layer in self.layers:
             if isinstance(layer, AdaLayerNorm):
@@ -193,4 +184,3 @@ class LinearNormConditioning(torch.nn.Module):
         return (inputs * scale + offset).to(
             self.dtype
         ), gate  # TODO: check if to(self.dtype) needed here
-

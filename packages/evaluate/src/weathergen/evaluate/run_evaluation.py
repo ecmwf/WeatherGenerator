@@ -12,10 +12,8 @@
 # Standard library
 import argparse
 import logging
-import multiprocessing as mp
 import sys
 from collections import defaultdict
-from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
 # Third-party
@@ -34,16 +32,17 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenReader,
     WeatherGenZarrReader,
 )
-from weathergen.evaluate.plotting.plot_utils import collect_channels
-from weathergen.evaluate.utils.utils import (
-    calc_scores_per_stream,
-    merge,
-    metric_list_to_json,
-    parse_metric_params,
+from weathergen.evaluate.plotting.plot_orchestration import (
     plot_data,
+    plot_score_maps_per_stream,
     plot_summary,
-    triple_nested_dict,
 )
+from weathergen.evaluate.plotting.plot_utils import collect_channels
+from weathergen.evaluate.scores.score_orchestration import (
+    calc_scores_per_stream,
+    metric_list_to_json,
+)
+from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
 from weathergen.metrics.mlflow_utils import (
     MlFlowUpload,
     get_or_create_mlflow_parent_run,
@@ -57,60 +56,15 @@ _logger = logging.getLogger(__name__)
 _platform_env = get_platform_env()
 
 
-def setup_main_logger(log_file: str | None, log_queue: mp.Queue) -> QueueListener:
-    """Set up main process logger with QueueListener
-
-    Parameters
-    ----------
-        log_file: str
-            Name of
-    """
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
-    )
-
-    handlers: list[logging.Handler] = [console_handler]
-    if log_file:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
-        )
-        handlers.append(file_handler)
-
-    listener = QueueListener(log_queue, *handlers)
-    listener.start()
-    return listener
-
-
-def setup_worker_logger(log_queue: mp.Queue) -> logging.Logger:
-    """"""
-    qh = QueueHandler(log_queue)
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.handlers.clear()
-    logger.addHandler(qh)
-    return logger
-
-
 #################################################################
 
 
 def evaluate() -> None:
     """entry point for evaluation script."""
-    # By default, arguments from the command line are read.
-    log_queue: mp.Queue = mp.Queue()
-    listener = setup_main_logger("evaluation.log", log_queue)
-    try:
-        evaluate_from_args(sys.argv[1:], log_queue)
-    finally:
-        listener.stop()
-        log_queue.close()
-        log_queue.join_thread()
+    evaluate_from_args(sys.argv[1:])
 
 
-def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
+def evaluate_from_args(argl: list[str]) -> None:
     """
     Wrapper of evaluate_from_config.
 
@@ -134,6 +88,25 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
         action="store_true",
         help="(optional) Upload scores to MLFlow.",
     )
+    parser.add_argument(
+        "--options",
+        nargs="+",
+        default=[],
+        help=(
+            "Overwrite individual config options."
+            " Individual items should be of the form: parent_obj.nested_obj=value."
+            " NOTE: cannot be used for run_ids (use --run-ids instead)."
+        ),
+    )
+    parser.add_argument(
+        "--run-ids",
+        nargs="+",
+        default=None,
+        help=(
+            "Filter run_ids from the config to only these."
+            " E.g. --run-ids wu4wy9os fy6fgscn so67dku1"
+        ),
+    )
 
     args = parser.parse_args(argl)
     if args.config:
@@ -155,7 +128,29 @@ def evaluate_from_args(argl: list[str], log_queue: mp.Queue) -> None:
 
     cf = OmegaConf.load(config)
     assert isinstance(cf, DictConfig)
-    evaluate_from_config(cf, mlflow_client, log_queue)
+
+    # Disable struct flag so that --options and --run-ids can freely modify keys.
+    OmegaConf.set_struct(cf, False)
+
+    if args.options:
+        # Filter out any run_ids= items — those must use --run-ids instead.
+        cli_items = [item for item in args.options if not item.startswith("run_ids=")]
+        if len(cli_items) != len(args.options):
+            _logger.warning(
+                "run_ids= in --options is not supported (it's a dict, not a list). "
+                "Use --run-ids instead. Ignoring run_ids= items."
+            )
+        if cli_items:
+            cli_overwrite = OmegaConf.from_cli(cli_items)
+            cf = OmegaConf.merge(cf, cli_overwrite)
+            _logger.info(f"Applied --options overwrites: {cli_items}")
+
+    if args.run_ids:
+        existing = cf.get("run_ids", {})
+        cf.run_ids = {k: existing.get(k, {}) for k in args.run_ids}
+        _logger.info(f"Overwritten run_ids to: {args.run_ids}")
+
+    evaluate_from_config(cf, mlflow_client)
 
 
 def get_reader(
@@ -181,12 +176,6 @@ def get_reader(
     else:
         raise ValueError(f"Unknown reader type: {reader_type}")
     return reader
-
-
-def _process_stream_wrapper(
-    args: dict[str, object],
-) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
-    return _process_stream(**args)
 
 
 def _process_stream(
@@ -230,48 +219,77 @@ def _process_stream(
         _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
         return run_id, stream, {}
 
-    # Parallel plotting
-    if stream_dict.get("plotting") and type_ == "zarr":
-        plot_data(reader, stream, global_plotting_opts)
+    needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
+    needs_scoring = stream_dict.get("evaluation", False)
+
+    output_data = None
+    if (needs_plotting or needs_scoring) and type_ == "zarr":
+        available_data = reader.check_availability(stream, mode="evaluation")
+
+        output_data = reader.get_data(
+            stream,
+            fsteps=available_data.fsteps,
+            samples=available_data.samples,
+            channels=available_data.channels,
+            ensemble=available_data.ensemble,
+        )
+
+        _logger.info(
+            f"RUN {run_id} - {stream}: Data loaded once — sharing between plotting and scoring."
+        )
+
+    # Plotting (pass pre-loaded data)
+    if needs_plotting:
+        plot_data(reader, stream, global_plotting_opts, output_data=output_data)
 
     # Scoring per stream
-    if not stream_dict.get("evaluation"):
+    if not needs_scoring:
         return run_id, stream, {}
+
+    score_maps = plot_score_maps and type_ == "zarr"
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif plot_score_maps and type_ == "zarr":
+    elif score_maps:
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
         return run_id, stream, scores_dict
 
     stream_computed_scores = calc_scores_per_stream(
-        reader, stream, regions_to_compute, metrics_to_compute, plot_score_maps
+        reader,
+        stream,
+        regions_to_compute,
+        metrics_to_compute,
+        output_data=output_data,
     )
     metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
     scores_dict = merge(stream_loaded_scores, stream_computed_scores)
+
+    if score_maps:
+        plot_score_maps_per_stream(
+            reader,
+            stream,
+            regions_to_compute,
+            metrics_to_compute,
+            output_data=output_data,
+        )
+
     return run_id, stream, scores_dict
 
 
-# except Exception as e:
-#     _logger.error(f"Error processing {run_id} - {stream}: {e}")
-#     return run_id, stream, {}
-
-
-# Weird typing error from python: mp.Queue is seen as a method with a "|" operator => this fai
-def evaluate_from_config(
-    cfg: dict, mlflow_client: MlflowClient | None, log_queue: "mp.Queue | None"
-) -> None:
+def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     """
     Main function that controls evaluation plotting and scoring.
     Parameters
     ----------
     cfg:
         Configuration input stored as dictionary.
+    mlflow_client:
+        Optional MLFlow client for uploading scores.
     """
     with open_dict(cfg):
         cfg.evaluation.metrics = parse_metric_params(cfg.evaluation.metrics)
@@ -283,38 +301,23 @@ def evaluate_from_config(
     regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
-    use_parallel = cfg.evaluation.get("num_processes", 0)
     default_streams = cfg.get("default_streams", {})
+    max_workers = cfg.get("max_workers")  # global hard cap for parallel workers
 
-    if use_parallel == "auto":
-        num_processes = mp.cpu_count()
-    elif isinstance(use_parallel, int):
-        if use_parallel > 0:
-            num_processes = min(use_parallel, mp.cpu_count())
-        else:
-            # Using the main process only
-            num_processes = 0
-    else:
-        raise ValueError("parallel option must be 'auto' or an non-negative integer")
-
-    if num_processes > 1:
-        _logger.info("Using %d processes for evaluation", num_processes)
-    else:
-        _logger.info("Using main process for evaluation")
-
-    scores_dict = defaultdict(triple_nested_dict)  # metric -> region -> stream -> run
     tasks = []
 
-    # Build tasks per stream
+    # Build tasks per stream — avoid constructing heavyweight readers here;
+    # _process_stream will create its own reader when it actually needs one.
     for run_id, run in runs.items():
-        type_ = run.get("type", "zarr")
-
         if "streams" not in run:
             run["streams"] = default_streams
 
-        reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
+        # Propagate top-level max_workers into each run dict so that readers
+        # and orchestration code can pick it up via eval_cfg.get("max_workers").
+        if max_workers is not None and "max_workers" not in run:
+            run["max_workers"] = max_workers
 
-        for stream in reader.streams:
+        for stream in run.get("streams", {}):
             tasks.append(
                 {
                     "run_id": run_id,
@@ -329,20 +332,7 @@ def evaluate_from_config(
             )
 
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    if num_processes == 0:
-        if log_queue is not None:
-            setup_worker_logger(log_queue)
-        results = [_process_stream(**task) for task in tasks]
-    else:
-        with mp.Pool(
-            processes=num_processes,
-            initializer=setup_worker_logger,
-            initargs=(log_queue,),
-        ) as pool:
-            results = pool.map(
-                _process_stream_wrapper,
-                tasks,
-            )
+    results = [_process_stream(**task) for task in tasks]
 
     for _, stream, stream_scores in results:
         for metric, regions_dict in stream_scores.items():
