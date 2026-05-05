@@ -237,6 +237,8 @@ torch = [
 # Explicit pin for CPU.
   { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.9.1+cpu-cp312-cp312-manylinux_2_28_aarch64.whl",marker = "sys_platform == 'linux' and platform_machine == 'aarch64'",extra = "cpu" },
   { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.9.1+cpu-cp312-cp312-manylinux_2_28_x86_64.whl",marker = "sys_platform == 'linux' and platform_machine == 'x86_64'",extra = "cpu" },
+  { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.9.1-cp312-none-macosx_11_0_arm64.whl",marker = "sys_platform == 'darwin'", extra="cpu" },
+
   # No acceleration for now.
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
