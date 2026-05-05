@@ -82,14 +82,19 @@ OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
 OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
+def _patch_time(key, sub_conf, resolver):
+    raw_key = f"_{key}"
+    sub_conf[raw_key] = sub_conf[key]
+    sub_conf[key] = f"${{{resolver}:{sub_conf[key]}}}"
+    return sub_conf
+
+
 def _sanitize_start_end_time_keys(sub_conf):
     """Convert start_date and end_date keys to datetime resolvers."""
     time_keys = ["start_date", "end_date"]
     for key in time_keys:
         if key in sub_conf:
-            raw_key = f"_{key}"
-            sub_conf[raw_key] = f"${{{key}}}"
-            sub_conf[key] = f"${{{_DATETIME_TYPE_NAME}:{sub_conf[key]}}}"
+            sub_conf = _patch_time(key, sub_conf, _DATETIME_TYPE_NAME)
 
 
 def _sanitize_delta_time_keys(sub_conf):
@@ -97,16 +102,12 @@ def _sanitize_delta_time_keys(sub_conf):
     delta_keys = ["time_window_step", "time_window_len"]
     for key in delta_keys:
         if key in sub_conf:
-            raw_key = f"_{key}"
-            sub_conf[raw_key] = f"${{{key}}}"
-            sub_conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf[key]}}}"
+            sub_conf = _patch_time(key, sub_conf, _TIMEDELTA_TYPE_NAME)
 
     if sub_conf.get("forecast") is not None:
         key = "time_step"
         if key in sub_conf.forecast:
-            raw_key = f"_{key}"
-            sub_conf.forecast[raw_key] = f"${{{key}}}"
-            sub_conf.forecast[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf.forecast[key]}}}"
+            sub_conf.forecast = _patch_time(key, sub_conf.forecast, _TIMEDELTA_TYPE_NAME)
 
 
 def _sanitize_time_keys(conf: Config) -> Config:
@@ -135,35 +136,33 @@ def _sanitize_time_keys(conf: Config) -> Config:
 
 
 def _strip_interpolation(conf: Config) -> Config:
-    """Remove OmegaConf interpolations and convert timedelta/datetime objects to strings."""
-    stripped = OmegaConf.create()
-    for key in list(conf.keys()):
-        if key.startswith("_"):
-            # Skip hidden/backup keys
-            continue
-        elif OmegaConf.is_interpolation(conf, key):
-            raw_key = f"_{key}"
-            if raw_key in conf:
+    """Recursively convert interpolated timedelta/datetime objects to strings."""
+    stripped = {}
+    if OmegaConf.is_dict(conf):
+        for key in list(conf.keys()):
+            if OmegaConf.is_missing(conf, key):
+                val = "???"
+            elif OmegaConf.is_config(conf[key]):
+                val = _strip_interpolation(conf[key])
+            elif key.startswith("_"):
+                continue  # Skip hidden/backup keys
+            elif OmegaConf.is_interpolation(conf, key):
+                raw_key = f"_{key}"
+                assert raw_key in conf, (
+                    f"Backup key: {raw_key} expected for interpolated key: {key}"
+                )
                 # Retrieve the value from the backup key (resolves interpolation)
                 val = conf[raw_key]
             else:
-                # Fallback to the original key
                 val = conf[key]
-        else:
-            # Standard key retrieval
-            val = conf[key]
 
-        # Convert unsupported types (timedelta/datetime) to strings
-        if isinstance(val, np.timedelta64 | pd.Timedelta):
-            val = timedelta_to_str(val)
-        elif isinstance(val, np.datetime64 | pd.Timestamp):
-            dt = pd.to_datetime(val)
-            # Format: Standard ISO without microseconds
-            val = dt.strftime("%Y-%m-%dT%H:%M:%S")
+            stripped[key] = val
+    elif OmegaConf.is_list(conf):
+        stripped = [
+            _strip_interpolation(item) if OmegaConf.is_config(item) else item for item in conf
+        ]
 
-        stripped[key] = val
-
-    return stripped
+    return OmegaConf.create(stripped)
 
 
 def get_run_id():
@@ -256,7 +255,6 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
-    config = _sanitize_time_keys(config)
 
     return _apply_fixes(config)
 
@@ -311,8 +309,8 @@ def _apply_fixes(config: Config) -> Config:
     "outdatet" run configurations. The fixes in this function should be
     eventually removed.
     """
+    config = _check_time_interpolation(config)
     config = _check_datasets(config)
-    config = _check_qk_norm_type(config)
     return config
 
 
@@ -335,26 +333,35 @@ def _check_datasets(config: Config) -> Config:
     return config
 
 
-def _check_logging(config: Config) -> Config:
+def _check_time_interpolation(config: Config) -> Config:
     """
-    Apply fixes to log frequency config.
+    convert 'value': '${resolver:time_value_str}' to 'time_value_str'.
     """
+
+    def _convert_interpolation(cfg, key):
+        if OmegaConf.is_interpolation(cfg, key):
+            interpolation = OmegaConf.to_container(cfg, resolve=False)[key]
+            resolver, sep, value = interpolation[2:-1].partition(":")
+            cfg[key] = value
+
+    time_keys = ["start_date", "end_date"]
+    delta_keys = ["time_window_step", "time_window_len"]
+    forecast_step_dt = "time_step"
+
     config = config.copy()
-    if config.get("train_logging") is None:  # TODO remove this for next version
-        config.train_logging = OmegaConf.create(
-            {"checkpoint": 250, "terminal": 10, "metrics": config.train_logging.log_interval}
-        )
+    subconfs = [
+        config.get("training_config"),
+        config.get("test_config"),
+        config.get("validation_config"),
+    ]
 
-    return config
+    for subconf in subconfs:
+        if subconf is not None:
+            for key in (*time_keys, *delta_keys):
+                _convert_interpolation(subconf, key)
+            if "forecast" in subconf:
+                _convert_interpolation(subconf.forecast, forecast_step_dt)
 
-
-def _check_qk_norm_type(config: Config) -> Config:
-    """
-    Backfill qk_norm_type for configs saved before qk_norm_type was introduced.
-    """
-    config = config.copy()
-    if "qk_norm_type" not in config:
-        config.qk_norm_type = config.get("norm_type", "LayerNorm")
     return config
 
 
@@ -368,7 +375,6 @@ def merge_configs(base_config: Config, update_config: Config):
 def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
-    run_id: str | None = None,
     mini_epoch: int | None = None,
     base: Path | Config | None = None,
     *overwrites: Path | dict | Config,
@@ -417,16 +423,8 @@ def load_merge_configs(
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
-
-    # In the case where we chain several finetuning jobs we don't want to reset the istep
-    # This case is detected by from_run_id being equal to run_id
-    istep = None
-    if from_run_id is not None and run_id is not None and from_run_id == run_id:
-        istep = base_config.general.istep
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
-    if istep is not None:
-        c.general.istep = istep
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
 
@@ -660,6 +658,10 @@ def load_streams(streams_directory: Path) -> list[Config]:
             # support commenting out entire stream files to avoid loading them.
             _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
             continue
+
+    for _, stream in streams.items():
+        if stream.get("frequency", None) is not None:
+            stream = _patch_time("frequency", stream, _TIMEDELTA_TYPE_NAME)
 
     return list(streams.values())
 
