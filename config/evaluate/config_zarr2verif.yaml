@@ -1,0 +1,114 @@
+# List of variables to compare between WeatherGenerator output and MetNor observation files
+# To add more varaibles use the same formate for the variable using the `var` field to put the 
+# name of the variable in the WeatherGenerator dataset and units for each stream in `wg_uni`
+# Additionally, add the chosen variable to required channels in `verif_parser.py` L92
+
+variables:
+  2t:
+    var: 2t
+    long: 2 meter temperature
+    wg_unit: {CERRA:   K,
+               MEPS:    K,
+               NORA3:   K,
+               ERA5:    K,
+               DEFAULT: K}
+    verif_unit: K
+    obs_name: air_temperature
+    obs_units: K
+    level_type: sfc
+
+  sp:
+    var: sp
+    long: Surface pressure
+    wg_unit: {CERRA:   Pa,
+               MEPS:    Pa,
+               NORA3:   Pa,
+               ERA5:    Pa,
+               DEFAULT: Pa}
+    verif_unit: Pa
+    obs_name: surface_air_pressure
+    obs_units: Pa
+    level_type: sfc
+
+  tp:
+    var: tp
+    long: Total precipitation amount
+    wg_unit:  {CERRA:   kg/m^2,
+               MEPS:    kg/m^2,
+               NORA3:   kg/m^2,
+               ERA5:    m,
+               DEFAULT: kg/m^2}
+    verif_unit: kg/m^2
+    obs_name: precipitation_amount_1h
+    obs_units: kg/m^2
+    level_type: sfc
+
+
+  msl:
+    var: mslp
+    long: Mean sea level pressure
+    wg_unit:  {CERRA:   Pa,
+               MEPS:    Pa,
+               NORA3:   Pa,
+               ERA5:    Pa,
+               DEFAULT: Pa}
+    verif_unit: Pa
+    obs_name: surface_air_pressure #check with Rolf
+    obs_units: kg/m^2
+    level_type: sfc
+
+
+  10si:
+    var: 10si # derived channel
+    long: wind speed
+    wg_unit:  {CERRA:   m/s,
+               MEPS:    m/s,
+               NORA3:   m/s,
+               ERA5:    m/s,
+               DEFAULT: m/s}
+    verif_unit: m/s
+    obs_name: wind_speed
+    obs_units: m/s
+    level_type: sfc
+
+
+coordinates:
+    sfc:
+        lat: latitude
+        lon: longitude
+        forecast_step: leadtime
+        forecast_reference_time: time
+        ncells: ncells
+    pl:
+      #not needed
+        pressure_level: pressure
+        lat: latitude
+        lon: longitude
+        forecast_step: leadtime
+        forecast_reference_time: time
+        ncells: ncells
+
+dimensions:
+    lat: 
+      verif: latitude
+      std: latitude
+      verif_unit: degrees_north
+    lon: 
+      verif: longitude
+      std: longitude
+      verif_unit: degrees_east
+    pressure_level:
+      verif: pressure
+      std: pressure
+      verif_unit: hPa
+    forecast_reference_time: 
+      verif: time
+      std: forecast_reference_time
+    forecast_step:
+      verif: leadtime
+      std: forecast_period
+      long: time since forecast_reference_time
+      verif_unit: hour
+    ncells:
+      verif: ncells
+      std: ncells
