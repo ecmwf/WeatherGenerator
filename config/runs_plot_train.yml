@@ -1,0 +1,5 @@
+train : 
+  plot :    
+    h8wnm1kt:
+      slurm_id: 0
+      description: "first conditioning experiment"

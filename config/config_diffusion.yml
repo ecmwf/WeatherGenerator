@@ -55,17 +55,19 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 4
+fe_num_blocks: 2
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
+fe_diffusion_model_conditioning: "date_time" # options: "date_time", "forecast_step", "none"
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 with_step_conditioning: True # False
 # Diffusion related parameters
+diffusion_conditioning_embed_dim: 32  # Multi-frequency calendar embedding (8 frequencies × 4 components)
 frequency_embedding_dim: 256
 embedding_dim: 512
 sigma_min: 0.002
@@ -158,7 +160,7 @@ training_config:
   shuffle: True
  
   start_date: 1979-06-01T00:00
-  end_date: 2022-12-31T18:00
+  end_date: 1979-06-01T18:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -225,14 +227,14 @@ validation_config:
   # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
   # Each value produces a separate validation pass with independently logged metrics.
   # validation_noise_levels: [0.3, 0.5, 0.75, 1.0, 1.5]
-  validation_noise_levels: [0.3, 1.5]
+  validation_noise_levels: [0.3, 1.5, 3.0]
 
   samples_per_mini_epoch: 1
   shuffle: True  # TODO: Set back to False
 
-  start_date: 2023-10-01T00:00
-  end_date: 2023-12-31T18:00
-  
+  start_date: 1979-06-01T00:00
+  end_date: 1979-06-01T18:00
+
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
     enabled : True

@@ -28,7 +28,7 @@
 import torch
 import torch.nn as nn
 
-from weathergen.model.norms import AdaLayerNorm, RMSNorm
+from weathergen.model.norms import AdaLayerNorm, AdaLayerNormFinal, RMSNorm
 
 
 class NamedLinear(torch.nn.Module):
@@ -53,6 +53,7 @@ class MLP(torch.nn.Module):
         num_layers=2,
         hidden_factor=2,
         pre_layer_norm=True,
+        post_layer_norm=False,
         dropout_rate=0.0,
         nonlin=torch.nn.GELU,
         with_residual=False,
@@ -90,7 +91,7 @@ class MLP(torch.nn.Module):
         if with_noise_conditioning:
             self.noise_conditioning = LinearNormConditioning(
                 dim_in
-            )  # TODO: chech if should pass some dtype?
+            )  # TODO: check if should pass some dtype?
 
         self.layers.append(torch.nn.Linear(dim_in, dim_hidden))
         self.layers.append(nonlin())
@@ -103,22 +104,42 @@ class MLP(torch.nn.Module):
 
         self.layers.append(torch.nn.Linear(dim_hidden, dim_out))
 
+        if post_layer_norm:
+            self.layers.append(
+                norm(dim_out, eps=norm_eps)
+                if dim_aux is None
+                else AdaLayerNormFinal(dim_out, dim_aux, norm_eps=norm_eps)
+            )
+
     # TODO: expanded args, must check dependencies (previously aux = args[-1])
     def forward(self, *args):
         x, x_in = args[0], args[0]
+        if len(args) < 2 and self.with_aux:
+            raise ValueError("Auxiliary input required but not provided")
         if len(args) == 2:
             aux = args[1]
         elif len(args) > 2:
             aux = args[-1]
-            noise_emb = args[1] if self.with_noise_conditioning else None
+            noise_emb = args[2] if self.with_noise_conditioning else None
 
+        gate = None
         for i, layer in enumerate(self.layers):
-            if isinstance(layer, LinearNormConditioning):
-                x = layer(x, noise_emb)  # noise embedding
+            if i == 0 and self.with_aux:
+                if isinstance(layer, (AdaLayerNorm)):
+                    x = layer(x, aux)
+                if self.with_noise_conditioning:
+                    x, gate = self.noise_conditioning(x, noise_emb)
             else:
-                x = layer(x, aux) if (i == 0 and self.with_aux) else layer(x)
+                if i == 0 and self.with_noise_conditioning:
+                    x, gate = self.noise_conditioning(x, noise_emb)
+                if isinstance(layer, (AdaLayerNormFinal)):
+                    x = layer(x, aux)
+                else:
+                    x = layer(x)
 
         if self.with_residual:
+            if gate is not None:
+                x = x * gate
             if x.shape[-1] == x_in.shape[-1]:
                 x = x_in + x
             else:

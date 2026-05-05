@@ -25,6 +25,7 @@
 
 import logging
 import math
+import numpy as np
 
 import torch
 
@@ -49,6 +50,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.noise_embedder = NoiseEmbedder(
             embedding_dim=self.embedding_dim, frequency_embedding_dim=self.frequency_embedding_dim
         )
+        self.datetime_embedder = DateTimeEncoder()
 
         # Parameters
         self.sigma_min = self.cf.sigma_min
@@ -62,6 +64,70 @@ class DiffusionForecastEngine(torch.nn.Module):
         self._fixed_noise_level: float | None = None
 
     def forward(
+        self,
+        tokens: torch.Tensor = None,
+        fstep: int = None,
+        meta_info: dict[str, SampleMetaData] = None,
+        coords: torch.Tensor = None,
+        num_steps: int = 30,
+    ) -> torch.Tensor:
+        """
+        Forward pass that routes to training_forward or inference_forward based on model status.
+
+        During training:
+            - calls training_forward with tokens, fstep, meta_info, coords
+            - extracts datetime conditioning from meta_info and passes through datetime embedder
+            - adds noise to target and returns denoised prediction
+
+        During inference:
+            - calls inference_forward with fstep, num_steps, and meta_info
+            - generates samples via iterative diffusion steps with conditional temporal modulation
+
+        Args:
+            tokens: Training tensor of shape (B, H, D) - required during training
+            fstep: Forecast step index - required for both modes
+            meta_info: Sample metadata dict containing timestamps - required for both modes
+            coords: Optional coordinate tensor
+            num_steps: Number of diffusion steps for inference (default: 30)
+
+        Returns:
+            torch.Tensor: Model output (denoised prediction during training,
+                         or generated sample during inference)
+
+        Raises:
+            ValueError: If required arguments are missing for current mode
+        """
+        if self.training:
+            if tokens is None or fstep is None or meta_info is None:
+                raise ValueError(
+                    f"During training, tokens, fstep, and meta_info are required. "
+                    f"Got tokens={tokens is not None}, fstep={fstep}, meta_info={meta_info is not None}"
+                )
+            return self.training_forward(
+                tokens=tokens,
+                fstep=fstep,
+                meta_info=meta_info,
+                coords=coords,
+            )
+        else:
+            # NOTE: temporary for analysing denoising
+            # return self.training_forward(
+            #     tokens=tokens,
+            #     fstep=fstep,
+            #     meta_info=meta_info,
+            #     coords=coords,
+            # )
+            if fstep is None:
+                raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
+            
+            return self.inference_forward(
+                tokens=tokens,  # TODO: remove after single sample experiments
+                fstep=fstep,
+                num_steps=num_steps,
+                meta_info=meta_info,
+            )
+
+    def training_forward(
         self,
         tokens: torch.Tensor,
         fstep: int,
@@ -82,7 +148,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = tokens
 
-        c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
+        c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
         y = tokens
 
         if self.training:
@@ -98,6 +164,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self._noised_tokens = y + n
 
+        
+
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep)
 
     def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int) -> torch.Tensor:
@@ -106,6 +174,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
         noise level sigma.
         """
+
         # Compute scaling conditionings
         c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
         c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
@@ -116,22 +185,45 @@ class DiffusionForecastEngine(torch.nn.Module):
         noise_emb = self.noise_embedder(c_noise)
 
         # Precondition input and feed through network
-        x = self.preconditioner.precondition(x, c)
-
+        x = self.preconditioner.precondition(x, c) #currently does nothing
+        c = self.datetime_embedder(c).to(x.device)
+    
         return c_skip * x + c_out * self.net(
-            c_in * x, fstep=fstep, noise_emb=noise_emb
+            c_in * x, fstep=fstep, noise_emb=noise_emb, ada_ln_aux=c
         )  # Eq. (7) in EDM paper
 
-    def inference(
+    def inference_forward(
         self,
+        tokens,
         fstep: int,
         num_steps: int = 30,
+        meta_info: dict[str, SampleMetaData] = None,
     ) -> torch.Tensor:
-        # Forward pass of the diffusion model during inference
-        # https://github.com/NVlabs/edm/blob/main/generate.py
+        """
+        Forward pass of the diffusion model during inference.
+        
+        Iteratively denoises a random sample using the learned score function,
+        with optional temporal conditioning extracted from meta_info.
+        https://github.com/NVlabs/edm/blob/main/generate.py
+        
+        Args:
+            fstep: Forecast step index for the network
+            num_steps: Number of diffusion denoising steps (default: 30)
+            meta_info: Optional sample metadata dict containing timestamps for temporal conditioning
+        
+        Returns:
+            torch.Tensor: Generated sample of shape (1, num_healpix_cells, ae_global_dim_embed)
+        """
+
+        # Extract conditioning from meta_info (same as training_forward)
+        c = None
+        if meta_info is not None:
+            c = meta_info["ERA5"].params["timestamp"]
 
         # Sample noise (assuming single batch element for now)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+
+        x = tokens * 0.66 + x * 0.33 #NOTE: for debugging only!
 
         # Time step discretization.
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -142,8 +234,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
         ) ** self.rho
         t_steps = torch.cat(
-            [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+            [t_steps, torch.zeros_like(t_steps[:1])]
         )  # t_N = 0
+        # t_steps = torch.cat(
+        #     [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+        # )  # t_N = 0
 
         # Main sampling loop.
         x_next = x * t_steps[0]
@@ -151,6 +246,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             zip(t_steps[:-1], t_steps[1:], strict=False)
         ):  # 0, ..., N-1
             x_cur = x_next
+            print(f"Step {i+1}/{num_steps}: t_cur={t_cur.item():.4f}, t_next={t_next.item():.4f}")
 
             # Increase noise temporarily. (Stochastic sampling; not used for now)
             # gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
@@ -160,13 +256,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_hat = t_cur
 
             # Euler step.
-            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep)  # c to be discussed
+            denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.denoise(x=x_next, c=None, sigma=t_next, fstep=fstep)
+                denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
@@ -201,12 +297,16 @@ class NoiseEmbedder(torch.nn.Module):
     def timestep_embedding(self, t: float, max_period: int = 10000):
         """
         Create sinusoidal timestep embeddings.
-        :param t: a 1-D Tensor of N indices, one per batch element.
+        :param t: a scalar or 1-D Tensor of N indices, one per batch element.
                           These may be fractional.
         :param dim: the dimension of the output.
         :param max_period: controls the minimum frequency of the embeddings.
         :return: an (N, D) Tensor of positional embeddings.
         """
+        # Ensure t is at least 1D
+        if t.dim() == 0:
+            t = t.unsqueeze(0)
+        
         half = self.frequency_embedding_dim // 2
         freqs = torch.exp(
             -math.log(max_period) * torch.arange(start=0, end=half, dtype=self.dtype) / half
@@ -221,3 +321,83 @@ class NoiseEmbedder(torch.nn.Module):
         t_freq = self.timestep_embedding(t)
         t_emb = self.mlp(t_freq)
         return t_emb
+
+class DateTimeEncoder(torch.nn.Module):
+    """
+    Encodes timestamp(s) into multi-frequency sinusoidal calendar embeddings.
+    
+    Inspired by cBottle (Climate in a Bottle) with k=1..8 frequency scales.
+    Captures seasonal (day-of-year) and diurnal (time-of-day) cycles at multiple timescales.
+    
+    Input shape:  scalar or any tensor shape (...)
+    Output shape:  (..., 32) — 8 frequencies × 4 components (cos/sin per signal)
+    
+    Output structure for k=1..8:
+      [cos(2πk·doy/365.25), sin(2πk·doy/365.25), cos(k·t), sin(k·t)]
+    where:
+      - doy = day of year (0-365.25)
+      - t = 2π·seconds_of_day/86400 (time of day in radians, UTC)
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.num_frequencies = 8
+
+    def forward(self, timestamp: np.ndarray) -> torch.Tensor:
+        """
+        Encode numpy datetime64 timestamps into 32D multi-frequency calendar embeddings.
+
+        Args:
+            timestamp: np.datetime64 scalar or array of timestamps
+            
+        Returns:
+            torch.Tensor of shape (..., 32) containing multi-frequency embeddings
+        """
+
+        # TODO: Consider adding local time encoding (e.g., using longitude)
+
+        orig_shape = timestamp.shape
+        timestamp_flat = timestamp.reshape(-1)
+        
+        two_pi = 2.0 * np.pi
+        
+        # --- Extract time components ---
+        ts_int64 = timestamp_flat.astype('int64')  # seconds since Unix epoch
+        seconds_in_day = 86400.0
+        seconds_of_day = (ts_int64 % int(seconds_in_day)) / seconds_in_day  # [0, 1)
+        
+        # --- Extract day of year ---
+        day_np = timestamp_flat.astype('datetime64[D]')
+        year_start = day_np.astype('datetime64[Y]').astype('datetime64[D]')
+        next_year_start = (day_np.astype('datetime64[Y]') + np.timedelta64(1, 'Y')).astype('datetime64[D]')
+        
+        day_of_year_0 = (day_np - year_start).astype(np.int64)  # [0, 365] or [0, 366]
+        days_in_year = (next_year_start - year_start).astype(np.int64)  # 365 or 366
+        doy_frac = day_of_year_0.astype(np.float32) / days_in_year.astype(np.float32)  # [0, 1)
+        
+        # --- Multi-frequency sinusoidal embeddings ---
+        # Build output for all 8 frequency scales
+        embeddings = []
+        for k in range(1, self.num_frequencies + 1):
+            k_float = float(k)
+            
+            # Day-of-year components: cos(2π·k·doy/365.25), sin(2π·k·doy/365.25)
+            doy_phase = two_pi * k_float * doy_frac
+            doy_cos = np.cos(doy_phase).astype(np.float32)
+            doy_sin = np.sin(doy_phase).astype(np.float32)
+            
+            # Time-of-day components: cos(k·t), sin(k·t) where t = 2π·seconds_of_day
+            tot_phase = k_float * two_pi * seconds_of_day
+            tot_cos = np.cos(tot_phase).astype(np.float32)
+            tot_sin = np.sin(tot_phase).astype(np.float32)
+            
+            embeddings.append(doy_cos)
+            embeddings.append(doy_sin)
+            embeddings.append(tot_cos)
+            embeddings.append(tot_sin)
+        
+        # Stack all components: (N, 32)
+        out = np.stack(embeddings, axis=-1)
+        out = torch.from_numpy(out).float()
+        
+        return out.reshape(*orig_shape, self.num_frequencies * 4)

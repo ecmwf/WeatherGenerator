@@ -449,6 +449,7 @@ class ForecastingEngine(torch.nn.Module):
                         self.cf.ae_global_dim_embed,
                         self.cf.ae_global_dim_embed,
                         with_residual=True,
+                        post_layer_norm=cf.fe_diffusion_model_conditioning in ["date_time"],
                         dropout_rate=self.cf.fe_dropout_rate,
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
@@ -489,6 +490,7 @@ class ForecastingEngine(torch.nn.Module):
         fstep: int,
         meta_info: SampleMetaData = None,
         noise_emb: torch.Tensor = None,
+        ada_ln_aux: torch.Tensor = None,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
@@ -504,22 +506,21 @@ class ForecastingEngine(torch.nn.Module):
         if forecast_residual:
             tokens_in = tokens
 
-        aux_info = None
         if self.cf.fe_diffusion_model:
-            assert noise_emb is not None, (
-                "Noise embedding must be provided for diffusion forecast engine"
+            assert ada_ln_aux is not None, (
+                "Conditioning (noise and other) must be provided for diffusion forecast engine"
             )
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = block(tokens)
                 else:
-                    tokens = block(tokens, coords, noise_emb, aux_info)
+                    tokens = block(tokens, coords, noise_emb, ada_ln_aux)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
-                    tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+                    tokens = checkpoint(block, tokens, coords, ada_ln_aux, use_reentrant=False)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
 

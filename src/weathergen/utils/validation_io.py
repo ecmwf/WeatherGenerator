@@ -94,6 +94,7 @@ def write_output(
         if loss_term.type == "LossPhysical"
     ]
     assert len(outputs_physical) == 1
+    
     target_aux_out = target_aux_out[outputs_physical[0]]
 
     # collect all target / prediction-related information
@@ -329,7 +330,8 @@ def write_output(
         noised_len_per_sample = noised_stream.shape[0] // num_samples if has_noised else 0
 
         if noise_level is not None:
-            eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.0e}'))
+            # Format with .1e to preserve one decimal place in mantissa, then clean up exponent notation
+            eta_str = re.sub(r'e[+]?0*(?=\d)', 'e', re.sub(r'e-0*(?=\d)', 'e-', f'{noise_level:.1e}'))
         else:
             eta_str = None
         eta_tag = f"_eta{eta_str}" if eta_str is not None else ""
