@@ -372,7 +372,7 @@ class NetcdfParser(CfParser):
         variables = {}
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
-        dims_list = ["pressure", "latitude", "longitude", "valid_time"]
+        dims_list = ["pressure", "valid_time", "latitude", "longitude"]
         for var_name, da in ds.data_vars.items():
             mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
@@ -459,11 +459,17 @@ class NetcdfParser(CfParser):
         coord_map = self.config.get("coordinates", {}).get(var_cfg.get("level_type"), {})
 
         for coord, new_name in coord_map.items():
-            coords[new_name] = (
-                ds.coords[coord].dims,
-                ds.coords[coord].values,
-                attrs[new_name],
-            )
+            try:
+                coords[new_name] = (
+                    ds.coords[coord].dims,
+                    ds.coords[coord].values,
+                    attrs[new_name],
+                )
+            except KeyError:
+                _logger.warning(
+                    f"Coordinate '{coord}' not found in dataset for variable '{var_cfg.get('var', 'unknown')}'."
+                    " This coordinate will be skipped for this variable."
+                )
 
         return coords
 
