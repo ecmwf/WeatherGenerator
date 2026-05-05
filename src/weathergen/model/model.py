@@ -19,8 +19,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-
 from weathergen.common.config import Config
+
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
@@ -710,14 +710,14 @@ class Model(torch.nn.Module):
         for step in batch.get_output_idxs():
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
-                # Pushforward mode: advance tokens without grad
-                # Pushforward mode: no decoding in this mode
-                with torch.no_grad():
-                    tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
-                    continue
+                # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                continue
 
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
+            # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
 
         return output
