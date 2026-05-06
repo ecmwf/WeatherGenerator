@@ -223,13 +223,6 @@ weathergen-evaluate = { workspace = true }
 weathergen-metrics = { workspace = true }
 weathergen-readers-extra = { workspace = true }
 
-
-flash-attn = [
-  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
-  # There is no official support for flash-attn on macos
-]
-
 torch = [
 # Explicit pin for GPU
   { url = "https://download-r2.pytorch.org/whl/cu126/torch-2.9.1+cu126-cp312-cp312-manylinux_2_28_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"', extra="gpu" },
@@ -244,6 +237,9 @@ torch = [
 ]
 # branch = "feature/any-zarr-version-in-pyproject/"
 anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
+
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]
 
 [tool.pytest.ini_options]
 log_cli = true
