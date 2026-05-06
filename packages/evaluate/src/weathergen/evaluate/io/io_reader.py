@@ -174,6 +174,9 @@ class Reader(ABC):
         # Fill requested info for channels, fsteps, samples, ensemble
         requested_data = self._get_channels_fsteps_samples(stream, mode)
 
+        if not requested_data.score_availability:
+            return requested_data
+
         channels = requested_data.channels
         fsteps = requested_data.fsteps
         samples = requested_data.samples
@@ -331,9 +334,17 @@ class Reader(ABC):
         )
 
         stream_cfg = self.get_stream(stream)
-        assert stream_cfg.get(mode, False), (
-            f"Mode '{mode}' does not exist in stream config for '{stream}'. Please add it."
-        )
+        if not stream_cfg.get(mode, False):
+            _logger.warning(
+                f"Mode '{mode}' does not exist in stream config for '{stream}'. Skipping."
+            )
+            return DataAvailability(
+                score_availability=False,
+                channels=None,
+                fsteps=None,
+                samples=None,
+                ensemble=None,
+            )
 
         samples = stream_cfg[mode].get("sample", None)
         fsteps = stream_cfg[mode].get("forecast_step", None)

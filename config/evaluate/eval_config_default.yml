@@ -7,6 +7,7 @@
 #  dpi_val : 300
 #  fps: 2
 #  ERA5:
+#    use_datashader: false
 #    marker_size: 2
 #    scale_marker_size: 1
 #    marker: "o"
