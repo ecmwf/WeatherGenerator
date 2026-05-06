@@ -42,10 +42,6 @@ def inference():
     main([cli.Stage.inference] + sys.argv[1:])
 
 
-def profile():
-    """Entry point for calling the inference code from the command line."""
-    main([cli.Stage.profile] + sys.argv[1:])
-
 
 def main(argl: list[str]):
     try:
@@ -62,8 +58,6 @@ def main(argl: list[str]):
             run_continue(args)
         case cli.Stage.inference:
             run_inference(args)
-        case cli.Stage.profile:
-            run_profile(args)
         case _:
             logger.error("No stage was found.")
 
@@ -192,7 +186,11 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.train_logging)
+    if cf.get("profiling", {}).get("enabled", False):
+        cf = config._check_profiling(cf)
+        trainer = ProfilingTrainer(cf.train_logging)
+    else:
+        trainer = Trainer(cf.train_logging)
 
     try:
         trainer.run(cf, devices)
