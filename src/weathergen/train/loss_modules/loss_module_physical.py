@@ -312,14 +312,14 @@ class LossPhysical(LossModuleBase):
 
                         for ch_n, v in zip(target_channels, loss_lfct_chs, strict=True):
                             losses_all[stream_name][str(timestep_idx)][loss_fct_name][ch_n] = (
-                                spoof_weight * v if v != 0.0 else torch.nan
+                                spoof_weight * v if v != 0.0 and sw > 0.0 else torch.nan
                             )
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
                         loss_cur_w = spoof_weight * loss_fct_weight * loss_lfct * output_step_weight
                         loss_st_corr = loss_st_corr + loss_cur_w
-                        ctr_loss_fcts += 1 if (loss_lfct > 0.0 and sw > 0.0) else 0
+                        ctr_loss_fcts += 1 if (loss_cur_w > 0.0 and sw > 0.0) else 0
 
                     loss_timestep = loss_timestep + loss_st_corr
                     ctr_batch += 1 if ctr_loss_fcts > 0.0 else 0
