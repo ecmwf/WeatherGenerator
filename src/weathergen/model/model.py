@@ -656,7 +656,9 @@ class Model(torch.nn.Module):
         num_params_q_cells = (
             np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
         )
-        num_params_q_aux = np.prod(self.encoder.q_aux.shape) if self.encoder.q_aux.requires_grad else 0
+        num_params_q_aux = (
+            np.prod(self.encoder.q_aux.shape) if self.encoder.q_aux.requires_grad else 0
+        )
         num_params_ae_adapter = get_num_parameters(self.encoder.ae_local_global_engine)
 
         num_params_ae_aggregation = get_num_parameters(

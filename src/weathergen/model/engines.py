@@ -34,6 +34,7 @@ from weathergen.utils.utils import get_dtype
 
 MAX_NUMBER_TOKENS_LOCAL_PER_CELL = 128
 
+
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 

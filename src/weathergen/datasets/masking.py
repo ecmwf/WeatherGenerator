@@ -9,6 +9,9 @@ import torch
 from numpy.typing import NDArray
 
 from weathergen.datasets.batch import SampleMetaData
+
+# Sample noise levels
+from weathergen.datasets.noise_schedule import CosineNoiseSchedule, sample_noise_levels
 from weathergen.train.utils import Stage
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
@@ -440,6 +443,27 @@ class Masker:
                     source_mask, mask_params, source_cfg, losses, i_source, corr, relationship
                 )
 
+                # For self-flow: propagate noise params from target to source and
+                # override source metadata.mask so JEPA loss_mask = crop AND noise_mask
+                if relationship == "identity" and target_masks.metadata[target_idx].params.get(
+                    "is_self_flow"
+                ):
+                    sf_params = target_masks.metadata[target_idx].params
+                    source_meta = source_masks.metadata[-1]
+                    source_meta.params = {
+                        **source_meta.params,
+                        "noise_mask": sf_params["noise_mask"],
+                        "alpha_s": sf_params["alpha_s"],
+                        "sigma_s": sf_params["sigma_s"],
+                        "alpha_t": sf_params["alpha_t"],
+                        "sigma_t": sf_params["sigma_t"],
+                        "is_self_flow": True,
+                        "noise_seed": sf_params["noise_seed"],
+                    }
+                    # student_masks for JEPA loss: crop & ~noise_mask
+                    crop_mask = source_masks.masks[-1]
+                    source_meta.mask = crop_mask & ~sf_params["noise_mask"]
+
                 source_target_mapping += [target_idx]
                 i_source += 1
 
@@ -598,6 +622,58 @@ class Masker:
                     center_cell=None,
                     method=method,
                 )
+
+        elif strategy == "self_flow":
+            # Teacher crop: generate spatial crop mask
+            keep_rate = self._get_sampling_rate(masking_strategy_config)
+            hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
+                self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
+            )
+            method = masking_strategy_config.get("method", "geodesic_disk")
+
+            if num_parents_to_keep == 0:
+                mask = np.zeros(num_cells, dtype=bool)
+            else:
+                mask = self._select_spatially_contiguous_cells(
+                    healpix_level=hl_mask,
+                    num_cells=num_cells,
+                    num_cells_to_select=num_parents_to_keep,
+                    num_children_per_parent=num_children_per_parent,
+                    center_cell=None,
+                    method=method,
+                )
+
+            # Noise mask: which cells within the crop get high noise (level t)
+            noise_cfg = masking_strategy_config.get("noise_mask_config", {})
+            noise_rate = noise_cfg.get("rate", 0.4)
+            noise_hl = noise_cfg.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+            noise_cfg_full = {"hl_mask": noise_hl, "rate": noise_rate}
+            _, noise_npc, noise_ncpp, noise_nptk = self._prepare_healpix_based_masking(
+                noise_cfg_full, noise_rate
+            )
+
+            if noise_nptk == 0:
+                noise_mask = np.zeros(num_cells, dtype=bool)
+            else:
+                noise_mask = self.rng.uniform(0, 1, num_cells) < noise_rate
+            # Intersect noise mask with crop (noise only within visible region)
+            noise_mask = np.asarray(noise_mask) & np.asarray(mask)
+
+            schedule = CosineNoiseSchedule()
+            alpha_s, sigma_s, alpha_t, sigma_t = sample_noise_levels(
+                self.rng,
+                schedule,
+                t_min=masking_strategy_config.get("t_min", 0.1),
+                t_max=masking_strategy_config.get("t_max", 0.9),
+            )
+
+            masking_params["noise_mask"] = to_bool_tensor(noise_mask)
+            masking_params["alpha_s"] = alpha_s
+            masking_params["sigma_s"] = sigma_s
+            masking_params["alpha_t"] = alpha_t
+            masking_params["sigma_t"] = sigma_t
+            masking_params["is_self_flow"] = True
+            masking_params["noise_seed"] = int(self.rng.integers(0, 2**31))
 
         else:
             raise NotImplementedError(
