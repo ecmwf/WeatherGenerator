@@ -467,8 +467,8 @@ class NetcdfParser(CfParser):
                 )
             except KeyError:
                 _logger.warning(
-                    f"Coordinate '{coord}' not found in dataset for variable '{var_cfg.get('var', 'unknown')}'."
-                    " This coordinate will be skipped for this variable."
+                    f"Coordinate '{coord}' will be skipped for "
+                    f"variable '{var_cfg.get('var', 'unknown')}'."
                 )
 
         return coords
