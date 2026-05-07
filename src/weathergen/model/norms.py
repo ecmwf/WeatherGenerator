@@ -60,41 +60,39 @@ class RMSNorm(torch.nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
-
 class AdaLNZero(torch.nn.Module):
-    """DiT-style adaptive layer norm with zero initialization for diffusion models."""
+    """
+    AdaLayerNorm with zero initialization and with additional gate parameter
+    """
 
-    def __init__(self, dim_embed: int, dim_aux: int, norm_eps: float = 1e-5):
+    def __init__(
+        self, dim_embed_x, dim_aux, norm_elementwise_affine: bool = False, norm_eps: float = 1e-5
+    ):
         super().__init__()
-        self.norm = torch.nn.LayerNorm(dim_embed, elementwise_affine=False, eps=norm_eps)
-        self.gate_proj = torch.nn.Linear(dim_aux, dim_embed)
-        self.shift_proj = torch.nn.Linear(dim_aux, dim_embed)
 
-        with torch.no_grad():
-            self.gate_proj.weight.zero_()
-            self.gate_proj.bias.zero_()
-            self.shift_proj.weight.zero_()
-            self.shift_proj.bias.zero_()
+        # simple 2-layer MLP for embedding auxiliary information
+        self.embed_aux = torch.nn.ModuleList()
+        self.embed_aux.append(torch.nn.Linear(dim_aux, 6 * dim_aux))
+        self.embed_aux.append(torch.nn.SiLU())
+        self.embed_aux.append(torch.nn.Linear(6 * dim_aux, 3 * dim_embed_x))
 
-    def forward(self, x: torch.Tensor, aux: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Returns (x_normalized_and_scaled, gate_signal) for residual modulation."""
-        x_norm = self.norm(x)
+        self.norm = torch.nn.LayerNorm(
+            dim_embed_x,
+            eps=norm_eps,
+            elementwise_affine=norm_elementwise_affine,
+        )
+        # Zero-initialize the final modulation layer.
+        nn.init.zeros_(self.embed_aux[-1].weight)
+        nn.init.zeros_(self.embed_aux[-1].bias)
 
-        if aux.dim() == 0:
-            aux = aux.unsqueeze(0)
+    def forward(self, x: torch.Tensor, aux: torch.Tensor | None = None) -> torch.Tensor:
+        for block in self.embed_aux:
+            aux = block(aux)
+        scale, shift, gate = aux.chunk(3, dim=-1)
 
-        gate_params = self.gate_proj(aux)
-        shift_params = self.shift_proj(aux)
+        x = self.norm(x) * (1 + scale) + shift
 
-        while gate_params.dim() < x_norm.dim():
-            gate_params = gate_params.unsqueeze(-2)
-            shift_params = shift_params.unsqueeze(-2)
-
-        gate = 1 + gate_params
-        x_out = gate * x_norm + shift_params
-        gate_signal = gate.mean(dim=-1, keepdim=True)
-
-        return x_out, gate_signal
+        return x, gate
 
 
 class AdaLayerNorm(torch.nn.Module):

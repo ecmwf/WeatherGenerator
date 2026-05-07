@@ -28,7 +28,7 @@
 import torch
 import torch.nn as nn
 
-from weathergen.model.norms import AdaLayerNorm, RMSNorm
+from weathergen.model.norms import AdaLNZero, AdaLayerNorm, RMSNorm
 
 
 class NamedLinear(torch.nn.Module):
@@ -61,6 +61,7 @@ class MLP(torch.nn.Module):
         norm_eps=1e-5,
         name: str | None = None,
         is_dit=False,
+        dit_is_cond=False,
     ):
         """Constructor"""
 
@@ -74,6 +75,7 @@ class MLP(torch.nn.Module):
         self.with_residual = with_residual
         self.with_aux = dim_aux is not None
         self.is_dit = is_dit
+        self.dit_is_cond = dit_is_cond
         dim_hidden = int(dim_in * hidden_factor)
 
         self.layers = torch.nn.ModuleList()
@@ -81,9 +83,11 @@ class MLP(torch.nn.Module):
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
 
         if is_dit:
-            assert dim_aux is None, "conditioning not yet implemented for DIT attention"
+            if dit_is_cond:
+                assert dim_aux is not None, "For DIT, need to provide dim_aux for ada layer norm"
             assert with_residual, "DIT attention should always have residual connection"
-            self.lnorm = norm(dim_in, eps=norm_eps)
+            self.lnorm = AdaLNZero(dim_in, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_in, eps=norm_eps)
+            self.noise_conditioning = LinearNormConditioning(dim_in)
             self.noise_conditioning = LinearNormConditioning(dim_in)
         elif dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps)
@@ -132,7 +136,8 @@ class MLP(torch.nn.Module):
                 x = self.lnorm(x)
                 cond_gate = 1
             assert noise_emb is not None, "Need noise embedding for noise conditioning in DIT"
-            x, gate = self.noise_conditioning(x, noise_emb)
+            x, noise_gate = self.noise_conditioning(x, noise_emb)
+            gate = cond_gate * noise_gate
 
         for layer in self.layers:
             if isinstance(layer, AdaLayerNorm):

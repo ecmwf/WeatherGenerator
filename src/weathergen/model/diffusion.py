@@ -157,7 +157,10 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = tokens.detach()
 
-        c = None
+        if self.cf.fe_diffusion_model_conditioning == "date_time":
+            c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
+        else:
+            c = None
 
         y = tokens
 
@@ -200,6 +203,8 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)  # currently does nothing
+        if self.cf.fe_diffusion_model_conditioning == "date_time":
+            c = self.datetime_embedder(c).to(x.device)
 
         return c_skip * x + c_out * self.net(
             c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=c
@@ -230,6 +235,10 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Extract conditioning from meta_info (same as training_forward)
         c = None
+
+        if self.cf.fe_diffusion_model_conditioning == "date_time":
+            c = meta_info["ERA5"].params["timestamp"]
+
 
         # Sample pure noise (assuming single batch element for now)
         # torch.manual_seed(42)
@@ -350,6 +359,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         import matplotlib
 
         matplotlib.use("Agg")
+        import os
         import matplotlib.pyplot as plt
 
         steps = list(range(len(track["sigma"])))
@@ -465,18 +475,18 @@ class DateTimeEncoder(torch.nn.Module):
     Input shape:  scalar or any tensor shape (...)
     Output shape:  (..., 32) — 8 frequencies × 4 components (cos/sin per signal)
 
-    Output structure for k=1..8:
-      [cos(2πk·doy/365.25), sin(2πk·doy/365.25), cos(k·t), sin(k·t)]
+    Output structure for k=1..num_frequencies:
+        [cos(2πk·doy_frac), sin(2πk·doy_frac), cos(2πk·tod_frac), sin(2πk·tod_frac)]
     where:
-      - doy = day of year (0-365.25)
-      - t = 2π·seconds_of_day/86400 (time of day in radians, UTC)
+    - doy_frac = day_of_year / days_in_year
+    - tod_frac = seconds_of_day / 86400.0
     """
 
     def __init__(self):
         super().__init__()
         self.num_frequencies = 8
 
-    def forward(self, timestamp: np.ndarray) -> torch.Tensor:
+    def forward(self, timestamp: np.ndarray | np.datetime64) -> torch.Tensor:
         """
         Encode numpy datetime64 timestamps into 32D multi-frequency calendar embeddings.
 
@@ -489,6 +499,7 @@ class DateTimeEncoder(torch.nn.Module):
 
         # TODO: Consider adding local time encoding (e.g., using longitude)
 
+        timestamp = np.asarray(timestamp)
         orig_shape = timestamp.shape
         timestamp_flat = timestamp.reshape(-1)
 
@@ -497,7 +508,7 @@ class DateTimeEncoder(torch.nn.Module):
         # --- Extract time components ---
         ts_int64 = timestamp_flat.astype("int64")  # seconds since Unix epoch
         seconds_in_day = 86400.0
-        seconds_of_day = (ts_int64 % int(seconds_in_day)) / seconds_in_day  # [0, 1)
+        tod_frac = (ts_int64 % int(seconds_in_day)) / seconds_in_day  # [0, 1)
 
         # --- Extract day of year ---
         day_np = timestamp_flat.astype("datetime64[D]")
@@ -510,29 +521,51 @@ class DateTimeEncoder(torch.nn.Module):
         days_in_year = (next_year_start - year_start).astype(np.int64)  # 365 or 366
         doy_frac = day_of_year_0.astype(np.float32) / days_in_year.astype(np.float32)  # [0, 1)
 
-        # --- Multi-frequency sinusoidal embeddings ---
-        # Build output for all 8 frequency scales
-        embeddings = []
-        for k in range(1, self.num_frequencies + 1):
-            k_float = float(k)
+        # --- Multi-frequency sinusoidal embeddings (vectorized over k) ---
+        k = np.arange(1, self.num_frequencies + 1, dtype=np.float32)[None, :]
+        doy_phase = two_pi * doy_frac[:, None] * k
+        tod_phase = two_pi * tod_frac[:, None] * k
 
-            # Day-of-year components: cos(2π·k·doy/365.25), sin(2π·k·doy/365.25)
-            doy_phase = two_pi * k_float * doy_frac
-            doy_cos = np.cos(doy_phase).astype(np.float32)
-            doy_sin = np.sin(doy_phase).astype(np.float32)
+        doy_cos = np.cos(doy_phase).astype(np.float32)
+        doy_sin = np.sin(doy_phase).astype(np.float32)
+        tod_cos = np.cos(tod_phase).astype(np.float32)
+        tod_sin = np.sin(tod_phase).astype(np.float32)
 
-            # Time-of-day components: cos(k·t), sin(k·t) where t = 2π·seconds_of_day
-            tot_phase = k_float * two_pi * seconds_of_day
-            tot_cos = np.cos(tot_phase).astype(np.float32)
-            tot_sin = np.sin(tot_phase).astype(np.float32)
-
-            embeddings.append(doy_cos)
-            embeddings.append(doy_sin)
-            embeddings.append(tot_cos)
-            embeddings.append(tot_sin)
-
-        # Stack all components: (N, 32)
-        out = np.stack(embeddings, axis=-1)
+        # Stack all components: (N, K, 4) -> (N, K*4)
+        out = np.stack([doy_cos, doy_sin, tod_cos, tod_sin], axis=-1)
+        out = out.reshape(out.shape[0], self.num_frequencies * 4)
         out = torch.from_numpy(out).float()
 
+        breakpoint()
+        self.plot_embedding_heatmap(out)
+        breakpoint()
+
         return out.reshape(*orig_shape, self.num_frequencies * 4)
+
+    def plot_embedding_heatmap(self, emb: torch.Tensor) -> torch.Tensor:
+        """
+        Compute and plot a heatmap of the date/time embedding for debugging.
+
+        Args:
+            emb: torch.Tensor of shape (..., 32) containing multi-frequency embeddings
+
+        Returns:
+            torch.Tensor of shape (..., 32) containing multi-frequency embeddings
+        """
+        import matplotlib.pyplot as plt
+        import os
+
+        emb_2d = emb.reshape(emb.shape[0], -1) if emb.ndim > 1 else emb.view(1, -1)
+
+        plt.figure(figsize=(8, 4))
+        plt.imshow(emb_2d.detach().cpu().numpy(), aspect="auto", cmap="viridis")
+        plt.colorbar(label="embedding value")
+        plt.xlabel("embedding dimension")
+        plt.ylabel("sample index")
+        plt.title("Date/time embedding heatmap")
+        plt.tight_layout()
+        os.makedirs("plots", exist_ok=True)
+        plt.savefig("plots/datetime_embedding_heatmap.png", dpi=150)
+        plt.close()
+
+        return emb

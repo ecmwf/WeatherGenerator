@@ -14,7 +14,7 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.layers import LinearNormConditioning
-from weathergen.model.norms import AdaLayerNorm, RMSNorm
+from weathergen.model.norms import AdaLNZero, AdaLayerNorm, RMSNorm
 from weathergen.model.positional_encoding import rotary_pos_emb_2d
 
 """
@@ -228,6 +228,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
         is_dit=False,
+        dit_is_cond=False,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -247,10 +248,13 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
             norm = RMSNorm
 
         self.is_dit = is_dit
+        self.dit_is_cond = dit_is_cond
         if is_dit:
+            if dit_is_cond:
+                assert dim_aux is not None, "For DIT, need to provide dim_aux for ada layer norm"
             assert dim_aux is None, "conditioning not yet implemented for DIT attention"
             assert with_residual, "DIT attention should always have residual connection"
-            self.lnorm = norm(dim_embed, eps=norm_eps)
+            self.lnorm = AdaLNZero(dim_embed, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_embed, eps=norm_eps)
             self.noise_conditioning = LinearNormConditioning(
                 latent_space_dim=dim_embed, dtype=attention_dtype
             )
@@ -295,8 +299,13 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
 
         # Handle ada_ln_aux conditioning
         if self.is_dit:
-            x = self.lnorm(x)
-            x, gate = self.noise_conditioning(x, emb)
+            if self.dit_is_cond:
+                x, cond_gate = self.lnorm(x, ada_ln_aux)
+            else:
+                x = self.lnorm(x)
+                cond_gate = 1
+            x, noise_gate = self.noise_conditioning(x, emb)
+            gate = cond_gate * noise_gate
         else:
             x = self.lnorm(x, ada_ln_aux) if ada_ln_aux is not None else self.lnorm(x)
 
@@ -561,6 +570,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
         is_dit=False,  # should only be True for diffusion model
+        dit_is_cond = False, # whether the attention is used for conditioning in the diffusion model (as opposed to denoising). Should only be True for cross attention layers in the diffusion model, and will control whether ada_ln_aux is applied to the input or output of the attention layer
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -580,11 +590,13 @@ class MultiSelfAttentionHead(torch.nn.Module):
             norm = RMSNorm
 
         self.is_dit = is_dit
+        self.dit_is_cond = dit_is_cond
 
         if is_dit:
-            assert dim_aux is None, "conditioning not yet implemented for DIT attention"
+            if dit_is_cond:
+                assert dim_aux is not None, "For DIT, need to provide dim_aux for ada layer norm"
             assert with_residual, "DIT attention should always have residual connection"
-            self.lnorm = norm(dim_embed, eps=norm_eps)
+            self.lnorm = AdaLNZero(dim_embed, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_embed, eps=norm_eps)
             self.noise_conditioning = LinearNormConditioning(
                 latent_space_dim=dim_embed, dtype=attention_dtype
             )  # TODO: Do I need to pass dtype?
@@ -623,8 +635,13 @@ class MultiSelfAttentionHead(torch.nn.Module):
 
         # Handle ada_ln_aux conditioning
         if self.is_dit:
-            x = self.lnorm(x)
-            x, gate = self.noise_conditioning(x, emb)
+            if self.dit_is_cond:
+                x, cond_gate = self.lnorm(x, ada_ln_aux)
+            else:
+                x = self.lnorm(x)
+                cond_gate = 1
+            x, noise_gate = self.noise_conditioning(x, emb)
+            gate = cond_gate * noise_gate
         else:
             x = self.lnorm(x, ada_ln_aux) if ada_ln_aux is not None else self.lnorm(x)
 
