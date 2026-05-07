@@ -724,7 +724,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 target_metadata = target_masks.metadata[tidx]
 
                 # Get first target step's times (using self.output_offset as the first output step index)
-                if self.diffusion_model_conditioning == "date_time":
+                if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
                     target_times_array = sdata.target_times_raw[self.output_offset]
                     target_metadata.add_params({'timestamp': (
                         target_times_array[0] if len(target_times_array) > 0 else None
@@ -744,7 +744,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
         #add target times in source for diffusion model date/time conditioning
-        if self.diffusion_model_conditioning == "date_time":
+        if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
             #TODO: Might need upgrading fro num_samples > 1
 
             # Assert singular source and target samples
