@@ -1,0 +1,11 @@
+train:
+  plot:
+    ofxc76we-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space self-flow"
+    # zk3sdw27-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA sf ctxt=0.4, ema=900000, warmup=8000"
+    # e4wijy3p-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA sf deep_layer=[0.35, 0.3 , 0.25, 0.1]"
