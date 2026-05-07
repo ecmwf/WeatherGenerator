@@ -1,0 +1,5 @@
+train:
+  plot:
+    ofxc76we-pretrain:
+      slurm_id: 0
+      description: "JEPA space self-flow"

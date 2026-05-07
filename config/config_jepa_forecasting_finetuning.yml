@@ -106,7 +106,7 @@ training_config:
   deep_ssl:
     enabled: false
 
-  num_mini_epochs: 32
+  num_mini_epochs: 64
   samples_per_mini_epoch: 4096
   shuffle: True
 

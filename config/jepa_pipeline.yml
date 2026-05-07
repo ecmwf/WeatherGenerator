@@ -24,8 +24,8 @@ stages:
   # Stage 1: JEPA pre-training with EMA teacher + deep SSL
   - name: pretrain
     command: train
-    base-config: ./config/config_jepa_deep_ssl.yml
-    config: ./config/config_jepa_deep_ssl.yml
+    base-config: ./config/config_jepa_self_flow.yml
+    config: ./config/config_jepa_self_flow.yml
     options: []
     chain: 4
     nodes: 1

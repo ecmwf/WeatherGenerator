@@ -458,7 +458,7 @@ def plot_loss_per_stream(
                                 x_vals[mask],
                                 y_data[mask],
                                 linestyle,
-                                color=colors[j % len(colors)],
+                                # color=colors[j % len(colors)],
                                 alpha=alpha,
                             )
                             legend_strs[-1] += [
@@ -847,6 +847,10 @@ def plot_train(args=None):
         for run_id in runs_ids
     ]
 
+    for r in runs_data:
+        r.val = r.val.rename(lambda s: s.replace("LossLatentSSLStudentTeacher", "SSL"))
+    streams = [s.replace("LossLatentSSLStudentTeacher", "SSL") for s in streams]
+
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
@@ -855,6 +859,8 @@ def plot_train(args=None):
     ]
 
     x_scale_log = args.log_x
+
+    print(runs_data)
 
     # plot learning rate
     plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir, legend_outside=args.legend_outside)
