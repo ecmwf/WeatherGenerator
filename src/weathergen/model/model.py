@@ -29,6 +29,7 @@ from weathergen.model.engines import (
     BilinearDecoder,
     EnsPredictionHead,
     ForecastingEngine,
+    IdentityEngine,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
@@ -323,7 +324,7 @@ class Model(torch.nn.Module):
 
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
-        self.forecast_engine: ForecastingEngine | None = None
+        self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
@@ -377,9 +378,10 @@ class Model(torch.nn.Module):
         )
 
         mode_cfg = cf.training_config
-        self.forecast_engine = None
         if cf.fe_num_blocks > 0:
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+        else:
+            self.forecast_engine = IdentityEngine()
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -622,9 +624,7 @@ class Model(torch.nn.Module):
         num_params_latent_heads = get_num_parameters(self.latent_heads)
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_fe = (
-            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
-        )
+        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
@@ -704,12 +704,17 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
+        # Allow for pushforward trick
+        p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
-            # apply forecasting engine (if present)
-            if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+            without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
+            if without_grad:
+                # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                continue
 
+            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
