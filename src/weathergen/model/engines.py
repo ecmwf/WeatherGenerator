@@ -563,7 +563,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.fe_diffusion_model,
-                            dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
+                            dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"],
                         )
                     )
                 else:
@@ -583,7 +583,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.fe_diffusion_model,
-                            dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
+                            dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"],
                         )
                     )
                 # Add MLP block
@@ -598,7 +598,7 @@ class ForecastingEngine(torch.nn.Module):
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         is_dit=self.cf.fe_diffusion_model,
-                        dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time"],
+                        dit_is_cond=self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"],
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -646,7 +646,7 @@ class ForecastingEngine(torch.nn.Module):
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
-                    if self.cf.fe_diffusion_model_conditioning in ["date_time"]:
+                    if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
                         # Assuming ada_ln_aux contains the date_time embedding in this case
                         assert ada_ln_aux is not None, "ada_ln_aux must be provided for diffusion model conditioning"
                         tokens = checkpoint(block, tokens, coords, noise_emb, ada_ln_aux, use_reentrant=False)

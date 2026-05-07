@@ -387,7 +387,7 @@ class Model(torch.nn.Module):
         mode_cfg = cf.training_config
         self.forecast_engine = None
         if cf.fe_num_blocks > 0:
-            if cf.get("fe_diffusion_model_conditioning", None) in ["date_time"]:
+            if cf.get("fe_diffusion_model_conditioning", None) in ["date_time", "date", "time"]:
                 assert cf.diffusion_conditioning_embed_dim is not None, (
                     "Diffusion conditioning embedding dimension must be specified when using diffusion model conditioning"
                 )
