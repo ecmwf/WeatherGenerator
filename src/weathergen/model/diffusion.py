@@ -536,36 +536,4 @@ class DateTimeEncoder(torch.nn.Module):
         out = out.reshape(out.shape[0], self.num_frequencies * 4)
         out = torch.from_numpy(out).float()
 
-        breakpoint()
-        self.plot_embedding_heatmap(out)
-        breakpoint()
-
         return out.reshape(*orig_shape, self.num_frequencies * 4)
-
-    def plot_embedding_heatmap(self, emb: torch.Tensor) -> torch.Tensor:
-        """
-        Compute and plot a heatmap of the date/time embedding for debugging.
-
-        Args:
-            emb: torch.Tensor of shape (..., 32) containing multi-frequency embeddings
-
-        Returns:
-            torch.Tensor of shape (..., 32) containing multi-frequency embeddings
-        """
-        import matplotlib.pyplot as plt
-        import os
-
-        emb_2d = emb.reshape(emb.shape[0], -1) if emb.ndim > 1 else emb.view(1, -1)
-
-        plt.figure(figsize=(8, 4))
-        plt.imshow(emb_2d.detach().cpu().numpy(), aspect="auto", cmap="viridis")
-        plt.colorbar(label="embedding value")
-        plt.xlabel("embedding dimension")
-        plt.ylabel("sample index")
-        plt.title("Date/time embedding heatmap")
-        plt.tight_layout()
-        os.makedirs("plots", exist_ok=True)
-        plt.savefig("plots/datetime_embedding_heatmap.png", dpi=150)
-        plt.close()
-
-        return emb
