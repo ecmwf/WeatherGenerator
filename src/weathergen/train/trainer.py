@@ -838,7 +838,7 @@ class ProfilingTrainer(Trainer):
         # create profiler trace directory
         super().init(cf, devices)
         if is_root():
-            config.get_path_profiler(self.config).mkdir(exist_ok=True, parents=True)
+            config.get_path_profiler(self.cf).mkdir(exist_ok=True, parents=True)
 
     def _training_loop(self, mini_epoch_base: int):
         # run validation before training if requested

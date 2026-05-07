@@ -375,7 +375,7 @@ def _check_profiling(config: Config) -> Config:
     config = config.copy()
 
     defaults = {
-        "enabled": True,
+        "enabled": False,
         "wait_iteration": 1,
         "warmup_iteration": 1,
         "active_iteration": 1,
