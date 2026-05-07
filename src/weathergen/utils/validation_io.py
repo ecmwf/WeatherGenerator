@@ -15,7 +15,7 @@ import torch
 import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
-from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.datasets.data_reader_base import TimeWindowHandler, TimeWindowHandlerDates
 
 _logger = logging.getLogger(__name__)
 
@@ -144,15 +144,22 @@ def write_output(
 
     # write output
 
-    start_date = val_cfg.start_date
-    end_date = val_cfg.end_date
-
-    twh = TimeWindowHandler(
-        start_date,
-        end_date,
-        val_cfg.time_window_len,
-        val_cfg.time_window_step,
-    )
+    init_dates = val_cfg.get("init_dates", None)
+    if init_dates is not None:
+        twh = TimeWindowHandlerDates(
+            list(init_dates),
+            val_cfg.time_window_len,
+            val_cfg.time_window_step,
+        )
+    else:
+        start_date = val_cfg.start_date
+        end_date = val_cfg.end_date
+        twh = TimeWindowHandler(
+            start_date,
+            end_date,
+            val_cfg.time_window_len,
+            val_cfg.time_window_step,
+        )
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 

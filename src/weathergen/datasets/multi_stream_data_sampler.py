@@ -22,6 +22,7 @@ from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
+    TimeWindowHandlerDates,
     TIndex,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
@@ -118,12 +119,21 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.len_timedelta = mode_cfg.time_window_len
         self.step_timedelta = mode_cfg.time_window_step
-        tw = TimeWindowHandler(
-            self.mode_cfg.start_date,
-            self.mode_cfg.end_date,
-            self.len_timedelta,
-            self.step_timedelta,
-        )
+
+        init_dates = mode_cfg.get("init_dates", None)
+        if init_dates is not None:
+            tw = TimeWindowHandlerDates(
+                list(init_dates),
+                self.len_timedelta,
+                self.step_timedelta,
+            )
+        else:
+            tw = TimeWindowHandler(
+                self.mode_cfg.start_date,
+                self.mode_cfg.end_date,
+                self.len_timedelta,
+                self.step_timedelta,
+            )
 
         self.time_window_handler = tw
         if is_root():
@@ -146,15 +156,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        max_index = self.index_range.end - (
-            (  # max time units needed to make a forecast
-                self.time_step * (fsm + self.output_offset)  # translation due to forecasting
-                + self.len_timedelta  # length of forecasting window
+        sample_indices = self.time_window_handler.get_sample_indices()
+        if sample_indices is not None:
+            # Explicit init dates: each date is one valid sample position
+            available_samples = len(sample_indices) * self.batch_size
+        else:
+            max_index = self.index_range.end - (
+                (  # max time units needed to make a forecast
+                    self.time_step * (fsm + self.output_offset)  # translation due to forecasting
+                    + self.len_timedelta  # length of forecasting window
+                )
+                // self.step_timedelta  # as number of indexs
             )
-            // self.step_timedelta  # as number of indexs
-        )
-
-        available_samples = max_index * self.batch_size  # as number of samples
+            available_samples = max_index * self.batch_size  # as number of samples
 
         assert available_samples > 0, (
             "There is an insufficient date range to \
@@ -187,6 +201,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _calc_baseperms(self, fsm: int) -> np.typing.NDArray:
         """This calculates the base permutation array and
         depends on fsm so must be repeated for __init__ and reset"""
+        sample_indices = self.time_window_handler.get_sample_indices()
+        if sample_indices is not None:
+            return sample_indices
+
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
