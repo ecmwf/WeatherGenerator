@@ -4,6 +4,7 @@ from prefect.tasks import task_input_hash
 import asyncio, json, functools
 from datetime import datetime, timezone
 from prefect.logging import get_run_logger
+from weathergen.prefect_dags.prefect_logging import get_logger
 import argparse
 import logging
 import os
@@ -290,8 +291,7 @@ async def slurm_queue_poller_jsc():
 
 @flow(log_prints=True, flow_run_name=_flow_run_name("slurm_queue_poller_cineca"))
 async def slurm_queue_poller_cineca():
-    # TODO I should not have to do that
-    log: logging.Logger = get_run_logger()
+    log: logging.Logger = get_logger()
     hpc = "leonardo"
     log.info(f"Polling SLURM queue for HPC: {hpc}")
     statuses = await cineca_slurm_poller(logger=log)

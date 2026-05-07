@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Prefect flows for the WeatherGenerator project."
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    # TODO: remove the dependency on weathergen-common-core once the code is migrated to this package.
     "weathergen-common-core",
     "prefect>=3.0.0",
     "paramiko>=3.1",

@@ -443,7 +443,7 @@ class ECaccessClient:
 
     # -- job list / detail ---------------------------------------------------
 
-    def list_jobs(self, job_id: str | None = None) -> list[dict[str, str]]:
+    def list_jobs(self, job_id: str | None = None) -> list[dict[str, str | list[str]]]:
         """ecaccess-job-list."""
         token = self.authenticate()
 
