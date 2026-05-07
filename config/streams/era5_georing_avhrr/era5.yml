@@ -20,7 +20,6 @@ ERA5_in :
   token_size : 8
   tokenize_spacetime : True
   max_num_targets: -1
-  # frequency: 24:00:00
   forcing: True
   embed : 
     net : transformer
@@ -34,7 +33,6 @@ ERA5_in :
   target_readout :
     num_layers : 2
     num_heads : 4
-    # sampling_rate : 0.2
   pred_head :
     ens_size : 1
     num_layers : 1

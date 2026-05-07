@@ -9,7 +9,6 @@
 
 ERA5 :
   type : anemoi
-  # filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr']
   stream_id : 1
   source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
@@ -18,10 +17,9 @@ ERA5 :
   loss_weight : 1.
   location_weight : cosine_latitude
   masking_rate : 0.8
-  token_size : 64
-  tokenize_spacetime : False  
+  token_size : 8
+  tokenize_spacetime : True  
   max_num_targets: -1
-  # frequency: 24:00:00
   diagnostic: True
   embed : 
     net : transformer
@@ -31,7 +29,7 @@ ERA5 :
     num_blocks : 2
   embed_target_coords :
     net : linear
-    dim_embed : 256
+    dim_embed : 512
   target_readout :
     num_layers : 2
     num_heads : 4
