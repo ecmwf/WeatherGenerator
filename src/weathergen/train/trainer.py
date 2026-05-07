@@ -44,26 +44,26 @@ from weathergen.train.utils import (
     VAL,
     Stage,
     cfg_keys_to_filter,
-    export_memory_snapshot,
     extract_batch_metadata,
     filter_config_by_enabled,
     get_active_stage_config,
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
+)
+from weathergen.utils.distributed import is_root
+from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
+from weathergen.utils.profiling import (
+    export_memory_snapshot,
     start_record_memory_history,
     stop_record_memory_history,
     trace_handler,
     wrap_module_forward_with_profiling,
 )
-from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
-
-# cfg_keys_to_filter = ["losses", "model_input", "target_input"]
 
 
 class Trainer(TrainerBase):
@@ -163,10 +163,6 @@ class Trainer(TrainerBase):
         if is_root():
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
-
-            # create profiler trace directory
-            if cf.get("profiling", {}).get("enabled", False):
-                config.get_path_profiler(cf).mkdir(exist_ok=True, parents=True)
 
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
@@ -389,7 +385,9 @@ class Trainer(TrainerBase):
         if is_root():
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
+        self._training_loop(mini_epoch_base)
 
+    def _training_loop(self, mini_epoch_base: int):
         # run validation before training if requested
         self.validate_before_training()
 
@@ -397,10 +395,6 @@ class Trainer(TrainerBase):
             logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
 
             self.train(mini_epoch)
-
-            if cf.profiling.enabled:
-                # Skip validation.
-                break
 
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
@@ -411,10 +405,6 @@ class Trainer(TrainerBase):
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
             )
             self.save_model(mini_epoch)
-
-        # Log the final model only when profiling is not enabled.
-        if not cf.profiling.enabled:
-            self.save_model(self.training_cfg.num_mini_epochs)
 
     def validate_before_training(self):
         """
@@ -844,6 +834,21 @@ class Trainer(TrainerBase):
 
 
 class ProfilingTrainer(Trainer):
+    def init(self, cf, devices):
+        # create profiler trace directory
+        super().init(cf, devices)
+        if is_root():
+            config.get_path_profiler(self.config).mkdir(exist_ok=True, parents=True)
+
+    def _training_loop(self, mini_epoch_base: int):
+        # run validation before training if requested
+        self.validate_before_training()
+
+        for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
+            logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
+
+            self.train(mini_epoch)
+
     def train(self, mini_epoch):
         """
         Profiling the training using torch profiler.
@@ -864,7 +869,9 @@ class ProfilingTrainer(Trainer):
         wrap_module_forward_with_profiling(self.model, prefix="model")
 
         max_profile_steps = (
-            cf.profiling.wait_iteration + cf.profiling.warmup_iteration + cf.profiling.active_iteration
+            cf.profiling.wait_iteration
+            + cf.profiling.warmup_iteration
+            + cf.profiling.active_iteration
         ) * cf.profiling.repeat
 
         handler = partial(trace_handler, cf)
@@ -1043,3 +1050,11 @@ def _log_collapse_metrics(self, stage: Stage) -> None:
     if metrics and is_root():
         metrics["num_samples"] = self.cf.general.istep
         self.train_logger.log_metrics(stage, metrics)
+
+
+def get_trainer(config: Config) -> Trainer:
+    if config.get("profiling", {}).get("enabled", False):
+        trainer = ProfilingTrainer(config.train_logging)
+    else:
+        trainer = Trainer(config.train_logging)
+    return trainer

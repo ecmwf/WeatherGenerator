@@ -9,7 +9,6 @@ class Stage(enum.StrEnum):
     train = enum.auto()
     train_continue = enum.auto()
     inference = enum.auto()
-    profile = enum.auto()
 
 
 def get_main_parser() -> argparse.ArgumentParser:
@@ -31,12 +30,6 @@ def get_main_parser() -> argparse.ArgumentParser:
         help="Run infernce on a trained WeatherGenerator configuration",
     )
     _add_inference_args(inference_parser)
-
-    profile_parser = subparsers.add_parser(
-        Stage.profile,
-        help="Profile a WeatherGenerator training configuration.",
-    )
-    _add_profile_args(profile_parser)
 
     return parser
 
@@ -62,17 +55,7 @@ def get_inference_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_profile_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False)
-    _add_profile_args(parser)
-    return parser
-
-
 def _add_train_args(parser: argparse.ArgumentParser):
-    _add_general_arguments(parser)
-
-
-def _add_profile_args(parser: argparse.ArgumentParser):
     _add_general_arguments(parser)
 
 
