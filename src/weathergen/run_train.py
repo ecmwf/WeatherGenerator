@@ -115,7 +115,7 @@ def run_inference(args):
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = get_trainer(config)
+    trainer = get_trainer(cf)
     trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
 
 
@@ -147,7 +147,7 @@ def run_continue(args):
     # track history of run to ensure traceability of results
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = get_trainer(config)
+    trainer = get_trainer(cf)
     trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
 
 
@@ -181,7 +181,7 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = get_trainer(config)
+    trainer = get_trainer(cf)
     trainer.run(cf, devices)
 
 

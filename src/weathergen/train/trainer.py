@@ -1052,9 +1052,9 @@ def _log_collapse_metrics(self, stage: Stage) -> None:
         self.train_logger.log_metrics(stage, metrics)
 
 
-def get_trainer(config: Config) -> Trainer:
-    if config.get("profiling", {}).get("enabled", False):
-        trainer = ProfilingTrainer(config.train_logging)
+def get_trainer(cf: Config) -> Trainer:
+    if cf.get("profiling", {}).get("enabled", False):
+        trainer = ProfilingTrainer(cf.train_logging)
     else:
-        trainer = Trainer(config.train_logging)
+        trainer = Trainer(cf.train_logging)
     return trainer
