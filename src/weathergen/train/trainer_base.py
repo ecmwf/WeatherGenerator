@@ -10,6 +10,7 @@
 # nor does it submit to any jurisdiction.
 
 import os
+import subprocess
 
 import torch
 import torch.distributed as dist
@@ -20,6 +21,32 @@ from weathergen.train.utils import str_to_tensor, tensor_to_str
 from weathergen.utils.distributed import is_root
 
 PORT = 1345
+
+
+def _get_master_addr() -> str:
+    master_addr = os.environ.get("MASTER_ADDR")
+    if master_addr:
+        return master_addr
+
+    slurm_num_nodes = int(
+        os.environ.get("SLURM_JOB_NUM_NODES") or os.environ.get("SLURM_NNODES") or "1"
+    )
+    slurm_nodelist = os.environ.get("SLURM_JOB_NODELIST")
+
+    if slurm_nodelist and slurm_num_nodes > 1:
+        try:
+            hostnames = subprocess.check_output(
+                ["scontrol", "show", "hostnames", slurm_nodelist], text=True
+            ).splitlines()
+            if hostnames:
+                return hostnames[0]
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(
+                "Could not derive MASTER_ADDR from SLURM_JOB_NODELIST; set MASTER_ADDR "
+                "explicitly for multi-node DDP."
+            ) from exc
+
+    return "127.0.0.1"
 
 
 class TrainerBase:
@@ -89,7 +116,7 @@ class TrainerBase:
             if rank == -1:
                 ranks_per_node = int(os.environ.get("SLURM_TASKS_PER_NODE", "1")[0])
                 rank = int(os.environ.get("SLURM_NODEID")) * ranks_per_node + local_rank
-            master_addr = os.environ.get("MASTER_ADDR", "localhost")
+            master_addr = _get_master_addr()
             master_port = os.environ.get("MASTER_PORT", f"{PORT}")  # Default port
 
             if torch.accelerator.is_available():

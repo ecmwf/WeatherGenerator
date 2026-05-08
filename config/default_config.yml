@@ -10,6 +10,8 @@
 embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
+mlp_type: mlp
+use_xsa: False
 
 ae_local_dim_embed: 1024
 ae_local_num_blocks: 2
@@ -67,10 +69,11 @@ num_register_tokens: 0
 
 healpix_level: 5
 
-# Use 2D RoPE instead of traditional global positional encoding
-# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
-# When False: uses traditional pe_global positional encoding
-rope_2D: False
+# Generalized RoPE selector.
+rope_mode: none  # one of: none, 2d, spherical
+# Optional spherical harmonic band for spherical RoPE. If null, the model picks one
+# conservative shared band that fits all spherical-RoPE attention modules.
+rope_spherical_band: null
 
 with_mixed_precision: True
 with_flash_attention: True
