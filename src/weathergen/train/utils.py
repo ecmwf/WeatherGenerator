@@ -9,12 +9,12 @@
 
 import copy
 import json
+import logging
 from typing import Literal
 
 import torch
 from omegaconf import OmegaConf
 
-from weathergen.common import config
 from weathergen.common.config import Config, merge_configs
 
 # Run stages
@@ -27,8 +27,7 @@ TEST: Stage = "test"
 cfg_keys_to_filter = ["losses", "model_input", "target_input"]
 
 
-# TODO: remove this definition, it should directly using common.
-get_run_id = config.get_run_id
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 def str_to_tensor(modelid):

@@ -135,7 +135,7 @@ def _sanitize_time_keys(conf: Config) -> Config:
     return conf
 
 
-def _strip_interpolation(conf: Config) -> Config:
+def _strip_interpolation(conf: Config) -> Config | ListConfig:
     """Recursively convert interpolated timedelta/datetime objects to strings."""
     stripped = {}
     if OmegaConf.is_dict(conf):
@@ -311,6 +311,7 @@ def _apply_fixes(config: Config) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
+    config = _check_profiling(config)
     return config
 
 
@@ -361,6 +362,35 @@ def _check_time_interpolation(config: Config) -> Config:
                 _convert_interpolation(subconf, key)
             if "forecast" in subconf:
                 _convert_interpolation(subconf.forecast, forecast_step_dt)
+
+    return config
+
+
+def _check_profiling(config: Config) -> Config:
+    """
+    Apply fixes to profiling config. If profiling section is missing, inject defaults.
+    If profiling exists but some fields are missing, fill in defaults.
+    Always forces enabled=True since this is called from run_profile.
+    """
+    config = config.copy()
+
+    defaults = {
+        "enabled": False,
+        "wait_iteration": 1,
+        "warmup_iteration": 1,
+        "active_iteration": 1,
+        "repeat": 1,
+    }
+
+    if config.get("profiling") is None:
+        # no profiling section at all — inject full defaults
+        config.profiling = OmegaConf.create(defaults)
+    else:
+        # profiling section exists — fill in any missing fields and force enabled=True
+        for key, value in defaults.items():
+            if config.profiling.get(key) is None:
+                config.profiling[key] = value
+        config.profiling.enabled = True  # always True when called from run_profile
 
     return config
 
@@ -593,7 +623,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
             _logger.info("Deserialize default configuration.")
             conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
     assert isinstance(conf, Config)
-    return conf
+    return _apply_fixes(conf)
 
 
 def load_streams(streams_directory: Path) -> list[Config]:
@@ -669,6 +699,11 @@ def load_streams(streams_directory: Path) -> list[Config]:
 def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
     return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
+
+
+def get_path_profiler(config: Config) -> Path:
+    """Get the path for storing profiling logs."""
+    return _get_shared_wg_path() / "profiler_logs" / get_run_id_from_config(config)
 
 
 def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
