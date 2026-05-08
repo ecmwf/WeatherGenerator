@@ -3,9 +3,15 @@ train:
     ofxc76we-finetune-forecast:
       slurm_id: 0
       description: "JEPA space self-flow"
-    # zk3sdw27-pretrain:
-    #   slurm_id: 0
-    #   description: "JEPA sf ctxt=0.4, ema=900000, warmup=8000"
-    # e4wijy3p-pretrain:
-    #   slurm_id: 0
-    #   description: "JEPA sf deep_layer=[0.35, 0.3 , 0.25, 0.1]"
+    zk3sdw27-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA sf ctxt=0.4, ema=900000, warmup=8000"
+    e4wijy3p-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA sf deep_layer=[0.35, 0.3 , 0.25, 0.1]"
+    uwi9ycgq-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA sf ema=400000 (no noise)"
+    rji4dzs6-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA sf ema=400000 wider predictor (no noise)"

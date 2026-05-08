@@ -458,7 +458,7 @@ def plot_loss_per_stream(
                                 x_vals[mask],
                                 y_data[mask],
                                 linestyle,
-                                # color=colors[j % len(colors)],
+                                color=colors[j % len(colors)],
                                 alpha=alpha,
                             )
                             legend_strs[-1] += [
