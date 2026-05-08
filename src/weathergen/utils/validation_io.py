@@ -317,13 +317,6 @@ def _write_latent_data_to_zarr(
                 _write_array(group, "times", times_array)
                 _logger.debug(f"Wrote times shape {times_array.shape} for sample {global_sample_idx}")
 
-                group.attrs["num_extra_tokens"] = int(num_register_tokens + num_class_tokens)
-                group.attrs["num_register_tokens"] = int(num_register_tokens)
-                group.attrs["num_class_tokens"] = int(num_class_tokens)
-                group.attrs["spatial_points"] = int(coords_array.shape[0])
-                if npoints is not None:
-                    group.attrs["total_points"] = int(npoints)
-                group.attrs["coords_order"] = "lat_lon"
 
 def _infer_latent_points_for_metadata(latents_for_sample: dict) -> int | None:
     """
