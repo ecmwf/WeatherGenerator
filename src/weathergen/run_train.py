@@ -54,11 +54,11 @@ def main(argl: list[str]):
     try:
         match args.stage:
             case cli.Stage.train:
-                runner = run_train(args)
+                run_train(args)
             case cli.Stage.train_continue:
-                runner = run_continue(args)
+                run_continue(args)
             case cli.Stage.inference:
-                runner = run_inference(args)
+                run_inference(args)
             case _:
                 logger.error("No stage was found. Aborting.")
     except Exception:
