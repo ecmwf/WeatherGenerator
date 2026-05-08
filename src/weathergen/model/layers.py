@@ -74,6 +74,9 @@ class MLP(torch.nn.Module):
         self.with_residual = with_residual
         self.with_aux = dim_aux is not None
         self.is_dit = is_dit
+        # DiT-with-AdaLN-aux conditioning is not implemented (asserted below); set the flag
+        # explicitly so the forward path never sees an undefined attribute.
+        self.dit_is_cond = False
         dim_hidden = int(dim_in * hidden_factor)
 
         self.layers = torch.nn.ModuleList()

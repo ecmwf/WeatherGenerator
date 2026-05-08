@@ -52,6 +52,25 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
         self.datetime_embedder = DateTimeEncoder()
 
+        # Optional date/time conditioning: project the 32-D calendar embedding into the
+        # noise-embedding space so it can simply be summed with the noise embedding and
+        # consumed by the existing DiT LinearNormConditioning channel. None disables it.
+        self.dt_conditioning_mode = self.cf.get("fe_diffusion_model_conditioning", None)
+        if self.dt_conditioning_mode == "date_time":
+            self.dt_proj = torch.nn.Linear(
+                self.datetime_embedder.num_frequencies * 4, self.embedding_dim
+            )
+            # Start near zero so the model recovers its unconditional behaviour at init.
+            torch.nn.init.normal_(self.dt_proj.weight, std=1e-3)
+            torch.nn.init.zeros_(self.dt_proj.bias)
+        elif self.dt_conditioning_mode in (None, "none"):
+            self.dt_proj = None
+        else:
+            raise ValueError(
+                f"Unknown fe_diffusion_model_conditioning={self.dt_conditioning_mode!r}; "
+                "supported: 'date_time', 'none', null."
+            )
+
         # Parameters
         self.sigma_min = self.cf.sigma_min
         self.sigma_max = self.cf.sigma_max
@@ -173,7 +192,47 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self._noised_tokens = (y + n).detach()
 
-        return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep, coords=coords)
+        dt_emb = self._compute_dt_emb(meta_info, device=tokens.device, dtype=tokens.dtype)
+
+        return self.denoise(
+            x=y + n, c=c, sigma=sigma, fstep=fstep, coords=coords, dt_emb=dt_emb
+        )
+
+    def _compute_dt_emb(
+        self,
+        meta_info: dict[str, SampleMetaData] | None,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor | None:
+        """Encode the sample's forecast valid time and project it into noise-emb space.
+
+        Returns ``None`` when date/time conditioning is disabled. Raises if conditioning is
+        enabled but no valid_time was attached upstream by the data sampler.
+        """
+        if self.dt_proj is None:
+            return None
+
+        if meta_info is None or "ERA5" not in meta_info:
+            raise ValueError(
+                "fe_diffusion_model_conditioning='date_time' but no ERA5 meta_info was "
+                "passed to the diffusion forecast engine."
+            )
+        valid_time = meta_info["ERA5"].valid_time
+        if valid_time is None:
+            raise ValueError(
+                "fe_diffusion_model_conditioning='date_time' but meta_info['ERA5'].valid_time "
+                "is None. Sampler must stamp valid_time on SampleMetaData."
+            )
+
+        # DateTimeEncoder takes np.datetime64 (scalar or array) and returns a CPU float tensor.
+        valid_time_np = np.asarray(valid_time)
+        dt_raw = self.datetime_embedder(valid_time_np).to(device=device)
+        # Ensure a leading batch dim so the (..., embedding_dim) result broadcasts with
+        # noise_emb of shape (1, embedding_dim).
+        if dt_raw.dim() == 1:
+            dt_raw = dt_raw.unsqueeze(0)
+        dt_emb = self.dt_proj(dt_raw.to(dtype=self.dt_proj.weight.dtype))
+        return dt_emb.to(dtype=dtype)
 
     def denoise(
         self,
@@ -182,6 +241,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         sigma: float,
         fstep: int,
         coords: torch.Tensor = None,
+        dt_emb: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         The actual diffusion step, where the model removes noise from the input x under
@@ -196,6 +256,11 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Embed noise level
         noise_emb = self.noise_embedder(c_noise)
+
+        # Fold optional date/time conditioning into the noise embedding so the existing
+        # LinearNormConditioning channel in the DiT blocks consumes it without changes.
+        if dt_emb is not None:
+            noise_emb = noise_emb + dt_emb.to(noise_emb.dtype)
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)  # currently does nothing
@@ -233,6 +298,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Sample pure noise (assuming single batch element for now)
         # torch.manual_seed(42)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+
+        # Pre-compute date/time conditioning embedding once for all ODE steps.
+        dt_emb = self._compute_dt_emb(meta_info, device=x.device, dtype=x.dtype)
 
         ### OLD WAY OF COMPUTING SIGMA SCHEDULE
         # # Time step discretization.
@@ -315,13 +383,17 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_hat = t_cur
 
             # Euler step.
-            denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep, coords=coords)
+            denoised = self.denoise(
+                x=x_hat, c=c, sigma=t_hat, fstep=fstep, coords=coords, dt_emb=dt_emb
+            )
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords)
+                denoised = self.denoise(
+                    x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords, dt_emb=dt_emb
+                )
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 

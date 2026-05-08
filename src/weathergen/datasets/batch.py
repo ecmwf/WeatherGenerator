@@ -25,6 +25,10 @@ class SampleMetaData:
 
     global_params: dict | None = None
 
+    # forecast valid time of the sample (used e.g. for date/time conditioning of the
+    # diffusion forecast engine). np.datetime64 scalar, or None if not set.
+    valid_time: np.datetime64 | None = None
+
     def add_global_params(self, params: dict) -> None:
         if self.global_params is None:
             self.global_params = {}

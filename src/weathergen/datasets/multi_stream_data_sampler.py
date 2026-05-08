@@ -684,6 +684,15 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
             output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
 
+            # Forecast valid time at the first output step. Stamped on both source and
+            # target metadata so downstream consumers (e.g. the diffusion forecast engine
+            # for date/time conditioning) can reach it regardless of which sample side they
+            # read from.
+            step_forecast_dt = (
+                idx + (self.time_step * self.output_offset) // self.step_timedelta
+            )
+            target_valid_time = self.time_window_handler.window(step_forecast_dt).start
+
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
                 tidx = source_to_target[sidx].item()
@@ -701,6 +710,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     input_mask=source_mask,
                 )
 
+                source_masks.metadata[sidx].valid_time = target_valid_time
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
@@ -724,6 +734,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
+                target_metadata.valid_time = target_valid_time
                 # Map target to all source students
                 student_indices = [
                     s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx

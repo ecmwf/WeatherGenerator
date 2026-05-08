@@ -644,7 +644,8 @@ class ForecastingEngine(torch.nn.Module):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
                     assert ada_ln_aux is None, (
-                        "ada_ln_aux should not be provided when diffusion model conditioning is disabled"
+                        "ada_ln_aux is not supported by the DiT path; extra conditioning "
+                        "must be folded into noise_emb upstream."
                     )
                     tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
         else:
