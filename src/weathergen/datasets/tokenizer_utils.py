@@ -24,6 +24,28 @@ def theta_phi_to_standard_coords(coords):
     return thetas, phis
 
 
+def precompute_cell_ids(
+    input_data: list,
+    healpix_level: int,
+) -> list[np.typing.NDArray | None]:
+    """Precompute HEALPix cell IDs for each rdata's coordinates.
+
+    Returns a list parallel to ``input_data``, with ``None`` for empty entries.
+    """
+    nside = 2**healpix_level
+    cell_ids_list = []
+    for rdata in input_data:
+        if rdata.is_empty():
+            cell_ids_list.append(None)
+        else:
+            coords_np = (
+                rdata.coords.numpy() if isinstance(rdata.coords, torch.Tensor) else rdata.coords
+            )
+            thetas, phis = theta_phi_to_standard_coords(coords_np)
+            cell_ids_list.append(ang2pix(nside, thetas, phis, nest=True))
+    return cell_ids_list
+
+
 def encode_times_source(times, time_win) -> torch.tensor:
     """Encode times in the format used for source
 

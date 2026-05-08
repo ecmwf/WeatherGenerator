@@ -17,7 +17,7 @@ from weathergen.datasets.noise_schedule import (
     apply_uniform_noise,
     sample_noise_levels,
 )
-from weathergen.datasets.utils import precompute_cell_ids
+from weathergen.datasets.tokenizer_utils import precompute_cell_ids
 from weathergen.train.utils import Stage
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
