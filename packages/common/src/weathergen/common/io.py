@@ -359,7 +359,7 @@ class OutputItem:
             self._append_dataset(self.target, "target")
             self._append_dataset(self.prediction, "prediction")
         if latent is not None:
-            self.datasets += latent
+            self._append_dataset(latent, "latent")
 
     def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
