@@ -255,7 +255,29 @@ def _write_latent_data_to_zarr(
                 num_register_tokens,
                 num_class_tokens,
             ) = _build_latent_metadata(cf, batch, sample_idx_in_batch, npoints)
+            # Collect all attributes upfront so they can be passed to
+            # create_group in a single call.  Setting attrs individually
+            # after creation causes duplicate zarr.json entries in ZipStore.
+            group_attrs: dict[str, int | str] = {}
+            if coords_array is not None and times_array is not None:
+                group_attrs = {
+                    "num_extra_tokens": int(num_register_tokens + num_class_tokens),
+                    "num_register_tokens": int(num_register_tokens),
+                    "num_class_tokens": int(num_class_tokens),
+                    "spatial_points": int(coords_array.shape[0]),
+                    "coords_order": "lat_lon",
+                }
+                if npoints is not None:
+                    group_attrs["total_points"] = int(npoints)
 
+            # Create or get group (avoid duplicate entries in ZipStore)
+            group = zio.data_root.get(group_path)
+            if group is None:
+                group = zio.data_root.create_group(group_path, attributes=group_attrs)
+            else:
+                _logger.debug(
+                    f"Latent group already exists at {group_path}, skipping creation."
+                )
             extra_written = False
             for latent_name, latent_data in latents_for_sample.items():
                 latent_array = np.asarray(latent_data)
