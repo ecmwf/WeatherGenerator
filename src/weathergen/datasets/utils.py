@@ -14,6 +14,7 @@ import torch
 from astropy_healpix.healpy import ang2pix
 
 from weathergen.datasets.batch import BatchSamples
+from weathergen.datasets.tokenizer_utils import theta_phi_to_standard_coords
 
 
 ####################################################################################################
@@ -255,6 +256,29 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     aa = aa.flatten(1, 2)
     a[..., (geoinfo_offset + zi) : (geoinfo_offset + zi + aa.shape[-1])] = aa
     return a
+
+
+def precompute_cell_ids(
+    input_data: list,
+    healpix_level: int,
+) -> list[np.typing.NDArray | None]:
+    """Precompute HEALPix cell IDs for each rdata's coordinates.
+
+    Returns a list parallel to ``input_data``, with ``None`` for empty entries.
+    """
+    nside = 2**healpix_level
+    cell_ids_list = []
+    for rdata in input_data:
+        if rdata.is_empty():
+            cell_ids_list.append(None)
+        else:
+            # rdata.coords is torch Tensor after tokenization; ang2pix needs numpy
+            coords_np = (
+                rdata.coords.numpy() if isinstance(rdata.coords, torch.Tensor) else rdata.coords
+            )
+            thetas, phis = theta_phi_to_standard_coords(coords_np)
+            cell_ids_list.append(ang2pix(nside, thetas, phis, nest=True))
+    return cell_ids_list
 
 
 def get_tokens_lens(streams: dict, batch_data: BatchSamples, input_steps: int) -> torch.Tensor:

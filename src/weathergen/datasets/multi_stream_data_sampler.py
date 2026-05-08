@@ -7,14 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import copy
 import logging
 import pathlib
 from collections.abc import Sequence
 
 import numpy as np
 import torch
-from astropy_healpix.healpy import ang2pix
 from omegaconf import OmegaConf
 
 from weathergen.common.config import Config
@@ -29,10 +27,8 @@ from weathergen.datasets.data_reader_base import (
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
-from weathergen.datasets.noise_schedule import apply_self_flow_noise, apply_uniform_noise
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
-from weathergen.datasets.tokenizer_utils import theta_phi_to_standard_coords
 from weathergen.datasets.utils import (
     get_tokens_lens,
 )
@@ -51,78 +47,6 @@ FORECAST_DEFAULTS = {
     "policy": None,
     "num_steps": np.array([0], dtype=np.int32),
 }
-
-
-def _precompute_cell_ids(
-    input_data: list,
-    healpix_level: int,
-) -> list[np.typing.NDArray | None]:
-    """Precompute HEALPix cell IDs for each rdata's coordinates.
-
-    Returns a list parallel to input_data, with None for empty entries.
-    """
-    nside = 2**healpix_level
-    cell_ids_list = []
-    for rdata in input_data:
-        if rdata.is_empty():
-            cell_ids_list.append(None)
-        else:
-            # rdata.coords is torch Tensor after tokenization; ang2pix needs numpy
-            coords_np = (
-                rdata.coords.numpy() if isinstance(rdata.coords, torch.Tensor) else rdata.coords
-            )
-            thetas, phis = theta_phi_to_standard_coords(coords_np)
-            cell_ids_list.append(ang2pix(nside, thetas, phis, nest=True))
-    return cell_ids_list
-
-
-def _apply_noise_to_data(
-    input_data: list,
-    params: dict,
-    is_student: bool,
-    cell_ids_list: list[np.typing.NDArray | None] | None = None,
-) -> list:
-    """Clone input data list and apply self-flow noise.
-
-    Student: per-cell noise (noise_mask=True -> level t, rest -> level s).
-    Teacher: uniform noise at level s.
-    Same noise_seed -> same eps realization.
-
-    Args:
-        cell_ids_list: Precomputed HEALPix cell IDs (required for student, ignored for teacher).
-    """
-    noised = []
-    for step, rdata in enumerate(input_data):
-        if rdata.is_empty():
-            noised.append(rdata)
-            continue
-
-        if is_student:
-            # Map cell-level noise_mask to point-level using precomputed cell IDs
-            cell_ids = cell_ids_list[step]
-            point_noise_mask = params["noise_mask"][cell_ids]
-            noised_data = apply_self_flow_noise(
-                rdata.data,
-                point_noise_mask,
-                params["alpha_s"],
-                params["sigma_s"],
-                params["alpha_t"],
-                params["sigma_t"],
-                params["noise_seed"],
-            )
-        else:
-            noised_data = apply_uniform_noise(
-                rdata.data,
-                params["alpha_s"],
-                params["sigma_s"],
-                params["noise_seed"],
-            )
-
-        # Shallow copy with noised data
-        rd = copy.copy(rdata)
-        rd.data = noised_data
-        noised.append(rd)
-    return noised
 
 
 def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IOReaderData:
@@ -796,24 +720,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 input_tokens_target = input_tokens
                 output_tokens_target = output_tokens
 
-            # Precompute cell IDs once per stream for self-flow noise mapping
-            any_self_flow = any(m.params.get("is_self_flow") for m in source_masks.metadata)
-            cell_ids_list = (
-                _precompute_cell_ids(input_data, self.healpix_level) if any_self_flow else None
-            )
-
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
                 tidx = source_to_target[sidx].item()
 
-                # Apply self-flow noise to student data
-                source_params = source_masks.metadata[sidx].params
-                if source_params.get("is_self_flow"):
-                    input_data_src = _apply_noise_to_data(
-                        input_data, source_params, is_student=True, cell_ids_list=cell_ids_list
-                    )
-                else:
-                    input_data_src = input_data
+                # Apply self-flow noise to student data (handled by masker)
+                input_data_src = self.masker.apply_noise_to_data(
+                    input_data,
+                    source_masks.metadata[sidx],
+                    is_student=True,
+                )
 
                 sdata = self._build_stream_data(
                     source_select,
@@ -832,20 +748,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
+            input_data_target_orig = input_data_target
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
                 # Use time-offset data for teacher when teacher_time_offset > 0.
                 target_idx = idx + self.teacher_time_offset
 
-                # Apply self-flow noise to teacher data (uniform level s)
-                target_params = target_masks.metadata[tidx].params
-                if target_params.get("is_self_flow"):
-                    input_data_tgt = _apply_noise_to_data(
-                        input_data_target, target_params, is_student=False
-                    )
-                else:
-                    input_data_tgt = input_data_target
+                # Apply self-flow noise to teacher data (handled by masker)
+                input_data_target = self.masker.apply_noise_to_data(
+                    input_data_target_orig, target_masks.metadata[tidx], is_student=False
+                )
 
                 sdata = self._build_stream_data(
                     target_select,
@@ -853,7 +766,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     num_forecast_steps,
                     stream_info,
                     target_masks.metadata[tidx].params.get("num_steps_input", 1),
-                    input_data_tgt,
+                    input_data_target,
                     output_data_target,
                     input_tokens_target,
                     output_tokens_target,
