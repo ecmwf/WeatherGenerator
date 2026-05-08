@@ -25,6 +25,13 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from weathergen.common.logger import init_loggers
 from weathergen.common.paths import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
+from weathergen.metrics.mlflow_utils import (
+    MlFlowUpload,
+    get_or_create_mlflow_parent_run,
+    log_scores,
+    setup_mlflow,
+)
+
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
@@ -43,12 +50,6 @@ from weathergen.evaluate.scores.score_orchestration import (
     metric_list_to_json,
 )
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
-from weathergen.metrics.mlflow_utils import (
-    MlFlowUpload,
-    get_or_create_mlflow_parent_run,
-    log_scores,
-    setup_mlflow,
-)
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
@@ -372,8 +373,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     )
 
     # summary plots
-    if scores_dict and cfg.evaluation.get("summary_plots", False):
-        _logger.info("Started creating summary plots...")
+    if scores_dict:
         plot_summary(cfg, scores_dict, summary_dir)
 
 

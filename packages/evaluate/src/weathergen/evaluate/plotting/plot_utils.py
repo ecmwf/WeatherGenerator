@@ -373,7 +373,7 @@ def plot_metric_region(
                 colors.append(runs[run_id].get("color", None))
 
             if selected_data:
-                _logger.info(f"Creating plot for {metric} - {region} - {stream} - {ch}.")
+                _logger.info(f"Creating line plot for {metric} - {region} - {stream} - {ch}.")
 
                 name = create_filename(
                     prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream, ch]
@@ -495,7 +495,7 @@ def ratio_plot_metric_region(
             colors.append(run_data.get("color", None))
 
         if len(selected_data) > 0:
-            _logger.info(f"Creating Ratio plot for {metric} - {stream}")
+            _logger.info(f"Creating ratio plot for {metric} - {stream}")
 
             name = create_filename(
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
@@ -505,7 +505,7 @@ def ratio_plot_metric_region(
                 run_ids,
                 labels,
                 tag=name,
-                x_dim="channel",
+                x_dim=["forecast_step", "channel"],
                 y_dim=metric,
                 print_summary=print_summary,
                 colors=colors,
@@ -519,7 +519,7 @@ def heat_maps_metric_region(
     scores_dict: dict,
     plotter: object,
 ) -> None:
-    """Plot ratio data for all streams and channels for a given metric and region.
+    """Plot heat map data for all streams and channels for a given metric and region.
 
     Parameters
     ----------
@@ -556,7 +556,7 @@ def heat_maps_metric_region(
             run_ids.append(run_id)
 
         if len(selected_data) > 0:
-            _logger.info(f"Creating Heat maps for {metric} - {stream}")
+            _logger.info(f"Creating heat maps for {metric} - {stream}")
             name = create_filename(
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
