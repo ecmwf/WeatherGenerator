@@ -245,14 +245,6 @@ def _write_latent_data_to_zarr(
             # Create group path: sample/latent/forecast_step
             group_path = f"{global_sample_idx}/{io.LATENT_STREAM}/{t_idx}"
             
-            # Create or get group (avoid duplicate entries in ZipStore)
-            group = zio.data_root.get(group_path)
-            if group is None:
-                group = zio.data_root.create_group(group_path)
-            else:
-                _logger.debug(
-                    f"Latent group already exists at {group_path}, skipping creation."
-                )
             
             npoints = _infer_latent_points_for_metadata(latents_for_sample)
             (
