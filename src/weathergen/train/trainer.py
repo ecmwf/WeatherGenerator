@@ -844,8 +844,9 @@ class ProfilingTrainer(Trainer):
         # run validation before training if requested
         self.validate_before_training()
 
-        for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
-            logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
+        end = min(mini_epoch_base + 1, self.training_cfg.num_mini_epochs)
+        for mini_epoch in range(mini_epoch_base, end):
+            logger.info(f"Mini_epoch {mini_epoch} of {end}: train.")
 
             self.train(mini_epoch)
 
