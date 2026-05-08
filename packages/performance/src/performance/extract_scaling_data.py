@@ -71,8 +71,8 @@ def extract_metrics_from_run_id(run_id: str, shared_work_dir: Path) -> dict | No
 
         # Extract training time for mini-epoch from last non-NaN row
         overall_training_time = None
-        if "elapsed_time_mini_epoch" in df.columns:
-            val = df["elapsed_time_mini_epoch"].dropna()
+        if "training_time_after_mini_epoch_seconds" in df.columns:
+            val = df["training_time_after_mini_epoch_seconds"].dropna()
             overall_training_time = val.iloc[-1] if len(val) > 0 else None
 
         return {

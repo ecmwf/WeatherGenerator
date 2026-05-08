@@ -574,7 +574,7 @@ class Trainer(TrainerBase):
                 "train",
                 {
                     "completed_mini_epoch": mini_epoch,
-                    "elapsed_time_mini_epoch": total_training_time,
+                    "training_time_after_mini_epoch_seconds": total_training_time,
                 },
             )
             logger.info(
