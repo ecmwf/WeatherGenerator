@@ -23,7 +23,7 @@ import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
 from weathergen.train.trainer import Trainer, get_trainer
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import get_world_size
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def main(argl: list[str]):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if is_root():
+        if get_world_size() == 1:
             pdb.post_mortem(tb)
 
 
