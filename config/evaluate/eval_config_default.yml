@@ -37,6 +37,7 @@ evaluation:
   add_grid: false
   score_cards: false
   bar_plots: false
+  #agg_dims: ["ipoint"] #----> NOTE: advanced! Handle with care. This will average the scores across the specified list of dimensions. Supported dimensions: "ipoint", "sample", "forecast_step", "ensemble". Use with caution, as it can hide important details about the model performance. 
 
 
 default_streams:

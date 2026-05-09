@@ -9,7 +9,6 @@
 
 """Plotting orchestration: parallel dispatch of per-sample maps, score maps, and summary plots."""
 
-import glob
 import logging
 from pathlib import Path
 
@@ -44,7 +43,6 @@ from weathergen.evaluate.utils.clim_utils import get_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
-
 
 # ---------------------------------------------------------------------------
 # Score maps
@@ -252,17 +250,18 @@ def _scatter_plot_single(
 
 
 def _build_single_animation(
-    map_output_dir: Path,
+    output_dir: Path,
     run_id: str,
     tag: str,
     stream: str,
-    region: str,
+    region: str | None,
     var: str,
     sa: object,
     fsteps: list,
     image_format: str,
     animation_format: str,
     duration_ms: int,
+    prefix: str = "map",
 ) -> list[str]:
     """Build one GIF for a single (region, sample, variable) combination.
 
@@ -271,32 +270,38 @@ def _build_single_animation(
     Returns the list of source frame paths that were assembled into the GIF
     (empty list if no frames were found).
     """
-    image_paths: list[str] = []
-    for fstep in fsteps:
-        parts = [
-            "map",
-            run_id,
-            tag,
-            str(sa),
-            "*",
-            stream,
-            region,
-            var,
-            "fstep",
-            str(fstep).zfill(3),
-        ]
-        name = "_".join(filter(None, parts))
-        fname = f"{map_output_dir.joinpath(name)}.{image_format}"
-        image_paths += glob.glob(fname)
+    # Both map and histogram filenames follow the same pattern:
+    #   {prefix}_{run_id}_{tag}_{sample}_{valid_time}_{stream}_{region}_{var}_{fstep:03d}
+    # For all_samples histograms, valid_time is omitted.
+    # We match files by checking a fixed prefix and suffix, allowing any
+    # valid_time (or none) in between — no glob wildcards needed.
+    region_part = region if region else ""
+    head = "_".join(filter(None, [prefix, run_id, tag, str(sa)]))
+    tail = "_".join(filter(None, [stream, region_part, var]))
+    suffix = f".{image_format}"
+    fstep_strs = {str(f).zfill(3) for f in fsteps}
 
-    if not image_paths:
-        _logger.debug(f"No images found for animation {var} sample {sa} region {region}")
+    if not output_dir.is_dir():
         return []
 
-    image_paths = sorted(image_paths)
-    out_path = (
-        f"{map_output_dir}/animation_{run_id}_{tag}_{sa}_{stream}_{region}_{var}.{animation_format}"
+    image_paths = sorted(
+        str(f)
+        for f in output_dir.iterdir()
+        if f.name.startswith(head + "_")
+        and f.name.endswith(suffix)
+        and f"_{tail}_" in f.name
+        and f.stem.rsplit("_", 1)[-1] in fstep_strs
     )
+
+    if not image_paths:
+        return []
+
+    anim_parts = ["animation", run_id, tag, str(sa), stream]
+    if region:
+        anim_parts.append(region)
+    anim_parts.append(var)
+    out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
+
     if animation_format.lower() == "mp4":
         frames = [imageio.imread(p) for p in image_paths]
         fps = 1000 / duration_ms if duration_ms > 0 else 2
@@ -327,6 +332,9 @@ def _dispatch_animations(
 ) -> list[str]:
     """Build GIF animations in parallel for all (region, sample, variable) combinations.
 
+    Animations are built for both maps and histograms — whichever image files
+    exist on disk will be picked up automatically.
+
     Parameters
     ----------
     plotter : Plotter
@@ -340,13 +348,17 @@ def _dispatch_animations(
         Paths of all source frames that were assembled into GIFs.
     """
     plotter.update_data_selection(select)
-    map_output_dir = plotter.get_map_output_dir(tag)
 
     duration_ms = int(1000 / plotter.fps) if plotter.fps > 0 else 400
 
+    prefixes = [
+        ("map", plotter.get_map_output_dir(tag)),
+        ("histogram", plotter.get_hist_output_dir()),
+    ]
+
     tasks = [
         {
-            "map_output_dir": map_output_dir,
+            "output_dir": output_dir,
             "run_id": plotter.run_id,
             "tag": tag,
             "stream": plotter.stream,
@@ -357,7 +369,9 @@ def _dispatch_animations(
             "image_format": plotter.image_format,
             "animation_format": plotter.animation_format,
             "duration_ms": duration_ms,
+            "prefix": prefix,
         }
+        for prefix, output_dir in prefixes
         for region in plotter.regions
         for sa in samples
         for var in variables
@@ -370,7 +384,7 @@ def _dispatch_animations(
     results = dispatch_parallel(
         calls,
         n_workers=get_num_workers(max_workers=max_workers),
-        backend="threading",
+        backend="loky",
         desc="Animations",
     )
     return [p for r in results if r for p in r]
@@ -395,7 +409,7 @@ def _plot_single_sample(
     plot_maps: bool,
     plot_bias: bool,
     plot_target: bool,
-    plot_histograms: bool,
+    plot_histograms: bool | str,
     maps_config: dict,
     bias_config: dict,
 ) -> None:
@@ -418,11 +432,13 @@ def _plot_single_sample(
         if plot_bias and bias_data is not None and not bias_has_ens:
             plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
-        for ens in ensemble:
-            has_ens = "ens" in preds.dims and ens != "mean"
-            preds_ens = preds.sel(ens=ens) if has_ens else preds
-            preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
-            preds_name = "_".join(filter(None, ["preds", preds_tag]))
+    for ens in ensemble:
+        has_ens = "ens" in preds.dims and ens != "mean"
+        preds_ens = preds.sel(ens=ens) if has_ens else preds
+        preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+        preds_name = "_".join(filter(None, ["preds", preds_tag]))
+
+        if plot_maps:
             plotter.create_maps_per_sample(
                 preds_ens, plot_chs, data_selection, preds_name, maps_cfg
             )
@@ -434,10 +450,60 @@ def _plot_single_sample(
                     bias_ens, plot_chs, data_selection, bias_tag, bias_cfg
                 )
 
-            if plot_histograms:
-                plotter.create_histograms_per_sample(
-                    tars, preds_ens, plot_chs, data_selection, preds_tag
-                )
+        if plot_histograms is True or plot_histograms == "per-sample":
+            plotter.create_histograms(
+                tars,
+                preds_ens,
+                plot_chs,
+                data_selection,
+                preds_name,
+                ranges=maps_config,
+            )
+
+    plotter.clean_data_selection()
+
+
+def _plot_all_samples(
+    plotter_cfg: dict,
+    output_basedir: str,
+    tars: xr.DataArray,
+    preds: xr.DataArray,
+    bias_data: xr.DataArray | None,
+    fstep: int | str,
+    stream: str,
+    plot_chs: list[str],
+    ensemble: list,
+    plot_histograms: bool | str,
+    maps_config: dict,
+    bias_config: dict,
+) -> None:
+    """Plot histograms across all samples for a single fstep.
+
+    Unlike per-sample histograms, these aggregate all samples together.
+    The output filename uses 'global' instead of a sample id and omits the timestep.
+    """
+    if not (plot_histograms is True or plot_histograms == "across-samples"):
+        return
+
+    matplotlib.use("Agg")
+    plotter = Plotter(plotter_cfg, Path(output_basedir))
+
+    data_selection = {"sample": "all_samples", "stream": stream, "forecast_step": fstep}
+
+    for ens in ensemble:
+        has_ens = "ens" in preds.dims and ens != "mean"
+        preds_ens = preds.sel(ens=ens) if has_ens else preds
+        preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+        preds_name = "_".join(filter(None, ["preds", preds_tag]))
+
+        plotter.create_histograms(
+            tars,
+            preds_ens,
+            plot_chs,
+            data_selection,
+            preds_name,
+            ranges=maps_config,
+        )
 
     plotter.clean_data_selection()
 
@@ -465,14 +531,8 @@ def plot_data(
     stream_cfg = reader.get_stream(stream)
     plot_settings = stream_cfg.get("plotting", {})
 
-    if not (
-        plot_settings
-        and (
-            plot_settings.get("plot_maps", False)
-            or plot_settings.get("plot_histograms", False)
-            or plot_settings.get("plot_animations", False)
-        )
-    ):
+    plot_keys = ("plot_maps", "plot_histograms", "plot_animations")
+    if not plot_settings or not any(plot_settings.get(k, False) for k in plot_keys):
         return
 
     plotter_cfg = {
@@ -482,9 +542,13 @@ def plot_data(
         "fig_size": global_plotting_opts.get("fig_size"),
         "fps": global_plotting_opts.get("fps", 2),
         "regions": global_plotting_opts.get("regions", ["global"]),
+        "log_x": global_plotting_opts.get("log_x", False),
+        "log_y": global_plotting_opts.get("log_y", False),
+        "n_bins": global_plotting_opts.get("n_bins", 50),
         "plot_subtimesteps": reader.get_inference_stream_attr(stream, "tokenize_spacetime", False)
         | plot_settings.get("plot_subtimesteps", False),
     }
+
     plotter = Plotter(plotter_cfg, reader.runplot_dir)
 
     available_data = reader.check_availability(stream, mode="plotting")
@@ -502,12 +566,16 @@ def plot_data(
     if not isinstance(plot_target, bool):
         raise TypeError("plot_target must be a boolean.")
     plot_histograms = plot_settings.get("plot_histograms", False)
-    if not isinstance(plot_histograms, bool):
-        raise TypeError("plot_histograms must be a boolean.")
+    if not isinstance(plot_histograms, bool) and plot_histograms not in {
+        "across-samples",
+        "per-sample",
+    }:
+        raise TypeError("plot_histograms must be true, false, 'across-samples', or 'per-sample'. ")
     plot_animations = plot_settings.get("plot_animations", False)
     if not isinstance(plot_animations, bool):
         raise TypeError("plot_animations must be a boolean.")
 
+    model_output = output_data
     if output_data is None:
         model_output = reader.get_data(
             stream,
@@ -516,8 +584,6 @@ def plot_data(
             channels=available_data.channels,
             ensemble=available_data.ensemble,
         )
-    else:
-        model_output = output_data
 
     da_tars = model_output.target
     da_preds = model_output.prediction
@@ -530,7 +596,9 @@ def plot_data(
     plot_sample_set = set(available_data.samples) if available_data.samples is not None else None
     plot_channel_set = set(available_data.channels) if available_data.channels is not None else None
 
+    output_dir = str(reader.runplot_dir)
     output_fstep_keys = set(da_tars.keys())
+
     if plot_fstep_set is not None and output_fstep_keys - plot_fstep_set:
         zarr_fsteps = set(int(f) for f in reader.get_forecast_steps())
         if plot_fstep_set == zarr_fsteps:
@@ -551,16 +619,9 @@ def plot_data(
 
     if not isinstance(global_plotting_opts.get(stream), oc.DictConfig):
         global_plotting_opts[stream] = oc.DictConfig({})
-    maps_config = common_ranges(
-        da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
-    )
-    bias_config = bias_ranges(
-        da_tars, da_preds, available_data.channels, global_plotting_opts[stream]
-    )
-
-    maps_config_dict = oc.OmegaConf.to_container(maps_config, resolve=True)
-    bias_config_dict = oc.OmegaConf.to_container(bias_config, resolve=True)
-    output_basedir = str(reader.runplot_dir)
+    _range_args = (da_tars, da_preds, available_data.channels, global_plotting_opts[stream])
+    maps_config_dict = oc.OmegaConf.to_container(common_ranges(*_range_args), resolve=True)
+    bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*_range_args), resolve=True)
 
     num_plot_workers = get_num_workers(
         check_process_headroom=True,
@@ -568,6 +629,7 @@ def plot_data(
     )
 
     tasks: list[dict] = []
+    all_samples_tasks: list[dict] = []
     for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
         all_chs = list(np.atleast_1d(tars.channel.values))
         plot_chs = (
@@ -589,11 +651,28 @@ def plot_data(
 
         bias_data = (preds - tars) if plot_bias else None
 
+        all_samples_tasks.append(
+            {
+                "plotter_cfg": plotter_cfg,
+                "output_basedir": output_dir,
+                "tars": tars,
+                "preds": preds,
+                "bias_data": bias_data,
+                "fstep": fstep,
+                "stream": stream,
+                "plot_chs": plot_chs,
+                "ensemble": list(available_data.ensemble),
+                "plot_histograms": plot_histograms,
+                "maps_config": maps_config_dict,
+                "bias_config": bias_config_dict,
+            }
+        )
+
         for sample in plot_samples:
             tasks.append(
                 {
                     "plotter_cfg": plotter_cfg,
-                    "output_basedir": output_basedir,
+                    "output_basedir": output_dir,
                     "tars": tars,
                     "preds": preds,
                     "bias_data": bias_data,
@@ -620,63 +699,51 @@ def plot_data(
         calls, n_workers=num_plot_workers, backend="loky", desc=f"Plotting {run_id} - {stream}"
     )
 
+    if all_samples_tasks:
+        _logger.info(
+            f"Parallel plotting: dispatching {len(all_samples_tasks)} across-samples "
+            f"tasks using up to {num_plot_workers} loky workers."
+        )
+        as_calls = [delayed(_plot_all_samples)(**t) for t in all_samples_tasks]
+        dispatch_parallel(
+            as_calls,
+            n_workers=num_plot_workers,
+            backend="loky",
+            desc=f"Across-samples plots {run_id} - {stream}",
+        )
+
     if plot_animations:
-        plotter = Plotter(plotter_cfg, reader.runplot_dir)
         last_fstep = list(da_tars.keys())[-1]
-        last_tars = da_tars[last_fstep]
         last_preds = da_preds[last_fstep]
-        all_chs = list(np.atleast_1d(last_tars.channel.values))
-        plot_chs = (
-            [ch for ch in all_chs if ch in plot_channel_set]
-            if plot_channel_set is not None
-            else all_chs
-        )
-        all_samples = list(np.unique(last_tars.sample.values))
-        plot_samples = (
-            [s for s in all_samples if s in plot_sample_set]
-            if plot_sample_set is not None
-            else all_samples
-        )
-        plot_fsteps = da_tars.keys()
-        data_selection = {
-            "sample": plot_samples[-1],
-            "stream": stream,
-            "forecast_step": last_fstep,
-        }
+        last_tars = da_tars[last_fstep]
+        has_ens = "ens" in last_preds.dims
+
+        _sel = lambda items, allowed: [x for x in items if x in allowed] if allowed else items
+        plot_chs = _sel(list(np.atleast_1d(last_tars.channel.values)), plot_channel_set)
+        plot_samples = _sel(list(np.unique(last_tars.sample.values)), plot_sample_set)
+
         max_wk = reader.eval_cfg.get("max_workers", None)
+        anim_samples = plot_samples + (["all_samples"] if plot_histograms else [])
+        anim_kw = dict(
+            plotter=plotter,
+            samples=anim_samples,
+            fsteps=da_tars.keys(),
+            variables=plot_chs,
+            max_workers=max_wk,
+            select={"sample": plot_samples[-1], "stream": stream, "forecast_step": last_fstep},
+        )
+
+        tags: list[str] = []
         for ens in available_data.ensemble:
-            preds_name = "preds" if "ens" not in last_preds.dims else f"preds_ens_{ens}"
-            _dispatch_animations(
-                plotter,
-                plot_samples,
-                plot_fsteps,
-                plot_chs,
-                data_selection,
-                preds_name,
-                max_workers=max_wk,
-            )
+            tags.append("preds" if not has_ens else f"preds_ens_{ens}")
         if plot_target:
-            _dispatch_animations(
-                plotter,
-                plot_samples,
-                plot_fsteps,
-                plot_chs,
-                data_selection,
-                "targets",
-                max_workers=max_wk,
-            )
+            tags.append("targets")
         if plot_bias:
             for ens in available_data.ensemble:
-                bias_tag = "bias" if "ens" not in last_preds.dims else f"bias_ens_{ens}"
-                _dispatch_animations(
-                    plotter,
-                    plot_samples,
-                    plot_fsteps,
-                    plot_chs,
-                    data_selection,
-                    bias_tag,
-                    max_workers=max_wk,
-                )
+                tags.append("bias" if not has_ens else f"bias_ens_{ens}")
+
+        for tag in tags:
+            _dispatch_animations(**anim_kw, tag=tag)
 
 
 # ---------------------------------------------------------------------------

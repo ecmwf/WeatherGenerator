@@ -7,6 +7,9 @@
 #  animation_format: "gif" #options: "mp4", "gif"
 #  dpi_val : 300
 #  fps: 2
+#  n_bins: 50 #number of bins for histograms. 
+#  log_x: true #use log scale for x axis in histograms. 
+#  log_y: true #use log scale for y axis in histograms. 
 #  ERA5:
 #    use_datashader: false
 #    marker_size: 2
