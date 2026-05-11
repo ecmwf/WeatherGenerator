@@ -374,7 +374,7 @@ class Masker:
                 if is_stream_forcing(stream_info, self.stage):
                     target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
-                    masking_config = target_cfg.get("masking_strategy_config", {})
+                    masking_config = copy.deepcopy(target_cfg.get("masking_strategy_config", {}))
                     if stream_info.get( "masking_rate") is not None :
                         masking_config["rate"] = stream_info.get("masking_rate")
                     # targets are never randomly dropped
@@ -410,7 +410,7 @@ class Masker:
                 continue
             # samples per strategy
             for i_sample in range(source_cfg.get("num_samples", 1)):
-                masking_config = source_cfg.get("masking_strategy_config", {})
+                masking_config = copy.deepcopy(source_cfg.get("masking_strategy_config", {}))
                 if stream_info.get( "masking_rate") is not None :
                     masking_config["rate"] = stream_info.get("masking_rate")
                 # extract corresponding target
