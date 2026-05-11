@@ -14,7 +14,7 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 1e-4
+fe_impute_latent_noise_std: 0 # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
@@ -106,7 +106,7 @@ training_config:
   deep_ssl:
     enabled: false
 
-  num_mini_epochs: 32
+  num_mini_epochs: 64
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -118,25 +118,25 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 1e-4
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256
-    num_steps_cooldown: 512
+    num_steps_cooldown: 1
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 1.0
+    grad_clip: 0.25
     weight_decay: 0.1
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.98125
       beta2 : 0.9875
-      eps : 2e-08
+      eps : 1e-08
 
   losses : {
     "student-teacher": {
@@ -186,7 +186,7 @@ validation_config:
   validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
-    ema_halflife_in_thousands: 1e-3
+    ema_halflife_in_thousands: 600
 
   # parameters for validation samples that are written to disk
   output : {

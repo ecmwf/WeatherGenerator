@@ -112,7 +112,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         steps = np.array(forecast_cfg["num_steps"], dtype=np.int32).reshape(-1)
         self.list_num_forecast_steps = np.array(steps, dtype=np.int32)
 
-
         # teacher_time_offset: number of time windows to shift the teacher's input
         # relative to the student's. When > 0 the teacher sees a future time window.
         # Only active when student_teacher mode is used; ignored in masking mode to
@@ -724,13 +723,21 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
                 tidx = source_to_target[sidx].item()
+
+                # Apply self-flow noise to student data (handled by masker)
+                input_data_src = self.masker.apply_noise_to_data(
+                    input_data,
+                    source_masks.metadata[sidx],
+                    is_student=True,
+                )
+
                 sdata = self._build_stream_data(
                     source_select,
                     idx,
                     num_forecast_steps,
                     stream_info,
                     source_masks.metadata[sidx].params.get("num_steps_input", 1),
-                    input_data,
+                    input_data_src,
                     output_data,
                     input_tokens,
                     output_tokens,
@@ -741,11 +748,18 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 batch.add_source_stream(sidx, tidx, stream_name, sdata, source_masks.metadata[sidx])
 
             # for t_idx, mask in enumerate(source_masks):
+            input_data_target_orig = input_data_target
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
                 # Use time-offset data for teacher when teacher_time_offset > 0.
                 target_idx = idx + self.teacher_time_offset
+
+                # Apply self-flow noise to teacher data (handled by masker)
+                input_data_target = self.masker.apply_noise_to_data(
+                    input_data_target_orig, target_masks.metadata[tidx], is_student=False
+                )
+
                 sdata = self._build_stream_data(
                     target_select,
                     target_idx,

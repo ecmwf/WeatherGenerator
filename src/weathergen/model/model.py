@@ -365,6 +365,7 @@ class Model(torch.nn.Module):
                 loss_cfg,
                 use_class_token=use_class_token,
                 use_patch_token=use_patch_token,
+                default_mlp_type=global_cfg.get("mlp_type", "mlp"),
             )
         elif loss_cfg["head"].lower() == "transformer":
             return LatentPredictionHeadTransformer(
@@ -431,6 +432,7 @@ class Model(torch.nn.Module):
                     tr_mlp_hidden_factor = (
                         tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
                     )
+                    tr_mlp_type = tr.get("mlp_type", cf.get("mlp_type", "mlp"))
                     tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
                     softcap = tr["softcap"] if "softcap" in tr else 0.0
 
@@ -458,6 +460,7 @@ class Model(torch.nn.Module):
                             hidden_factor=8,
                             with_residual=False,
                             dropout_rate=dropout_rate,
+                            mlp_type=self.cf.get("mlp_type", "mlp"),
                             norm_eps=self.cf.mlp_norm_eps,
                             name=f"embed_target_coords_{stream_name}",
                         )
@@ -484,6 +487,7 @@ class Model(torch.nn.Module):
                             dim_coord_in,
                             tr_dim_head_proj,
                             tr_mlp_hidden_factor,
+                            tr_mlp_type,
                             softcap,
                             stream_config=si,
                         )
@@ -656,7 +660,9 @@ class Model(torch.nn.Module):
         num_params_q_cells = (
             np.prod(self.encoder.q_cells.shape) if self.encoder.q_cells.requires_grad else 0
         )
-        num_params_q_aux = np.prod(self.encoder.q_aux.shape) if self.encoder.q_aux.requires_grad else 0
+        num_params_q_aux = (
+            np.prod(self.encoder.q_aux.shape) if self.encoder.q_aux.requires_grad else 0
+        )
         num_params_ae_adapter = get_num_parameters(self.encoder.ae_local_global_engine)
 
         num_params_ae_aggregation = get_num_parameters(
