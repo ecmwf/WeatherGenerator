@@ -187,6 +187,8 @@ class Scores:
             "vrmse": self.calc_vrmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
+            "rps": self.calc_rps,
+            "rpss": self.calc_rpss,
             "froct": self.calc_froct,
             "troct": self.calc_troct,
             "fact": self.calc_fact,
@@ -287,6 +289,8 @@ class Scores:
             "froct": ["p", "gt", "p_next", "gt_next"],
             "troct": ["p", "gt", "p_next", "gt_next"],
             "acc": ["p", "gt", "c"],
+            "rps": ["p", "gt", "c"],
+            "rpss": ["p", "gt", "c"],
             "fact": ["p", "c"],
             "tact": ["gt", "c"],
         }
@@ -922,6 +926,9 @@ class Scores:
         if c is None:
             return xr.full_like(x.sum(self._agg_dims), np.nan)
 
+        if "statistic" in c.dims:
+            c = c.sel(statistic="mean", drop=True)
+
         # Calculate anomalies
         ano = x - c
         act = ano.std(dim=self._agg_dims)
@@ -1001,6 +1008,9 @@ class Scores:
         if c is None:
             return xr.full_like(p.sum(self._agg_dims), np.nan)
 
+        if "statistic" in c.dims:
+            c = c.sel(statistic="mean", drop=True)
+
         # Calculate anomalies
         fcst_ano, obs_ano = p - c, gt - c
 
@@ -1010,6 +1020,140 @@ class Scores:
         )
 
         return acc
+
+    def calc_rps(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        c: xr.DataArray,
+        rps_quintile_stats: list[str] = None,
+    ) -> xr.DataArray:
+        """
+        Calculate Ranked Probability Score (RPS) using quintile categories.
+
+        Uses the four **quintile** boundary thresholds q20, q40, q60, q80 (selected from the
+        ``statistic`` dimension of ``c``) to define five categories.
+
+        Supports both deterministic and ensemble forecasts
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array.  May optionally contain an ensemble dimension named
+            ``self._ens_dim`` (default ``'ens'``).
+        gt: xr.DataArray
+            Ground truth data array (always deterministic / single-valued).
+        c: xr.DataArray
+            Climatology DataArray with a ``statistic`` dimension.  Must contain at least
+            the statistics ``'q20'``, ``'q40'``, ``'q60'``, ``'q80'``.
+        rps_quintile_stats: list[str]
+            List of statistic names in ``c`` to use as quintile boundaries. Default is
+            ``['q20', 'q40', 'q60', 'q80']``.
+
+        Returns
+        -------
+        xr.DataArray
+            Ranked Probability Score (RPS). Lower values indicate better forecasts.
+            Perfect score is 0.
+        """
+        if rps_quintile_stats is None:
+            rps_quintile_stats = ["q20", "q40", "q60", "q80"]
+        if c is None:
+            return xr.full_like(p.sum(self._agg_dims), np.nan)
+
+        if "statistic" not in c.dims:
+            raise ValueError(
+                "calc_rps expects a quantile DataArray with a 'statistic' dimension "
+                f"(e.g. from the new climatology format). Got dims: {c.dims}"
+            )
+        missing = [s for s in rps_quintile_stats if s not in c.statistic.values]
+        if missing:
+            raise ValueError(
+                f"calc_rps requires statistics {rps_quintile_stats} in the 'statistic' "
+                f"dimension, but {missing} are absent. Available: {list(c.statistic.values)}"
+            )
+
+        n_categories = len(rps_quintile_stats) + 1
+        boundaries = c.sel(statistic=rps_quintile_stats)
+
+        # Observation CDF
+        gt_cat = xr.zeros_like(gt, dtype=int)
+        for stat in rps_quintile_stats:
+            gt_cat = gt_cat + (gt > boundaries.sel(statistic=stat, drop=True))
+
+        if self._ens_dim in p.dims:
+            # Ensemble: fraction of members not exceeding boundary k
+            rps_sum = xr.zeros_like(gt)
+            for k, stat in enumerate(rps_quintile_stats):
+                p_cumulative = (p <= boundaries.sel(statistic=stat, drop=True)).mean(
+                    dim=self._ens_dim
+                )
+                rps_sum = rps_sum + (p_cumulative - (gt_cat <= k).astype(float)) ** 2
+        else:
+            # Deterministic
+            p_cat = xr.zeros_like(p, dtype=int)
+            for stat in rps_quintile_stats:
+                p_cat = p_cat + (p > boundaries.sel(statistic=stat, drop=True))
+            rps_sum = xr.zeros_like(gt)
+            for k in range(n_categories):
+                rps_sum = rps_sum + ((p_cat <= k).astype(float) - (gt_cat <= k).astype(float)) ** 2
+
+        return (rps_sum / (n_categories-1)).mean(self._agg_dims)
+
+    def calc_rpss(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        c: xr.DataArray,
+        rps_quintile_stats: list[str] = None,
+    ) -> xr.DataArray:
+        """
+        Calculate the Ranked Probability Skill Score (RPSS) based on quintile categories.
+
+        RPSS = 1 - mean(RPS_fcst) / mean(RPS_clim)
+
+        The climatological reference uses a uniform distribution over the quintile
+        categories
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array (deterministic or ensemble with an ``ens`` dimension).
+        gt: xr.DataArray
+            Ground truth data array.
+        c: xr.DataArray
+            Climatology DataArray with a ``statistic`` dimension containing at least
+            ``'q20'``, ``'q40'``, ``'q60'``, ``'q80'``.
+        rps_quintile_stats: list[str]
+            List of statistic names in ``c`` to use as quintile boundaries. Default is
+            ``['q20', 'q40', 'q60', 'q80']``.
+
+        Returns
+        -------
+        xr.DataArray
+            RPSS. Values in (-inf, 1]; positive means better than climatology.
+        """
+        if rps_quintile_stats is None:
+            rps_quintile_stats = ["q20", "q40", "q60", "q80"]
+        if c is None:
+            return xr.full_like(p.mean(self._agg_dims), np.nan)
+
+        rps_fcst = self.calc_rps(p, gt, c, rps_quintile_stats=rps_quintile_stats)
+
+        # Uniform climatological reference: P_clim(cat <= k) = (k+1) / n_categories
+        n_categories = len(rps_quintile_stats) + 1
+        boundaries = c.sel(statistic=rps_quintile_stats)
+        gt_cat = xr.zeros_like(gt, dtype=int)
+        for stat in rps_quintile_stats:
+            gt_cat = gt_cat + (gt > boundaries.sel(statistic=stat, drop=True))
+        rps_clim_sum = xr.zeros_like(gt)
+        for k in range(n_categories - 1):  # final term is zero and omitted
+            rps_clim_sum = (
+                rps_clim_sum + ((k + 1) / n_categories - (gt_cat <= k).astype(float)) ** 2
+            )
+        rps_clim = (rps_clim_sum / (n_categories - 1)).mean(self._agg_dims)
+
+        return (1.0 - rps_fcst / rps_clim).where(rps_clim != 0, np.nan)
 
     def calc_bias(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
