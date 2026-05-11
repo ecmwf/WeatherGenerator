@@ -1098,7 +1098,7 @@ class Scores:
             for k in range(n_categories):
                 rps_sum = rps_sum + ((p_cat <= k).astype(float) - (gt_cat <= k).astype(float)) ** 2
 
-        return (rps_sum / (n_categories-1)).mean(self._agg_dims)
+        return (rps_sum / (n_categories - 1)).mean(self._agg_dims)
 
     def calc_rpss(
         self,
