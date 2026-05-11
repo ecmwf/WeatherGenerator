@@ -167,23 +167,23 @@ class Masker:
         global config.  ``masking_strategy`` itself can also be replaced.
         """
         if override is None:
-            return mode_cfg
+            override = {}
 
-        stream_cfg_masking = copy.deepcopy(mode_cfg)
+        stream_cfg = copy.deepcopy(mode_cfg)
 
         # Copy top-level masking keys from override
         if "randomly_drop_as_source_rate" in override:
-            stream_cfg_masking["randomly_drop_as_source_rate"] = override[
-                "randomly_drop_as_source_rate"
-            ]
+            stream_cfg["randomly_drop_as_source_rate"] = override["randomly_drop_as_source_rate"]
+
+        # target and source are assumed identical when target is not specified
+        if stream_cfg.get("target_input") is None:
+            stream_cfg["target_input"] = copy.deepcopy(stream_cfg.get("model_input", {}))
 
         for section_key in ("model_input", "target_input"):
-            override_values = override.get(section_key, None)
+            override_values = override.get(section_key)
             if override_values is None:
                 continue
-            section = stream_cfg_masking.get(section_key, None)
-            if section is None:
-                continue
+            section = stream_cfg.get(section_key)
             for strategy_cfg in section.values():
                 if "masking_strategy" in override_values:
                     strategy_cfg["masking_strategy"] = override_values["masking_strategy"]
@@ -193,7 +193,7 @@ class Masker:
                         override_values["masking_strategy_config"],
                     )
 
-        return stream_cfg_masking
+        return stream_cfg
 
     def build_effective_masking_cfgs(self, streams, mode_cfg):
         """Build effective masking configs for all streams."""
@@ -374,9 +374,7 @@ class Masker:
                 if is_stream_forcing(stream_info, self.stage):
                     target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
-                    masking_config = copy.deepcopy(target_cfg.get("masking_strategy_config", {}))
-                    if stream_info.get( "masking_rate") is not None :
-                        masking_config["rate"] = stream_info.get("masking_rate")
+                    masking_config = target_cfg.get("masking_strategy_config", {})
                     # targets are never randomly dropped
                     target_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
@@ -410,9 +408,7 @@ class Masker:
                 continue
             # samples per strategy
             for i_sample in range(source_cfg.get("num_samples", 1)):
-                masking_config = copy.deepcopy(source_cfg.get("masking_strategy_config", {}))
-                if stream_info.get( "masking_rate") is not None :
-                    masking_config["rate"] = stream_info.get("masking_rate")
+                masking_config = source_cfg.get("masking_strategy_config", {})
                 # extract corresponding target
                 target_cfg_idx, rel_losses = corr_dict[i_src_cfg]
                 relationship, losses = rel_losses
