@@ -18,7 +18,6 @@ ERA5 :
   token_size : 8
   tokenize_spacetime : True
   max_num_targets: -1
-  # frequency: 24:00:00
   embed : 
     net : transformer
     num_tokens : 1
