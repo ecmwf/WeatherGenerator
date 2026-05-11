@@ -11,8 +11,8 @@ ERA5 :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   stream_id : 0
-  source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
-  target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
+  source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
+  target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
   loss_weight : 1.
   location_weight : cosine_latitude
   token_size : 8
