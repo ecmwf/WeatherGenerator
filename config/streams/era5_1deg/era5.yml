@@ -15,11 +15,10 @@ ERA5 :
   target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
   loss_weight : 1.
   location_weight : cosine_latitude
-  masking_rate : 0.6
-  masking_rate_none : 0.05
   token_size : 8
   tokenize_spacetime : True
-  max_num_targets: -1 
+  max_num_targets: -1
+  # frequency: 24:00:00
   embed : 
     net : transformer
     num_tokens : 1
