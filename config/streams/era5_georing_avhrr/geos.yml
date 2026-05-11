@@ -14,7 +14,10 @@ METEOSAT_SEVIRI_IR :
   # filenames : ['observations-file-2014-2024-seviri-h512-v5.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  masking_rate : 0.5
+  masking_override :
+    source_input :
+      masking_strategy_config :
+        rate: 0.5
   token_size : 128
   tokenize_spacetime : True
   max_num_targets: 262144
@@ -43,7 +46,10 @@ GOES_ABI_IR :
   # filenames : ['observations-file-2017-2024-abi-goes16-IR-h512-v2.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  masking_rate : 0.5
+  masking_override :
+    source_input :
+      masking_strategy_config :
+        rate: 0.5
   token_size : 128
   tokenize_spacetime : True
   max_num_targets: 262144
@@ -72,7 +78,10 @@ HIMAWARI_AHI_IR :
   # filenames : ['observations-file-2015-2022-himawari8-IR-h512-v1.zarr', observations-file-2022-2024-himawari9-IR-o256-v1.zarr]
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  masking_rate : 0.5
+  masking_override :
+    source_input :
+      masking_strategy_config :
+        rate: 0.5
   token_size : 128
   tokenize_spacetime : True
   max_num_targets: 262144
@@ -101,7 +110,10 @@ GOES_ABI_VIS :
   # filenames : ['observations-file-2017-2024-abi-goes16-RED-h512-v2.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  masking_rate : 0.5
+  masking_override :
+    source_input :
+      masking_strategy_config :
+        rate: 0.5
   token_size : 128
   tokenize_spacetime : True
   max_num_targets: 262144
@@ -130,7 +142,10 @@ HIMAWARI_AHI_VIS :
   # filenames : ['observations-file-2015-2022-himawari8-IR-h512-v1.zarr', observations-file-2022-2024-himawari9-IR-o256-v1.zarr]
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  masking_rate : 0.5
+  masking_override :
+    source_input :
+      masking_strategy_config :
+        rate: 0.5
   token_size : 128
   tokenize_spacetime : True
   max_num_targets: 262144

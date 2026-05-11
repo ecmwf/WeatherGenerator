@@ -16,7 +16,10 @@ ERA5 :
   geoinfo_channels : ['lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.
   location_weight : cosine_latitude
-  masking_rate : 0.8
+  masking_override :
+    target_input :
+      masking_strategy_config :
+        rate: 1.0
   token_size : 8
   tokenize_spacetime : True
   max_num_targets: -1
