@@ -325,6 +325,127 @@ class Plotter:
 
         return name
 
+    def create_distribution_histograms(
+        self,
+        target: xr.DataArray,
+        preds: xr.DataArray,
+        channels: list[str],
+        fstep: int | str,
+        stream: str,
+    ) -> list[str]:
+        """Plot aggregated distribution histograms over ALL samples for one (fstep, channel).
+
+        For each channel a single figure is produced that shows the flattened target
+        vs prediction distributions (all samples × all spatial points), annotated
+        with Total Variation (TV) loss and Earth Mover's Distance (EMD / Wasserstein-1).
+
+        Parameters
+        ----------
+        target : xr.DataArray
+            Target data for this forecast step (all samples included).
+        preds : xr.DataArray
+            Prediction data for this forecast step (all samples included).
+        channels : list[str]
+            Channels to produce plots for.
+        fstep : int | str
+            Forecast step (used for labelling and filenames).
+        stream : str
+            Stream name.
+
+        Returns
+        -------
+        list[str]
+            Names (without extension) of saved plot files.
+        """
+        from scipy.stats import wasserstein_distance  # noqa: PLC0415
+
+        plot_names = []
+
+        dist_output_dir = self.out_plot_basedir / stream / "distribution_analysis"
+        if not os.path.exists(dist_output_dir):
+            _logger.info(f"Creating dir {dist_output_dir}")
+            os.makedirs(dist_output_dir, exist_ok=True)
+
+        available_channels = list(np.atleast_1d(target.channel.values))
+
+        for channel in channels:
+            if channel not in available_channels:
+                _logger.debug(f"Channel {channel} not in target – skipping distribution plot.")
+                continue
+
+            tar_ch = target.sel(channel=channel)
+            pred_ch = preds.sel(channel=channel)
+
+            # If an ensemble dimension is present collapse to mean
+            if "ens" in pred_ch.dims:
+                pred_ch = pred_ch.mean(dim="ens")
+
+            tar_vals = tar_ch.values.ravel()
+            pred_vals = pred_ch.values.ravel()
+
+            tar_vals = tar_vals[~np.isnan(tar_vals)]
+            pred_vals = pred_vals[~np.isnan(pred_vals)]
+
+            if tar_vals.size == 0 or pred_vals.size == 0:
+                _logger.warning(
+                    f"Distribution histogram skipped for {channel} fstep={fstep}: empty data."
+                )
+                continue
+
+            # ── compute metrics ───────────────────────────────────────────────
+            emd = float(wasserstein_distance(tar_vals, pred_vals))
+
+            all_vals = np.concatenate([tar_vals, pred_vals])
+            bins = np.histogram_bin_edges(all_vals, bins=50)
+            tar_hist, _ = np.histogram(tar_vals, bins=bins, density=False)
+            pred_hist, _ = np.histogram(pred_vals, bins=bins, density=False)
+            tar_prob = tar_hist / tar_hist.sum() if tar_hist.sum() > 0 else tar_hist.astype(float)
+            pred_prob = (
+                pred_hist / pred_hist.sum()
+                if pred_hist.sum() > 0
+                else pred_hist.astype(float)
+            )
+            tv_loss = float(0.5 * np.sum(np.abs(tar_prob - pred_prob)))
+
+            # ── plot ──────────────────────────────────────────────────────────
+            fig_size = self.fig_size if self.fig_size else (10, 6)
+            fig, ax = plt.subplots(figsize=fig_size)
+
+            ax.hist(tar_vals, bins=bins, alpha=0.7, label="Ground truth", density=True)
+            ax.hist(pred_vals, bins=bins, alpha=0.7, label="Generated samples", density=True)
+
+            ax.set_xlabel(f"{channel}")
+            ax.set_ylabel("Density")
+            ax.set_title(
+                f"Aggregated distribution | {stream} | {channel} | fstep={str(fstep).zfill(3)}\n"
+                f"n_target={len(tar_vals):,}  n_pred={len(pred_vals):,}"
+            )
+            ax.legend(frameon=False)
+
+            textstr = f"TV loss:   {tv_loss:.5f}\nEMD (W1): {emd:.5f}"
+            props = dict(boxstyle="round", facecolor="lightyellow", alpha=0.7)
+            ax.text(
+                0.98,
+                0.95,
+                textstr,
+                transform=ax.transAxes,
+                fontsize=10,
+                verticalalignment="top",
+                horizontalalignment="right",
+                bbox=props,
+            )
+
+            name = (
+                f"distribution_{self.run_id}_{stream}_{channel}_fstep{str(fstep).zfill(3)}"
+            )
+            fname = dist_output_dir / f"{name}.{self.image_format}"
+            _logger.debug(f"Saving distribution histogram to {fname}")
+            plt.savefig(fname, dpi=self.dpi_val, bbox_inches="tight")
+            plt.close(fig)
+            plot_names.append(name)
+
+        return plot_names
+
     def create_maps_per_sample(
         self,
         data: xr.DataArray,

@@ -439,6 +439,21 @@ def _plot_single_sample(
     plotter.clean_data_selection()
 
 
+def _plot_distribution_analysis(
+    plotter_cfg: dict,
+    output_basedir: str,
+    stream: str,
+    fstep: int | str,
+    tars: xr.DataArray,
+    preds: xr.DataArray,
+    channels: list[str],
+) -> None:
+    """Aggregate-over-samples distribution histogram for one fstep (loky worker)."""
+    matplotlib.use("Agg")
+    plotter = Plotter(plotter_cfg, Path(output_basedir), stream)
+    plotter.create_distribution_histograms(tars, preds, channels, fstep, stream)
+
+
 def plot_data(
     reader: Reader,
     stream: str,
@@ -468,6 +483,7 @@ def plot_data(
             plot_settings.get("plot_maps", False)
             or plot_settings.get("plot_histograms", False)
             or plot_settings.get("plot_animations", False)
+            or plot_settings.get("analyse_distribution", False)
         )
     ):
         return
@@ -613,6 +629,45 @@ def plot_data(
     dispatch_parallel(
         calls, n_workers=num_plot_workers, backend="loky", desc=f"Plotting {run_id} - {stream}"
     )
+
+    # ── distribution analysis (aggregated over all samples) ──────────────────
+    analyse_distribution = plot_settings.get("analyse_distribution", False)
+    if not isinstance(analyse_distribution, bool):
+        raise TypeError("analyse_distribution must be a boolean.")
+    if analyse_distribution:
+        dist_calls = []
+        for (fstep, tars), (_, preds) in zip(da_tars.items(), da_preds.items(), strict=False):
+            all_chs = list(np.atleast_1d(tars.channel.values))
+            dist_chs = (
+                [ch for ch in all_chs if ch in plot_channel_set]
+                if plot_channel_set is not None
+                else all_chs
+            )
+            if not dist_chs:
+                continue
+            dist_calls.append(
+                delayed(_plot_distribution_analysis)(
+                    plotter_cfg=plotter_cfg,
+                    output_basedir=output_basedir,
+                    stream=stream,
+                    fstep=fstep,
+                    tars=tars,
+                    preds=preds,
+                    channels=dist_chs,
+                )
+            )
+        if dist_calls:
+            _logger.info(
+                f"Distribution analysis: dispatching {len(dist_calls)} fstep task(s) "
+                f"for {run_id} - {stream}."
+            )
+            dispatch_parallel(
+                dist_calls,
+                n_workers=num_plot_workers,
+                backend="loky",
+                desc=f"Distribution analysis {run_id} - {stream}",
+            )
+    # ─────────────────────────────────────────────────────────────────────────
 
     if plot_animations:
         plotter = Plotter(plotter_cfg, reader.runplot_dir)
