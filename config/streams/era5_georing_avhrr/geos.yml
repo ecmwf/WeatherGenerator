@@ -10,7 +10,7 @@
 METEOSAT_SEVIRI_IR :
   type : obs
   stream_id : 10
-  filenames : ['observations-od-ai-0001-201311-202505-msg-combined-seviri-o256-v1.zarr']
+  filenames : ['observations-file-2014-2024-seviri-o256-wegen-v3.zarr']
   # filenames : ['observations-file-2014-2024-seviri-h512-v5.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
