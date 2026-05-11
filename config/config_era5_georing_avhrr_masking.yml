@@ -8,25 +8,25 @@
 # nor does it submit to any jurisdiction.
 
 embed_orientation: "channels"
-embed_unembed_mode: "block"
+embed_unembed_mode: "full" #"block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1024
-ae_local_num_blocks: 2
+ae_local_dim_embed: 1536
+ae_local_num_blocks: 4
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
-ae_adapter_num_heads: 16
+ae_adapter_num_heads: 12
 ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
-ae_global_num_blocks: 2
+ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 0
+ae_aggregation_num_blocks: 4
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -50,26 +50,22 @@ pred_adapter_kv: False
 pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
-
-# number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
-# one is training an auto-encoder
-fe_num_blocks: 6
-fe_num_heads: 16
-fe_dropout_rate: 0.1
-fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0.0  # 1e-4
-# currently fixed to 1.0 (due to limitations with flex_attention and triton)
-forecast_att_dense_rate: 1.0
-
 num_class_tokens: 0
 num_register_tokens: 0
 
+# number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
+# one is training an auto-encoder
+fe_num_blocks: 16
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_impute_latent_noise_std: 1e-4
+# currently fixed to 1.0 (due to limitations with flex_attention and triton)
+forecast_att_dense_rate: 1.0
+
 healpix_level: 5
 
-# Use 2D RoPE instead of traditional global positional encoding
-# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
-# When False: uses traditional pe_global positional encoding
 rope_2D: False
 
 with_mixed_precision: True
@@ -85,17 +81,16 @@ latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
 latent_noise_saturate_encodings: 5 
 latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True
+latent_noise_deterministic_latents: True 
 
 freeze_modules: ""
 load_chkpt: {}
 
 norm_type: "LayerNorm"
-qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
+streams_directory: "./config/streams/era5_georing_avhrr/"
 streams: ???
 
 # type of zarr_store
@@ -126,7 +121,6 @@ train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
-  log_grad_norms: False
 
 # parameters for data loading
 data_loading :
@@ -135,23 +129,18 @@ data_loading :
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
-  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
-  # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
-  # If this happens, you can disable the flag, but performance will drop on GH200.
-  memory_pinning: True
-
 
 # config for training
 training_config:
-
+  
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 32
+  num_mini_epochs: 128
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 1979-01-01T00:00
+  start_date: 2014-01-01T00:00
   end_date: 2022-12-31T00:00
 
   time_window_step: 06:00:00
@@ -160,9 +149,9 @@ training_config:
   learning_rate_scheduling :
     lr_start: 1e-6
     lr_max: 5e-5
-    lr_final_decay: 1e-6
+    lr_final_decay: 2e-6
     lr_final: 0.0
-    num_steps_warmup: 512
+    num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
@@ -175,8 +164,8 @@ training_config:
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.975
-      beta2 : 0.9875
+      beta1 : 0.98125 # == 0.85 on 2 nodes x 4 gpus
+      beta2 : 0.9875  # == 0.90 on 2 nodes x 4 gpus
       eps : 2e-08
 
   losses : {
@@ -189,14 +178,19 @@ training_config:
   model_input: {
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
-      masking_strategy: "forecast",
+      masking_strategy: "healpix",
+      masking_strategy_config : { 
+        rate : 0.7,
+        hl_mask: 2, 
+        rate_sampling: False
       },
-    }
+    },
+  }
 
   forecast :
       time_step: 06:00:00
-      num_steps: 2
-      offset: 1
+      offset: 0
+      num_steps: 0
       policy: "fixed"
 
 
@@ -208,7 +202,10 @@ validation_config:
 
   start_date: 2023-10-01T00:00
   end_date: 2023-12-31T00:00
-  
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
     enabled : True
