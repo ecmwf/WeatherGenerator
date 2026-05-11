@@ -236,8 +236,14 @@ class WeatherGenMergeReader(Reader):
         """
         for reader in self.readers:
             clim_data_path = reader.get_climatology_filename(stream)
-            if clim_data_path:
+            if clim_data_path and Path(clim_data_path).exists():
                 return clim_data_path
+            else:
+                _logger.warning(
+                    f"Climatology file {clim_data_path} does not exist or configuration is invalid"
+                    " for stream {stream} in reader with run_id {reader.run_id}."
+                    " Please check that the path is correct and that the file exists."
+                )
         return None
 
     def get_stream(self, stream: str):
