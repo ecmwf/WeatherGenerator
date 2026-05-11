@@ -41,6 +41,7 @@ class GenericSshCommandRunner(CommandRunner):
 
     def __init__(self, context: GenericContext):
         self._ctx = context
+        self.hpc = context.hpc
 
     def run(self, cmd: Command, logger: Logger) -> Result[CommandResult]:
         try:

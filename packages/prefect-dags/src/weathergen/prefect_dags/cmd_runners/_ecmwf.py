@@ -46,6 +46,9 @@ class EcmwfSshCommandRunner(CommandRunner):
 
     def __init__(self, context: EcmwfSshContext):
         self._ctx = context
+        # No separate "hpc" name on ECMWF contexts — the ssh host alias
+        # ("hpc-login", "hpc2020", ...) already identifies the cluster.
+        self.hpc = context.host
 
     def run(self, cmd: Command, logger: Logger) -> Result[CommandResult]:
         # ssh runs a non-login, non-interactive shell on the remote, so

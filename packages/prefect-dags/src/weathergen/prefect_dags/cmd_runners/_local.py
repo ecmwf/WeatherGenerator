@@ -26,6 +26,7 @@ class LocalContext:
 
 class LocalCommandRunner(CommandRunner):
     name = "local"
+    hpc = "local"
 
     def run(self, cmd: Command, logger: Logger) -> Result[CommandResult]:
         # Merge onto os.environ rather than replacing it: replacing wipes PATH,

@@ -25,6 +25,8 @@ class CommandRunner(Protocol):
 
     name: str
 
+    hpc: str
+
     def run(self, cmd: Command, logger: Logger) -> Result[CommandResult]:
         """Run a shell command and return its result, or the error if any.
 

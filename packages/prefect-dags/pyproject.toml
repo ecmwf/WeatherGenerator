@@ -6,7 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     # TODO: remove the dependency on weathergen-common-core once the code is migrated to this package.
     "weathergen-common-core",
-    "prefect>=3.0.0",
+    "prefect>=3.7.0",
     "paramiko>=3.1",
     "dacite",
 ]

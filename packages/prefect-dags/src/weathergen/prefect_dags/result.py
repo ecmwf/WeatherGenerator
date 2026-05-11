@@ -90,10 +90,19 @@ async def try_run_async[T](
         return OpError(err=e)
 
 
-__all__ = [
-    "OpError",
-    "Result",
-    "is_err",
-    "try_run",
-    "try_run_async",
-]
+def unwrap[T](r: Result[T]) -> T:
+    """
+    Return the success value, or re-raise the captured exception.
+
+    The escape hatch out of the Result convention into normal exception
+    flow. Use this at boundaries where you'd rather propagate failure
+    via `raise` — e.g. inside a Prefect task body, where an unhandled
+    exception is the right way to fail the task.
+
+    The original exception (with its original traceback) is re-raised.
+    Python adds the unwrap call site as `__context__` so both locations
+    are visible in the printed traceback.
+    """
+    if is_err(r):
+        raise r.err
+    return r
