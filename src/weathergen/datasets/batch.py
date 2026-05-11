@@ -472,13 +472,7 @@ class ModelBatch:
         """
         Get number of input/source steps from smallest of all available streams
         """
-        # TODO: define explicitly
-        lens = [
-            len(stream.source_tokens_cells)
-            for _, stream in self.target_samples.samples[0].streams_data.items()
-        ]
-
-        return min(lens)
+        return self.target_samples.get_num_steps()
 
     def get_num_target_steps(self) -> int:
         """
