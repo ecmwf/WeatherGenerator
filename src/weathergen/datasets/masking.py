@@ -374,11 +374,14 @@ class Masker:
                 if is_stream_forcing(stream_info, self.stage):
                     target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
+                    masking_config = target_cfg.get("masking_strategy_config", {})
+                    if stream_info.get( "masking_rate") is not None :
+                        masking_config["rate"] = stream_info.get("masking_rate")
                     # targets are never randomly dropped
                     target_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
                         strategy=target_cfg.get("masking_strategy"),
-                        masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
+                        masking_strategy_config=masking_config,
                         target_relationship_mask=("independent", None),
                     )
 
@@ -408,6 +411,8 @@ class Masker:
             # samples per strategy
             for i_sample in range(source_cfg.get("num_samples", 1)):
                 masking_config = source_cfg.get("masking_strategy_config", {})
+                if stream_info.get( "masking_rate") is not None :
+                    masking_config["rate"] = stream_info.get("masking_rate")
                 # extract corresponding target
                 target_cfg_idx, rel_losses = corr_dict[i_src_cfg]
                 relationship, losses = rel_losses
