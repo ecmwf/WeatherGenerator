@@ -59,7 +59,7 @@ fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
@@ -70,6 +70,8 @@ healpix_level: 5
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
 rope_2D: True 
+mlp_type: swiglu
+use_xsa: True
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -202,7 +204,7 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 1e-5
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 512
@@ -213,7 +215,7 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 0.5
+    grad_clip: 0.75
     weight_decay: 0.05
     adamw :
       # parameters are scaled by number of DDP workers
