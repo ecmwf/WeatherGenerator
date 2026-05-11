@@ -189,9 +189,25 @@ def _max_supported_spherical_band(dim_embed: int, num_heads: int) -> int:
     return max(0, (max_complex - 1) // 2)
 
 
+def get_rope_mode(cf, logger=None) -> str:
+    """Resolve RoPE mode, including temporary backwards compatibility for rope_2D."""
+
+    rope_mode = cf.get("rope_mode", "none") or "none"
+    rope_2d = cf.get("rope_2D", None)
+    if rope_2d is not None:
+        if logger is not None:
+            logger.warning(
+                "Config key 'rope_2D' is deprecated and will be removed. Use 'rope_mode' "
+                "with one of: none, 2d, spherical."
+            )
+        if rope_mode == "none":
+            rope_mode = "2d" if rope_2d else "none"
+    return rope_mode
+
+
 def get_rope_spherical_band(cf) -> int:
     """Resolve spherical band index, supporting explicit config or automatic selection."""
-    
+
     rope_spherical_band = cf.get("rope_spherical_band", None)
     if rope_spherical_band is not None:
         return int(rope_spherical_band)
