@@ -166,8 +166,6 @@ class Masker:
         every target strategy, inheriting rate, rate_sampling, etc. from the
         global config.  ``masking_strategy`` itself can also be replaced.
         """
-        if override is None:
-            override = {}
 
         stream_cfg = copy.deepcopy(mode_cfg)
 
@@ -176,7 +174,7 @@ class Masker:
             stream_cfg["randomly_drop_as_source_rate"] = override["randomly_drop_as_source_rate"]
 
         # target and source are assumed identical when target is not specified
-        if stream_cfg.get("target_input") is None:
+        if len(stream_cfg.get("target_input", {})) == 0:
             stream_cfg["target_input"] = copy.deepcopy(stream_cfg.get("model_input", {}))
 
         for section_key in ("model_input", "target_input"):
@@ -200,9 +198,9 @@ class Masker:
         cfgs = {}
         for stream_info in streams:
             name = stream_info["name"]
-            override = stream_info.get("masking_override", None)
+            override = stream_info.get("masking_override", {})
             cfgs[name] = self.merge_masking_config(mode_cfg, override)
-            if override is not None and is_root():
+            if override != {} and is_root():
                 logger.info(f"Stream '{name}' using masking override: {override}")
 
         return cfgs
@@ -344,13 +342,10 @@ class Masker:
 
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
-        # target and source configs
-        target_cfgs = stream_masking_cfg.get("target_input", [])
-        source_cfgs = stream_masking_cfg.get("model_input", [])
-
-        # target and source are assumed identical when target is not specified
-        if len(target_cfgs) == 0:
-            target_cfgs = copy.deepcopy(source_cfgs)
+        # # target and source configs
+        target_cfgs = stream_masking_cfg.get("target_input")
+        source_cfgs = stream_masking_cfg.get("model_input")
+        assert target_cfgs is not None and source_cfgs is not None
 
         losses = stream_masking_cfg.losses
         corr_dict = self.parse_src_target_correspondence(losses, target_cfgs, source_cfgs)
