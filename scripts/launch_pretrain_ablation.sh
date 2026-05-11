@@ -188,7 +188,6 @@ for EPOCH in "${EPOCHS[@]}"; do
         --run-id "$RUN_ID"
         --mini-epoch "$EPOCH"
         --chain-jobs "$CHAIN_JOBS"
-        --dir "$SLURM_ROOT"
         --config "$FINETUNE_CONFIG"
     )
 
