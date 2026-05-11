@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.train.utils import Stage
-from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 logger = logging.getLogger(__name__)
@@ -173,15 +172,19 @@ class Masker:
         if "randomly_drop_as_source_rate" in override:
             stream_cfg["randomly_drop_as_source_rate"] = override["randomly_drop_as_source_rate"]
 
-        # target and source are assumed identical when target is not specified
-        if len(stream_cfg.get("target_input", {})) == 0:
-            stream_cfg["target_input"] = copy.deepcopy(stream_cfg.get("model_input", {}))
-
         for section_key in ("model_input", "target_input"):
+            section = stream_cfg.get(section_key, {})
+            # target and source are identical when target is not specified
+            if section == {} and section_key == "target_input":
+                # by the processing order of "model_input" and "target_input", the target_input
+                # here will have stream specific model_input overrides
+                stream_cfg["target_input"] = copy.deepcopy(stream_cfg.get("model_input", {}))
+                section = stream_cfg["target_input"]
+
             override_values = override.get(section_key)
             if override_values is None:
                 continue
-            section = stream_cfg.get(section_key)
+
             for strategy_cfg in section.values():
                 if "masking_strategy" in override_values:
                     strategy_cfg["masking_strategy"] = override_values["masking_strategy"]
@@ -200,8 +203,6 @@ class Masker:
             name = stream_info["name"]
             override = stream_info.get("masking_override", {})
             cfgs[name] = self.merge_masking_config(mode_cfg, override)
-            if override != {} and is_root():
-                logger.info(f"Stream '{name}' using masking override: {override}")
 
         return cfgs
 
