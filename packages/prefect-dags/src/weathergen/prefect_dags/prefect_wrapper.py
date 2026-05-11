@@ -1,6 +1,15 @@
 """
 Wrapper around the prefect task and flow decorators to provide sensible
 defaults for machine learning.
+
+The code is mostly boilerplate:
+- `task` wrapper: 
+    sets cache_policy, cache_expiration, retries,
+    enforces the presence of `cache_key_fn` and `persist_result` for cache replay to work.
+- `flow` wrapper:
+    sets flow_run_name to a consistent convention,
+    enforces the presence of `rerun_token: str | None` in the signature for cache replay to work,
+    logs the rerun token at the start of every run so users know what to pass to resume if interrupted.
 """
 
 import datetime
@@ -36,10 +45,11 @@ from weathergen.prefect_dags.prefect_logging import get_run_logger
 
 
 # ---------------------------------------------------------------------------
-# Cache key: (rerun_token OR flow_run.id) :: task name :: hashed parameters.
+# Cache key: (rerun_token OR short flow id) :: task name :: hashed parameters.
 #
-# - No token  -> key embeds the *current* flow_run.id -> nothing in the cache
-#                matches -> task runs -> result is persisted under this id.
+# - No token  -> key embeds a short `flow_<8>` derived from the current
+#                flow_run.id -> nothing in the cache matches -> task runs ->
+#                result is persisted under that short id.
 # - With token -> key is stable across runs that share the token -> previously
 #                completed tasks are returned from cache and skipped.
 # ---------------------------------------------------------------------------
@@ -47,9 +57,16 @@ def _stable_hash(obj: Any) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
+def _short_run_id() -> str:
+    # Short, human-typable identifier derived from the current flow_run.id.
+    # Used as the default rerun token so users can copy/paste it from the log.
+    # 32 bits of entropy is enough for cache-key disambiguation in practice.
+    return f"flo{prefect.runtime.flow_run.id[:8]}"
+
+
 def rerun_aware_cache_key(context: TaskRunContext, parameters: dict[str, Any]) -> str | None:
     flow_params = prefect.runtime.flow_run.parameters or {}
-    token = flow_params.get("rerun_token") or prefect.runtime.flow_run.id
+    token = flow_params.get("rerun_token") or _short_run_id()
     return f"{token}::{context.task.name}::{_stable_hash(parameters)}"
 
 
@@ -113,11 +130,12 @@ def make_flow_run_name() -> str:
     # or the function name). Fall back to "flow" if invoked outside a run.
     flow_name = (prefect.runtime.flow_run.flow_name or "flow").replace("_", "-")
     params = prefect.runtime.flow_run.parameters or {}
-    if params.get("rerun_token"):
-        tag = f"rerun-{params['rerun_token'][:8]}"
-    else:
-        tag = f"fresh-{prefect.runtime.flow_run.id[:8]}"
-    return f"{flow_name}-{tag}"
+    # Strip the `flow_` prefix from the token when embedding into the run name
+    # so we don't get redundant "fresh-flow_xxxx" / "rerun-flow_xxxx".
+    token = params.get("rerun_token") or _short_run_id()
+    short = token.removeprefix("flow_")
+    kind = "rerun" if params.get("rerun_token") else "fresh"
+    return f"{flow_name}-{kind}-{short}"
 
 
 def _is_str_or_none(tp: Any) -> bool:
@@ -154,15 +172,16 @@ def _validate_rerun_token_param(fn: Any) -> None:
 def _log_rerun_info(rerun_token: str | None) -> None:
     """Log how to (re)run the flow.
 
-    On a fresh run, prints the current flow_run.id so the user knows the
-    value to pass back as `rerun_token` to skip already-completed tasks.
-    On a resume, confirms which token is being used.
+    On a fresh run, prints the short `flow_<8>` form of the current
+    flow_run.id so the user knows the value to pass back as `rerun_token`
+    to skip already-completed tasks. On a resume, confirms which token is
+    being used.
     """
     log = get_run_logger()
     if rerun_token is None:
         log.info(
             "Fresh run. To resume if interrupted, rerun with "
-            f"rerun_token='{prefect.runtime.flow_run.id}'."
+            f"rerun_token='{_short_run_id()}'."
         )
     else:
         log.info(f"Resuming with rerun_token={rerun_token!r}.")

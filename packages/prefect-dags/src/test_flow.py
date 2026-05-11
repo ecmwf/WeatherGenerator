@@ -12,11 +12,10 @@ ctx: CmdContext = EcmwfSshContext(
 
 @task
 def get_pwd() -> str:
-    res = run(
+    return run(
         ctx,
         command=["pwd"],
-    )
-    return res.stdout.strip()
+    ).stdout.strip()
 
 
 @task
@@ -34,7 +33,8 @@ def sleep_and_print(sleep_sec: int) -> SlurmJobResult:
         time_limit="00:01:00",
         working_directory=pwd,
     )
-    assert sleep_sec < 6, "xxx"
+    print(f"result: {res}, type: {type(res)}")
+    # assert sleep_sec < 6, "xxx"
     return res
 
 
@@ -42,13 +42,13 @@ def sleep_and_print(sleep_sec: int) -> SlurmJobResult:
 def test_run_cmd_flow(
     rerun_token: str | None = None,
 ):
-    # Fan out two jobs concurrently via Prefect's task runner; no asyncio needed.
-    t1_fut = sleep_and_print.submit(5)
-    res = sleep_and_print(10)
-    print(res, type(res))
-    res1 = t1_fut.result()
-    print(res1, type(res1))
+    # Fan out two concurrent jobs.
+    job1 = sleep_and_print.submit(5)
+    job2 = sleep_and_print.submit(10)
+    res1, res2 = job1.result(), job2.result()
+    print(res1)
+    print(res2)
 
 
 if __name__ == "__main__":
-    test_run_cmd_flow(rerun_token="0ca68051-7b0c-4baf-8c9b-ebe2c0aff7af")
+    test_run_cmd_flow(rerun_token=None)

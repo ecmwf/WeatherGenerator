@@ -13,6 +13,7 @@ from pathlib import Path
 from prefect import get_client
 from prefect.artifacts import acreate_markdown_artifact
 from prefect.concurrency.asyncio import concurrency as _async_concurrency
+from prefect.transactions import CommitMode, transaction
 from prefect.utilities.asyncutils import run_coro_as_sync
 from prefect.variables import Variable
 from pydantic import TypeAdapter, ValidationError
@@ -124,18 +125,22 @@ def sbatch_try(
     return run_coro_as_sync(_sbatch_try(job, context))
 
 
-@task
 def sbatch_submit(
     job: SlurmJob,
     context: CmdContext,
 ) -> Result[SlurmSubmissionResult]:
     """
-    Separate task to just submit the job without awaiting completion.
-    This makes the submission step visible in prefect and it allow idempotent
-    recovery from crashes.
+    Submit a slurm job without awaiting completion.
 
-    On purpose kept small and focused: any crash here may trigger a slurm job
-    that we will not monitor.
+    Synchronous facade over the cached async task `_sbatch_submit_async`.
+    Calling this from any flow records a cached `_sbatch_submit_async` task
+    run in the graph: on rerun (with a `rerun_token`), the cached submission
+    result is returned without re-launching the job. This is what `sbatch`
+    relies on for idempotent recovery — a failure during polling no longer
+    causes a duplicate slurm submission on retry.
+
+    On purpose kept small and focused: any crash here may trigger a slurm
+    job that we will not monitor.
 
     TODO: the result will be cached, including the error. This
     is a logical issue (if the submission did not happen because of
@@ -144,10 +149,15 @@ def sbatch_submit(
     return run_coro_as_sync(_sbatch_submit_async(job, context))
 
 
+@task
 async def _sbatch_submit_async(
     job: SlurmJob,
     context: CmdContext,
 ) -> Result[SlurmSubmissionResult]:
+    """Cached submission step. Called from both the sync `sbatch_submit`
+    facade and the async `_sbatch_try` polling path so that on rerun a
+    completed submission is replayed from cache instead of re-submitted.
+    """
     logger = get_run_logger()
     submission_result = await submit_slurm(job, context, logger)
     if isinstance(submission_result, OpError):
@@ -199,7 +209,13 @@ async def _sbatch_try(
     It is separated so that the graph of tasks in prefect stays clean (no nested sbatch_try inside sbatch)
     """
     logger = get_run_logger()
-    submission_result = await _sbatch_submit_async(job, context)
+    # Commit the submission eagerly so a downstream failure (polling crash,
+    # caller's exception after sbatch returns, etc.) does NOT roll back the
+    # cached submission. Without this, Prefect's transactional semantics
+    # discard the child task's result when the parent fails, causing a
+    # duplicate slurm submission on the next rerun.
+    with transaction(commit_mode=CommitMode.EAGER):
+        submission_result = await _sbatch_submit_async(job, context)
     if isinstance(submission_result, OpError):
         return OpError(err=submission_result.err)
     sub_res: SlurmSubmissionResult = submission_result
