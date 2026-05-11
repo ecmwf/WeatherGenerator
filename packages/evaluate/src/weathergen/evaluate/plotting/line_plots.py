@@ -454,9 +454,9 @@ class LinePlots:
         data: xr.DataArray | list,
         run_ids: list[str],
         labels: str | list,
-        tag: str = "",
-        x_dim: str = "forecast_step",
+        x_dim: str | list[str],
         y_dim: str = "value",
+        tag: str = "",
         print_summary: bool = False,
         colors: list[str | None] | None = None,
     ) -> None:
