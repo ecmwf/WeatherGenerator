@@ -136,6 +136,13 @@ def clean_label(s: str) -> str:
     return re.sub(r"[_\-]+", " ", s).strip()
 
 
+def filter_set(items: list, allowed: set | None) -> list:
+    """Return *items* filtered to *allowed*, or all items if *allowed* is ``None``."""
+    if allowed is None:
+        return items
+    return [x for x in items if x in allowed]
+
+
 class DefaultMarkerSize:
     """
     Utility class for managing default configuration values, such as marker sizes
