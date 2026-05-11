@@ -36,6 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PRIVATE_DIR="$(cd "$REPO_DIR/../WeatherGenerator-private" && pwd)"
 LAUNCHER="$PRIVATE_DIR/hpc/launch-slurm.py"
+REPO_PARENT="$(cd "$REPO_DIR/.." && pwd)"
 
 # Defaults
 EPOCHS=(16 32 48 64)
@@ -53,6 +54,33 @@ generate_random_suffix() {
         # Fallback without python: 8 hex chars from bash RNG.
         printf "%08x\n" "$(((RANDOM << 16) | RANDOM))"
     fi
+}
+
+resolve_slurm_root() {
+    local default_root="$REPO_PARENT"
+    local hpc_config_path
+    local parsed_root
+
+    if [[ -x "$PRIVATE_DIR/hpc/platform-env.py" ]]; then
+        hpc_config_path="$("$PRIVATE_DIR/hpc/platform-env.py" hpc-config 2>/dev/null || true)"
+        if [[ -n "$hpc_config_path" && -f "$hpc_config_path" ]]; then
+            parsed_root="$(
+                awk -F': *' '
+                    /^[[:space:]]*path_shared_slurm_dir[[:space:]]*:/ {
+                        print $2
+                        exit
+                    }
+                ' "$hpc_config_path" \
+                | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^['\"]//" -e "s/['\"]$//"
+            )"
+            if [[ -n "$parsed_root" && -d "$parsed_root" ]]; then
+                printf "%s\n" "$parsed_root"
+                return
+            fi
+        fi
+    fi
+
+    printf "%s\n" "$default_root"
 }
 
 # --- Parse arguments ---
@@ -83,47 +111,49 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Resolve the SLURM copy directory ---
-# launch-slurm.py resolves the slurm dir from the private config's
-# path_shared_slurm_dir (or falls back to the parent of WeatherGenerator).
-# We replicate that logic here so we can create the symlink.
-SLURM_ROOT="$REPO_DIR/.."
-if command -v python3 &>/dev/null; then
-    # Try to read path_shared_slurm_dir from the private config
-    _maybe_root=$(python3 -c "
-import sys, importlib.util
-spec = importlib.util.spec_from_file_location('platform_env', '$PRIVATE_DIR/hpc/platform-env.py')
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-conf = mod.private_config()
-print(conf.get('path_shared_slurm_dir', ''))
-" 2>/dev/null || true)
-    if [[ -n "$_maybe_root" && -d "$_maybe_root" ]]; then
-        SLURM_ROOT="$_maybe_root"
-    fi
-fi
+SLURM_ROOT="$(resolve_slurm_root)"
 
 # The 8-char base id (strip everything from the first hyphen onward)
 BASE_ID="${PRETRAIN_RUN_ID%%-*}"
-EXISTING_DIR="$SLURM_ROOT/slurm_weathergen_${BASE_ID}_dir"
 SYMLINK_DIR="$SLURM_ROOT/slurm_weathergen_${PRETRAIN_RUN_ID}_dir"
 
 CREATED_SYMLINK=false
 
 if [[ "$PRETRAIN_RUN_ID" != "$BASE_ID" ]]; then
-    # The full run-id has a suffix — we may need a symlink
-    if [[ -d "$EXISTING_DIR" && ! -e "$SYMLINK_DIR" ]]; then
-        echo "Creating symlink: $SYMLINK_DIR -> $EXISTING_DIR"
-        if ! $DRY_RUN; then
-            ln -s "$(basename "$EXISTING_DIR")" "$SYMLINK_DIR"
-            CREATED_SYMLINK=true
+    # The full run-id has a suffix.
+    # Ensure launch-slurm.py can resolve:
+    #   ${SLURM_ROOT}/slurm_weathergen_${PRETRAIN_RUN_ID}_dir/WeatherGenerator
+    # by aliasing to the current workspace parent (contains WeatherGenerator).
+    if [[ -L "$SYMLINK_DIR" ]]; then
+        current_target="$(cd "$SYMLINK_DIR" 2>/dev/null && pwd -P || true)"
+        if [[ "$current_target" == "$REPO_PARENT" ]]; then
+            echo "Using existing compatibility symlink: $SYMLINK_DIR -> $REPO_PARENT"
         else
-            echo "  [dry-run] ln -s $(basename "$EXISTING_DIR") $SYMLINK_DIR"
+            echo "Replacing compatibility symlink: $SYMLINK_DIR -> $REPO_PARENT"
+            if ! $DRY_RUN; then
+                rm -f "$SYMLINK_DIR"
+                ln -s "$REPO_PARENT" "$SYMLINK_DIR"
+                CREATED_SYMLINK=true
+            else
+                echo "  [dry-run] rm -f $SYMLINK_DIR && ln -s $REPO_PARENT $SYMLINK_DIR"
+            fi
         fi
     elif [[ -e "$SYMLINK_DIR" ]]; then
-        echo "SLURM dir already exists: $SYMLINK_DIR"
+        if [[ -d "$SYMLINK_DIR/WeatherGenerator" ]]; then
+            echo "Using existing directory for from-run-id source: $SYMLINK_DIR"
+        else
+            echo "ERROR: Existing path is incompatible: $SYMLINK_DIR" >&2
+            echo "       Expected directory containing WeatherGenerator/." >&2
+            exit 1
+        fi
     else
-        echo "WARNING: Neither $EXISTING_DIR nor $SYMLINK_DIR found." >&2
-        echo "         The launcher may fail to locate the source directory." >&2
+        echo "Creating compatibility symlink: $SYMLINK_DIR -> $REPO_PARENT"
+        if ! $DRY_RUN; then
+            ln -s "$REPO_PARENT" "$SYMLINK_DIR"
+            CREATED_SYMLINK=true
+        else
+            echo "  [dry-run] ln -s $REPO_PARENT $SYMLINK_DIR"
+        fi
     fi
 fi
 
@@ -158,6 +188,7 @@ for EPOCH in "${EPOCHS[@]}"; do
         --run-id "$RUN_ID"
         --mini-epoch "$EPOCH"
         --chain-jobs "$CHAIN_JOBS"
+        --dir "$SLURM_ROOT"
         --config "$FINETUNE_CONFIG"
     )
 
