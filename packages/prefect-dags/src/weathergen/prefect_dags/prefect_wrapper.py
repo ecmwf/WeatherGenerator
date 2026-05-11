@@ -1,8 +1,9 @@
 """
-Wrapper around the prefect task and flow decorators to provide sensible 
+Wrapper around the prefect task and flow decorators to provide sensible
 defaults for machine learning.
 """
 
+import datetime
 import functools
 import hashlib
 import inspect
@@ -10,12 +11,26 @@ import json
 import types
 from collections.abc import Callable, Iterable
 from datetime import timedelta
-from typing import Any, Union, get_args, get_origin, get_type_hints, overload
+from typing import Any, Literal, Optional, Union, get_args, get_origin, get_type_hints, overload
 
 import prefect
 import prefect.runtime.flow_run
-from prefect import flow as p_flow, task as p_task
+from prefect import flow as p_flow
+from prefect import task as p_task
+from prefect.assets import Asset
+from prefect.cache_policies import CachePolicy
 from prefect.context import TaskRunContext
+from prefect.flows import Flow, FlowStateHook
+from prefect.futures import PrefectFuture
+from prefect.results import ResultSerializer, ResultStorage
+from prefect.task_runners import TaskRunner
+from prefect.tasks import (
+    RetryConditionCallable,
+    StateHookCallable,
+    Task,
+    TaskRunNameValueOrCallable,
+)
+from prefect.utilities.annotations import NotSet
 
 from weathergen.prefect_dags.prefect_logging import get_run_logger
 
@@ -29,90 +44,69 @@ from weathergen.prefect_dags.prefect_logging import get_run_logger
 #                completed tasks are returned from cache and skipped.
 # ---------------------------------------------------------------------------
 def _stable_hash(obj: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(obj, sort_keys=True, default=str).encode()
-    ).hexdigest()[:16]
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
-def rerun_aware_cache_key(
-    context: TaskRunContext, parameters: dict[str, Any]
-) -> str | None:
+def rerun_aware_cache_key(context: TaskRunContext, parameters: dict[str, Any]) -> str | None:
     flow_params = prefect.runtime.flow_run.parameters or {}
     token = flow_params.get("rerun_token") or prefect.runtime.flow_run.id
     return f"{token}::{context.task.name}::{_stable_hash(parameters)}"
 
 
-# A thin wrapper around @task so scientists writing new tasks just use
-# @task or @task(...) and get the right caching behaviour automatically. The
-# signature mirrors the common subset of `prefect.task` so IDE autocomplete
-# works; remaining prefect kwargs are forwarded via **extra_kwargs.
-#
-# Two overloads make type checkers (pyrefly / pyright) preserve the wrapped
-# function's signature through the decorator: calling the decorated `get_pwd`
-# stays `() -> Coroutine[..., str]` rather than degrading to `Any` / mismatched
-# Task signatures. ParamSpec carries the args, R the return type.
+# Thin wrapper around `prefect.task` so scientists writing new tasks just use
+# `@task` or `@task(...)`. The decorator's signature mirrors `prefect.task`
+# (same kwargs, same defaults, same return type `Task[P, R]`) so the IDE
+# experience is identical — `.submit`, `.map`, `.with_options`, etc. are all
+# visible on the decorated object. Two kwargs are *not* exposed because they
+# carry codebase invariants:
+#   - `cache_key_fn` is fixed to `rerun_aware_cache_key` (enables resumability)
+#   - `persist_result` is forced True (required for cache replay)
+# We also apply two non-default defaults: `cache_expiration=14d`, `retries=0`.
 @overload
-def task[**P, R](__fn: Callable[P, R], /) -> Callable[P, R]: ...
+def task[**P, R](__fn: Callable[P, R], /) -> Task[P, R]: ...
 @overload
 def task[**P, R](
-    *,
-    name: str | None = ...,
-    description: str | None = ...,
-    tags: Iterable[str] | None = ...,
-    version: str | None = ...,
-    cache_expiration: timedelta | None = ...,
-    task_run_name: str | Callable[[], str] | None = ...,
-    retries: int | None = ...,
-    retry_delay_seconds: float | list[float] | None = ...,
-    retry_jitter_factor: float | None = ...,
-    timeout_seconds: float | None = ...,
-    log_prints: bool | None = ...,
-    refresh_cache: bool | None = ...,
-    **extra_kwargs: Any,
-) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
-def task(
-    __fn: Any = None,
+    __fn: Literal[None] = None,
     /,
     *,
-    name: str | None = None,
-    description: str | None = None,
-    tags: Iterable[str] | None = None,
-    version: str | None = None,
-    cache_expiration: timedelta | None = None,
-    task_run_name: str | Callable[[], str] | None = None,
-    retries: int | None = None,
-    retry_delay_seconds: float | list[float] | None = None,
-    retry_jitter_factor: float | None = None,
-    timeout_seconds: float | None = None,
-    log_prints: bool | None = None,
-    refresh_cache: bool | None = None,
-    **extra_kwargs: Any,
-) -> Any:
-    # Framework defaults applied only when the caller didn't specify a value.
-    if cache_expiration is None:
-        cache_expiration = timedelta(days=14)
-    if retries is None:
-        retries = 0
-    # Enforced contract: cache_key_fn and persist_result are required for
-    # rerun_token-aware cache replay to work. Not user-configurable here.
-    decorator = p_task(
-        cache_key_fn=rerun_aware_cache_key,
-        persist_result=True,
-        name=name,
-        description=description,
-        tags=tags,
-        version=version,
-        cache_expiration=cache_expiration,
-        task_run_name=task_run_name,
-        retries=retries,
-        retry_delay_seconds=retry_delay_seconds,
-        retry_jitter_factor=retry_jitter_factor,
-        timeout_seconds=timeout_seconds,
-        log_prints=log_prints,
-        refresh_cache=refresh_cache,
-        **extra_kwargs,
-    )
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    tags: Optional[Iterable[str]] = None,
+    version: Optional[str] = None,
+    cache_policy: Union[CachePolicy, type[NotSet]] = NotSet,
+    cache_expiration: Optional[datetime.timedelta] = None,
+    task_run_name: Optional[TaskRunNameValueOrCallable] = None,
+    retries: Optional[int] = None,
+    retry_delay_seconds: Union[
+        float, int, list[float], Callable[[int], list[float]], None
+    ] = None,
+    retry_jitter_factor: Optional[float] = None,
+    result_storage: Optional[ResultStorage] = None,
+    result_storage_key: Optional[str] = None,
+    result_serializer: Optional[ResultSerializer] = None,
+    cache_result_in_memory: bool = True,
+    timeout_seconds: Union[int, float, None] = None,
+    log_prints: Optional[bool] = None,
+    refresh_cache: Optional[bool] = None,
+    on_completion: Optional[list[StateHookCallable]] = None,
+    on_failure: Optional[list[StateHookCallable]] = None,
+    on_running: Optional[list[StateHookCallable]] = None,
+    retry_condition_fn: Optional[RetryConditionCallable] = None,
+    viz_return_value: Any = None,
+    asset_deps: Optional[list[Union[str, Asset]]] = None,
+) -> Callable[[Callable[P, R]], Task[P, R]]: ...
+def task(__fn: Any = None, /, **kwargs: Any) -> Any:
+    # Apply framework defaults only when the caller didn't specify a value.
+    kwargs.setdefault("cache_expiration", timedelta(days=14))
+    kwargs.setdefault("retries", 0)
+    # Enforced invariants — `cache_key_fn` + `persist_result` are required for
+    # rerun_token-aware cache replay to work, regardless of what the caller
+    # passed. Drop any user-supplied values silently.
+    kwargs["cache_key_fn"] = rerun_aware_cache_key
+    kwargs["persist_result"] = True
+    decorator = p_task(**kwargs)
     return decorator(__fn) if __fn is not None else decorator
+
 
 def make_flow_run_name() -> str:
     # Prefect runtime exposes the active flow's name (the @flow(name=...) value
@@ -124,6 +118,7 @@ def make_flow_run_name() -> str:
     else:
         tag = f"fresh-{prefect.runtime.flow_run.id[:8]}"
     return f"{flow_name}-{tag}"
+
 
 def _is_str_or_none(tp: Any) -> bool:
     # Accept both `str | None` (PEP 604, types.UnionType) and `Optional[str]` /
@@ -173,62 +168,53 @@ def _log_rerun_info(rerun_token: str | None) -> None:
         log.info(f"Resuming with rerun_token={rerun_token!r}.")
 
 
+# Thin wrapper around `prefect.flow`. Like the `task` wrapper above, this
+# mirrors `prefect.flow`'s full signature — kwargs, defaults, and `Flow[P, R]`
+# return type — so IDEs see the real decorated object. One kwarg is reserved:
+#   - `flow_run_name` is fixed to `make_flow_run_name` (consistent naming
+#     convention across the codebase)
+# In addition, every decorated flow must declare `rerun_token: str | None`;
+# this is checked at decoration time and surfaces as TypeError on import.
 @overload
-def flow[**P, R](__fn: Callable[P, R], /) -> Callable[P, R]: ...
+def flow[**P, R](__fn: Callable[P, R], /) -> Flow[P, R]: ...
 @overload
 def flow[**P, R](
-    *,
-    name: str | None = ...,
-    version: str | None = ...,
-    retries: int | None = ...,
-    retry_delay_seconds: float | None = ...,
-    description: str | None = ...,
-    timeout_seconds: float | None = ...,
-    validate_parameters: bool = ...,
-    log_prints: bool | None = ...,
-    **extra_kwargs: Any,
-) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
-def flow(
-    __fn: Any = None,
+    __fn: Literal[None] = None,
     /,
     *,
-    name: str | None = None,
-    version: str | None = None,
-    retries: int | None = None,
-    retry_delay_seconds: float | None = None,
-    description: str | None = None,
-    timeout_seconds: float | None = None,
+    name: Optional[str] = None,
+    version: Optional[str] = None,
+    retries: Optional[int] = None,
+    retry_delay_seconds: Optional[Union[int, float]] = None,
+    task_runner: Optional[TaskRunner[PrefectFuture[Any]]] = None,
+    description: Optional[str] = None,
+    timeout_seconds: Union[int, float, None] = None,
     validate_parameters: bool = True,
-    log_prints: bool | None = None,
-    **extra_kwargs: Any,
-) -> Any:
+    persist_result: Optional[bool] = None,
+    result_storage: Optional[ResultStorage] = None,
+    result_serializer: Optional[ResultSerializer] = None,
+    cache_result_in_memory: bool = True,
+    log_prints: Optional[bool] = None,
+    on_completion: Optional[list[FlowStateHook[..., Any]]] = None,
+    on_failure: Optional[list[FlowStateHook[..., Any]]] = None,
+    on_cancellation: Optional[list[FlowStateHook[..., Any]]] = None,
+    on_crashed: Optional[list[FlowStateHook[..., Any]]] = None,
+    on_running: Optional[list[FlowStateHook[..., Any]]] = None,
+) -> Callable[[Callable[P, R]], Flow[P, R]]: ...
+def flow(__fn: Any = None, /, **kwargs: Any) -> Any:
     """
     Wrapper around @flow with sensible defaults for a machine learning workflow.
     - does not depend on the code to check if the flow needs a rerun. The code is typically
       called separately in a slurm script.
     - expects an additional (optional) parameter `rerun_token` in the flow signature, which is used to determine caching keys for tasks. See `rerun_aware_cache_key` for details.
 
-    Usable as both `@flow` and `@flow(...)`. The signature mirrors the common
-    subset of `prefect.flow`; remaining kwargs are forwarded via **extra_kwargs.
-    `flow_run_name` is intentionally not exposed — the codebase enforces a
-    single naming convention.
+    Usable as both `@flow` and `@flow(...)`. The signature mirrors `prefect.flow`;
+    `flow_run_name` is reserved — the codebase enforces a single naming convention.
     """
     # Enforce our naming function on every flow in this codebase. Drop any
-    # user-supplied flow_run_name silently — the design intent is one
-    # consistent naming convention, not a per-flow opt-out.
-    extra_kwargs.pop("flow_run_name", None)
-    p_flow_decorator = p_flow(
-        flow_run_name=make_flow_run_name,
-        name=name,
-        version=version,
-        retries=retries,
-        retry_delay_seconds=retry_delay_seconds,
-        description=description,
-        timeout_seconds=timeout_seconds,
-        validate_parameters=validate_parameters,
-        log_prints=log_prints,
-        **extra_kwargs,
-    )
+    # user-supplied flow_run_name silently.
+    kwargs["flow_run_name"] = make_flow_run_name
+    p_flow_decorator = p_flow(**kwargs)
 
     def wrapper(fn):
         _validate_rerun_token_param(fn)
@@ -240,18 +226,21 @@ def flow(
         # was invoked. functools.wraps preserves __wrapped__ so Prefect's
         # signature introspection still sees the original function shape.
         if inspect.iscoroutinefunction(fn):
+
             @functools.wraps(fn)
-            async def _async_wrapped(*args: Any, **kwargs: Any) -> Any:
-                bound = sig.bind_partial(*args, **kwargs).arguments
+            async def _async_wrapped(*args: Any, **kw: Any) -> Any:
+                bound = sig.bind_partial(*args, **kw).arguments
                 _log_rerun_info(bound.get("rerun_token"))
-                return await fn(*args, **kwargs)
+                return await fn(*args, **kw)
+
             return p_flow_decorator(_async_wrapped)
 
         @functools.wraps(fn)
-        def _sync_wrapped(*args: Any, **kwargs: Any) -> Any:
-            bound = sig.bind_partial(*args, **kwargs).arguments
+        def _sync_wrapped(*args: Any, **kw: Any) -> Any:
+            bound = sig.bind_partial(*args, **kw).arguments
             _log_rerun_info(bound.get("rerun_token"))
-            return fn(*args, **kwargs)
+            return fn(*args, **kw)
+
         return p_flow_decorator(_sync_wrapped)
 
     return wrapper(__fn) if __fn is not None else wrapper

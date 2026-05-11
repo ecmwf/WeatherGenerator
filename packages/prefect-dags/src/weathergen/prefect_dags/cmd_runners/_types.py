@@ -1,9 +1,10 @@
 from dataclasses import dataclass
+from logging import Logger
 from pathlib import Path
 from typing import Protocol
-from logging import Logger
 
 from weathergen.prefect_dags.result import Result
+
 
 @dataclass
 class Command:
@@ -11,11 +12,13 @@ class Command:
     working_directory: str | Path | None = None
     env_vars: dict[str, str] | None = None
 
+
 @dataclass
 class CommandResult:
     stdout: str
     stderr: str
     return_code: int
+
 
 class CommandRunner(Protocol):
     """

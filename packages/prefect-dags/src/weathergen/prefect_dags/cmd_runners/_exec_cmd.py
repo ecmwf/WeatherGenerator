@@ -1,14 +1,16 @@
 """
 Executing commands in an asynchronous way.
 """
-import logging 
+
 import asyncio
 import functools
+import logging
 from typing import Any
-from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
-from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
-from weathergen.prefect_dags.cmd_runners._generic import GenericSshCommandRunner, GenericContext
+
 from weathergen.prefect_dags.cmd_runners._ecmwf import EcmwfSshCommandRunner, EcmwfSshContext
+from weathergen.prefect_dags.cmd_runners._generic import GenericContext, GenericSshCommandRunner
+from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
+from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
 from weathergen.prefect_dags.result import OpError, Result, is_err
 
 """
@@ -17,7 +19,8 @@ on a given environment (e.g. local machine, remote server, etc.).
 """
 type CmdContext = LocalContext | GenericContext | EcmwfSshContext
 
-def get_command_runner(context: CmdContext) -> CommandRunner|Exception:
+
+def get_command_runner(context: CmdContext) -> CommandRunner | Exception:
     match context:
         case LocalContext():
             return LocalCommandRunner()
@@ -28,13 +31,16 @@ def get_command_runner(context: CmdContext) -> CommandRunner|Exception:
         case _:
             return ValueError(f"Unsupported context type: {type(context)}")
 
+
 async def run_blocking(fn, *args, **kwargs):
     """Run a blocking function in the default thread executor."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
 
 
-async def run_cmd(context: CmdContext, cmd: Command, logger: logging.Logger|Any|None = None) -> Result[CommandResult]:
+async def run_cmd(
+    context: CmdContext, cmd: Command, logger: logging.Logger | Any | None = None
+) -> Result[CommandResult]:
     """
     Runs a command on the specified HPC using the provided context.
 
@@ -48,9 +54,9 @@ async def run_cmd(context: CmdContext, cmd: Command, logger: logging.Logger|Any|
         return OpError(err=runner_or_err)
     runner = runner_or_err
     raw_data = await run_blocking(runner.run, cmd, logger)
-    if is_err(raw_data):
-        return raw_data
-    elif isinstance(raw_data, CommandResult):
+    if is_err(raw_data) or isinstance(raw_data, CommandResult):
         return raw_data
     else:
-        return OpError(err=ValueError(f"Unexpected return type from command runner: {type(raw_data)}"))
+        return OpError(
+            err=ValueError(f"Unexpected return type from command runner: {type(raw_data)}")
+        )

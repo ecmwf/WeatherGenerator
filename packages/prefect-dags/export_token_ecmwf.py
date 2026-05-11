@@ -50,6 +50,7 @@ Environment variables:
 
 Derived from the official ECaccess Web Toolkit Perl source v6.3.1.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -99,12 +100,15 @@ def _soap_envelope(method: str, params: list[tuple[str, str, str | None]]) -> by
 
     params is a list of (name, value, xsi_type_or_None).
     """
-    env = ET.Element("soapenv:Envelope", {
-        "xmlns:soapenv": SOAP_ENV_NS,
-        "xmlns:xsd": XSD_NS,
-        "xmlns:xsi": XSI_NS,
-        "xmlns:ns": SOAP_NS,
-    })
+    env = ET.Element(
+        "soapenv:Envelope",
+        {
+            "xmlns:soapenv": SOAP_ENV_NS,
+            "xmlns:xsd": XSD_NS,
+            "xmlns:xsi": XSI_NS,
+            "xmlns:ns": SOAP_NS,
+        },
+    )
     body = ET.SubElement(env, "soapenv:Body")
     meth = ET.SubElement(body, f"ns:{method}")
 
@@ -236,8 +240,9 @@ class ECaccessClient:
 
     # -- low-level SOAP call ------------------------------------------------
 
-    def _call(self, method: str, params: list[tuple[str, str, str | None]],
-              *, use_https: bool = True) -> ET.Element:
+    def _call(
+        self, method: str, params: list[tuple[str, str, str | None]], *, use_https: bool = True
+    ) -> ET.Element:
         """Make a SOAP call and return the parsed response element."""
         envelope = _soap_envelope(method, params)
         url = self._ctrl_url if use_https else self._data_url
@@ -325,9 +330,12 @@ class ECaccessClient:
         raw = self.cert_path.read_bytes()
         cert_b64 = base64.b64encode(raw).decode("ascii")
 
-        resp = self._call("getTokenFromCertificate", [
-            ("certificate", cert_b64, None),
-        ])
+        resp = self._call(
+            "getTokenFromCertificate",
+            [
+                ("certificate", cert_b64, None),
+            ],
+        )
         self._token = _return_text(resp)
         if not self._token:
             raise RuntimeError("Empty token — certificate may be expired or invalid")
@@ -350,11 +358,15 @@ class ECaccessClient:
         """
         boundary = "---------------------------154328737501"
         body = (
-            f"-----------------------------154328737501\r\n"
-            f'Content-Disposition: form-data; name="fileupload"; '
-            f'filename="{urllib.parse.quote(handle)}"\r\n'
-            f"Content-Type: application/octet-stream\r\n\r\n"
-        ).encode("utf-8") + data + b"\r\n-----------------------------154328737501--\r\n"
+            (
+                f"-----------------------------154328737501\r\n"
+                f'Content-Disposition: form-data; name="fileupload"; '
+                f'filename="{urllib.parse.quote(handle)}"\r\n'
+                f"Content-Type: application/octet-stream\r\n\r\n"
+            ).encode()
+            + data
+            + b"\r\n-----------------------------154328737501--\r\n"
+        )
 
         resp = self._http.post(
             self._dataios_url,
@@ -373,10 +385,13 @@ class ECaccessClient:
         Matches ECaccess.pm getFileInputStream (lines 267-281).
         """
         url = f"{self._dataios_url}?handle={urllib.parse.quote(handle)}"
-        resp = self._http.get(url, headers={
-            "User-Agent": "python-ecaccess:0.1",
-            "Content-Type": "text/xml",
-        })
+        resp = self._http.get(
+            url,
+            headers={
+                "User-Agent": "python-ecaccess:0.1",
+                "Content-Type": "text/xml",
+            },
+        )
         if resp.status_code >= 400:
             raise RuntimeError(f"Download failed: HTTP {resp.status_code}")
         return resp.content
@@ -400,12 +415,14 @@ class ECaccessClient:
         resp = self._call("getOperationList", [("token", token, None)])
         results = []
         for ret in _get_returns(resp):
-            results.append({
-                "name": _elem_field(ret, "name"),
-                "duration": _elem_field(ret, "duration"),
-                "endDate": _elem_field(ret, "endDate"),
-                "comment": _elem_field(ret, "comment"),
-            })
+            results.append(
+                {
+                    "name": _elem_field(ret, "name"),
+                    "duration": _elem_field(ret, "duration"),
+                    "endDate": _elem_field(ret, "endDate"),
+                    "comment": _elem_field(ret, "comment"),
+                }
+            )
         return results
 
     # -- queue list ----------------------------------------------------------
@@ -414,31 +431,38 @@ class ECaccessClient:
         """ecaccess-queue-list."""
         token = self.authenticate()
         if detail_queue:
-            resp = self._call("getQueueDetail", [
-                ("token", token, None),
-                ("queueName", detail_queue, None),
-            ])
+            resp = self._call(
+                "getQueueDetail",
+                [
+                    ("token", token, None),
+                    ("queueName", detail_queue, None),
+                ],
+            )
             results = []
             for ret in _get_returns(resp):
-                results.append({
-                    "name": _elem_field(ret, "name"),
-                    "comment": _elem_field(ret, "comment"),
-                })
+                results.append(
+                    {
+                        "name": _elem_field(ret, "name"),
+                        "comment": _elem_field(ret, "comment"),
+                    }
+                )
             return results
 
         resp = self._call("getQueueList", [("token", token, None)])
         results = []
         for ret in _get_returns(resp):
-            results.append({
-                "queueName": _elem_field(ret, "queueName"),
-                "schedulerName": _elem_field(ret, "schedulerName"),
-                "comment": _elem_field(ret, "comment"),
-                "INIT": _elem_field(ret, "numberOfJobsInInitState"),
-                "WAIT": _elem_field(ret, "numberOfJobsInWaitState"),
-                "EXEC": _elem_field(ret, "numberOfJobsInExecState"),
-                "DONE": _elem_field(ret, "numberOfJobsInDoneState"),
-                "STOP": _elem_field(ret, "numberOfJobsInStopState"),
-            })
+            results.append(
+                {
+                    "queueName": _elem_field(ret, "queueName"),
+                    "schedulerName": _elem_field(ret, "schedulerName"),
+                    "comment": _elem_field(ret, "comment"),
+                    "INIT": _elem_field(ret, "numberOfJobsInInitState"),
+                    "WAIT": _elem_field(ret, "numberOfJobsInWaitState"),
+                    "EXEC": _elem_field(ret, "numberOfJobsInExecState"),
+                    "DONE": _elem_field(ret, "numberOfJobsInDoneState"),
+                    "STOP": _elem_field(ret, "numberOfJobsInStopState"),
+                }
+            )
         return results
 
     # -- job list / detail ---------------------------------------------------
@@ -448,44 +472,51 @@ class ECaccessClient:
         token = self.authenticate()
 
         if job_id:
-            resp = self._call("getJob", [
-                ("token", token, None),
-                ("jobid", job_id, None),
-            ])
+            resp = self._call(
+                "getJob",
+                [
+                    ("token", token, None),
+                    ("jobid", job_id, None),
+                ],
+            )
             ret = _get_returns(resp)
             if not ret:
                 return []
             job = ret[0]
-            return [{
-                "jobId": _elem_field(job, "jobId"),
-                "name": _elem_field(job, "name"),
-                "queueName": _elem_field(job, "queueName"),
-                "hostName": _elem_field(job, "hostName"),
-                "scheduledDate": _elem_field(job, "scheduledDate"),
-                "expirationDate": _elem_field(job, "expirationDate"),
-                "tryDone": _elem_field(job, "tryDone"),
-                "tryCount": _elem_field(job, "tryCount"),
-                "status": _elem_field(job, "status"),
-                "comment": _elem_field(job, "comment"),
-                "outputFileSize": _elem_field(job, "outputFileSize"),
-                "errorFileSize": _elem_field(job, "errorFileSize"),
-                "inputFileSize": _elem_field(job, "inputFileSize"),
-                "eventIds": _elem_fields(job, "eventIds"),
-            }]
+            return [
+                {
+                    "jobId": _elem_field(job, "jobId"),
+                    "name": _elem_field(job, "name"),
+                    "queueName": _elem_field(job, "queueName"),
+                    "hostName": _elem_field(job, "hostName"),
+                    "scheduledDate": _elem_field(job, "scheduledDate"),
+                    "expirationDate": _elem_field(job, "expirationDate"),
+                    "tryDone": _elem_field(job, "tryDone"),
+                    "tryCount": _elem_field(job, "tryCount"),
+                    "status": _elem_field(job, "status"),
+                    "comment": _elem_field(job, "comment"),
+                    "outputFileSize": _elem_field(job, "outputFileSize"),
+                    "errorFileSize": _elem_field(job, "errorFileSize"),
+                    "inputFileSize": _elem_field(job, "inputFileSize"),
+                    "eventIds": _elem_fields(job, "eventIds"),
+                }
+            ]
 
         resp = self._call("getJobList", [("token", token, None)])
         results = []
         for ret in _get_returns(resp):
-            results.append({
-                "jobId": _elem_field(ret, "jobId"),
-                "queueName": _elem_field(ret, "queueName"),
-                "status": _elem_field(ret, "status"),
-                "tryDone": _elem_field(ret, "tryDone"),
-                "tryCount": _elem_field(ret, "tryCount"),
-                "scheduledDate": _elem_field(ret, "scheduledDate"),
-                "name": _elem_field(ret, "name"),
-                "eventIds": _elem_fields(ret, "eventIds"),
-            })
+            results.append(
+                {
+                    "jobId": _elem_field(ret, "jobId"),
+                    "queueName": _elem_field(ret, "queueName"),
+                    "status": _elem_field(ret, "status"),
+                    "tryDone": _elem_field(ret, "tryDone"),
+                    "tryCount": _elem_field(ret, "tryCount"),
+                    "scheduledDate": _elem_field(ret, "scheduledDate"),
+                    "name": _elem_field(ret, "name"),
+                    "eventIds": _elem_fields(ret, "eventIds"),
+                }
+            )
         return results
 
     # -- job submit (ecaccess-job-submit) ------------------------------------
@@ -531,12 +562,15 @@ class ECaccessClient:
             name = job_name or path.name
 
             # Get output handle
-            resp = self._call("getOutputFileHandle", [
-                ("token", token, None),
-                ("target", temp_file, None),
-                ("offset", "0", None),
-                ("umask", "640", None),
-            ])
+            resp = self._call(
+                "getOutputFileHandle",
+                [
+                    ("token", token, None),
+                    ("target", temp_file, None),
+                    ("offset", "0", None),
+                    ("umask", "640", None),
+                ],
+            )
             handle = _return_text(resp)
             if not handle:
                 raise RuntimeError("Failed to get output file handle")
@@ -549,12 +583,15 @@ class ECaccessClient:
         else:
             # Remote file — copy to temp
             name = job_name or script_path.rsplit("/", 1)[-1].rsplit(":", 1)[-1]
-            self._call("copyFile", [
-                ("token", token, None),
-                ("source", script_path, None),
-                ("target", temp_file, None),
-                ("erase", "false", "xsd:boolean"),
-            ])
+            self._call(
+                "copyFile",
+                [
+                    ("token", token, None),
+                    ("source", script_path, None),
+                    ("target", temp_file, None),
+                    ("erase", "false", "xsd:boolean"),
+                ],
+            )
 
         # Step 3: submitJob with nested request
         def _bool(v: bool) -> str:
@@ -569,20 +606,20 @@ class ECaccessClient:
         request_fields = [
             _opt("scheduledDate", scheduled_date),
             _opt("userMailAddress", None),
-            f'<ns:sendMailOnStart xsi:type="xsd:boolean">false</ns:sendMailOnStart>',
-            f'<ns:sendMailOnSuccess xsi:type="xsd:boolean">false</ns:sendMailOnSuccess>',
-            f'<ns:sendMailOnFailure xsi:type="xsd:boolean">false</ns:sendMailOnFailure>',
-            f'<ns:sendMailOnRetry xsi:type="xsd:boolean">false</ns:sendMailOnRetry>',
+            '<ns:sendMailOnStart xsi:type="xsd:boolean">false</ns:sendMailOnStart>',
+            '<ns:sendMailOnSuccess xsi:type="xsd:boolean">false</ns:sendMailOnSuccess>',
+            '<ns:sendMailOnFailure xsi:type="xsd:boolean">false</ns:sendMailOnFailure>',
+            '<ns:sendMailOnRetry xsi:type="xsd:boolean">false</ns:sendMailOnRetry>',
             f'<ns:containsDirectives xsi:type="xsd:boolean">{_bool(not no_directives)}</ns:containsDirectives>',
             _opt("queueName", queue),
             _opt("name", name),
             _opt("transferGatewayName", None),
             _opt("transferRemoteLocation", None),
-            f'<ns:transferOutputFile xsi:type="xsd:boolean">false</ns:transferOutputFile>',
-            f'<ns:transferErrorFile xsi:type="xsd:boolean">false</ns:transferErrorFile>',
-            f'<ns:transferInputFile xsi:type="xsd:boolean">false</ns:transferInputFile>',
-            f'<ns:transferKeepInSpool xsi:type="xsd:boolean">false</ns:transferKeepInSpool>',
-            f'<ns:renewSubscription xsi:type="xsd:boolean">true</ns:renewSubscription>',
+            '<ns:transferOutputFile xsi:type="xsd:boolean">false</ns:transferOutputFile>',
+            '<ns:transferErrorFile xsi:type="xsd:boolean">false</ns:transferErrorFile>',
+            '<ns:transferInputFile xsi:type="xsd:boolean">false</ns:transferInputFile>',
+            '<ns:transferKeepInSpool xsi:type="xsd:boolean">false</ns:transferKeepInSpool>',
+            '<ns:renewSubscription xsi:type="xsd:boolean">true</ns:renewSubscription>',
             f'<ns:errorToOutput xsi:type="xsd:boolean">{_bool(stderr_to_stdout)}</ns:errorToOutput>',
             _opt("manPageContent", None),
             f"<ns:lifeTime>{life_time}</ns:lifeTime>",
@@ -593,7 +630,11 @@ class ECaccessClient:
         ]
 
         token_xml = f"<ns:token>{token}</ns:token>"
-        request_xml = "<ns:request>\n" + "\n".join(f"        {f}" for f in request_fields) + "\n      </ns:request>"
+        request_xml = (
+            "<ns:request>\n"
+            + "\n".join(f"        {f}" for f in request_fields)
+            + "\n      </ns:request>"
+        )
         envelope = _soap_envelope_raw_inner("submitJob", token_xml, request_xml)
 
         resp = self._call_raw("submitJob", envelope)
@@ -601,11 +642,14 @@ class ECaccessClient:
 
         # Step 4: cleanup temp file
         try:
-            self._call("deleteFile", [
-                ("token", token, None),
-                ("source", temp_file, None),
-                ("force", "true", "xsd:boolean"),
-            ])
+            self._call(
+                "deleteFile",
+                [
+                    ("token", token, None),
+                    ("source", temp_file, None),
+                    ("force", "true", "xsd:boolean"),
+                ],
+            )
         except Exception:
             pass
 
@@ -616,20 +660,26 @@ class ECaccessClient:
     def delete_job(self, job_id: str) -> None:
         """ecaccess-job-delete."""
         token = self.authenticate()
-        self._call("deleteJob", [
-            ("token", token, None),
-            ("jobid", job_id, None),
-        ])
+        self._call(
+            "deleteJob",
+            [
+                ("token", token, None),
+                ("jobid", job_id, None),
+            ],
+        )
 
     # -- job restart ---------------------------------------------------------
 
     def restart_job(self, job_id: str) -> None:
         """ecaccess-job-restart."""
         token = self.authenticate()
-        self._call("restartJob", [
-            ("token", token, None),
-            ("jobId", job_id, None),
-        ])
+        self._call(
+            "restartJob",
+            [
+                ("token", token, None),
+                ("jobId", job_id, None),
+            ],
+        )
 
     # -- job get output/error/input ------------------------------------------
 
@@ -649,10 +699,13 @@ class ECaccessClient:
             "input": "getJobInputHandle",
         }[which]
 
-        resp = self._call(method, [
-            ("token", token, None),
-            ("jobid", job_id, None),
-        ])
+        resp = self._call(
+            method,
+            [
+                ("token", token, None),
+                ("jobid", job_id, None),
+            ],
+        )
         handle = _return_text(resp)
         if not handle:
             raise RuntimeError(f"No handle returned for job {job_id} {which}")
@@ -727,7 +780,9 @@ def _print_jobs(client: ECaccessClient, job_id: str | None) -> None:
             events = "[" + ";".join(j["eventIds"]) + "]" if j["eventIds"] else "[-]"
             tries = f"{j['tryDone']}/{j['tryCount']}"
             name = f" {j['name']}" if j["name"] else ""
-            print(f"{j['jobId']:<10s} {j['queueName']:<10s} {j['status']:<10s} {tries:<6s} {j['scheduledDate']:<15s} {events}{name}")
+            print(
+                f"{j['jobId']:<10s} {j['queueName']:<10s} {j['status']:<10s} {tries:<6s} {j['scheduledDate']:<15s} {events}{name}"
+            )
 
 
 def main() -> int:
@@ -765,10 +820,16 @@ def main() -> int:
     p_s.add_argument("script", help="Path to Slurm job script (local, or remote with --distant)")
     p_s.add_argument("--queue", "-q", default=None, help="Queue name")
     p_s.add_argument("--name", "-n", default=None, help="Job name")
-    p_s.add_argument("--distant", "-d", action="store_true",
-                     help="Script is already at ECMWF (ECaccess path like home:scripts/job.sh)")
+    p_s.add_argument(
+        "--distant",
+        "-d",
+        action="store_true",
+        help="Script is already at ECMWF (ECaccess path like home:scripts/job.sh)",
+    )
     p_s.add_argument("--event-ids", default=None, help="Event IDs (semicolon-separated)")
-    p_s.add_argument("--no-directives", action="store_true", help="Script has no scheduler directives")
+    p_s.add_argument(
+        "--no-directives", action="store_true", help="Script has no scheduler directives"
+    )
     p_s.add_argument("--stderr-to-stdout", action="store_true", help="Merge stderr into stdout")
 
     # delete

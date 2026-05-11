@@ -121,7 +121,9 @@ def _load_private_key(key_path: Path, logger: Logger) -> paramiko.PKey:
     with open(key_path, "rb") as f:
         crypto_key = load_ssh_private_key(f.read(), password=None)
     pem_text = crypto_key.private_bytes(
-        Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption(),
+        Encoding.PEM,
+        PrivateFormat.TraditionalOpenSSL,
+        NoEncryption(),
     ).decode()
 
     if isinstance(crypto_key, ec.EllipticCurvePrivateKey):

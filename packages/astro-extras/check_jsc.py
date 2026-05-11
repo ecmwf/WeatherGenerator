@@ -21,10 +21,10 @@ import os
 import re
 import sys
 import time
+from dataclasses import dataclass
 
 import pyunicore.client as uc_client
 import pyunicore.credentials as uc_credentials
-from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
@@ -60,15 +60,19 @@ def discover_sites(credential):
     log.info("Discovered sites: %s", sites)
     return sites
 
+
 @dataclass
 class SlurmJobInfo:
     """
     Holds information about a submitted UNICORE job that can be used to query its status or cancel it later.
     """
+
     slurm_job_id: str
 
 
-def run_command(client: uc_client.Client, command: str, project: str, poll_interval: float = 2.0) -> str:
+def run_command(
+    client: uc_client.Client, command: str, project: str, poll_interval: float = 2.0
+) -> str:
     """Submit a command via UNICORE and print its output."""
     job_desc = {
         "Executable": command,
@@ -163,11 +167,13 @@ def main():
         description="Run a command on a JSC UNICORE site.",
     )
     parser.add_argument(
-        "--token", default=DEFAULT_TOKEN_FILE,
+        "--token",
+        default=DEFAULT_TOKEN_FILE,
         help=f"Path to token file (default: {DEFAULT_TOKEN_FILE})",
     )
     parser.add_argument(
-        "--site", default="JUDAC",
+        "--site",
+        default="JUDAC",
         help="UNICORE site name, e.g. JURECA, JUWELS, JUPITER (default: JUDAC)",
     )
     parser.add_argument(

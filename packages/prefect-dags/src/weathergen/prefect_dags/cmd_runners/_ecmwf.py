@@ -41,6 +41,7 @@ class EcmwfSshCommandRunner(CommandRunner):
 
     TODO: documentation to ECMWF teleport setup.
     """
+
     name = "ecmwf_ssh"
     _ctx: EcmwfSshContext
 

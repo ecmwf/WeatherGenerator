@@ -7,19 +7,20 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from prefect import get_client
 from prefect.artifacts import acreate_markdown_artifact
 from prefect.concurrency.asyncio import concurrency as _async_concurrency
+from prefect.utilities.asyncutils import run_coro_as_sync
 from prefect.variables import Variable
 from pydantic import TypeAdapter, ValidationError
 
 from weathergen.prefect_dags.cmd_runners import CmdContext, CommandRunner, get_command_runner
 from weathergen.prefect_dags.prefect_logging import get_run_logger
 from weathergen.prefect_dags.prefect_wrapper import task
-from weathergen.prefect_dags.result import OpError, Result
+from weathergen.prefect_dags.result import OpError, Result, is_err
 from weathergen.prefect_dags.slurm import (
     SlurmJob,
     SlurmJobId,
@@ -38,17 +39,30 @@ _POLL_INTERVAL_SECS = 5
 
 _PRFEFECT_NUM_READS = 200
 
+_ensured_limits: set[str] = set()
+
+
+async def _ensure_concurrency_limit(name: str) -> None:
+    if name in _ensured_limits:
+        return
+    async with get_client() as client:
+        await client.upsert_global_concurrency_limit_by_name(name=name, limit=1)
+    _ensured_limits.add(name)
+
+
 @dataclass
 class SlurmJobResult:
     """
     The final result of a slurm job.
     """
+
     job_id: SlurmJobId
     status: SlurmJobState
     submission: SlurmSubmissionResult
 
+
 @task
-async def sbatch(
+def sbatch(
     ctx: CmdContext,
     *,
     job_name: str,
@@ -62,7 +76,7 @@ async def sbatch(
     slurm_options: dict[str, str] | None = None,
 ) -> SlurmJobResult:
     """
-    Submit a slurm job and await its completion, returning the final state.
+    Submits a slurm job and await its completion, returning the final state.
 
     Keyword arguments mirror `SlurmJob` — see that dataclass for the meaning
     of each field. `ctx` is the command-runner context (local / SSH / etc.).
@@ -86,7 +100,7 @@ async def sbatch(
         time_limit=time_limit,
         slurm_options=slurm_options,
     )
-    res = await sbatch_try(job, ctx)
+    res = run_coro_as_sync(_sbatch_try(job, ctx))
     if isinstance(res, OpError):
         # Re-raise the original exception so the type and traceback are
         # preserved (e.g. FileNotFoundError on a missing script_path).
@@ -98,59 +112,20 @@ async def sbatch(
         )
     return job_res
 
+
 @task
-async def sbatch_try(
+def sbatch_try(
     job: SlurmJob,
     context: CmdContext,
 ) -> Result[SlurmJobResult]:
-    logger = get_run_logger()
-    submission_result = await sbatch_submit(job, context)
-    if isinstance(submission_result, OpError):
-        return OpError(err=submission_result.err)
-    sub_res: SlurmSubmissionResult = submission_result
-    job_id = sub_res.job_id
-    _runner = get_command_runner(context)
-    if isinstance(_runner, Exception):
-        return OpError(err=_runner)
-    runner: CommandRunner = _runner
-    logger.info(f"Submitted SLURM job with ID: {job_id} on hpc {runner.hpc}")
-    # Surface the submission details in the Prefect UI as a markdown artifact.
-    # Artifacts render directly on the task run page.
-    await acreate_markdown_artifact(
-        key=f"slurm-submission-{_artifact_key_part(job.job_name)}-{_artifact_key_part(job_id)}",
-        markdown=(
-            f"## SLURM submission\n\n"
-            f"- **Job ID:** `{job_id}`\n"
-            f"- **HPC:** `{runner.hpc}`\n"
-            f"- **Job name:** `{job.job_name}`\n"
-            f"- **stdout:** `{sub_res.stdout}`\n"
-            f"- **stderr:** `{sub_res.stderr}`\n"
-        ),
-        description=f"slurm job {job_id} on {runner.hpc}",
-    )
-    # Insert a prefect variable so the monitoring loop can discover this job.
-    # Initial "PENDING" is accurate for a freshly submitted job and will be
-    # overwritten by the first lease holder that polls sacct.
-    await _set_status(runner.hpc, job_id, "PENDING")
+    """
+     Same as `sbatch`, but returns a Result instead of throwing on failure. 
+    """
+    return run_coro_as_sync(_sbatch_try(job, context))
 
-    # Now await completion of the job.
-    state = await _wait_completion_single(logger, context, job_id, runner)
-    if isinstance(state, OpError):
-        # Best-effort cleanup before propagating the error.
-        await _delete_status(runner.hpc, job_id)
-        return state
-
-    # Remove the per-job variable now that the job is done.
-    await _delete_status(runner.hpc, job_id)
-
-    return SlurmJobResult(
-        job_id=job_id,
-        status=state,
-        submission=sub_res,
-    )
 
 @task
-async def sbatch_submit(
+def sbatch_submit(
     job: SlurmJob,
     context: CmdContext,
 ) -> Result[SlurmSubmissionResult]:
@@ -161,7 +136,18 @@ async def sbatch_submit(
 
     On purpose kept small and focused: any crash here may trigger a slurm job
     that we will not monitor.
+
+    TODO: the result will be cached, including the error. This
+    is a logical issue (if the submission did not happen because of
+    network / auth issue, we should retry rather than return the cached failure)
     """
+    return run_coro_as_sync(_sbatch_submit_async(job, context))
+
+
+async def _sbatch_submit_async(
+    job: SlurmJob,
+    context: CmdContext,
+) -> Result[SlurmSubmissionResult]:
     logger = get_run_logger()
     submission_result = await submit_slurm(job, context, logger)
     if isinstance(submission_result, OpError):
@@ -176,16 +162,19 @@ class _SlurmJobPrefectStatus:
     """
     The status of a slurm job as represented in prefect variables.
     """
+
     job_id: SlurmJobId
     hpc: str
     # Typed as a Literal so TypeAdapter rejects unknown state strings on read.
     status: SlurmJobState
+
 
 @dataclass
 class _SlurmJobMonitoringLock:
     """
     A lock to prevent multiple concurrent monitors for the same HPC.
     """
+
     hpc: str
     # The time at which the lease expires in ISO format.
     lease_expires_at: str
@@ -200,6 +189,58 @@ _LOCK_ADAPTER = TypeAdapter(_SlurmJobMonitoringLock)
 # ---------------------------------------------------------------------------
 # Variable naming + helpers
 # ---------------------------------------------------------------------------
+
+async def _sbatch_try(
+    job: SlurmJob,
+    context: CmdContext,
+) -> Result[SlurmJobResult]:
+    """
+    Implementation of sbatch_try.
+    It is separated so that the graph of tasks in prefect stays clean (no nested sbatch_try inside sbatch)
+    """
+    logger = get_run_logger()
+    submission_result = await _sbatch_submit_async(job, context)
+    if isinstance(submission_result, OpError):
+        return OpError(err=submission_result.err)
+    sub_res: SlurmSubmissionResult = submission_result
+    job_id = sub_res.job_id
+    _runner = get_command_runner(context)
+    if isinstance(_runner, Exception):
+        return OpError(err=_runner)
+    runner: CommandRunner = _runner
+    logger.info(f"Submitted SLURM job with ID: {job_id} on hpc {runner.hpc}")
+    # Insert a prefect variable so the monitoring loop can discover this job.
+    # Initial "PENDING" is accurate for a freshly submitted job and will be
+    # overwritten by the first lease holder that polls sacct.
+    await _set_status(runner.hpc, job_id, "PENDING")
+    # Surface the submission details in the Prefect UI as a markdown artifact.
+    # Artifacts render directly on the task run page.
+    await acreate_markdown_artifact(
+        key=f"slurm-submission-{_artifact_key_part(job.job_name)}-{_artifact_key_part(job_id)}",
+        markdown=(
+            f"## SLURM submission\n\n"
+            f"- **Job ID:** `{job_id}`\n"
+            f"- **HPC:** `{runner.hpc}`\n"
+            f"- **Job name:** `{job.job_name}`\n"
+            f"- **stdout:** `{sub_res.stdout}`\n"
+            f"- **stderr:** `{sub_res.stderr}`\n"
+        ),
+        description=f"slurm job {job_id} on {runner.hpc}",
+    )
+
+    # Now await completion of the job.
+    state = await _wait_completion_single(logger, context, job_id, runner)
+    # Job is done. Cleane up the variable.
+    await _delete_status(runner.hpc, job_id)
+    if isinstance(state, OpError):
+        return state
+
+    return SlurmJobResult(
+        job_id=job_id,
+        status=state,
+        submission=sub_res,
+    )
+
 
 def _artifact_key_part(s: str) -> str:
     """Sanitize a string for use in a Prefect artifact key.
@@ -222,18 +263,10 @@ def _lease_var_name(hpc: str) -> str:
 
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _set_status(hpc: str, job_id: SlurmJobId, status: SlurmJobState) -> None:
-    # Only called for non-terminal states. A terminal state is signalled by
-    # the lease holder deleting the variable; the awaiting sbatch_try detects
-    # the deletion and fetches the final state via sacct directly. So the
-    # variable in the prefect store always represents an *active* job.
-    assert not is_terminal_state(status), (
-        f"_set_status must not be called with a terminal state ({status}); "
-        "the lease holder deletes terminal jobs from the variable store."
-    )
     payload = _SlurmJobPrefectStatus(job_id=job_id, hpc=hpc, status=status)
     await Variable.aset(
         name=_status_var_name(hpc, job_id),
@@ -259,7 +292,7 @@ async def _delete_status(hpc: str, job_id: SlurmJobId) -> None:
     await Variable.aunset(name=_status_var_name(hpc, job_id))
 
 
-async def _list_running_job_ids(hpc: str) -> list[SlurmJobId]:
+async def _list_running_job_ids(hpc: str, logger: logging.Logger) -> list[SlurmJobId]:
     # Prefect's client doesn't expose server-side filtering on variables, so
     # we read a bounded batch and filter by tags client-side. Fine for the
     # typical "tens of active jobs per HPC" scale.
@@ -272,7 +305,8 @@ async def _list_running_job_ids(hpc: str) -> list[SlurmJobId]:
             continue
         try:
             parsed = _STATUS_ADAPTER.validate_python(v.value)
-        except ValidationError:
+        except ValidationError as e:
+            logger.warning(f"Malformed status variable: {v.name}: {v.value}: {v.tags} : {e}")
             # Skip malformed values rather than failing the whole refresh.
             continue
         out.append(parsed.job_id)
@@ -308,7 +342,6 @@ async def _write_lease(hpc: str) -> None:
     )
 
 
-
 async def _wait_completion_single(
     logger: logging.Logger,
     ctx: CmdContext,
@@ -320,33 +353,22 @@ async def _wait_completion_single(
     Each iteration:
       1. Try to refresh sacct (only succeeds if we win the HPC lease).
       2. Read this job's status variable.
-      3. If the variable was previously present and is now gone, the lease
-         holder deleted it on observing a terminal state. Do one direct
-         sacct call to learn the actual final state.
 
-    `saw_variable` guards against the first-iteration race where we read
-    before our own initial _set_status has been observed.
     """
-    saw_variable = False
     while True:
         await _try_update_status(logger, ctx, runner)
         status = await _read_status(runner.hpc, job_id)
-        if status is None and saw_variable:
-            # Variable was deleted by the lease holder — terminal. Fetch the
-            # actual state directly; the variable itself doesn't carry it
-            # since we never persist terminal states.
-            states = await get_slurm_job_states(ctx, [job_id], logger)
-            if isinstance(states, OpError):
-                return states
-            if not states:
-                return OpError(err=RuntimeError(
-                    f"sacct returned no record for job {job_id}"
-                ))
-            final = states[0].state
-            logger.info(f"SLURM job {job_id} reached terminal state: {final}")
-            return final
-        if status is not None:
-            saw_variable = True
+        if status is None:
+            # Variable missing. It should not happen.
+            # Reinsert the variable with a "PENDING" status so the monitor loop can update the status.
+            logger.warning(f"Status variable for job {job_id} on hpc {runner.hpc} is missing. Reinserting with PENDING status.")
+            await _set_status(runner.hpc, job_id, "PENDING")
+        elif status is not None and is_err(status):
+            logger.info(f"SLURM job {job_id} reached terminal error state: {status}")
+            return status
+        elif status is not None and is_terminal_state(status):
+            logger.info(f"SLURM job {job_id} reached terminal state: {status}")
+            return status
         await asyncio.sleep(_POLL_INTERVAL_SECS)
 
 
@@ -360,9 +382,9 @@ async def _try_update_status(
     Uses a double-check-inside-a-semaphore pattern:
       1. Cheap check outside the semaphore — fast path when the lease is
          fresh, so the vast majority of polls skip the lock entirely.
-      2. Acquire a per-HPC concurrency slot (prefect auto-creates the limit
-         with a single slot, giving us a real mutex). Tasks racing here
-         queue briefly until the current sacct call finishes.
+      2. Acquire a per-HPC concurrency slot (we upsert the global limit
+         with a single slot on first use, giving us a real mutex). Tasks
+         racing here queue briefly until the current sacct call finishes.
       3. Re-check the lease inside the lock — the holder we just waited on
          may have already refreshed it. Skip if so.
       4. Write a fresh lease, then do the actual sacct refresh.
@@ -372,7 +394,9 @@ async def _try_update_status(
         return
 
     # 2. Per-HPC critical section.
-    async with _async_concurrency(f"sacct-refresh-{runner.hpc}"):
+    limit_name = f"sacct-refresh-{runner.hpc}"
+    await _ensure_concurrency_limit(limit_name)
+    async with _async_concurrency(limit_name):
         # 3. Double check — another task may have refreshed while we waited.
         if not await _lease_expired(runner.hpc):
             return
@@ -381,23 +405,20 @@ async def _try_update_status(
         # first so any task currently in step 1 sees fresh state and bails.
         await _write_lease(runner.hpc)
 
-        job_ids = await _list_running_job_ids(runner.hpc)
+        logger.info(f"Acquired lease for hpc {runner.hpc} — refreshing SLURM job states")
+
+        job_ids = await _list_running_job_ids(runner.hpc, logger)
         if not job_ids:
             return
+        logger.info(f"Found {len(job_ids)} running jobs for hpc {runner.hpc}: {job_ids}")
         states_res = await get_slurm_job_states(ctx, job_ids, logger)
         if isinstance(states_res, OpError):
             # Don't propagate: this is opportunistic refresh. The next
             # monitor will retry. Surface in the log so the operator can
             # act on chronic failures (e.g. sacct outage, network issue).
-            logger.warning(
-                f"Failed to refresh slurm states for hpc={runner.hpc}: {states_res.err}"
-            )
+            logger.warning(f"Failed to refresh slurm states for hpc={runner.hpc}: {states_res.err}")
             return
         for info in states_res:
-            if is_terminal_state(info.state):
-                # Job is done — remove its variable. Awaiting sbatch_try
-                # detects the deletion and fetches the final state via its
-                # own sacct call. We never persist terminal states.
-                await _delete_status(runner.hpc, info.job_id)
-            else:
-                await _set_status(runner.hpc, info.job_id, info.state)
+            await _set_status(runner.hpc, info.job_id, info.state)
+        logger.info(f"Refreshed {len(states_res)} states for hpc {runner.hpc}")
+                

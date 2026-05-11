@@ -28,26 +28,22 @@ References:
 
 import argparse
 import getpass
-import json
 import logging
 import os
 import re
-import time
 import sys
-from datetime import datetime, timedelta, timezone
+import time
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypedDict
-
-import requests
 
 import pyunicore.client as uc_client
 import pyunicore.credentials as uc_credentials
- 
+import requests
+
 log = logging.getLogger(__name__)
 
 # ─── JSC UNICORE endpoints ───────────────────────────────────────────
-REGISTRY_URL = (
-    "https://unicore.fz-juelich.de/FZJ/rest/registries/default_registry"
-)
+REGISTRY_URL = "https://unicore.fz-juelich.de/FZJ/rest/registries/default_registry"
 
 # Default token lifetime: 30 days (in seconds)
 DEFAULT_LIFETIME = 30 * 24 * 3600  # 2 592 000 seconds
@@ -104,7 +100,11 @@ def create_token(
     """
     log.info(
         "Requesting token from: %s  (lifetime=%ds ~%dd, limited=%s, renewable=%s)",
-        base_url, lifetime, lifetime // 86400, limited, renewable,
+        base_url,
+        lifetime,
+        lifetime // 86400,
+        limited,
+        renewable,
     )
 
     client = uc_client.Client(credential, site_url=base_url, check_authentication=False)
@@ -129,7 +129,8 @@ def create_token(
     except requests.exceptions.HTTPError as e:
         log.error(
             "Could not query %s: HTTP %s — your credential may not be accepted by this site.",
-            base_url, e.response.status_code if e.response is not None else "?",
+            base_url,
+            e.response.status_code if e.response is not None else "?",
         )
         raise
 
@@ -146,8 +147,10 @@ def discover_sites_bearer(token: str) -> SiteMap:
     """Query the registry using a Bearer token; return {site_name: base_url}."""
     return discover_sites(uc_credentials.BearerToken(token=token))
 
-def run_command(client: uc_client.Client, command: str, project: str | None,
-                poll_interval: float) -> None:
+
+def run_command(
+    client: uc_client.Client, command: str, project: str | None, poll_interval: float
+) -> None:
     """Submit a non-batch (interactive) job that runs `command` and stream output."""
     job_desc = {
         "Executable": command,
@@ -155,21 +158,21 @@ def run_command(client: uc_client.Client, command: str, project: str | None,
     }
     if project:
         job_desc["Project"] = project
- 
+
     print(f"  Submitting: {command}")
     job = client.new_job(job_description=job_desc)
     print(f"  Job URL:    {job.resource_url}")
     print(f"  Status:     {job.properties['status']}")
- 
+
     # Poll until finished
     while job.properties["status"] not in ("SUCCESSFUL", "FAILED", "DONE"):
         time.sleep(poll_interval)
         # Force refresh
         job.properties  # noqa – property access triggers refresh
- 
+
     status = job.properties["status"]
     print(f"  Final:      {status}")
- 
+
     # Read stdout / stderr from the working directory
     wd = job.working_dir
     print("\n--- stdout ---")
@@ -178,28 +181,27 @@ def run_command(client: uc_client.Client, command: str, project: str | None,
         print(stdout.raw().read().decode("utf-8", errors="replace"))
     except Exception:
         print("  (empty or unavailable)")
- 
+
     stderr_text = ""
     try:
         stderr_file = wd.stat("/stderr")
         stderr_text = stderr_file.raw().read().decode("utf-8", errors="replace")
     except Exception:
         pass
- 
+
     if stderr_text.strip():
         print("--- stderr ---")
         print(stderr_text)
- 
+
     # Clean up the job on the server
     try:
         job.delete()
     except Exception:
         pass
- 
+
     if status == "FAILED":
         sys.exit(1)
- 
- 
+
 
 def verify_token(base_url: str, token: str) -> bool:
     """
@@ -267,7 +269,8 @@ Examples:
 """,
     )
     parser.add_argument(
-        "-u", "--username",
+        "-u",
+        "--username",
         help="JUDOOR username (if omitted, will be prompted)",
     )
     parser.add_argument(
@@ -291,7 +294,7 @@ Examples:
     parser.add_argument(
         "--site",
         help="Target site name (e.g. JURECA, JUWELS, JUPITER). "
-             "If omitted, you can choose interactively.",
+        "If omitted, you can choose interactively.",
     )
     parser.add_argument(
         "--list-sites",
@@ -299,7 +302,8 @@ Examples:
         help="List available sites and exit",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         default=DEFAULT_TOKEN_FILE,
         help=f"File to save the token to (default: {DEFAULT_TOKEN_FILE})",
     )
@@ -312,24 +316,28 @@ Examples:
         "--check",
         action="store_true",
         help="Check that the saved token (see -o/--output) is still valid. "
-             "No credentials required. Use --site to target a specific site.",
+        "No credentials required. Use --site to target a specific site.",
     )
     parser.add_argument(
-        "-i", "--identity",
+        "-i",
+        "--identity",
         help="Path to SSH private key for authentication (e.g. ~/.ssh/id_rsa). "
-             "If given, authenticates via a locally-signed JWT instead of password.",
+        "If given, authenticates via a locally-signed JWT instead of password.",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable debug logging (shows raw HTTP response details)",
     )
     parser.add_argument(
-        "-p", "--project",
+        "-p",
+        "--project",
         help="Budget/project account to charge (passed as UNICORE 'Project')",
     )
     parser.add_argument(
-        "command", nargs="?",
+        "command",
+        nargs="?",
         help="Shell command to execute (e.g. 'squeue -u $USER')",
     )
     args = parser.parse_args()
@@ -373,7 +381,8 @@ Examples:
             if args.site not in sites:
                 log.error(
                     "Site '%s' not found. Available: %s",
-                    args.site, ", ".join(sorted(sites)),
+                    args.site,
+                    ", ".join(sorted(sites)),
                 )
                 sys.exit(1)
             to_check: SiteMap = {args.site: sites[args.site]}
@@ -454,7 +463,8 @@ Examples:
         if args.site not in sites:
             log.error(
                 "Site '%s' not found. Available: %s",
-                args.site, ", ".join(sorted_names),
+                args.site,
+                ", ".join(sorted_names),
             )
             sys.exit(1)
         chosen = args.site
@@ -493,7 +503,7 @@ Examples:
     token = result["token"]
 
     # ── Output ────────────────────────────────────────────────────────
-    expiry = datetime.now(timezone.utc) + timedelta(seconds=args.lifetime)
+    expiry = datetime.now(UTC) + timedelta(seconds=args.lifetime)
     log.info("Token created successfully!")
     log.info("  Site:      %s", chosen)
     log.info("  Renewable: %s", renewable)
@@ -507,14 +517,16 @@ Examples:
         save_token(token, args.output)
         log.info("To use with pyunicore:")
         log.info("  import pyunicore.credentials as uc_credentials")
-        log.info("  credential = uc_credentials.OIDCToken(token=open('%s').read().strip())", args.output)
+        log.info(
+            "  credential = uc_credentials.OIDCToken(token=open('%s').read().strip())", args.output
+        )
         log.info("To use with UCC (preferences file):")
         log.info("  authentication-method=bearer-token")
         log.info("  token=<contents of %s>", args.output)
         log.info("To use with curl:")
         log.info('  curl -H "Authorization: Bearer $(cat %s)" \\', args.output)
         log.info('       -H "Accept: application/json" \\')
-        log.info('       %s', base_url)
+        log.info("       %s", base_url)
 
     # ── Quick verification ────────────────────────────────────────────
     verify_token(base_url, token)

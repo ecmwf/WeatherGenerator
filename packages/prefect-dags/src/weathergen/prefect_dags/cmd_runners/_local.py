@@ -4,8 +4,8 @@ Local command runner implementation for running shell commands on the local mach
 
 import os
 import subprocess
-from logging import Logger
 from dataclasses import dataclass
+from logging import Logger
 
 from weathergen.prefect_dags.cmd_runners._types import (
     Command,
@@ -22,7 +22,9 @@ class LocalContext:
 
     Nothing is required for a local runner.
     """
+
     pass
+
 
 class LocalCommandRunner(CommandRunner):
     name = "local"
@@ -32,7 +34,9 @@ class LocalCommandRunner(CommandRunner):
         # Merge onto os.environ rather than replacing it: replacing wipes PATH,
         # HOME, etc. and breaks most commands. None inherits the parent env unchanged.
         env = {**os.environ, **cmd.env_vars} if cmd.env_vars is not None else None
-        logger.info(f"Running local command: {cmd.command} with env vars: {cmd.env_vars} and working directory: {cmd.working_directory}")
+        logger.info(
+            f"Running local command: {cmd.command} with env vars: {cmd.env_vars} and working directory: {cmd.working_directory}"
+        )
         try:
             proc = subprocess.run(
                 cmd.command,

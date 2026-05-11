@@ -1,21 +1,26 @@
 """
 Utilities for running commands on a Slurm cluster using Prefect.
 
-On purpose, this code does not depend on prefect itself (no task, etc) to 
+On purpose, this code does not depend on prefect itself (no task, etc) to
 allow portability.
 
 Also, it does not depend on a specific HPC environment or command runner.
 The only primitives are calling sbatch and sacct.
 """
 
-from weathergen.prefect_dags.cmd_runners import Command, CommandResult, CommandRunner, CmdContext, get_command_runner, run_cmd
-from weathergen.prefect_dags.result import OpError, Result, is_err
+import asyncio
 import logging
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, get_args
-import asyncio
+
+from weathergen.prefect_dags.cmd_runners import (
+    CmdContext,
+    Command,
+    run_cmd,
+)
+from weathergen.prefect_dags.result import OpError, Result, is_err
 
 
 @dataclass
@@ -23,6 +28,7 @@ class SlurmJob:
     """
     Represents a Slurm job to be submitted.
     """
+
     job_name: str
     # Stdout file (sbatch --output). May contain Slurm filename patterns like %j.
     stdout: str | Path | None = None
@@ -39,7 +45,9 @@ class SlurmJob:
     time_limit: str | None = None
     slurm_options: dict[str, str] | None = None
 
+
 type SlurmJobId = str
+
 
 @dataclass
 class SlurmSubmissionResult:
@@ -95,23 +103,25 @@ SlurmJobState = Literal[
 _KNOWN_STATES: frozenset[str] = frozenset(get_args(SlurmJobState))
 
 
-_TERMINAL_STATES: frozenset[SlurmJobState] = frozenset({
-    # Slurm's canonical JOB_END set (slurm.h): the job has a final disposition
-    # and will not transition further.
-    "BOOT_FAIL",
-    "CANCELLED",
-    "COMPLETED",
-    "DEADLINE",
-    "FAILED",
-    "NODE_FAIL",
-    "OUT_OF_MEMORY",
-    "PREEMPTED",
-    "TIMEOUT",
-    # Federation: a sibling cluster cancelled the job — it will not run here.
-    "REVOKED",
-    # Launch failed permanently.
-    "LAUNCH_FAILED",
-})
+_TERMINAL_STATES: frozenset[SlurmJobState] = frozenset(
+    {
+        # Slurm's canonical JOB_END set (slurm.h): the job has a final disposition
+        # and will not transition further.
+        "BOOT_FAIL",
+        "CANCELLED",
+        "COMPLETED",
+        "DEADLINE",
+        "FAILED",
+        "NODE_FAIL",
+        "OUT_OF_MEMORY",
+        "PREEMPTED",
+        "TIMEOUT",
+        # Federation: a sibling cluster cancelled the job — it will not run here.
+        "REVOKED",
+        # Launch failed permanently.
+        "LAUNCH_FAILED",
+    }
+)
 
 
 def is_terminal_state(state: SlurmJobState) -> bool:
@@ -123,13 +133,15 @@ def is_terminal_state(state: SlurmJobState) -> bool:
     """
     return state in _TERMINAL_STATES
 
+
 @dataclass
 class SlurmJobInfo:
     job_id: SlurmJobId
     state: SlurmJobState
 
+
 async def get_slurm_job_states(
-        ctx: CmdContext,
+    ctx: CmdContext,
     slurm_job_ids: list[SlurmJobId],
     logger: logging.Logger,
 ) -> Result[list[SlurmJobInfo]]:
@@ -145,12 +157,18 @@ async def get_slurm_job_states(
     # -X : only the main allocation row, skip .batch / .extern / .<step>
     # -n : no header
     # -P : parsable, '|'-delimited, no padding
-    cmd = Command(command=[
-        "sacct",
-        "-j", ",".join(slurm_job_ids),
-        "-o", "JobID,State",
-        "-X", "-n", "-P",
-    ])
+    cmd = Command(
+        command=[
+            "sacct",
+            "-j",
+            ",".join(slurm_job_ids),
+            "-o",
+            "JobID,State",
+            "-X",
+            "-n",
+            "-P",
+        ]
+    )
     res = await run_cmd(ctx, cmd, logger)
     if is_err(res):
         return OpError(err=RuntimeError(f"sacct command failed: {res.err}"))
@@ -163,9 +181,9 @@ async def get_slurm_job_states(
         # State may carry a suffix like "CANCELLED by 12345" — keep the first token
         token = raw_state.split(maxsplit=1)[0] if raw_state else ""
         if token not in _KNOWN_STATES:
-            return OpError(err=ValueError(
-                f"unrecognised slurm state for job {job_id!r}: {raw_state!r}"
-            ))
+            return OpError(
+                err=ValueError(f"unrecognised slurm state for job {job_id!r}: {raw_state!r}")
+            )
         states[job_id] = token  # type: ignore[assignment]
 
     missing = [jid for jid in slurm_job_ids if jid not in states]
@@ -221,7 +239,9 @@ async def await_completion(
             await asyncio.sleep(poll_interval_secs)
 
 
-async def submit_slurm(job: SlurmJob, ctx: CmdContext, logger: logging.Logger) -> Result[SlurmSubmissionResult]:
+async def submit_slurm(
+    job: SlurmJob, ctx: CmdContext, logger: logging.Logger
+) -> Result[SlurmSubmissionResult]:
     """
     Submits a Slurm job using the provided context and logger.
 
@@ -244,13 +264,23 @@ async def submit_slurm(job: SlurmJob, ctx: CmdContext, logger: logging.Logger) -
     """
     # Validate path requirements.
     if job.working_directory is not None and not Path(job.working_directory).is_absolute():
-        return OpError(err=ValueError(f"working_directory must be absolute: {job.working_directory}"))
+        return OpError(
+            err=ValueError(f"working_directory must be absolute: {job.working_directory}")
+        )
     if job.submission_directory is not None and not Path(job.submission_directory).is_absolute():
-        return OpError(err=ValueError(f"submission_directory must be absolute: {job.submission_directory}"))
-    if job.working_directory is None and job.script_path is not None and not Path(job.script_path).is_absolute():
-        return OpError(err=ValueError(
-            f"script_path must be absolute when working_directory is not set: {job.script_path}"
-        ))
+        return OpError(
+            err=ValueError(f"submission_directory must be absolute: {job.submission_directory}")
+        )
+    if (
+        job.working_directory is None
+        and job.script_path is not None
+        and not Path(job.script_path).is_absolute()
+    ):
+        return OpError(
+            err=ValueError(
+                f"script_path must be absolute when working_directory is not set: {job.script_path}"
+            )
+        )
 
     # Resolve stdout path. Always populated so the final job state can be
     # captured even when the caller didn't ask for a specific file.
@@ -261,9 +291,11 @@ async def submit_slurm(job: SlurmJob, ctx: CmdContext, logger: logging.Logger) -
     elif job.script_path is not None:
         stdout_path = Path(job.script_path).parent / f"slurm_job_{job.job_name}_%j.out"
     else:
-        return OpError(err=ValueError(
-            "Cannot determine stdout path: provide stdout, working_directory, or script_path"
-        ))
+        return OpError(
+            err=ValueError(
+                "Cannot determine stdout path: provide stdout, working_directory, or script_path"
+            )
+        )
 
     # Stderr default: merge into stdout (sbatch's behavior when only --output
     # is set). Only emit --error if the caller asked for a separate file.
@@ -291,9 +323,7 @@ async def submit_slurm(job: SlurmJob, ctx: CmdContext, logger: logging.Logger) -
         # token, joined into a shell line via shlex. Then shlex.quote wraps
         # the whole thing as a single argument to --wrap so embedded quotes
         # in the user's command (e.g. inline Python) survive intact.
-        wrap_value = (
-            shlex.join(job.command) if isinstance(job.command, list) else job.command
-        )
+        wrap_value = shlex.join(job.command) if isinstance(job.command, list) else job.command
         cmd_parts.append(f"--wrap={shlex.quote(wrap_value)}")
     else:
         return OpError(err=ValueError("Either script_path or command must be provided in SlurmJob"))
@@ -309,6 +339,7 @@ async def submit_slurm(job: SlurmJob, ctx: CmdContext, logger: logging.Logger) -
 
     # Extract job ID from sbatch output
     job_id = result.stdout.strip().split()[-1]
+
     # Resolve %j (and %J) in the output paths now that we know the job id, so
     # the returned paths point to the actual files Slurm will write.
     def _resolve(p: Path) -> Path:

@@ -16,6 +16,7 @@ from prefect.logging import get_run_logger as _get_run_logger
 
 __all__ = ["get_run_logger"]
 
+
 def get_run_logger() -> logging.Logger:
     """Return the active Prefect run logger as a `logging.Logger`.
 

@@ -20,11 +20,10 @@ first DAG tutorial: https://docs.astronomer.io/learn/get-started-with-airflow
 ![Picture of the ISS](https://www.esa.int/var/esa/storage/images/esa_multimedia/images/2010/02/space_station_over_earth/10293696-3-eng-GB/Space_Station_over_Earth_card_full.jpg)
 """
 
- # This DAG uses the TaskFlow API. See: https://www.astronomer.io/docs/learn/airflow-decorators
+# This DAG uses the TaskFlow API. See: https://www.astronomer.io/docs/learn/airflow-decorators
+import requests
 from airflow.sdk import Asset, dag, task
 from pendulum import datetime, duration
-import requests
-
 
 # -------------- #
 # DAG Definition #
@@ -43,10 +42,9 @@ import requests
         "retry_delay": duration(seconds=5),  # tasks wait 30s in between retries
     },  # default_args are applied to all tasks in a DAG
     tags=["example", "space", "team:eng"],  # add tags in the UI
-    is_paused_upon_creation=False, # start running the DAG as soon as its created
+    is_paused_upon_creation=False,  # start running the DAG as soon as its created
 )
 def example_astronauts():
-
     # ---------------- #
     # Task Definitions #
     # ---------------- #
@@ -84,9 +82,7 @@ def example_astronauts():
                 {"craft": "ISS", "name": "Claude Nicollier"},
             ]
 
-        context["ti"].xcom_push(
-            key="number_of_people_in_space", value=number_of_people_in_space
-        )
+        context["ti"].xcom_push(key="number_of_people_in_space", value=number_of_people_in_space)
         return list_of_people_in_space
 
     @task
@@ -113,9 +109,7 @@ def example_astronauts():
     # This task uses dynamic task mapping to create a variable number of copies
     # of the print_astronaut_craft task at runtime in parallel
     # See: https://www.astronomer.io/docs/learn/dynamic-tasks
-    print_astronaut_craft.partial(greeting="Hello! :)").expand(
-        person_in_space=get_astronauts()
-    )
+    print_astronaut_craft.partial(greeting="Hello! :)").expand(person_in_space=get_astronauts())
 
 
 # Instantiate the DAG

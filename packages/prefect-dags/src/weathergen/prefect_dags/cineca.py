@@ -1,12 +1,10 @@
-"""
-"""
+""" """
 
 from __future__ import annotations
 
 import io
 import logging
 import os
-import subprocess
 from pathlib import Path
 
 import paramiko
@@ -16,7 +14,6 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
     load_ssh_private_key,
 )
-
 
 # ---------------------------------------------------------------------------
 # Default paths – override via env vars or function arguments
@@ -85,9 +82,7 @@ def run_command_cineca(
     logger.info("Using key path: %s", key_path)
 
     if not username:
-        raise ValueError(
-            "Provide 'username' or set the LEONARDO_USER environment variable."
-        )
+        raise ValueError("Provide 'username' or set the LEONARDO_USER environment variable.")
 
     # ------------------------------------------------------------------
     # Load the private key + certificate and connect
@@ -103,7 +98,9 @@ def run_command_cineca(
     with open(key_path, "rb") as f:
         crypto_key = load_ssh_private_key(f.read(), password=None)
     pem_text = crypto_key.private_bytes(
-        Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption(),
+        Encoding.PEM,
+        PrivateFormat.TraditionalOpenSSL,
+        NoEncryption(),
     ).decode()
     pkey = paramiko.ECDSAKey(file_obj=io.StringIO(pem_text))
 
@@ -145,9 +142,7 @@ def run_command_cineca(
         logger.info("Command finished with exit status %d", exit_status)
 
         if exit_status != 0:
-            raise RuntimeError(
-                f"Remote command exited with status {exit_status}:\n{combined}"
-            )
+            raise RuntimeError(f"Remote command exited with status {exit_status}:\n{combined}")
 
         return combined
 
@@ -161,6 +156,7 @@ def run_command_cineca(
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import argparse
+
     logging.basicConfig(level=logging.INFO)
     logger.info("paramiko version: %s", paramiko.__version__)
 
