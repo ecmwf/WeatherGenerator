@@ -23,7 +23,6 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
-from tqdm import tqdm
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
@@ -409,9 +408,7 @@ class ZarrIO:
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
-        for dataset in tqdm(item.datasets):  # pyrefly: ignore[not-iterable]
-            # pyrefly doesn't recognize that tqdm makes item.datasets iterable
-            # until fixed, ignore the warning here
+        for dataset in item.datasets:
             if dataset is not None:
                 self._write_dataset(group, dataset)
 
@@ -530,7 +527,7 @@ class ZarrIO:
 
 class ZipZarrIO(ZarrIO):
     def __enter__(self) -> typing.Self:
-        _logger.info(f"Opening zipstore, read-only: {self.read_only}")
+        _logger.debug(f"Opening zipstore, read-only: {self.read_only}")
         self._store = ZipStore(self._store_path, mode=self._mode, read_only=self.read_only)
         if self.read_only:
             self.data_root = zarr.open_group(store=self._store, mode=self._mode)

@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from multiprocessing import Pool
 
 import numpy as np
@@ -14,28 +15,70 @@ from weathergen.evaluate.export.reshape import detect_grid_type
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
+# Module-level cache for the zarr path and open store — resolved once per worker.
+_CACHED_FNAME_ZARR: str | None = None
+_CACHED_ZIO = None
 
-def get_data_worker(args: tuple) -> xr.DataArray:
+
+def _init_worker(fname_zarr: str) -> None:
+    """Pool initializer: open the zarr store once and keep it for the worker's lifetime."""
+    global _CACHED_FNAME_ZARR, _CACHED_ZIO
+    _CACHED_FNAME_ZARR = fname_zarr
+    _CACHED_ZIO = zarrio_reader(fname_zarr)
+    _CACHED_ZIO.__enter__()
+
+
+def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     """
-    Worker function to retrieve data for a single sample and forecast step.
+    Worker function to retrieve data for a single (sample, fstep) pair.
 
-    Parameters
-    ----------
-        args : Tuple containing (sample, fstep, run_id, stream).
+    Reads the raw zarr arrays as numpy (bypassing dask) and builds a
+    lightweight xarray DataArray that can be pickled back to the main
+    process with all data already in memory.
 
     Returns
     -------
-        xarray DataArray for the specified sample and forecast step.
+        Tuple of (sample, fstep, xarray.DataArray) with data fully in memory.
     """
-    sample, fstep, run_id, stream, dtype, epoch, rank = args
-    fname_zarr = get_model_results(run_id, epoch, rank)
-    with zarrio_reader(fname_zarr) as zio:
-        out = zio.get_data(sample, stream, fstep)
-        if dtype == "target":
-            data = out.target
-        elif dtype == "prediction":
-            data = out.prediction
-    return data
+    sample, fstep, stream, dtype = args
+
+    # Navigate directly to the zarr group for this (sample, stream, fstep, dtype).
+    group_path = f"{sample}/{stream}/{fstep}/{dtype}"
+    ds_group = _CACHED_ZIO.data_root.get(group_path)
+
+    if ds_group is None:
+        raise FileNotFoundError(f"Zarr group '{group_path}' not found in {_CACHED_FNAME_ZARR}")
+
+    # Read raw arrays as numpy — no dask, no chunking overhead.
+    data_arr = np.asarray(ds_group["data"])  # (npoints, nchannels) or (npoints, nchannels, nens)
+    coords_arr = np.asarray(ds_group["coords"])  # (npoints, 2)
+    times_arr = np.asarray(ds_group["times"]).astype("datetime64[ns]")  # (npoints,)
+    channels = list(ds_group.attrs["channels"])
+
+    # Build a lightweight xarray DataArray with the same structure
+    # that process_sample / assign_coords expects:
+    #   dims = [ipoint, channel]
+    #   coords: forecast_step, channel, valid_time, lat, lon
+    npoints = data_arr.shape[0]
+
+    # Handle optional ensemble dimension: squeeze it out if present.
+    if data_arr.ndim == 3 and data_arr.shape[2] == 1:
+        data_arr = data_arr[:, :, 0]
+
+    da_result = xr.DataArray(
+        data_arr,
+        dims=["ipoint", "channel"],
+        coords={
+            "ipoint": np.arange(npoints),
+            "channel": channels,
+            "forecast_step": fstep,
+            "valid_time": ("ipoint", times_arr),
+            "lat": ("ipoint", coords_arr[:, 0]),
+            "lon": ("ipoint", coords_arr[:, 1]),
+        },
+    )
+
+    return (sample, fstep, da_result)
 
 
 def get_fsteps(fsteps, fname_zarr: str):
@@ -52,12 +95,33 @@ def get_fsteps(fsteps, fname_zarr: str):
             Path to the Zarr store.
     Returns
     -------
-        list[str]
+        list[int]
             List of forecast steps to be used for data retrieval.
     """
     with zarrio_reader(fname_zarr) as zio:
         zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
-    return zio_forecast_steps if fsteps is None else sorted([int(fstep) for fstep in fsteps])
+
+    if fsteps is None:
+        return zio_forecast_steps
+
+    requested = sorted([int(fstep) for fstep in fsteps])
+    available_set = set(zio_forecast_steps)
+    valid = [f for f in requested if f in available_set]
+    missing = [f for f in requested if f not in available_set]
+
+    if missing:
+        _logger.warning(
+            f"Requested forecast steps {missing} are not available in the zarr store "
+            f"(available: {zio_forecast_steps}). They will be skipped."
+        )
+
+    if not valid:
+        raise ValueError(
+            f"None of the requested forecast steps {requested} exist in the zarr store. "
+            f"Available forecast steps: {zio_forecast_steps}"
+        )
+
+    return valid
 
 
 def get_samples(samples, fname_zarr: str):
@@ -72,17 +136,33 @@ def get_samples(samples, fname_zarr: str):
             Path to the Zarr store.
     Returns
     -------
-        list[str]
+        list[int]
             List of samples to be used for data retrieval.
     """
     with zarrio_reader(fname_zarr) as zio:
         zio_samples = sorted([int(sample) for sample in zio.samples])
-    samples = (
-        zio_samples
-        if samples is None
-        else sorted([int(sample) for sample in samples if sample in samples])
-    )
-    return samples
+
+    if samples is None:
+        return zio_samples
+
+    requested = sorted([int(sample) for sample in samples])
+    available_set = set(zio_samples)
+    valid = [s for s in requested if s in available_set]
+    missing = [s for s in requested if s not in available_set]
+
+    if missing:
+        _logger.warning(
+            f"Requested samples {missing} are not available in the zarr store "
+            f"(available range: {zio_samples[0]}–{zio_samples[-1]}). They will be skipped."
+        )
+
+    if not valid:
+        raise ValueError(
+            f"None of the requested samples {requested} exist in the zarr store. "
+            f"Available samples: {zio_samples}"
+        )
+
+    return valid
 
 
 def get_channels(channels, stream: str, fname_zarr: str) -> list[str]:
@@ -141,39 +221,69 @@ def get_grid_type(data_type, stream: str, fname_zarr: str) -> str:
 
 
 # TODO: this will change after restructuring the lead time.
-def get_ref_times(fname_zarr, stream, samples, fstep_hours) -> list[np.datetime64]:
+def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], list[np.datetime64]]:
     """
-    Retrieve reference times for the specified samples from the Zarr store.
+    Retrieve source interval boundaries from the source group at forecast step 0.
+
+    Values are derived from the actual ``times`` array of the **source**
+    group at forecast step 0:
+    - ``source_start = min(source_times)``
+    - ``source_end   = max(source_times)``
+
+    The ``source_end`` also serves as the reference (initialisation) time.
+
     Parameters
     ----------
-        fname_zarr : str
-            Path to the Zarr store.
-        stream : str
-            Stream name to retrieve data for (e.g., 'ERA5').
-        samples : list
-            List of samples to process.
-        fstep_hours : np.timedelta64
-            Time difference between forecast steps in hours.
+    fname_zarr : str
+        Path to the Zarr store.
+    stream : str
+        Stream name to retrieve data for (e.g., 'ERA5').
+    samples : list
+        List of samples to process.
+
     Returns
     -------
-        list[np.datetime64]
-            List of reference times corresponding to the samples.
+    tuple[list, list]
+        ``(source_starts, source_ends)`` — one entry per sample,
+        all as ``datetime64[ns]``.
     """
-    ref_times = []
+    _logger.info(f"Retrieving source info for {len(samples)} samples...")
+
+    source_starts = []
+    source_ends = []
     with zarrio_reader(fname_zarr) as zio:
-        zio_forecast_steps = sorted([int(step) for step in zio.forecast_steps])
-        for sample in samples:
-            data = zio.get_data(sample, stream, zio_forecast_steps[0])
-            data = data.target.as_xarray().squeeze()
-            ref_time = data.valid_time.values[0] - fstep_hours * int(data.forecast_step.values)
-            ref_times.append(ref_time)
-    return ref_times
+        for sample in tqdm(samples, desc="Getting source info"):
+            group_path = f"{sample}/{stream}/0/source"
+            source_group = zio.data_root.get(group_path)
+
+            if source_group is None:
+                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
+
+            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
+            source_start = np.min(times_arr)
+            source_end = np.max(times_arr)
+
+            _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
+            source_starts.append(source_start)
+            source_ends.append(source_end)
+
+    return source_starts, source_ends
+
+
+def get_streams(stream, fname_zarr):
+    with zarrio_reader(fname_zarr) as zio:
+        zio_streams = zio.streams
+    streams = zio_streams if stream is None else [stream]
+    return streams
 
 
 def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     """
-    Retrieve data from Zarr store and save one sample to each NetCDF file.
-    Using multiprocessing to speed up data retrieval.
+    Retrieve data from Zarr store and export to the requested format.
+
+    All (sample, fstep) pairs are submitted to the pool at once so that
+    every worker stays busy.  Results are grouped by sample and handed to
+    the parser in sample order.
 
     Parameters
     ----------
@@ -181,36 +291,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         Type of data to retrieve ('target' or 'prediction').
     config : OmegaConf
             Loaded config for cf_parser function.
-
     kwargs:
         Additional keyword arguments for the parser.
-
-    NOTE: it contains the following parameters:
-        run_id : str
-            Run ID to identify the Zarr store.
-        samples : list
-            Sample to process
-        stream : str
-            Stream name to retrieve data for (e.g., 'ERA5').
-        data_type : str
-            Type of data to retrieve ('target' or 'prediction').
-        fsteps : list
-            List of forecast steps to retrieve. If None, retrieves all available forecast steps.
-        channels : list
-            List of channels to retrieve. If None, retrieves all available channels.
-        n_processes : list
-            Number of parallel processes to use for data retrieval.
-        ecpoch : int
-            Epoch number to identify the Zarr store.
-        rank : int
-            Rank number to identify the Zarr store.
-        regrid_degree : float
-            If specified, regrid the data to a regular lat/lon grid with the given degree
-        output_dir : str
-            Directory to save the NetCDF files.
-        output_format : str
-            Output file format (currently only 'netcdf' supported).
-
     """
     kwargs = OmegaConf.create(kwargs)
 
@@ -222,7 +304,6 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     n_processes = kwargs.n_processes
     epoch = kwargs.epoch
     rank = kwargs.rank
-    fstep_hours = np.timedelta64(kwargs.fstep_hours, "h")
 
     if data_type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
@@ -230,30 +311,112 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     fname_zarr = get_model_results(run_id, epoch, rank)
     fsteps = get_fsteps(fsteps, fname_zarr)
     samples = get_samples(samples, fname_zarr)
-    grid_type = get_grid_type(data_type, stream, fname_zarr)
-    channels = get_channels(channels, stream, fname_zarr)
-    ref_times = get_ref_times(fname_zarr, stream, samples, fstep_hours)
+    streams = get_streams(stream, fname_zarr)
+    for stream in streams:
+        grid_type = get_grid_type(data_type, stream, fname_zarr)
+        channels = get_channels(channels, stream, fname_zarr)
+        source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
+        kwargs["grid_type"] = grid_type
+        kwargs["channels"] = channels
+        kwargs["data_type"] = data_type
 
-    kwargs["grid_type"] = grid_type
-    kwargs["channels"] = channels
-    kwargs["data_type"] = data_type
-
-    with Pool(processes=n_processes, maxtasksperchild=5) as pool:
         parser = CfParserFactory.get_parser(config=config, **kwargs)
 
-        for s_idx, sample in enumerate(tqdm(samples)):
-            ref_time = ref_times[s_idx]
+        n_fsteps = len(fsteps)
+        total_tasks = len(samples) * n_fsteps
 
-            step_tasks = [
-                (sample, fstep, run_id, stream, data_type, epoch, rank) for fstep in fsteps
-            ]
+        # Batch size in *samples*. Limits how many samples can be in-flight at once,
+        # bounding peak memory while still allowing read/write overlap within each batch.
+        batch_size = max(1, n_processes * 2)
+        n_batches = (len(samples) + batch_size - 1) // batch_size
 
-            results_iterator = pool.imap_unordered(get_data_worker, step_tasks, chunksize=1)
+        _logger.info(
+            f"Exporting {len(samples)} samples × {n_fsteps} fsteps "
+            f"({total_tasks} total tasks) in {n_batches} batch(es) of up to "
+            f"{batch_size} samples, using {n_processes} workers. "
+            f"Reading and writing are interleaved within each batch."
+        )
 
-            parser.process_sample(
-                results_iterator,
-                ref_time=ref_time,
-            )
+        # Initialise each worker with the zarr path so it is resolved only once.
+        with Pool(
+            processes=n_processes,
+            initializer=_init_worker,
+            initargs=(fname_zarr,),
+        ) as pool:
+            samples_written = 0
 
-        pool.terminate()
-        pool.join()
+            for batch_idx in range(n_batches):
+                batch_start = batch_idx * batch_size
+                batch_end = min(batch_start + batch_size, len(samples))
+                batch_samples = samples[batch_start:batch_end]
+                batch_source_starts = source_starts[batch_start:batch_end]
+                batch_source_ends = source_ends[batch_start:batch_end]
+
+                # Map sample -> index within this batch for ref_times lookup.
+                sample_to_batch_idx = {s: i for i, s in enumerate(batch_samples)}
+
+                batch_tasks = [
+                    (sample, fstep, stream, data_type)
+                    for sample in batch_samples
+                    for fstep in fsteps
+                ]
+
+                _logger.info(
+                    f"Batch {batch_idx + 1}/{n_batches}: "
+                    f"samples {batch_start}–{batch_end - 1} "
+                    f"({len(batch_samples)} samples, {len(batch_tasks)} tasks)"
+                )
+
+                # Interleaved read/write: as soon as all fsteps for a sample
+                # arrive, write it immediately while workers continue reading.
+                sample_results: dict[int, list] = defaultdict(list)
+                batch_written = 0
+
+                pbar = tqdm(
+                    total=len(batch_tasks),
+                    desc=f"  Batch {batch_idx + 1}/{n_batches}",
+                )
+
+                processed_samples = []
+
+                for sample, _fstep, data in pool.imap_unordered(
+                    get_data_worker, batch_tasks, chunksize=1
+                ):
+                    sample_results[sample].append(data)
+                    pbar.update(1)
+
+                    # Check if this sample is complete (all fsteps received).
+                    if len(sample_results[sample]) == n_fsteps:
+                        b_idx = sample_to_batch_idx[sample]
+                        source_start = batch_source_starts[b_idx]
+                        source_end = batch_source_ends[b_idx]
+                        results_iter = iter(sample_results[sample])
+                        processed = parser.process_sample(
+                            results_iter,
+                            ref_time=source_end,
+                            source_interval_start=source_start,
+                            source_interval_end=source_end,
+                        )
+                        processed_samples.append(processed)
+
+                        # Free memory immediately.
+                        del sample_results[sample]
+                        batch_written += 1
+
+                # Only save here if need to merge samples, otherwise saved in process_sample
+                if processed_samples[0] is not None:
+                    parser.save(processed_samples)
+                pbar.close()
+
+                samples_written += batch_written
+                if batch_written != len(batch_samples):
+                    _logger.error(
+                        f"Batch {batch_idx + 1}: expected {len(batch_samples)} "
+                        f"samples but only wrote {batch_written}. "
+                        f"Incomplete: {list(sample_results.keys())}"
+                    )
+
+                # Free any remaining refs before next batch.
+                del sample_results
+
+        _logger.info(f"Export complete. Wrote {samples_written}/{len(samples)} samples.")

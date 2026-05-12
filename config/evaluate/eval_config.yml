@@ -1,14 +1,22 @@
 #optional: if commented out all is taken care of by the default settings
 # NB. global options apply to all run_ids 
+
 #global_plotting_options:
-#  region: ["belgium", "global"]
+#  regions: ["europe", "global"]
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+#  animation_format: "gif" #options: "mp4", "gif"
 #  dpi_val : 300
 #  fps: 2
+#  n_bins: 50 #number of bins for histograms. 
+#  log_x: true #use log scale for x axis in histograms. 
+#  log_y: true #use log scale for y axis in histograms. 
 #  ERA5:
+#    use_datashader: false
 #    marker_size: 2
 #    scale_marker_size: 1
 #    marker: "o"
+#    add_healpix_grid: false
+#    healpix_nside: 4
 #    # alpha: 0.5
 #    2t: 
 #      vmin: 250
@@ -16,6 +24,9 @@
 #    10u:
 #      vmin: -40
 #      vmax: 40
+
+
+# max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
 
 evaluation:
   metrics  : ["rmse", "mae"]
@@ -47,6 +58,7 @@ default_streams:
       forecast_step: [1,3, 2] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
       ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
       plot_maps: true
+      plot_bias: false
       plot_target: false
       plot_histograms: true
       plot_animations: true
@@ -59,6 +71,7 @@ default_streams:
       sample: [2, 3, 0]
       forecast_step: [1,3, 4, 5]
       plot_maps: true
+      plot_bias: false
       plot_target: false
       plot_histograms: true
       plot_animations: true
@@ -81,6 +94,7 @@ run_ids :
 
   jjc9ym62:
     label: "2 steps window"
+    color: "magenta" #optional: if not specified, the color is automatically assigned by the plotting module
     results_base_dir : "./results/"
     epoch: 1 #optional: if not specified epoch 0 (in inference it is always 0) is used
     rank: 2 #optional: if not specified rank 0 is used
@@ -96,6 +110,7 @@ run_ids :
           forecast_step: [1,3, 2]
           ensemble: "mean" 
           plot_maps: true
+          plot_bias: false
           plot_target: false
           plot_histograms: true
           plot_animations: true
@@ -113,6 +128,7 @@ run_ids :
       - c9cg8ql3
     merge_metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
     label: "Merged Results"
+    color: "green" #optional
     results_base_dir : "./results/"
     streams:
       ERA5:

@@ -9,7 +9,7 @@ import importlib.util
 from functools import lru_cache
 from typing import Protocol
 
-from weathergen.common.config import _REPO_ROOT
+from weathergen.common.paths import get_wg_private_path
 
 
 class PlatformEnv(Protocol):
@@ -33,7 +33,7 @@ def get_platform_env() -> PlatformEnv:
     """
     Loads the platform environment module from the private repository.
     """
-    env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
+    env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
     spec = importlib.util.spec_from_file_location("platform_env", env_script_path)
     platform_env = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(platform_env)  # type: ignore

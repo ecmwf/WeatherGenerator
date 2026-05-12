@@ -84,8 +84,8 @@ class StreamData:
         self.output_steps = output_steps
         self.healpix_cells = healpix_cells
 
-        self.source_is_spoof = False
-        self.target_is_spoof = False
+        self.source_is_spoof = [False for _ in range(self.input_steps)]
+        self.target_is_spoof = [False for _ in range(self.output_steps)]
 
         # initialize empty members
         self.sample_idx = idx
@@ -103,7 +103,7 @@ class StreamData:
         self.source_tokens_cells = [None for _ in range(self.input_steps)]
         # length of source tokens per cell (without padding)
         self.source_tokens_lens = [
-            torch.tensor([], dtype=torch.int32) for _ in range(self.input_steps)
+            torch.zeros(self.healpix_cells, dtype=torch.int32) for _ in range(self.input_steps)
         ]
         # unprocessed source (for logging)
         self.source_raw = [None for _ in range(self.input_steps)]
@@ -196,6 +196,8 @@ class StreamData:
         idx = torch.isnan(self.source_tokens_cells[step])
         self.source_tokens_cells[step][idx] = self.mask_value
 
+        self.source_is_spoof[step] = ss_raw.is_spoof
+
     def add_target(
         self,
         fstep: int,
@@ -205,6 +207,7 @@ class StreamData:
         target_coords_raw: torch.Tensor,
         times_raw: torch.Tensor,
         idxs_inv: torch.Tensor,
+        is_spoof: bool,
     ) -> None:
         """
         Add data for target for one input.
@@ -238,6 +241,7 @@ class StreamData:
         self.target_times_raw[fstep] = times_raw
         self.target_coords_raw[fstep] = target_coords_raw
         self.idxs_inv[fstep] = idxs_inv
+        self.target_is_spoof[fstep] = is_spoof
 
     def add_target_values(
         self,
@@ -246,6 +250,7 @@ class StreamData:
         target_coords_raw: torch.Tensor,
         times_raw: torch.Tensor,
         idxs_inv: torch.Tensor,
+        is_spoof: bool,
     ) -> None:
         """
         Add data for target for one input.
@@ -278,11 +283,14 @@ class StreamData:
         self.target_coords_raw[fstep] = target_coords_raw
         self.idxs_inv[fstep] = idxs_inv
 
+        self.target_is_spoof[fstep] = is_spoof
+
     def add_target_coords(
         self,
         fstep: int,
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
+        is_spoof: bool,
     ) -> None:
         """
         Add data for target for one input.
@@ -312,6 +320,8 @@ class StreamData:
 
         self.target_coords[fstep] = target_coords
         self.target_coords_lens[fstep] = target_coords_per_cell
+
+        self.target_is_spoof[fstep] = is_spoof
 
     def target_empty(self) -> bool:
         """
@@ -350,6 +360,46 @@ class StreamData:
             torch.tensor([s.sum() if len(s) > 0 else 0 for s in self.source_tokens_lens]).sum() == 0
         )
 
+    def target_nan(self) -> bool:
+        """
+        Check if target for stream is all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if target is empty for stream, else False
+        """
+
+        is_nan = torch.isnan(torch.cat(self.target_tokens))
+        return is_nan.all() if len(is_nan) > 0 else False
+
+    def source_nan(self) -> bool:
+        """
+        Check if source for stream is all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if source is all NaN for stream, else False
+        """
+
+        is_nan = torch.tensor(
+            [
+                torch.isnan(s.coords).all() or torch.isnan(s.data).all()
+                for s in self.source_raw
+                if s is not None
+            ]
+        )
+        return is_nan.all() if len(is_nan) > 0 else False
+
     def empty(self):
         """
         Test if stream (source and target) are empty
@@ -366,14 +416,30 @@ class StreamData:
 
         return self.source_empty() and self.target_empty()
 
-    def is_spoof(self) -> bool:
+    def nan(self) -> bool:
         """
-        Either source or target is spoof
+        Check if stream (source and target) are all NaN
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        boolean
+            True if stream is all NaN
         """
-        return self.source_is_spoof or self.target_is_spoof
+
+        return self.source_nan() and self.target_nan()
+
+    def is_spoof(self, step: int) -> bool:
+        """
+        Either source or target at step is spoof
+        """
+        return any(self.source_is_spoof) or self.target_is_spoof[step]
 
 
-def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderData:
+def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderData:
     """
     Spoof an instance from data_reader_base.ReaderData instance.
     other should be such an instance.
@@ -388,7 +454,7 @@ def spoof(healpix_level: int, datetime, geoinfo_size, mean_of_data) -> IOReaderD
     coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
     geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
 
-    data = np.expand_dims(mean_of_data.astype(np.float32), axis=0).repeat(coords.shape[0], axis=0)
+    data = np.zeros((coords.shape[0], num_channels), dtype=np.float32)
     datetimes = np.array(datetime).repeat(coords.shape[0])
 
     n_datapoints = len(data)

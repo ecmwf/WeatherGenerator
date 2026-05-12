@@ -1,3 +1,5 @@
+# pylint: disable=bad-builtin
+
 import logging
 from pathlib import Path
 from typing import Any
@@ -7,7 +9,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import Regridder, find_pl
+from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_points
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -53,6 +55,7 @@ class NetcdfParser(CfParser):
         self,
         fstep_iterator_results: iter,
         ref_time: np.datetime64,
+        **kwargs,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -70,7 +73,11 @@ class NetcdfParser(CfParser):
             if result is None:
                 continue
 
-            result = result.as_xarray().squeeze()
+            # result is already a materialized xarray DataArray (built in the worker).
+            if not isinstance(result, xr.DataArray):
+                result = result.as_xarray().squeeze()
+            if "channel" not in result.indexes:
+                result = result.expand_dims("channel")
             result = result.sel(channel=self.channels)
             result = self.reshape(result)
             da_fs.append(result)
@@ -79,6 +86,11 @@ class NetcdfParser(CfParser):
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
 
         if da_fs:
+            if len(da_fs) > 1:
+                assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
+                    "Grid points between forecast steps are not consistent."
+                    "Check that inference was not performed with masking"
+                )
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
@@ -124,26 +136,30 @@ class NetcdfParser(CfParser):
         grid_type = self.grid_type
 
         # Original logic
-        var_dict, pl = find_pl(data.channel.values)
+        var_dict = find_pl(data.channel.values)
         data_vars = {}
 
-        for new_var, old_vars in var_dict.items():
-            if len(old_vars) > 1:
+        for new_var, pls in var_dict.items():
+            if pls[0] is not None:
+                old_vars = [f"{new_var}_{p}" for p in pls]
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
                     dims=["ipoint", "pressure_level"],
+                    coords={"pressure_level": pls},
                 )
             else:
                 data_vars[new_var] = xr.DataArray(
-                    data.sel(channel=old_vars[0]).values,
+                    data.sel(channel=new_var).values,
                     dims=["ipoint"],
                 )
 
         reshaped_dataset = xr.Dataset(data_vars)
         reshaped_dataset = reshaped_dataset.assign_coords(
             ipoint=data.coords["ipoint"],
-            pressure_level=pl,
         )
+        # order using pressure_level coord
+        if "pressure_level" in reshaped_dataset.coords:
+            reshaped_dataset = reshaped_dataset.sortby("pressure_level")
 
         if grid_type == "regular":
             # Use original reshape logic for regular grids
@@ -270,7 +286,7 @@ class NetcdfParser(CfParser):
         else:
             variables = self._attrs_regular_grid(ds)
 
-        dataset = xr.merge(variables.values())
+        dataset = xr.merge(variables.values(), compat="no_conflicts")
         dataset.attrs = ds.attrs
         return dataset
 
@@ -298,7 +314,9 @@ class NetcdfParser(CfParser):
             ds["forecast_reference_time"].encoding.update(time_encoding)
 
         if "forecast_period" in ds.coords:
-            ds["forecast_period"].encoding.update({"coordinates": "forecast_reference_time"})
+            ds["forecast_period"].attrs.update(
+                {"coordinates": "forecast_reference_time", "dtype": "timedelta64[ns]"}
+            )
 
         return ds
 
@@ -496,7 +514,7 @@ class NetcdfParser(CfParser):
             xarray Dataset with CF conventions added to attributes.
         """
         # ds = ds.copy()
-        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id} using stream {self.stream}"
+        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id}"
         ds.attrs["institution"] = "WeatherGenerator Project"
         ds.attrs["source"] = "WeatherGenerator v0.0"
         ds.attrs["history"] = (
@@ -504,8 +522,7 @@ class NetcdfParser(CfParser):
             + np.datetime_as_string(np.datetime64("now"), unit="s")
         )
         ds.attrs["Conventions"] = "CF-1.12"
-        # drop stream now it's in title
-        ds = ds.drop_vars("stream")
+
         return ds
 
     def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
