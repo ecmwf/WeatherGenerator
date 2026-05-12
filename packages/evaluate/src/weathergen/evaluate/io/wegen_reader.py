@@ -306,7 +306,7 @@ class WeatherGenReader(Reader):
                 if stream.get("name") == stream_name:
                     return stream.get(key, default)
         else:
-            return streams[stream_name].get(key, default)
+            return streams.get(stream_name, {}).get(key, default)
 
         return default
 

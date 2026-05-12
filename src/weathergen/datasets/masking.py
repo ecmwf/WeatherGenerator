@@ -197,7 +197,7 @@ class Masker:
 
         return stream_cfg
 
-    def build_effective_masking_cfgs(self, streams: list[Config], mode_cfg):
+    def build_effective_masking_cfgs(self, streams: Config, mode_cfg):
         """Build effective masking configs for all streams."""
         cfgs = {}
         for stream_info, stream_name in streams.items():
