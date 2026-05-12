@@ -181,12 +181,7 @@ def rotary_pos_emb_2d(q, k, coords, base=10000.0, unsqueeze_dim=1):
     cos, sin = rotary_embedding_2d(coords, q.shape[-1], base=base)
     return apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=unsqueeze_dim)
 
-
-####################################################################################################
 # Spherical RoPE
-####################################################################################################
-
-
 def _max_supported_spherical_band(dim_embed: int, num_heads: int) -> int:
     head_dim = dim_embed // num_heads
     max_complex = (head_dim - (head_dim % 2)) // 2
@@ -246,9 +241,9 @@ def rotary_pos_emb_spherical(
 ):
     """Apply spherical-harmonic RoPE-style modulation to q/k using precomputed coefficients.
 
-    Both q and k are multiplied by Y_lm(omega) at their respective positions. The real dot product
-    in attention naturally conjugates k, producing the addition-theorem kernel
-    sum_m Y_lm(omega_r) Y_lm*(omega_s) q_m k_m*.
+    Both q and k are multiplied by Y_lm(omega) at their respective positions. Under the real-pair
+    representation of complex modes, the attention dot product is equivalent to
+    Re[sum_m Y_lm(omega_r) Y_lm*(omega_s) q_m k_m*].
     """
 
     coeff_real, coeff_imag = coeffs
