@@ -58,6 +58,12 @@ def write_output(
             # there)
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 preds = model_output.get_physical_prediction(t_idx, sname)
+                # handle forcing streams or if sample is empty
+                if preds is None:
+                    targets = target_aux_out.physical[t_idx][sname]["target"]
+                    # preds are empty so create copy of target and add ensemble dimension
+                    assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
+                    preds = [target.clone().unsqueeze(0) for target in targets]
                 preds_shape = preds[0].shape
                 # for-loop to make sure we have a consistent number of samples
                 preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in preds]

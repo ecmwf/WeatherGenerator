@@ -61,6 +61,8 @@ def init_model_and_shard(
     # TODO: this should be handled in the encoder to be close where q_cells is defined
     if "q_cells" in cf.freeze_modules:
         model.encoder.q_cells.requires_grad = False
+    if "q_aux" in cf.freeze_modules:
+        model.encoder.q_aux.requires_grad = False
 
     if with_ddp and not with_fsdp:
         # create DDP model if running without FSDP
@@ -115,6 +117,16 @@ def init_model_and_shard(
         for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
+
+        if model.deep_ssl_fusion is not None:
+            for module in model.deep_ssl_fusion.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
+
+        if model.deep_ssl_level_projections is not None:
+            for module in model.deep_ssl_level_projections.modules():
+                if isinstance(module, modules_to_shard):
+                    fully_shard(module, **fsdp_kwargs)
 
         full_precision_fsdp_kwargs = {
             "mp_policy": (

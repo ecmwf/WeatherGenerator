@@ -83,6 +83,7 @@ class LossCalculator:
         preds: ModelOutput,
         targets_and_aux: TargetAuxOutput,
         metadata: dict,
+        istep: int = 0,
     ):
         losses_all = defaultdict(dict)
         stddev_all = defaultdict(dict)
@@ -92,7 +93,7 @@ class LossCalculator:
             for weight, calculator in calc_term:
                 if weight > 0.0:
                     loss_values = calculator.compute_loss(
-                        preds=preds, targets=target, metadata=metadata
+                        preds=preds, targets=target, metadata=metadata, istep=istep
                     )
                     loss = loss + weight * loss_values.loss
                     losses_all[calculator.name] = loss_values.losses_all
