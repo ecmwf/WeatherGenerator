@@ -62,7 +62,7 @@ fe_with_qk_lnorm: True
 fe_diffusion_model: True
 fe_diffusion_model_conditioning: "date_time" # options: "date_time"
 # Calendar conditioning mode: "day_of_year", "time_of_day", or "both"
-fe_diffusion_calendar_mode: "both"  # options: "both", "day_of_year", "time_of_day"
+fe_diffusion_calendar_mode: "time_of_day"  # options: "both", "day_of_year", "time_of_day"
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -265,7 +265,7 @@ validation_config:
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 1,
+    num_samples: 0,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
