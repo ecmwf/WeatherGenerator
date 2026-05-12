@@ -148,7 +148,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             elif self.cf.stage == "inference":
                 if fstep is None:
                     raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
-
+                self.cur_token = tokens.detach() if tokens is not None else None
                 return self.inference_forward(
                     fstep=fstep,
                     num_steps=num_steps,
