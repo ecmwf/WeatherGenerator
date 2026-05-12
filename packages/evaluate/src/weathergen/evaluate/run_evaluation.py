@@ -372,8 +372,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     )
 
     # summary plots
-    if scores_dict and cfg.evaluation.get("summary_plots", False):
-        _logger.info("Started creating summary plots...")
+    if scores_dict:
         plot_summary(cfg, scores_dict, summary_dir)
 
 
