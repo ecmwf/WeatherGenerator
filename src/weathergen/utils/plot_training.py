@@ -595,12 +595,11 @@ def plot_loss_per_run(
             x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
             # find the cols of the requested metric (e.g. mse) for all streams
             data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
-            data_cols = []
             for col in run_data_mode.columns:
                 col_split = col.split(".")
                 if len(col_split) < 4:
                     continue
-                if col_split[2].lower() == err.lower() and col_split[3] == channels:
+                if col_split[2].lower() == err.lower() and col_split[3] in channels:
                     data_cols += [col]
 
             data_cols = list(data_cols)
@@ -841,7 +840,6 @@ def plot_train(args=None):
         streams.remove("all")
 
     # read logged data
-
     runs_data = [
         TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
         for run_id in runs_ids
