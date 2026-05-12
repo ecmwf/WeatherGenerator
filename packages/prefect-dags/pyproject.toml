@@ -8,6 +8,7 @@ dependencies = [
     "weathergen-common-core",
     "prefect>=3.7.0",
     "paramiko>=3.1",
+    "pyfirecrest>=3.7",
     "dacite",
 ]
 

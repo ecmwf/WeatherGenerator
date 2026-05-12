@@ -11,6 +11,7 @@ from weathergen.prefect_dags.cmd_runners._exec_cmd import CmdContext, get_comman
 from weathergen.prefect_dags.cmd_runners._generic import GenericContext, GenericSshCommandRunner
 from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
 from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
+from weathergen.prefect_dags.cmd_runners._cscs_firecrest import CscsFirecrestCommandRunner, CscsFirecrestContext, CscsHpc
 
 __all__ = [
     "Command",
@@ -25,4 +26,7 @@ __all__ = [
     "run_cmd",
     "CmdContext",
     "get_command_runner",
+    "CscsFirecrestCommandRunner",
+    "CscsFirecrestContext",
+    "CscsHpc",
 ]

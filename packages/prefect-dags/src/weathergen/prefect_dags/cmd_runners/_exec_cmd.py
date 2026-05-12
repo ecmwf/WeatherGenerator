@@ -12,12 +12,13 @@ from weathergen.prefect_dags.cmd_runners._generic import GenericContext, Generic
 from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
 from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
 from weathergen.prefect_dags.result import OpError, Result, is_err
+from weathergen.prefect_dags.cmd_runners._cscs_firecrest import CscsFirecrestCommandRunner, CscsFirecrestContext, CscsHpc
 
 """
 The context contains all the information necessary to run a command
 on a given environment (e.g. local machine, remote server, etc.).
 """
-type CmdContext = LocalContext | GenericContext | EcmwfSshContext
+type CmdContext = LocalContext | GenericContext | EcmwfSshContext | CscsFirecrestContext
 
 
 def get_command_runner(context: CmdContext) -> CommandRunner | Exception:
@@ -28,6 +29,8 @@ def get_command_runner(context: CmdContext) -> CommandRunner | Exception:
             return EcmwfSshCommandRunner(context)
         case GenericContext():
             return GenericSshCommandRunner(context)
+        case CscsFirecrestContext():
+            return CscsFirecrestCommandRunner(context)
         case _:
             return ValueError(f"Unsupported context type: {type(context)}")
 
