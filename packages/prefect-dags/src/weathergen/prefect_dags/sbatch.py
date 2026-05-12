@@ -120,7 +120,7 @@ def sbatch_try(
     context: CmdContext,
 ) -> Result[SlurmJobResult]:
     """
-     Same as `sbatch`, but returns a Result instead of throwing on failure. 
+    Same as `sbatch`, but returns a Result instead of throwing on failure.
     """
     return run_coro_as_sync(_sbatch_try(job, context))
 
@@ -199,6 +199,7 @@ _LOCK_ADAPTER = TypeAdapter(_SlurmJobMonitoringLock)
 # ---------------------------------------------------------------------------
 # Variable naming + helpers
 # ---------------------------------------------------------------------------
+
 
 async def _sbatch_try(
     job: SlurmJob,
@@ -377,7 +378,9 @@ async def _wait_completion_single(
         if status is None:
             # Variable missing. It should not happen.
             # Reinsert the variable with a "PENDING" status so the monitor loop can update the status.
-            logger.warning(f"Status variable for job {job_id} on hpc {runner.hpc} is missing. Reinserting with PENDING status.")
+            logger.warning(
+                f"Status variable for job {job_id} on hpc {runner.hpc} is missing. Reinserting with PENDING status."
+            )
             await _set_status(runner.hpc, job_id, "PENDING")
         elif status is not None and is_err(status):
             logger.info(f"SLURM job {job_id} reached terminal error state: {status}")
@@ -437,4 +440,3 @@ async def _try_update_status(
         for info in states_res:
             await _set_status(runner.hpc, info.job_id, info.state)
         logger.info(f"Refreshed {len(states_res)} states for hpc {runner.hpc}")
-                

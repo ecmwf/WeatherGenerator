@@ -3,7 +3,7 @@ Wrapper around the prefect task and flow decorators to provide sensible
 defaults for machine learning.
 
 The code is mostly boilerplate:
-- `task` wrapper: 
+- `task` wrapper:
     sets cache_policy, cache_expiration, retries,
     enforces the presence of `cache_key_fn` and `persist_result` for cache replay to work.
 - `flow` wrapper:
@@ -20,7 +20,7 @@ import json
 import types
 from collections.abc import Callable, Iterable
 from datetime import timedelta
-from typing import Any, Literal, Optional, Union, get_args, get_origin, get_type_hints, overload
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints, overload
 
 import prefect
 import prefect.runtime.flow_run
@@ -86,31 +86,29 @@ def task[**P, R](
     __fn: Literal[None] = None,
     /,
     *,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
-    tags: Optional[Iterable[str]] = None,
-    version: Optional[str] = None,
-    cache_policy: Union[CachePolicy, type[NotSet]] = NotSet,
-    cache_expiration: Optional[datetime.timedelta] = None,
-    task_run_name: Optional[TaskRunNameValueOrCallable] = None,
-    retries: Optional[int] = None,
-    retry_delay_seconds: Union[
-        float, int, list[float], Callable[[int], list[float]], None
-    ] = None,
-    retry_jitter_factor: Optional[float] = None,
-    result_storage: Optional[ResultStorage] = None,
-    result_storage_key: Optional[str] = None,
-    result_serializer: Optional[ResultSerializer] = None,
+    name: str | None = None,
+    description: str | None = None,
+    tags: Iterable[str] | None = None,
+    version: str | None = None,
+    cache_policy: CachePolicy | type[NotSet] = NotSet,
+    cache_expiration: datetime.timedelta | None = None,
+    task_run_name: TaskRunNameValueOrCallable | None = None,
+    retries: int | None = None,
+    retry_delay_seconds: float | int | list[float] | Callable[[int], list[float]] | None = None,
+    retry_jitter_factor: float | None = None,
+    result_storage: ResultStorage | None = None,
+    result_storage_key: str | None = None,
+    result_serializer: ResultSerializer | None = None,
     cache_result_in_memory: bool = True,
-    timeout_seconds: Union[int, float, None] = None,
-    log_prints: Optional[bool] = None,
-    refresh_cache: Optional[bool] = None,
-    on_completion: Optional[list[StateHookCallable]] = None,
-    on_failure: Optional[list[StateHookCallable]] = None,
-    on_running: Optional[list[StateHookCallable]] = None,
-    retry_condition_fn: Optional[RetryConditionCallable] = None,
+    timeout_seconds: int | float | None = None,
+    log_prints: bool | None = None,
+    refresh_cache: bool | None = None,
+    on_completion: list[StateHookCallable] | None = None,
+    on_failure: list[StateHookCallable] | None = None,
+    on_running: list[StateHookCallable] | None = None,
+    retry_condition_fn: RetryConditionCallable | None = None,
     viz_return_value: Any = None,
-    asset_deps: Optional[list[Union[str, Asset]]] = None,
+    asset_deps: list[str | Asset] | None = None,
 ) -> Callable[[Callable[P, R]], Task[P, R]]: ...
 def task(__fn: Any = None, /, **kwargs: Any) -> Any:
     # Apply framework defaults only when the caller didn't specify a value.
@@ -180,8 +178,7 @@ def _log_rerun_info(rerun_token: str | None) -> None:
     log = get_run_logger()
     if rerun_token is None:
         log.info(
-            "Fresh run. To resume if interrupted, rerun with "
-            f"rerun_token='{_short_run_id()}'."
+            f"Fresh run. To resume if interrupted, rerun with rerun_token='{_short_run_id()}'."
         )
     else:
         log.info(f"Resuming with rerun_token={rerun_token!r}.")
@@ -201,24 +198,24 @@ def flow[**P, R](
     __fn: Literal[None] = None,
     /,
     *,
-    name: Optional[str] = None,
-    version: Optional[str] = None,
-    retries: Optional[int] = None,
-    retry_delay_seconds: Optional[Union[int, float]] = None,
-    task_runner: Optional[TaskRunner[PrefectFuture[Any]]] = None,
-    description: Optional[str] = None,
-    timeout_seconds: Union[int, float, None] = None,
+    name: str | None = None,
+    version: str | None = None,
+    retries: int | None = None,
+    retry_delay_seconds: int | float | None = None,
+    task_runner: TaskRunner[PrefectFuture[Any]] | None = None,
+    description: str | None = None,
+    timeout_seconds: int | float | None = None,
     validate_parameters: bool = True,
-    persist_result: Optional[bool] = None,
-    result_storage: Optional[ResultStorage] = None,
-    result_serializer: Optional[ResultSerializer] = None,
+    persist_result: bool | None = None,
+    result_storage: ResultStorage | None = None,
+    result_serializer: ResultSerializer | None = None,
     cache_result_in_memory: bool = True,
-    log_prints: Optional[bool] = None,
-    on_completion: Optional[list[FlowStateHook[..., Any]]] = None,
-    on_failure: Optional[list[FlowStateHook[..., Any]]] = None,
-    on_cancellation: Optional[list[FlowStateHook[..., Any]]] = None,
-    on_crashed: Optional[list[FlowStateHook[..., Any]]] = None,
-    on_running: Optional[list[FlowStateHook[..., Any]]] = None,
+    log_prints: bool | None = None,
+    on_completion: list[FlowStateHook[..., Any]] | None = None,
+    on_failure: list[FlowStateHook[..., Any]] | None = None,
+    on_cancellation: list[FlowStateHook[..., Any]] | None = None,
+    on_crashed: list[FlowStateHook[..., Any]] | None = None,
+    on_running: list[FlowStateHook[..., Any]] | None = None,
 ) -> Callable[[Callable[P, R]], Flow[P, R]]: ...
 def flow(__fn: Any = None, /, **kwargs: Any) -> Any:
     """
