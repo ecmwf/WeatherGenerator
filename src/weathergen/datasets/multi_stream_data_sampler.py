@@ -170,7 +170,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for fname in stream_info["filenames"]:
 
                 filename = stream_info.get("filenames")
-                if type(filename) is omegaconf.dictconfig.DictConfig: # and "join" in filename:
+                if type(filename) is omegaconf.dictconfig.DictConfig:
                     # join case, valid for anemoi only
                     if stream_info["type"] != "anemoi":
                         msg = (
