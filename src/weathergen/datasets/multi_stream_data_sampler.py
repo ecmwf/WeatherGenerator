@@ -155,6 +155,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     dataset = DataReaderObs
                 case "anemoi":
                     dataset = DataReaderAnemoi
+                    from anemoi.datasets import add_dataset_path
                 case "fesom":
                     dataset = DataReaderFesom
                 case type_name:
@@ -169,7 +170,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             for fname in stream_info["filenames"]:
 
                 filename = stream_info.get("filenames")
-                if type(filename) is omegaconf.dictconfig.DictConfig and "join" in filename:
+                if type(filename) is omegaconf.dictconfig.DictConfig: # and "join" in filename:
                     # join case, valid for anemoi only
                     if stream_info["type"] != "anemoi":
                         msg = (
@@ -180,21 +181,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     # Convert OmegaConf DictConfig to dict
                     filename = dict(filename)
                     # Prepend datapath to each dataset
-                    for entry in filename['join']:
-                        datapath=None
-                        for path in cf.data_paths:
-                            filename_tmp = pathlib.Path(path) / entry['dataset']
-                            if filename_tmp.exists():
-                                datapath=pathlib.Path(path)
-                                break
-                        if datapath is None:
-                            msg = (
-                                f"Did not find input data for {stream_info['type']} "
-                                f"stream '{stream_info['name']}'"
-                            )
-                            raise FileNotFoundError(msg)
-
-                        entry['dataset'] = str(datapath / entry['dataset'])
+                    for path in cf.data_paths:
+                        add_dataset_path(path)
                 else:
                     # normal list case
                     fname = pathlib.Path(fname)
