@@ -508,9 +508,9 @@ def ratio_plot_metric_region(
                 prefix=[metric, region], middle=sorted(set(run_ids)), suffix=[stream]
             )
             plotter.ratio_plot(
-                selected_data,
-                run_ids,
-                labels,
+                data=selected_data,
+                run_ids=run_ids,
+                labels=labels,
                 y_dim=metric,
                 tag=name,
                 print_summary=print_summary,

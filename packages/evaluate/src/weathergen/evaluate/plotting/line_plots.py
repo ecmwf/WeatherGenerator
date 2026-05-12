@@ -454,7 +454,6 @@ class LinePlots:
         data: xr.DataArray | list,
         run_ids: list[str],
         labels: str | list,
-        x_dim: str | list[str],
         y_dim: str = "value",
         tag: str = "",
         print_summary: bool = False,
@@ -475,8 +474,6 @@ class LinePlots:
             Label or list of labels for the legend.
         tag : str
             Tag appended to the plot title and filename.
-        x_dim : str
-            Dimension used for the x-axis (default ``'forecast_step'``).
         y_dim : str
             Dimension used for the y-axis label (default ``'value'``).
         print_summary : bool
@@ -517,8 +514,6 @@ class LinePlots:
         ref_channel_names = sorted(channel_names, key=channel_sort_key)
 
         ref = align_labels(ref_raw, ref_channel_names, "channel").reindex(channel=ref_channel_names)
-
-        fig = plt.figure(figsize=(max(12, len(ref_channel_names) * 0.25), 6))
 
         # Build a run_id → color map, skipping the baseline
         color_map = {}
