@@ -457,6 +457,7 @@ class Trainer(TrainerBase):
 
         apply_fct_to_blocks(self.model, cf.freeze_modules, set_to_eval)
 
+        self.dataset.train_step = self.cf.general.istep
         dataset_iter = iter(self.data_loader)
 
         self.optimizer.zero_grad()

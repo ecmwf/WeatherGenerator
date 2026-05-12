@@ -273,6 +273,9 @@ class ModelBatch:
     # device of the tensors in the batch
     device: str | torch.device
 
+    # logical training step used while building the batch
+    train_step: int | None
+
     def __init__(
         self,
         streams: dict,
@@ -280,6 +283,7 @@ class ModelBatch:
         num_target_samples: int,
         output_offset,
         output_steps,
+        train_step: int | None = None,
     ) -> None:
         """ """
 
@@ -287,6 +291,7 @@ class ModelBatch:
         self.output_offset = output_offset
         self.output_steps = output_steps
         self.output_idxs = list(range(output_offset, output_steps))
+        self.train_step = train_step
 
         self.source_samples = BatchSamples(
             streams, num_source_samples, output_steps, self.output_idxs
