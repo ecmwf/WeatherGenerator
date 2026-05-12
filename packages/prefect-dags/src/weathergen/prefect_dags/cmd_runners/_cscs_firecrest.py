@@ -1,0 +1,311 @@
+"""
+Command runner for the CSCS FirecREST v2 API.
+
+FirecREST has no synchronous "exec" endpoint — every command must go through
+Slurm. This runner wraps the requested command in a single-task batch script,
+submits it via pyfirecrest, blocks on `wait_for_job` until the job completes,
+then reads stdout / stderr / exit code from files written into a scratch
+directory on the cluster.
+
+# Usage instructions
+
+- Obtain an API token from https://docs.cscs.ch/access/firecrest/
+- `scratch_dir` is normally left unset: it's discovered automatically from
+  the cluster's `defaultWorkDir` filesystem combined with the authenticated
+  username (e.g. `/capstor/scratch/cscs/<username>`).
+"""
+
+import shlex
+import uuid
+from dataclasses import dataclass
+from logging import Logger
+from pathlib import Path
+from typing import Literal
+
+import firecrest as f7t
+
+from weathergen.prefect_dags.cmd_runners._types import (
+    Command,
+    CommandResult,
+    CommandRunner,
+)
+from weathergen.prefect_dags.result import OpError, Result
+
+type CscsHpc = Literal["santis", "alps"]
+
+
+@dataclass
+class CscsFirecrestContext:
+    """
+    Connection info for CSCS FirecREST v2.
+
+    `hpc` is the FirecREST `system_name` (e.g. "santis", "alps").
+    `api_token` / `api_token_path`: provide exactly one. The token is a
+        pre-issued bearer string from the CSCS user portal; we wrap it for
+        pyfirecrest instead of going through the OAuth2 client-credentials
+        flow.
+    `firecrest_url` is the FirecREST v2 base URL. When None (the default),
+        it's derived from `hpc`: santis → `/cw/`, alps → `/hpc/`. Override
+        for ML-platform machines (`/ml/`) or non-prod endpoints.
+    `scratch_dir`: when None (the default), the runner asks FirecREST for
+        the cluster's `defaultWorkDir` filesystem and the authenticated
+        username, and stages files at `<defaultWorkDir>/<username>`. Set
+        explicitly to override.
+    `partition` / `account` are optional Slurm directives; some CSCS systems
+        require an account.
+    `wall_time` is the Slurm `--time` value (HH:MM:SS) for the wrapper job.
+        Keep it small — short commands shouldn't sit in long queues.
+    `wait_timeout` is the maximum seconds to wait for completion; past that
+        the job is cancelled by pyfirecrest.
+    """
+
+    hpc: CscsHpc
+    # TODO directly putting an API token does not work.
+    # These tokens are not working correctly
+    # Exactly one of these two must be provided.
+    api_token: str | None = None
+    api_token_path: str | Path | None = None
+    # The rest is mostly automatic.
+    firecrest_url: str | None = None
+    scratch_dir: str | None = None
+    partition: str | None = None
+    account: str | None = None
+    wall_time: str = "00:30:00"
+    wait_timeout: float = 1800.0
+
+
+class _BearerTokenAuth:
+    """
+    Adapter so a pre-issued bearer token satisfies pyfirecrest's authorization
+    protocol (any object with `get_access_token() -> str`). `ClientCredentialsAuth`
+    drives the OAuth2 flow; when the caller already has a token, this avoids
+    re-issuing one on every request.
+    """
+
+    def __init__(self, token: str):
+        self._token = token
+
+    def get_access_token(self) -> str:
+        return self._token
+
+
+class CscsFirecrestCommandRunner(CommandRunner):
+    """
+    CommandRunner that executes commands on CSCS clusters via the FirecREST v2 API.
+
+    Each `run()` submits a single-task Slurm job wrapping the command, blocks
+    on `wait_for_job`, then fetches output via `view()` on the cluster.
+    """
+
+    name = "cscs_firecrest"
+    _ctx: CscsFirecrestContext
+    _client: f7t.v2.Firecrest
+    # Memoized scratch directory. Discovery hits two REST endpoints
+    # (`systems` + `userinfo`) and the answer never changes for a given
+    # context, so resolve once and cache.
+    _resolved_scratch_dir: str | None
+
+    def __init__(self, context: CscsFirecrestContext):
+        self._ctx = context
+        self.hpc = context.hpc
+        token = _load_token(context)
+        print("token", token)
+        self._client = f7t.v2.Firecrest(
+            firecrest_url=context.firecrest_url or _default_firecrest_url(context.hpc),
+            authorization=_BearerTokenAuth(token),
+        )
+        self._resolved_scratch_dir = context.scratch_dir
+
+    def run(self, cmd: Command, logger: Logger) -> Result[CommandResult]:
+        try:
+            return self._run(cmd, logger)
+        except Exception as e:
+            # Per the CommandRunner contract: errors are returned, not raised.
+            logger.error(f"FirecREST command failed: {e}")
+            return OpError(err=e)
+
+    def _run(self, cmd: Command, logger: Logger) -> Result[CommandResult]:
+        ctx = self._ctx
+        scratch_dir = self._get_scratch_dir(logger)
+        logger.info(f"Scratch dir: {scratch_dir}")
+
+        run_id = uuid.uuid4().hex[:12]
+        stdout_path = f"{scratch_dir}/firecrest-{run_id}.out"
+        stderr_path = f"{scratch_dir}/firecrest-{run_id}.err"
+        rc_path = f"{scratch_dir}/firecrest-{run_id}.rc"
+        logger.info(f"fc run: {run_id} rc_path: {rc_path}")
+
+        script = _build_sbatch_script(
+            cmd=cmd,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            rc_path=rc_path,
+            partition=ctx.partition,
+            wall_time=ctx.wall_time,
+        )
+
+        # FirecREST's submit `working_dir` is just where Slurm runs the script
+        # from — the in-script `cd` already handles the caller's intent, but
+        # Slurm still wants *some* directory it can chdir to.
+        working_dir = str(cmd.working_directory) if cmd.working_directory else scratch_dir
+
+        logger.info(f"Submitting Slurm wrapper job to {ctx.hpc} via FirecREST: working dir: {working_dir}")
+        submit_resp = self._client.submit(
+            system_name=ctx.hpc,
+            working_dir=working_dir,
+            script_str=script,
+            env_vars=cmd.env_vars,
+            account=ctx.account,
+        )
+
+        job_id = _extract_job_id(submit_resp)
+        logger.info(f"Submit response: {submit_resp}, extracted job_id: {job_id}")
+        if not job_id:
+            return OpError(err=RuntimeError(f"Unexpected submit response: {submit_resp}"))
+
+        logger.info(f"Submitted job {job_id}; waiting up to {ctx.wait_timeout}s for completion")
+        self._client.wait_for_job(
+            system_name=ctx.hpc,
+            job_id=job_id,
+            timeout=ctx.wait_timeout,
+        )
+
+        # Read output back. view() raises if the file is missing — which can
+        # happen if the command produced no output, or never ran. Treat
+        # missing as empty / -1 rather than propagating.
+        stdout = _safe_view(self._client, ctx.hpc, stdout_path, logger)
+        stderr = _safe_view(self._client, ctx.hpc, stderr_path, logger)
+        rc_str = _safe_view(self._client, ctx.hpc, rc_path, logger).strip()
+        try:
+            return_code = int(rc_str) if rc_str else -1
+        except ValueError:
+            return_code = -1
+
+        logger.info(f"Job {job_id} finished with return code {return_code}")
+        return CommandResult(stdout=stdout, stderr=stderr, return_code=return_code)
+
+    def _get_scratch_dir(self, logger: Logger) -> str:
+        if self._resolved_scratch_dir is not None:
+            return self._resolved_scratch_dir
+        logger.info(f"Resolving scratch_dir for {self._ctx.hpc} via FirecREST")
+        logger.info(f"FirecREST systems: {self._client.systems()}")
+
+        base = _find_default_work_dir(self._client, self._ctx.hpc)
+        username = _find_username(self._client, self._ctx.hpc)
+        # CSCS scratch is laid out as <defaultWorkDir>/<username> — see
+        # the example at https://docs.cscs.ch/access/firecrest/.
+        resolved = f"{base.rstrip('/')}/{username}"
+        logger.info(f"Resolved scratch_dir for {self._ctx.hpc}: {resolved}")
+        self._resolved_scratch_dir = resolved
+        return resolved
+
+
+def _default_firecrest_url(hpc: CscsHpc) -> str:
+    # CSCS routes by platform path (https://docs.cscs.ch/access/firecrest/):
+    # santis → C&W platform (/cw/), alps → HPC platform (/hpc/).
+    # Daint/Eiger and other Alps machines all live behind /hpc/.
+    if hpc == "santis":
+        return "https://api.svc.cscs.ch/cw/firecrest/v2"
+    platform = {"santis": "cw", "alps": "hpc"}[hpc]
+    return f"https://api.cscs.ch/{platform}/firecrest/v2"
+
+
+def _load_token(ctx: CscsFirecrestContext) -> str:
+    if ctx.api_token and ctx.api_token_path:
+        raise ValueError("Provide exactly one of api_token or api_token_path, not both.")
+    if ctx.api_token:
+        return ctx.api_token
+    if ctx.api_token_path:
+        return Path(ctx.api_token_path).read_text().strip()
+    raise ValueError("Either api_token or api_token_path must be set.")
+
+
+def _find_default_work_dir(client: f7t.v2.Firecrest, hpc: str) -> str:
+    for sys_info in client.systems():
+        if sys_info.get("name") != hpc:
+            continue
+        for fs in sys_info.get("fileSystems", []):
+            if fs.get("defaultWorkDir"):
+                path = fs.get("path")
+                if isinstance(path, str) and path:
+                    return path
+        raise RuntimeError(f"No filesystem with defaultWorkDir=true on {hpc}")
+    raise RuntimeError(f"System {hpc!r} not found in FirecREST systems list")
+
+
+def _find_username(client: f7t.v2.Firecrest, hpc: str) -> str:
+    info = client.userinfo(system_name=hpc)
+    # The endpoint returns Linux-id-style info. Different FirecREST versions
+    # have used slightly different shapes; try the documented one first, then
+    # the obvious fallbacks before giving up.
+    for path in (("user", "name"), ("username",), ("name",)):
+        cur: object = info
+        for key in path:
+            if not isinstance(cur, dict) or key not in cur:
+                cur = None
+                break
+            cur = cur[key]
+        if isinstance(cur, str) and cur:
+            return cur
+    raise RuntimeError(f"Could not find a username in userinfo response: {info!r}")
+
+
+def _build_sbatch_script(
+    cmd: Command,
+    stdout_path: str,
+    stderr_path: str,
+    rc_path: str,
+    partition: str | None,
+    wall_time: str,
+) -> str:
+    # `-l` per https://docs.cscs.ch/access/firecrest/ — CSCS clusters want a
+    # login shell so module / environment defaults are sourced.
+    sbatch_lines = [
+        "#!/bin/bash -l",
+        f"#SBATCH --output={stdout_path}",
+        f"#SBATCH --error={stderr_path}",
+        "#SBATCH --nodes=1",
+        "#SBATCH --ntasks=1",
+        f"#SBATCH --time={wall_time}",
+    ]
+    if partition:
+        sbatch_lines.append(f"#SBATCH --partition={partition}")
+
+    body: list[str] = []
+    if cmd.working_directory is not None:
+        body.append(f"cd {shlex.quote(str(cmd.working_directory))}")
+    if cmd.env_vars:
+        for k, v in cmd.env_vars.items():
+            body.append(f"export {k}={shlex.quote(v)}")
+    if isinstance(cmd.command, str):
+        body.append(cmd.command)
+    else:
+        body.append(shlex.join(cmd.command))
+    # Capture the command's own exit code — Slurm's job state tells us
+    # COMPLETED vs FAILED but not the underlying number (127 vs 1 etc.).
+    # The redirect on this line overrides Slurm's --output for this echo only.
+    body.append(f"echo $? > {shlex.quote(rc_path)}")
+
+    return "\n".join([*sbatch_lines, "", *body, ""])
+
+
+def _extract_job_id(submit_resp: dict) -> str:
+    # FirecREST v2 returns {"jobid": <int>} but older / wrapped responses have
+    # been seen as {"jobId": ...} or {"job": {"jobid": ...}}. Try all three.
+    for key in ("jobid", "jobId"):
+        if key in submit_resp and submit_resp[key] is not None:
+            return str(submit_resp[key])
+    job = submit_resp.get("job")
+    if isinstance(job, dict):
+        for key in ("jobid", "jobId"):
+            if key in job and job[key] is not None:
+                return str(job[key])
+    return ""
+
+
+def _safe_view(client: f7t.v2.Firecrest, system_name: str, path: str, logger: Logger) -> str:
+    try:
+        return client.view(system_name=system_name, path=path)
+    except f7t.FirecrestException as e:
+        logger.warning(f"Could not read {path}: {e}")
+        return ""
