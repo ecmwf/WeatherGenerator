@@ -508,7 +508,7 @@ class LinePlots:
                 baseline_name = run_ids[0]
                 baseline = data_list[0]
 
-        ref_raw = self._preprocess_data(baseline, x_dim, verbose=False)
+        ref_raw = self._preprocess_data(baseline, ["forecast_step", "channel"], verbose=False)
 
         channel_names = set(ref_raw.channel.values)
         for data in data_list[1:]:
@@ -534,7 +534,7 @@ class LinePlots:
                 if run_id == baseline_name:
                     continue
 
-                num_raw = self._preprocess_data(data, x_dim, verbose=False)
+                num_raw = self._preprocess_data(data, ["forecast_step", "channel"], verbose=False)
                 num = align_labels(num_raw, ref_channel_names, "channel").reindex(
                     channel=ref_channel_names
                 )

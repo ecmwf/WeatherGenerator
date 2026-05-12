@@ -511,7 +511,6 @@ def ratio_plot_metric_region(
                 selected_data,
                 run_ids,
                 labels,
-                x_dim=["forecast_step", "channel"],
                 y_dim=metric,
                 tag=name,
                 print_summary=print_summary,
