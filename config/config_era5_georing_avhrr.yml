@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "full" #"block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1536
+ae_local_dim_embed: 2048
 ae_local_num_blocks: 4
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
