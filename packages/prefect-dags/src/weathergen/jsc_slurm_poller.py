@@ -89,6 +89,24 @@ def run_command_jsc(
     return _run_command_jsc(client, command, project=project)
 
 
+def _job_status(job: uc_client.Job) -> str:
+    # `Job.properties` is typed as Optional[dict] because it's set lazily on
+    # first access, but a job we just submitted always has properties.
+    props = job.properties
+    if not isinstance(props, dict):
+        raise RuntimeError(f"Job {job.job_id} has no properties")
+    return props["status"]
+
+
+def _read_remote_text(wd: uc_client.Storage, path: str) -> str:
+    # `Storage.stat()` returns PathFile | PathDir; only PathFile has .raw().
+    # /stdout and /stderr are always files, but the static type doesn't know that.
+    entry = wd.stat(path)
+    if not isinstance(entry, uc_client.PathFile):
+        raise RuntimeError(f"Expected a file at {path}, got {type(entry).__name__}")
+    return entry.raw().read().decode("utf-8", errors="replace")
+
+
 def _run_command_jsc(
     client: uc_client.Client,
     command: str,
@@ -110,7 +128,7 @@ def _run_command_jsc(
     job = client.new_job(job_description=job_desc)
     try:
         log.info("Job ID:     %s", job.job_id)
-        log.info("Job Status: %s", job.properties["status"])
+        log.info("Job Status: %s", _job_status(job))
         # Fast until here, working dir is slow.
         log.info("Working dir: %s", job.working_dir)
         log.info("Job URL:    %s", job.resource_url)
@@ -119,10 +137,10 @@ def _run_command_jsc(
         stdout_offset = 0
         stdout_parts: list[str] = []
 
-        while job.properties["status"] not in ("SUCCESSFUL", "FAILED", "DONE"):
-            log.info("Status:     %s", job.properties["status"])
+        while _job_status(job) not in ("SUCCESSFUL", "FAILED", "DONE"):
+            log.info("Status:     %s", _job_status(job))
             try:
-                content = wd.stat("/stdout").raw().read().decode("utf-8", errors="replace")
+                content = _read_remote_text(wd, "/stdout")
                 if len(content) > stdout_offset:
                     new_content = content[stdout_offset:]
                     stdout_parts.append(new_content)
@@ -132,12 +150,12 @@ def _run_command_jsc(
                 pass
             time.sleep(poll_interval)
 
-        status = job.properties["status"]
+        status = _job_status(job)
         log.info("Status:     %s", status)
 
         # Read any remaining stdout
         try:
-            content = wd.stat("/stdout").raw().read().decode("utf-8", errors="replace")
+            content = _read_remote_text(wd, "/stdout")
             if len(content) > stdout_offset:
                 new_content = content[stdout_offset:]
                 stdout_parts.append(new_content)
@@ -146,7 +164,7 @@ def _run_command_jsc(
             pass
 
         try:
-            stderr_text = wd.stat("/stderr").raw().read().decode("utf-8", errors="replace")
+            stderr_text = _read_remote_text(wd, "/stderr")
             if stderr_text.strip():
                 log.warning(stderr_text)
         except Exception:
