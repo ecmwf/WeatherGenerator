@@ -161,7 +161,9 @@ class CscsFirecrestCommandRunner(CommandRunner):
         # Slurm still wants *some* directory it can chdir to.
         working_dir = str(cmd.working_directory) if cmd.working_directory else scratch_dir
 
-        logger.info(f"Submitting Slurm wrapper job to {ctx.hpc} via FirecREST: working dir: {working_dir}")
+        logger.info(
+            f"Submitting Slurm wrapper job to {ctx.hpc} via FirecREST: working dir: {working_dir}"
+        )
         submit_resp = self._client.submit(
             system_name=ctx.hpc,
             working_dir=working_dir,
@@ -226,9 +228,7 @@ def _build_authorization(ctx: CscsFirecrestContext) -> object:
     # Priority 1: OAuth2 client credentials. pyfirecrest's
     # `ClientCredentialsAuth` handles minting and refreshing the JWT.
     if ctx.consumer_key and ctx.consumer_secret:
-        return f7t.ClientCredentialsAuth(
-            ctx.consumer_key, ctx.consumer_secret, ctx.token_uri
-        )
+        return f7t.ClientCredentialsAuth(ctx.consumer_key, ctx.consumer_secret, ctx.token_uri)
     # Priority 2: a pre-issued bearer token (literal or read from file).
     if ctx.api_token and ctx.api_token_path:
         raise ValueError("Provide exactly one of api_token or api_token_path, not both.")

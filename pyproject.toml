@@ -227,7 +227,6 @@ explicit = true
 [tool.uv.sources]
 weathergen-astro-dags = { workspace = true }
 weathergen-astro-extras = { workspace = true }
-weathergen-prefect-dags = { workspace = true }
 weathergen-common = { workspace = true }
 weathergen-common-core = { workspace = true }
 weathergen-evaluate = { workspace = true }
@@ -273,7 +272,7 @@ log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 members = [
 #   "packages/astro-dags",
    #"packages/astro-extras",
-   "packages/prefect-dags",
+   # "packages/prefect-dags" — split off into its own standalone uv project.
    "packages/common",
    "packages/common-core",
    "packages/evaluate",

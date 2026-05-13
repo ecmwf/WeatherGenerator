@@ -336,8 +336,10 @@ async def submit_slurm(
     logger.debug(f"Slurm submission command result: {result}")
     if is_err(result):
         return result
-    
-    logger.info(f"Slurm job submitted successfully with output: stdout: {result.stdout.strip()} stderr: {result.stderr.strip()}")
+
+    logger.info(
+        f"Slurm job submitted successfully with output: stdout: {result.stdout.strip()} stderr: {result.stderr.strip()}"
+    )
 
     # Extract job ID from sbatch output
     job_id = result.stdout.strip().split()[-1]

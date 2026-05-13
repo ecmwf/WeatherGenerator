@@ -7,12 +7,15 @@ import functools
 import logging
 from typing import Any
 
+from weathergen.prefect_dags.cmd_runners._cscs_firecrest import (
+    CscsFirecrestCommandRunner,
+    CscsFirecrestContext,
+)
 from weathergen.prefect_dags.cmd_runners._ecmwf import EcmwfSshCommandRunner, EcmwfSshContext
 from weathergen.prefect_dags.cmd_runners._generic import GenericContext, GenericSshCommandRunner
 from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
 from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
 from weathergen.prefect_dags.result import OpError, Result, is_err
-from weathergen.prefect_dags.cmd_runners._cscs_firecrest import CscsFirecrestCommandRunner, CscsFirecrestContext, CscsHpc
 
 """
 The context contains all the information necessary to run a command

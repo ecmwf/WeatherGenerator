@@ -4,16 +4,12 @@ version = "0.1.0"
 description = "Prefect flows for the WeatherGenerator project."
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    # TODO: remove the dependency on weathergen-common-core once the code is migrated to this package.
-    "weathergen-common-core",
     "prefect>=3.7.0",
     "paramiko>=3.1",
     "pyfirecrest>=3.7",
     "dacite",
+    "pyunicore>=1.3.7",
 ]
-
-[tool.uv.sources]
-weathergen-common-core = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -30,11 +26,11 @@ project-excludes = [
 ]
 
 [tool.pyrefly.errors]
-bad-argument-type = false
-unsupported-operation = false
-missing-attribute = false
-no-matching-overload = false
-bad-context-manager = false
+# bad-argument-type = true
+# unsupported-operation = false
+# missing-attribute = false
+# no-matching-overload = false
+# bad-context-manager = false
 
 
 

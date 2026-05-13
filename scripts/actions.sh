@@ -45,6 +45,15 @@ case "$1" in
       # The dependencies are rebuilt for each package to ensure that they do not rely on implicit imports.
       cd "$SCRIPT_DIR" || exit 1
 
+      # weathergen-evaluate
+      uv sync --project packages/prefect-dags --no-install-workspace --package weathergen-prefect-dags
+      uv run --project packages/prefect-dags --frozen pyrefly check packages/prefect-dags
+      # Fail for errors on weathergen-prefect-dags:
+      if [ $? -ne 0 ]; then
+        echo "Type checking failed for weathergen-prefect-dags."
+        exit 1
+      fi
+
       # weathergen-common
       uv sync --project packages/common --no-install-workspace
       uv run --project packages/common --frozen pyrefly check packages/common
