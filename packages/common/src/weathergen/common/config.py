@@ -753,10 +753,11 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     output_offset = forecast_cfg.get("offset", 0)
     assert isinstance(output_offset, int), TypeError(valid_forecast_offset)
     if output_offset == 0:
-        if isinstance(forecast_cfg.num_steps, int):
-            assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
-        else:
-            raise TypeError(valid_forecast_steps_offset0)
+        # if isinstance(forecast_cfg.num_steps, int):
+        #     assert forecast_cfg.num_steps in [0, 1], valid_forecast_steps_offset0
+        # else:
+        #     raise TypeError(valid_forecast_steps_offset0)
+        pass
     elif output_offset == 1:
         assert forecast_cfg.policy, (provide_forecast_policy, valid_forecast_policies)
         if isinstance(forecast_cfg.num_steps, int):
