@@ -216,7 +216,7 @@ def _process_stream(
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
-        _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
+        _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
         return run_id, stream, {}
 
     needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
@@ -226,17 +226,17 @@ def _process_stream(
     if (needs_plotting or needs_scoring) and type_ == "zarr":
         available_data = reader.check_availability(stream, mode="evaluation")
 
-        output_data = reader.get_data(
-            stream,
-            fsteps=available_data.fsteps,
-            samples=available_data.samples,
-            channels=available_data.channels,
-            ensemble=available_data.ensemble,
-        )
+        output_data = None
+        if available_data.score_availability:
+            output_data = reader.get_data(
+                stream,
+                fsteps=available_data.fsteps,
+                samples=available_data.samples,
+                channels=available_data.channels,
+                ensemble=available_data.ensemble,
+            )
 
-        _logger.info(
-            f"RUN {run_id} - {stream}: Data loaded once — sharing between plotting and scoring."
-        )
+            _logger.info(f"RUN {run_id} - {stream}: Data loaded successfully.")
 
     # Plotting (pass pre-loaded data)
     if needs_plotting:
@@ -372,8 +372,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     )
 
     # summary plots
-    if scores_dict and cfg.evaluation.get("summary_plots", False):
-        _logger.info("Started creating summary plots...")
+    if scores_dict:
         plot_summary(cfg, scores_dict, summary_dir)
 
 
