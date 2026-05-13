@@ -18,9 +18,27 @@ from typing import Literal, get_args
 from weathergen.prefect_dags.cmd_runners import (
     CmdContext,
     Command,
+    CommandResult,
     run_cmd,
+    slurm_account,
 )
 from weathergen.prefect_dags.result import OpError, Result, is_err
+
+
+class SubmissionException(Exception):
+    """
+    Raised when `sbatch` ran to completion but its output did not contain
+    an extractable Slurm job id.
+    """
+
+    def __init__(self, result: CommandResult, message: str | None = None):
+        self.result = result
+        detail = message or "Could not parse a Slurm job id from sbatch output"
+        super().__init__(
+            f"{detail} "
+            f"(return_code={result.return_code}, "
+            f"stdout={result.stdout!r}, stderr={result.stderr!r})"
+        )
 
 
 @dataclass
@@ -44,9 +62,16 @@ class SlurmJob:
     # "D-HH", "D-HH:MM", or "D-HH:MM:SS". The job is killed when this elapses.
     time_limit: str | None = None
     slurm_options: dict[str, str] | None = None
+    # Slurm account to charge (sbatch --account).
+    # - if None, no --account argument is passed and the cluster default is used.
+    # - if "auto", the account is inferred from the context (if supported) or None if unsupported.
+    # - if any other string, that value is passed verbatim as --account.    
+    account: str | Literal["auto"] | None = "auto"
 
 
 type SlurmJobId = str
+
+
 
 
 @dataclass
@@ -312,6 +337,12 @@ async def submit_slurm(
     if job.time_limit is not None:
         cmd_parts.append(f"--time={job.time_limit}")
 
+    # Resolve --account from job.account, possibly using the context as a
+    # fallback when "auto" is requested. None means "don't pass --account".
+    account = _resolve_account(job.account, ctx)
+    if account is not None:
+        cmd_parts.append(f"--account={account}")
+
     if job.slurm_options:
         for option, value in job.slurm_options.items():
             cmd_parts.append(f"--{option}={value}")
@@ -341,8 +372,11 @@ async def submit_slurm(
         f"Slurm job submitted successfully with output: stdout: {result.stdout.strip()} stderr: {result.stderr.strip()}"
     )
 
-    # Extract job ID from sbatch output
-    job_id = result.stdout.strip().split()[-1]
+    # Extract job id from sbatch output. 
+    parsed_id = _parse_job_id(result)
+    if parsed_id is None:
+        return OpError(err=SubmissionException(result))
+    job_id: SlurmJobId = parsed_id
 
     # Resolve %j (and %J) in the output paths now that we know the job id, so
     # the returned paths point to the actual files Slurm will write.
@@ -354,3 +388,37 @@ async def submit_slurm(
         stdout=_resolve(stdout_path),
         stderr=_resolve(stderr_path),
     )
+
+
+def _resolve_account(account: str | Literal["auto"] | None, ctx: CmdContext) -> str | None:
+    """Map a `SlurmJob.account` setting to the actual `--account` argument value.
+
+    - None       -> None (no --account passed; cluster's default applies)
+    - "auto"     -> the account carried on the context (if any), else None.
+                    The context may not expose an account (e.g. plain SSH, local);
+                    silent fallback keeps "auto" safe to set as a project default.
+    - any string -> verbatim (passed straight through to sbatch).
+    """
+    if account is None:
+        return None
+    if account == "auto":
+        return slurm_account(ctx)
+    return account
+
+
+def _parse_job_id(result: CommandResult) -> SlurmJobId | None:
+    """Pull the Slurm job id from sbatch's stdout, or return None if the
+    submission output is not in the expected shape (non-zero exit, empty
+    stdout, or trailing token that doesn't look like an integer / array id).
+    """
+    if result.return_code != 0:
+        return None
+    tokens = result.stdout.strip().split()
+    if not tokens:
+        return None
+    candidate = tokens[-1]
+    # Slurm job ids are positive integers; array jobs append "_<index>".
+    base = candidate.split("_", 1)[0]
+    if not base.isdigit():
+        return None
+    return candidate

@@ -31,6 +31,7 @@ class EcmwfSshContext:
     """
 
     host: str
+    account: str | None = None
 
 
 class EcmwfSshCommandRunner(CommandRunner):

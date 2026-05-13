@@ -20,7 +20,7 @@ import json
 import types
 from collections.abc import Callable, Iterable
 from datetime import timedelta
-from typing import Any, Literal, Union, get_args, get_origin, get_type_hints, overload
+from typing import Any, ParamSpec, TypeVar, Union, get_args, get_origin, get_type_hints, overload
 
 import prefect
 import prefect.runtime.flow_run
@@ -42,6 +42,16 @@ from prefect.tasks import (
 from prefect.utilities.annotations import NotSet
 
 from weathergen.prefect_dags.prefect_logging import get_run_logger
+
+# Module-level ParamSpec / TypeVar declarations rather than PEP-695 generics
+# (`def task[**P, R](...)`). The two are semantically equivalent, but Pylance
+# fails to flow type vars through the two-step decorator-factory application
+# in the second overload (`@task(...)` form) when they're declared per-function:
+# the decorated function gets typed as a bare function, so `.submit` etc. are
+# invisible. The classic ParamSpec/TypeVar form has been around longer and is
+# resolved correctly.
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +90,10 @@ def rerun_aware_cache_key(context: TaskRunContext, parameters: dict[str, Any]) -
 #   - `persist_result` is forced True (required for cache replay)
 # We also apply two non-default defaults: `cache_expiration=14d`, `retries=0`.
 @overload
-def task[**P, R](__fn: Callable[P, R], /) -> Task[P, R]: ...
+def task(__fn: Callable[_P, _R], /) -> Task[_P, _R]: ...
 @overload
-def task[**P, R](
-    __fn: Literal[None] = None,
+def task(
+    __fn: None = None,
     /,
     *,
     name: str | None = None,
@@ -109,7 +119,7 @@ def task[**P, R](
     retry_condition_fn: RetryConditionCallable | None = None,
     viz_return_value: Any = None,
     asset_deps: list[str | Asset] | None = None,
-) -> Callable[[Callable[P, R]], Task[P, R]]: ...
+) -> Callable[[Callable[_P, _R]], Task[_P, _R]]: ...
 def task(__fn: Any = None, /, **kwargs: Any) -> Any:
     # Apply framework defaults only when the caller didn't specify a value.
     kwargs.setdefault("cache_expiration", timedelta(days=14))
@@ -192,10 +202,10 @@ def _log_rerun_info(rerun_token: str | None) -> None:
 # In addition, every decorated flow must declare `rerun_token: str | None`;
 # this is checked at decoration time and surfaces as TypeError on import.
 @overload
-def flow[**P, R](__fn: Callable[P, R], /) -> Flow[P, R]: ...
+def flow(__fn: Callable[_P, _R], /) -> Flow[_P, _R]: ...
 @overload
-def flow[**P, R](
-    __fn: Literal[None] = None,
+def flow(
+    __fn: None = None,
     /,
     *,
     name: str | None = None,
@@ -216,7 +226,7 @@ def flow[**P, R](
     on_cancellation: list[FlowStateHook[..., Any]] | None = None,
     on_crashed: list[FlowStateHook[..., Any]] | None = None,
     on_running: list[FlowStateHook[..., Any]] | None = None,
-) -> Callable[[Callable[P, R]], Flow[P, R]]: ...
+) -> Callable[[Callable[_P, _R]], Flow[_P, _R]]: ...
 def flow(__fn: Any = None, /, **kwargs: Any) -> Any:
     """
     Wrapper around @flow with sensible defaults for a machine learning workflow.

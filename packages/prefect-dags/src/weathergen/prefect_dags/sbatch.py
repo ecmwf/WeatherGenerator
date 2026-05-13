@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 from prefect import get_client
 from prefect.artifacts import acreate_markdown_artifact
@@ -75,6 +76,7 @@ def sbatch(
     submission_directory: str | Path | None = None,
     time_limit: str | None = None,
     slurm_options: dict[str, str] | None = None,
+    account: str | Literal["auto"] | None = "auto",
 ) -> SlurmJobResult:
     """
     Submits a slurm job and await its completion, returning the final state.
@@ -100,6 +102,7 @@ def sbatch(
         submission_directory=submission_directory,
         time_limit=time_limit,
         slurm_options=slurm_options,
+        account=account,
     )
     res = run_coro_as_sync(_sbatch_try(job, ctx))
     if isinstance(res, OpError):
@@ -114,7 +117,6 @@ def sbatch(
     return job_res
 
 
-@task
 def sbatch_try(
     job: SlurmJob,
     context: CmdContext,
@@ -122,7 +124,27 @@ def sbatch_try(
     """
     Same as `sbatch`, but returns a Result instead of throwing on failure.
     """
-    return run_coro_as_sync(_sbatch_try(job, context))
+    # Delegates to `sbatch` (the cached @task) rather than calling `_sbatch_try`
+    # directly: if we returned an OpError from a Prefect task here, Prefect
+    # would persist it as the task's result and replay the cached failure on
+    # every rerun with the same `rerun_token`.
+    
+    try:
+        return sbatch(
+            context,
+            job_name=job.job_name,
+            stdout=job.stdout,
+            stderr=job.stderr,
+            script_path=job.script_path,
+            command=job.command,
+            working_directory=job.working_directory,
+            submission_directory=job.submission_directory,
+            time_limit=job.time_limit,
+            slurm_options=job.slurm_options,
+            account=job.account,
+        )
+    except Exception as e:
+        return OpError(err=e)
 
 
 def sbatch_submit(
@@ -139,29 +161,40 @@ def sbatch_submit(
     relies on for idempotent recovery — a failure during polling no longer
     causes a duplicate slurm submission on retry.
 
+    Submission failures are NOT cached: `_sbatch_submit_async` raises on
+    error, Prefect marks that task run as Failed (no result persisted), and
+    the next rerun will retry from scratch instead of replaying a transient
+    network / auth failure. Here we catch that exception and return it as an
+    OpError so the caller's Result contract is preserved.
+
     On purpose kept small and focused: any crash here may trigger a slurm
     job that we will not monitor.
-
-    TODO: the result will be cached, including the error. This
-    is a logical issue (if the submission did not happen because of
-    network / auth issue, we should retry rather than return the cached failure)
     """
-    return run_coro_as_sync(_sbatch_submit_async(job, context))
+    try:
+        return run_coro_as_sync(_sbatch_submit_async(job, context))
+    except Exception as e:
+        return OpError(err=e)
 
 
 @task
 async def _sbatch_submit_async(
     job: SlurmJob,
     context: CmdContext,
-) -> Result[SlurmSubmissionResult]:
+) -> SlurmSubmissionResult:
     """Cached submission step. Called from both the sync `sbatch_submit`
     facade and the async `_sbatch_try` polling path so that on rerun a
-    completed submission is replayed from cache instead of re-submitted.
+    *successful* submission is replayed from cache instead of re-submitted.
+
+    Returns the SlurmSubmissionResult on success; raises on failure. Raising
+    (vs. returning an OpError) is deliberate: Prefect persists only the
+    results of successful task runs, so a failure here is NOT cached and a
+    subsequent rerun with the same rerun_token retries the submission instead
+    of replaying the cached error.
     """
     logger = get_run_logger()
     submission_result = await submit_slurm(job, context, logger)
     if isinstance(submission_result, OpError):
-        return OpError(err=submission_result.err)
+        raise submission_result.err
     sub_res: SlurmSubmissionResult = submission_result
     logger.info(f"Submitted SLURM job with ID: {sub_res.job_id}")
     return sub_res
@@ -215,11 +248,14 @@ async def _sbatch_try(
     # cached submission. Without this, Prefect's transactional semantics
     # discard the child task's result when the parent fails, causing a
     # duplicate slurm submission on the next rerun.
-    with transaction(commit_mode=CommitMode.EAGER):
-        submission_result = await _sbatch_submit_async(job, context)
-    if isinstance(submission_result, OpError):
-        return OpError(err=submission_result.err)
-    sub_res: SlurmSubmissionResult = submission_result
+    #
+    # `_sbatch_submit_async` raises on failure (so Prefect does not cache the
+    # error); convert that back into the Result contract here.
+    try:
+        with transaction(commit_mode=CommitMode.EAGER):
+            sub_res: SlurmSubmissionResult = await _sbatch_submit_async(job, context)
+    except Exception as e:
+        return OpError(err=e)
     job_id = sub_res.job_id
     _runner = get_command_runner(context)
     if isinstance(_runner, Exception):
