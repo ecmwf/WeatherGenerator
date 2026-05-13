@@ -24,6 +24,15 @@ from weathergen.prefect_dags.result import OpError, Result, is_err
 """
 The context contains all the information necessary to run a command
 on a given environment (e.g. local machine, remote server, etc.).
+
+Expectations:
+- The context should contain all necessary information to run a command, such as
+  authentication credentials, hostnames, etc.
+- The context should be serializable, as it may need to be passed between
+  different parts of the system (e.g. from a Prefect task to a command runner).
+- The context should be immutable (although the files it points to do *not* need to
+be immutable). This is important to detect when credentials are updated
+and to invalidate cached clients if needed.
 """
 type CmdContext = (
     LocalContext | GenericContext | EcmwfSshContext | CscsFirecrestContext | EcmwfEcaccessContext

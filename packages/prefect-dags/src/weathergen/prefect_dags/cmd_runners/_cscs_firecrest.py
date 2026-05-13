@@ -15,6 +15,7 @@ directory on the cluster.
   username (e.g. `/capstor/scratch/cscs/<username>`).
 """
 
+import hashlib
 import shlex
 import uuid
 from dataclasses import dataclass
@@ -124,6 +125,11 @@ class CscsFirecrestCommandRunner(CommandRunner):
     name = "cscs_firecrest"
     _ctx: CscsFirecrestContext
     _client: f7t.v2.Firecrest
+    # sha256 of the *_path credential files at the time _client was built.
+    # Long-running runners outlive credential rotation (CSCS API tokens are
+    # typically refreshed daily); re-hash on every run() and rebuild the
+    # client whenever the bytes on disk change.
+    _credential_signature: tuple[str | None, ...]
     # Memoized scratch directory. Discovery hits two REST endpoints
     # (`systems` + `userinfo`) and the answer never changes for a given
     # context, so resolve once and cache.
@@ -132,19 +138,26 @@ class CscsFirecrestCommandRunner(CommandRunner):
     def __init__(self, context: CscsFirecrestContext):
         self._ctx = context
         self.hpc = context.hpc
-        self._client = f7t.v2.Firecrest(
-            firecrest_url=context.firecrest_url or _default_firecrest_url(context.hpc),
-            authorization=_build_authorization(context),
-        )
+        self._credential_signature = _credential_signature(context)
+        self._client = _build_client(context)
         self._resolved_scratch_dir = context.scratch_dir
 
     def run(self, cmd: Command, logger: Logger) -> Result[CommandResult]:
+        self._refresh_client_if_credentials_changed(logger)
         try:
             return self._run(cmd, logger)
         except Exception as e:
             # Per the CommandRunner contract: errors are returned, not raised.
             logger.error(f"FirecREST command failed: {e}")
             return OpError(err=e)
+
+    def _refresh_client_if_credentials_changed(self, logger: Logger) -> None:
+        sig = _credential_signature(self._ctx)
+        if sig == self._credential_signature:
+            return
+        logger.info("Credential file content changed; rebuilding FirecREST client")
+        self._credential_signature = sig
+        self._client = _build_client(self._ctx)
 
     def _run(self, cmd: Command, logger: Logger) -> Result[CommandResult]:
         ctx = self._ctx
@@ -231,6 +244,30 @@ def _default_firecrest_url(hpc: CscsHpc) -> str:
         return "https://api.svc.cscs.ch/cw/firecrest/v2"
     platform = {"santis": "cw", "alps": "hpc"}[hpc]
     return f"https://api.cscs.ch/{platform}/firecrest/v2"
+
+
+def _build_client(ctx: CscsFirecrestContext) -> f7t.v2.Firecrest:
+    return f7t.v2.Firecrest(
+        firecrest_url=ctx.firecrest_url or _default_firecrest_url(ctx.hpc),
+        authorization=_build_authorization(ctx),
+    )
+
+
+def _credential_signature(ctx: CscsFirecrestContext) -> tuple[str | None, ...]:
+    """sha256 of each *_path credential file. None when the path is unset
+    or the file is missing — a missing file is its own distinct state, so
+    appearing later still triggers a rebuild."""
+    paths = (ctx.consumer_key_path, ctx.consumer_secret_path, ctx.api_token_path)
+    return tuple(_hash_file(p) for p in paths)
+
+
+def _hash_file(path: str | Path | None) -> str | None:
+    if path is None:
+        return None
+    resolved = Path(path).expanduser()
+    if not resolved.is_file():
+        return None
+    return hashlib.sha256(resolved.read_bytes()).hexdigest()
 
 
 def _build_authorization(ctx: CscsFirecrestContext) -> object:
