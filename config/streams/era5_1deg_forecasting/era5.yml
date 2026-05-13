@@ -11,8 +11,8 @@ ERA5 :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr']
   stream_id : 0
-  source_exclude : ['z', 'w_', 'skt', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
-  target_exclude : ['z', w_', 'slor', 'sdor', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
+  source_exclude : ['z', 'w_10', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_50', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_100', 'w_1000', 'skt', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
+  target_exclude : ['z', 'w_10', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_50', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_100', 'w_1000', 'slor', 'sdor', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
   geoinfo_channels : ['z', 'lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.
   location_weight : cosine_latitude
@@ -39,6 +39,7 @@ ERA5 :
     ens_size : 1
     num_layers : 1
   channel_weights :
+    q_10: 0.2
     q_50: 0.2
     q_100: 0.23
     q_150: 0.26
@@ -52,6 +53,7 @@ ERA5 :
     q_850: 0.71
     q_925: 0.75
     q_1000: 0.8
+    t_10: 0.2
     t_50: 0.2
     t_100: 0.23
     t_150: 0.26
@@ -65,6 +67,7 @@ ERA5 :
     t_850: 0.71
     t_925: 0.75
     t_1000: 0.8
+    u_10: 0.2
     u_50: 0.2
     u_100: 0.23
     u_150: 0.26
@@ -78,6 +81,7 @@ ERA5 :
     u_850: 0.71
     u_925: 0.75
     u_1000: 0.8
+    v_10: 0.2
     v_50: 0.2
     v_100: 0.23
     v_150: 0.26
@@ -91,6 +95,7 @@ ERA5 :
     v_850: 0.71
     v_925: 0.75
     v_1000: 0.8
+    z_10: 0.2
     z_50: 0.2
     z_100: 0.23
     z_150: 0.26
