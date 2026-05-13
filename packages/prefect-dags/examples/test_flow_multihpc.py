@@ -13,7 +13,7 @@
 # weathergen-prefect-dags = { path = "../", editable = true }
 # ///
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task
-from weathergen.prefect_dags.cmd_runners import CmdContext, CscsFirecrestContext, EcmwfSshContext
+from weathergen.prefect_dags.cmd_runners import CscsFirecrestContext, EcmwfSshContext
 
 all_contexts = {
     "atos-ssh": EcmwfSshContext(
@@ -30,7 +30,6 @@ all_contexts = {
         account="ch17",
     ),
 }
-
 
 
 @task(task_run_name="get_pwd-{ctx_name}")
@@ -70,8 +69,7 @@ def run_multi_hpc(
         pwd = get_pwd.submit(ctx_name)
         sleep_times = [5, 10]
         # Submit all my jobs
-        jobs.extend([sleep_and_print.submit(ctx_name, sleep_sec, pwd)
-                     for sleep_sec in sleep_times])
+        jobs.extend([sleep_and_print.submit(ctx_name, sleep_sec, pwd) for sleep_sec in sleep_times])
     # Wait for all the jobs to complete and print the results:
     for job in jobs:
         res = job.result()

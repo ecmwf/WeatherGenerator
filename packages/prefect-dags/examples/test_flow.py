@@ -13,7 +13,7 @@
 # weathergen-prefect-dags = { path = "../", editable = true }
 # ///
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task
-from weathergen.prefect_dags.cmd_runners import CmdContext, CscsFirecrestContext, EcmwfSshContext
+from weathergen.prefect_dags.cmd_runners import EcmwfSshContext
 
 # ctx: CmdContext = LocalContext()
 # ctx: CmdContext = EcmwfSshContext(
@@ -29,8 +29,6 @@ from weathergen.prefect_dags.cmd_runners import CmdContext, CscsFirecrestContext
 ctx = EcmwfSshContext(
     host="hpc-login",
 )
-
-
 
 
 @task
@@ -66,8 +64,7 @@ def test_run_cmd_flow(
     print(f"Current working directory: {pwd}")
     sleep_times = [5, 10]
     # Submit all my jobs
-    jobs = [sleep_and_print.submit(sleep_sec, pwd)
-             for sleep_sec in sleep_times]
+    jobs = [sleep_and_print.submit(sleep_sec, pwd) for sleep_sec in sleep_times]
     # Wait for all the jobs to complete and print the results:
     for job in jobs:
         res = job.result()

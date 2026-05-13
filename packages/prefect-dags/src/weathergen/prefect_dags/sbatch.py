@@ -6,7 +6,7 @@ This wrapper is rather complex because of the following:
 - handling transient errors (network failures, sacct outages, prefect crash, driver script crash) without losing the state
 - avoid duplicate slurm submitions on retries (best effort)
 - limit the number of concurrent polling calls to the HPC (1 per HPC at a time) to avoid overwhelming it with sacct calls.
-This requires coordination between all running jobs to prevent duplicatte polling. 
+This requires coordination between all running jobs to prevent duplicatte polling.
 This itself has to account for issues like crashes during polling.
 
 As a result:
@@ -147,7 +147,7 @@ def sbatch_try(
     # directly: if we returned an OpError from a Prefect task here, Prefect
     # would persist it as the task's result and replay the cached failure on
     # every rerun with the same `rerun_token`.
-    
+
     try:
         return sbatch(
             context,
@@ -473,9 +473,9 @@ async def _try_update_status(
     logger.info(f"Lease expired for hpc {runner.hpc}, attempting to acquire lock for sacct refresh")
     await _ensure_concurrency_limit(limit_name)
     logger.info(f"Ensured concurrency limit {limit_name} for sacct refresh")
-    async with _async_concurrency(limit_name,
-                                  lease_duration=_PREFECT_LEASE_DURATION_SECS,
-                                  strict=True):
+    async with _async_concurrency(
+        limit_name, lease_duration=_PREFECT_LEASE_DURATION_SECS, strict=True
+    ):
         # 3. Double check — another task may have refreshed while we waited.
         logger.info(f"Acquired lock for hpc {runner.hpc}, re-checking lease")
         if not await _lease_expired(runner.hpc):

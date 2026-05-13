@@ -65,13 +65,11 @@ class SlurmJob:
     # Slurm account to charge (sbatch --account).
     # - if None, no --account argument is passed and the cluster default is used.
     # - if "auto", the account is inferred from the context (if supported) or None if unsupported.
-    # - if any other string, that value is passed verbatim as --account.    
+    # - if any other string, that value is passed verbatim as --account.
     account: str | Literal["auto"] | None = "auto"
 
 
 type SlurmJobId = str
-
-
 
 
 @dataclass
@@ -372,7 +370,7 @@ async def submit_slurm(
         f"Slurm job submitted successfully with output: stdout: {result.stdout.strip()} stderr: {result.stderr.strip()}"
     )
 
-    # Extract job id from sbatch output. 
+    # Extract job id from sbatch output.
     parsed_id = _parse_job_id(result)
     if parsed_id is None:
         return OpError(err=SubmissionException(result))

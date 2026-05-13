@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import logging
 import os
 import sys
 import textwrap
@@ -18,6 +19,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants — taken directly from ECaccess.pm
@@ -204,9 +207,9 @@ class ECaccessClient:
         client = self._https if use_https else self._http
 
         if self.debug:
-            print(f"\n>>> POST {url}", file=sys.stderr)
-            print(f"    SOAPAction: urn:{method}", file=sys.stderr)
-            print(envelope.decode(), file=sys.stderr)
+            logger.debug(">>> POST %s", url)
+            logger.debug("    SOAPAction: urn:%s", method)
+            logger.debug("%s", envelope.decode())
 
         resp = client.post(
             url,
@@ -218,8 +221,8 @@ class ECaccessClient:
         )
 
         if self.debug:
-            print(f"\n<<< HTTP {resp.status_code}", file=sys.stderr)
-            print(resp.text[:2000], file=sys.stderr)
+            logger.debug("<<< HTTP %s", resp.status_code)
+            logger.debug("%s", resp.text[:2000])
 
         root = ET.fromstring(resp.content)
 
@@ -239,8 +242,8 @@ class ECaccessClient:
     def _call_raw(self, method: str, envelope: bytes) -> ET.Element:
         """Make a SOAP call with a pre-built envelope."""
         if self.debug:
-            print(f"\n>>> POST {self._ctrl_url}", file=sys.stderr)
-            print(envelope.decode()[:2000], file=sys.stderr)
+            logger.debug(">>> POST %s", self._ctrl_url)
+            logger.debug("%s", envelope.decode()[:2000])
 
         resp = self._https.post(
             self._ctrl_url,
@@ -252,8 +255,8 @@ class ECaccessClient:
         )
 
         if self.debug:
-            print(f"\n<<< HTTP {resp.status_code}", file=sys.stderr)
-            print(resp.text[:2000], file=sys.stderr)
+            logger.debug("<<< HTTP %s", resp.status_code)
+            logger.debug("%s", resp.text[:2000])
 
         root = ET.fromstring(resp.content)
         fault = _parse_fault(root)
@@ -684,59 +687,72 @@ class ECaccessClient:
 def _print_ops(client: ECaccessClient) -> None:
     ops = client.list_operations()
     if not ops:
-        print("(no operations — token may be invalid)")
+        logger.info("(no operations — token may be invalid)")
         return
     for op in ops:
-        print(f"{op['name']:<20s} {op['duration']:<8s} {op['endDate']:<20s} {op['comment']}")
+        logger.info("%-20s %-8s %-20s %s", op["name"], op["duration"], op["endDate"], op["comment"])
 
 
 def _print_queues(client: ECaccessClient, detail: str | None) -> None:
     queues = client.list_queues(detail_queue=detail)
     if not queues:
-        print("(no queues)")
+        logger.info("(no queues)")
         return
     if detail:
         for q in queues:
-            print(f"{q['name']:<20s} {q['comment']}")
+            logger.info("%-20s %s", q["name"], q["comment"])
     else:
         for q in queues:
             counts = f"INIT={q['INIT']},WAIT={q['WAIT']},EXEC={q['EXEC']},DONE={q['DONE']},STOP={q['STOP']}"
-            print(f"{q['queueName']:<15s} {q['schedulerName']:<15s} {q['comment']} ({counts})")
+            logger.info(
+                "%-15s %-15s %s (%s)",
+                q["queueName"],
+                q["schedulerName"],
+                q["comment"],
+                counts,
+            )
 
 
 def _print_jobs(client: ECaccessClient, job_id: str | None) -> None:
     jobs = client.list_jobs(job_id=job_id)
     if not jobs:
-        print("(no jobs)")
+        logger.info("(no jobs)")
         return
     if job_id:
         j = jobs[0]
-        print(f"     Job-Id: {j['jobId']}")
+        logger.info("     Job-Id: %s", j["jobId"])
         if j["name"]:
-            print(f"   Job Name: {j['name']}")
-        print(f"      Queue: {j['queueName']}")
+            logger.info("   Job Name: %s", j["name"])
+        logger.info("      Queue: %s", j["queueName"])
         if j["hostName"]:
-            print(f"       Host: {j['hostName']}")
-        print(f"   Schedule: {j['scheduledDate']}")
-        print(f" Expiration: {j['expirationDate']}")
-        print(f"  Try Count: {j['tryDone']}/{j['tryCount']}")
-        print(f"     Status: {j['status']}")
+            logger.info("       Host: %s", j["hostName"])
+        logger.info("   Schedule: %s", j["scheduledDate"])
+        logger.info(" Expiration: %s", j["expirationDate"])
+        logger.info("  Try Count: %s/%s", j["tryDone"], j["tryCount"])
+        logger.info("     Status: %s", j["status"])
         if j["eventIds"]:
-            print(f"  Event-Ids: {';'.join(j['eventIds'])}")
+            logger.info("  Event-Ids: %s", ";".join(j["eventIds"]))
         if j["status"] == "DONE":
             if j["outputFileSize"] and j["outputFileSize"] != "-1":
-                print(f"Stdout Size: {j['outputFileSize']}")
+                logger.info("Stdout Size: %s", j["outputFileSize"])
             if j["errorFileSize"] and j["errorFileSize"] != "-1":
-                print(f"Stderr Size: {j['errorFileSize']}")
+                logger.info("Stderr Size: %s", j["errorFileSize"])
         if j["comment"]:
-            print(f"    Comment: {j['comment']}")
+            logger.info("    Comment: %s", j["comment"])
     else:
         for j in jobs:
             events = "[" + ";".join(j["eventIds"]) + "]" if j["eventIds"] else "[-]"
             tries = f"{j['tryDone']}/{j['tryCount']}"
             name = f" {j['name']}" if j["name"] else ""
-            print(
-                f"{j['jobId']:<10s} {j['queueName']:<10s} {j['status']:<10s} {tries:<6s} {j['scheduledDate']:<15s} {events}{name}"
+            logger.info(
+                "%-10s %-10s %-10s %-6s %-15s %s%s",
+                j["jobId"],
+                j["queueName"],
+                j["status"],
+                tries,
+                j["scheduledDate"],
+                events,
+                name,
             )
 
 
@@ -804,6 +820,8 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO, format="%(message)s")
+
     # Resolve cert path: --cert flag > ECCERT env > default
     cert_path = args.cert or Path(os.environ.get("ECCERT", str(DEFAULT_CERT)))
 
@@ -821,7 +839,7 @@ def main() -> int:
     try:
         match args.command:
             case "gateway":
-                print(client.get_gateway_name() or "(no response)")
+                logger.info("%s", client.get_gateway_name() or "(no response)")
 
             case "ops":
                 _print_ops(client)
@@ -842,33 +860,33 @@ def main() -> int:
                     no_directives=args.no_directives,
                     stderr_to_stdout=args.stderr_to_stdout,
                 )
-                print(job_id)
+                logger.info("%s", job_id)
 
             case "delete":
                 client.delete_job(args.job_id)
-                print(f"Deleted {args.job_id}")
+                logger.info("Deleted %s", args.job_id)
 
             case "restart":
                 client.restart_job(args.job_id)
-                print(f"Restarted {args.job_id}")
+                logger.info("Restarted %s", args.job_id)
 
             case "get":
                 which = "error" if args.error else ("input" if args.input else "output")
                 data = client.get_job_output(args.job_id, which=which)
                 if args.output:
                     args.output.write_bytes(data)
-                    print(f"Written to {args.output}", file=sys.stderr)
+                    logger.info("Written to %s", args.output)
                 else:
                     sys.stdout.buffer.write(data)
 
     except FileNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        logger.error("Error: %s", exc)
         return 1
     except RuntimeError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        logger.error("Error: %s", exc)
         return 1
     except httpx.ConnectError as exc:
-        print(f"Connection error: {exc}", file=sys.stderr)
+        logger.error("Connection error: %s", exc)
         return 1
     finally:
         client.release_token()

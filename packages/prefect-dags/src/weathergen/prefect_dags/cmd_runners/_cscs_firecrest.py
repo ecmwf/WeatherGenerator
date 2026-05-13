@@ -76,8 +76,8 @@ class CscsFirecrestContext:
     consumer_key_path: str | Path | None = None
     consumer_secret_path: str | Path | None = None
     # Alternative: provide credentials as strings.
-    # WARNING: embedding secrets in source is STRONGLY DISCOURAGED. 
-    # If these credentials are committed to source, they will likely be leaked 
+    # WARNING: embedding secrets in source is STRONGLY DISCOURAGED.
+    # If these credentials are committed to source, they will likely be leaked
     # and should be considered compromised. Rotate immediately if that happens.
     consumer_key: str | None = None
     consumer_secret: str | None = None

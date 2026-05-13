@@ -23,6 +23,7 @@ on a given environment (e.g. local machine, remote server, etc.).
 """
 type CmdContext = LocalContext | GenericContext | EcmwfSshContext | CscsFirecrestContext
 
+
 def slurm_account(context: CmdContext) -> str | None:
     """
     Extracts a slurm account if specified in the context.
@@ -34,6 +35,7 @@ def slurm_account(context: CmdContext) -> str | None:
             return context.account
         case _:
             return None
+
 
 def get_command_runner(context: CmdContext) -> CommandRunner | Exception:
     match context:

@@ -135,6 +135,14 @@ What replays vs. what doesn't:
 
 **Never embed secrets directly in source** . All contexts can load secrets from disk. These secrets can be updated during computation, as they are regularly checked and reloaded.
 
+### ECMWF-SSH
+
+Works out
+
+### ECMWF-ECACCESS
+
+Get a
+
 ## Examples
 
 - [`examples/hello_world.py`](examples/hello_world.py) — minimal `run` + `sbatch` over SSH.
