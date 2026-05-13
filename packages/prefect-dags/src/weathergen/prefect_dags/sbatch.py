@@ -28,6 +28,7 @@ As a result:
 """
 
 import asyncio
+import contextlib
 import logging
 import re
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ from typing import Literal
 from prefect import get_client
 from prefect.artifacts import acreate_markdown_artifact
 from prefect.concurrency.asyncio import concurrency as _async_concurrency
+from prefect.exceptions import ObjectAlreadyExists
 from prefect.transactions import CommitMode, transaction
 from prefect.utilities.asyncutils import run_coro_as_sync
 from prefect.variables import Variable
@@ -74,8 +76,12 @@ _ensured_limits: set[str] = set()
 async def _ensure_concurrency_limit(name: str) -> None:
     if name in _ensured_limits:
         return
+    # Prefect's "upsert" is racy: it reads then creates, so two callers can
+    # both see "missing" and both call create — the loser gets a 409. The
+    # limit already existing is exactly the state we wanted, so swallow it.
     async with get_client() as client:
-        await client.upsert_global_concurrency_limit_by_name(name=name, limit=1)
+        with contextlib.suppress(ObjectAlreadyExists):
+            await client.upsert_global_concurrency_limit_by_name(name=name, limit=1)
     _ensured_limits.add(name)
 
 

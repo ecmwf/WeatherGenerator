@@ -5,6 +5,9 @@ Unlike GenericSshCommandRunner, this runner shells out to the system `ssh`
 client so that it honors ~/.ssh/config — including host aliases (e.g.
 "hpc-login"), IdentityFile, CertificateFile, and ProxyCommand. Teleport's
 tsh-based cert auth flow relies on these, and paramiko cannot replicate it.
+
+TODO: check if this is still needed for ECMWF clusters or if the generic
+SSH runner can be used now.
 """
 
 import shlex

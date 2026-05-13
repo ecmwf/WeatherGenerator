@@ -13,11 +13,18 @@
 # weathergen-prefect-dags = { path = "../", editable = true }
 # ///
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task
-from weathergen.prefect_dags.cmd_runners import CscsFirecrestContext, EcmwfSshContext
+from weathergen.prefect_dags.cmd_runners import (
+    CscsFirecrestContext,
+    EcmwfEcaccessContext,
+    EcmwfSshContext,
+)
 
 all_contexts = {
     "atos-ssh": EcmwfSshContext(
         host="hpc-login",
+    ),
+    "atos-ecaccess": EcmwfEcaccessContext(
+        cert_path="~/.ecaccess_cert.crt",
     ),
     "santis-firecrest": CscsFirecrestContext(
         hpc="santis",

@@ -13,7 +13,7 @@
 # weathergen-prefect-dags = { path = "../", editable = true }
 # ///
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task
-from weathergen.prefect_dags.cmd_runners import EcmwfSshContext
+from weathergen.prefect_dags.cmd_runners import EcmwfEcaccessContext
 
 # ctx: CmdContext = LocalContext()
 # ctx: CmdContext = EcmwfSshContext(
@@ -26,14 +26,22 @@ from weathergen.prefect_dags.cmd_runners import EcmwfSshContext
 #     consumer_key_path="~/.ssh/cscs_consumer_key",
 #     consumer_secret_path="~/.ssh/cscs_consumer_secret",
 # )
-ctx = EcmwfSshContext(
-    host="hpc-login",
+# ctx = EcmwfSshContext(
+#     host="hpc-login",
+# )
+ctx = EcmwfEcaccessContext(
+    cert_path="~/.ecaccess_cert.crt",
 )
 
 
 @task
 def get_pwd() -> str:
-    return run(ctx, command=["pwd"]).stdout.strip()
+    # ECMWF appends many other lines to the output, so we need to get the last one:
+    res = run(ctx, command=["pwd"])
+    assert res.stdout, "No output from pwd command"
+    last_line = res.stdout.strip().split("\n")[-1]
+    print(f"last line of pwd output: '{last_line}'")
+    return last_line
 
 
 @task(task_run_name="sleep_and_print-{sleep_sec}s")

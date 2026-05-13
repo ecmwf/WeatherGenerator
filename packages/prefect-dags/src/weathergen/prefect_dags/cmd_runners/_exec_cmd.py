@@ -12,6 +12,10 @@ from weathergen.prefect_dags.cmd_runners._cscs_firecrest import (
     CscsFirecrestContext,
 )
 from weathergen.prefect_dags.cmd_runners._ecmwf import EcmwfSshCommandRunner, EcmwfSshContext
+from weathergen.prefect_dags.cmd_runners._ecmwf_ecaccess import (
+    EcmwfEcaccessCommandRunner,
+    EcmwfEcaccessContext,
+)
 from weathergen.prefect_dags.cmd_runners._generic import GenericContext, GenericSshCommandRunner
 from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
 from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
@@ -21,7 +25,9 @@ from weathergen.prefect_dags.result import OpError, Result, is_err
 The context contains all the information necessary to run a command
 on a given environment (e.g. local machine, remote server, etc.).
 """
-type CmdContext = LocalContext | GenericContext | EcmwfSshContext | CscsFirecrestContext
+type CmdContext = (
+    LocalContext | GenericContext | EcmwfSshContext | CscsFirecrestContext | EcmwfEcaccessContext
+)
 
 
 def slurm_account(context: CmdContext) -> str | None:
@@ -33,6 +39,8 @@ def slurm_account(context: CmdContext) -> str | None:
             return context.account
         case EcmwfSshContext():
             return context.account
+        case EcmwfEcaccessContext():
+            return context.account
         case _:
             return None
 
@@ -43,6 +51,8 @@ def get_command_runner(context: CmdContext) -> CommandRunner | Exception:
             return LocalCommandRunner()
         case EcmwfSshContext():
             return EcmwfSshCommandRunner(context)
+        case EcmwfEcaccessContext():
+            return EcmwfEcaccessCommandRunner(context)
         case GenericContext():
             return GenericSshCommandRunner(context)
         case CscsFirecrestContext():

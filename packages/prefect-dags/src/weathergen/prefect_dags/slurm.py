@@ -196,11 +196,18 @@ async def get_slurm_job_states(
     if is_err(res):
         return OpError(err=RuntimeError(f"sacct command failed: {res.err}"))
 
+    # sacct -P output is "<jobid>|<state>" per line, but when the command is
+    # routed through ECaccess the stdout also contains the ECMWF job-filter
+    # banner and ecprofile/ecepilog blocks. Only trust rows whose first column
+    # is one of the job ids we actually asked about.
+    expected_ids = set(slurm_job_ids)
     states: dict[str, SlurmJobState] = {}
     for line in res.stdout.splitlines():
         if not line:
             continue
-        job_id, _, raw_state = line.partition("|")
+        job_id, sep, raw_state = line.partition("|")
+        if not sep or job_id not in expected_ids:
+            continue
         # State may carry a suffix like "CANCELLED by 12345" — keep the first token
         token = raw_state.split(maxsplit=1)[0] if raw_state else ""
         if token not in _KNOWN_STATES:
