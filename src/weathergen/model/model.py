@@ -94,7 +94,7 @@ class ModelParams(torch.nn.Module):
         self.dtype = get_dtype(cf.attention_dtype)
 
         # Positional embeddings
-        self.max_tokens_local_per_cell = cf.get("max_number_tokens_local_per_cell", 64)
+        self.max_tokens_local_per_cell = cf.get("ae_local_max_tokens_per_cell", 64)
         self.pe_embed = torch.nn.Parameter(
             torch.zeros(self.max_tokens_local_per_cell, cf.ae_local_dim_embed, dtype=self.dtype),
             requires_grad=False,
