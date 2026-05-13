@@ -18,9 +18,7 @@ ctx = EcmwfSshContext(
 )
 
 @flow(log_prints=True)
-def test_run_cmd_flow(
-    rerun_token=None,
-):
+def hello_world(rerun_token=None):
     command = "echo 'hello world'"
     # Run a command on the HPC:
     cmd_result = run(ctx, command=command)
@@ -29,6 +27,8 @@ def test_run_cmd_flow(
         ctx,
         job_name="hello_world_job",
         command=command,
+        # You may need to adapt to your HPC, see test_flow.py on an example.
+        working_directory="/tmp",
         time_limit="00:01:00",
     )
     print(f"Slurm job finished: {slurm_result.status}")
@@ -36,4 +36,4 @@ def test_run_cmd_flow(
 
 
 if __name__ == "__main__":
-    test_run_cmd_flow()
+    hello_world()

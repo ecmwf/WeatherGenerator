@@ -29,7 +29,11 @@ uvx --with "prefect==3.7.0" prefect server start
 ```
 
 
-2. Execute this script, which simply prints "hello world" through a Slurm job:
+2. Execute this script ([source](https://github.com/ecmwf/WeatherGenerator/blob/tjh/dev/prefect-test/packages/prefect-dags/examples/hello_world.py)), which simply prints "hello world" through a Slurm job:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ecmwf/WeatherGenerator/tjh/dev/prefect-test/packages/prefect-dags/examples/hello_world.py | uv run --script -
+```
 
 ```python
 from weathergen.prefect_dags.cmd_runners import EcmwfSshContext
@@ -39,9 +43,7 @@ from weathergen.prefect_dags import flow, run, sbatch
 ctx = EcmwfSshContext(host="hpc-login")
 
 @flow(log_prints=True)
-def test_run_cmd_flow(
-    rerun_token=None,
-):
+def hello_world(rerun_token=None):
     command = "echo 'hello world'"
     # Run a command on the HPC:
     cmd_result = run(ctx, command=command)
@@ -49,17 +51,27 @@ def test_run_cmd_flow(
     slurm_result = sbatch(
         ctx,
         job_name="hello_world_job",
+        # You may need to adapt to your HPC, see examples/test_flow.py on an example.
+        working_directory="/tmp",
         command=command,
         time_limit="00:01:00",
     )
     print(f"Slurm job finished: {slurm_result.status}")
 ```
 
-The whole file is on Github:
-https://github.com/ecmwf/WeatherGenerator/blob/tjh/dev/prefect-test/packages/prefect-dags/examples/hello_world.py
+Here is an expected output:
 
-You can run it from the terminal:
+```sh
+14:24:56.295 | INFO    | Flow run 'hello-world-fresh-flo6205c785' - Beginning flow run 'hello-world-fresh-flo6205c785' for flow 'hello-world'
+14:24:56.297 | INFO    | Flow run 'hello-world-fresh-flo6205c785' - Fresh run. To resume if interrupted, rerun with rerun_token='flo6205c785'.
+14:24:56.312 | INFO    | Task run 'run-328' - Running: ssh -o BatchMode=yes hpc-login 'echo '"'"'hello world'"'"''
+14:25:00.678 | INFO    | Task run 'run-328' - Finished in state Completed()
+...
+```
 
+The [Local Prefect UI](http://127.0.0.1:4200/flows) will show the finished flow:
+
+![alt text](image.png)
 
 
 ## Supported HPCs
