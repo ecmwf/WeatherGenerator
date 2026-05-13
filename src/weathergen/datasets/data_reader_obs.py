@@ -103,9 +103,9 @@ class DataReaderObs(DataReaderBase):
             c
             for c in colnames
             if (
-                np.array([c_sel in c for c_sel in cols_select]).any()
+                np.array([c_sel == c for c_sel in cols_select]).any()
                 if cols_select is not None
-                else True and not np.array([c_nsel in c for c_nsel in cols_exclude]).any()
+                else True and not np.array([c_nsel == c for c_nsel in cols_exclude]).any()
             )
         ]
 

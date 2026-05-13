@@ -253,9 +253,9 @@ class DataReaderAnemoi(DataReaderTimestep):
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
                     and (
-                        np.array([f in k for f in channels]).any() if channels is not None else True
+                        np.array([f == k for f in channels]).any() if channels is not None else True
                     )
-                    and not np.array([f in k for f in channels_exclude]).any()
+                    and not np.array([f == k for f in channels_exclude]).any()
                 )
             ]
         )
