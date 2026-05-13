@@ -118,27 +118,54 @@ class WeatherGenReader(Reader):
             Full climatology path if available, otherwise None.
         """
         stream_dict = self.get_stream(stream)
+        explicit_path = stream_dict.get("climatology_path", None)
+        if explicit_path:
+            return str(explicit_path)
 
-        clim_data_path = stream_dict.get("climatology_path", None)
-        if not clim_data_path:
-            clim_base_dir = self.inference_cfg.get("data_path_aux", None)
-            clim_fn = next(
-                (
-                    item.get("climatology_filename")
-                    for item in self.inference_cfg.get("streams", [])
-                    if item.get("name") == stream
-                ),
-                None,
+        clim_base_dir = self.inference_cfg.get("data_path_aux", None)
+        if not clim_base_dir:
+            _logger.warning(
+                "No 'data_path_aux' defined in inference config."
+                " Cannot infer climatology path for stream %s.",
+                stream,
             )
-            if clim_base_dir and clim_fn:
-                clim_data_path = Path(clim_base_dir) / clim_fn
-            else:
-                _logger.warning(
-                    f"No climatology path specified for stream {stream}. Setting climatology to "
-                    "NaN. Add 'climatology_path' to evaluation config to use metrics like ACC."
-                )
+            return None
 
-        return str(clim_data_path) if clim_data_path else None
+        clim_fn = next(
+            (
+                item.get("filenames")
+                for item in self.inference_cfg.get("streams", [])
+                if item.get("name") == stream
+            ),
+            None,
+        )
+        if isinstance(clim_fn, oc.ListConfig) and len(clim_fn) == 1:
+            climatology_partial_filename = clim_fn[0]
+        else:
+            _logger.warning(
+                f"Many source filenames found for stream {stream} in model config."
+                " In that case the climatology filename should be specified"
+                " explicitly via 'climatology_path' in the evaluation config."
+            )
+            return None
+
+        clim_data_path = (
+            Path(clim_base_dir)
+            / "climatology"
+            / climatology_partial_filename.replace(".zarr", "_climatology.zarr")
+        )
+
+        if not clim_data_path.exists():
+            _logger.warning(
+                f"Climatology file {clim_data_path} does not exist or configuration is invalid."
+                " Setting climatology to NaN."
+                " Please check that the path is correct and that the file exists."
+            )
+            return None
+        else:
+            _logger.info(f"Using climatology file: {clim_data_path}")
+
+        return str(clim_data_path)
 
     def get_channels(self, stream: str) -> list[str]:
         """
