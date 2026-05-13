@@ -19,10 +19,13 @@ import warnings
 
 import dask.array as da
 import numpy as np
+import pandas as pd
 import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
+from pathlib import Path
+from scipy.interpolate import RegularGridInterpolator
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
@@ -792,3 +795,266 @@ def _get_backend(store_path: pathlib.Path, read_only: bool) -> ZarrIO:
     """Get the proper io backend for a given store."""
     ext = store_path.suffix[1:]
     return _IO_CLASSES[StoreType(ext)](store_path, read_only)
+
+
+class CAMSForecastReader:
+    """Reader class for CAMS forecast data stored in Zarr format"""
+
+    def __init__(self, eval_cfg: dict):
+        """
+        Initialize the CAMSForecastReader.
+
+        Parameters
+        ----------
+        eval_cfg: dict
+            The evaluation configuration dictionary.
+        """
+        from weathergen.datasets.data_reader_anemoi import _clip_lat, _clip_lon  # Moved here to avoid circular import
+
+        self.eval_cfg = eval_cfg
+        logging.info(f"Initializing CAMSForecastReader with config: {eval_cfg}")
+        self.cams_base_dir = Path(self.eval_cfg.get("cams_base_dir"))
+        self.cams_forecast_filename = self.eval_cfg.get(
+            "cams_forecast_filename", "cams_forecast_2022.zarr"
+        )
+        self.cams_forecast_path = self.cams_base_dir / self.cams_forecast_filename
+        ds_surface = xr.open_zarr(self.cams_forecast_path, group="surface", chunks="auto")
+        ds_profiles = xr.open_zarr(self.cams_forecast_path, group="profiles", chunks="auto")
+
+        # merge along variables
+        self.ds = xr.merge([ds_surface, ds_profiles])
+        self.available_channels = set(self.ds.data_vars)
+        self.channels = {
+            'surface': ["pm1", "pm2p5", "pm10"],
+            'tc': ["tc_co", "tc_no", "tc_no2", "tc_so2", "tc_o3"],
+            # note: some profile variables are not listed automatically, add extras here
+            'profiles': ["so2", "o3", "co", "no", "no2", "go3"],
+        }
+        self.pressure_levels = [
+            "50",
+            "100",
+            "150",
+            "200",
+            "250",
+            "300",
+            "400",
+            "500",
+            "600",
+            "700",
+            "850",
+            "925",
+            "1000",
+        ]
+        lat_raw = _clip_lat(self.ds["latitude"].values)
+        lon_raw = _clip_lon(self.ds["longitude"].values)
+
+        # RegularGridInterpolator needs strictly monotonic axes
+        lat_order = np.argsort(lat_raw)
+        lon_order = np.argsort(lon_raw)
+        self.lat = lat_raw[lat_order]
+        self.lon = lon_raw[lon_order]
+        self._lat_order = lat_order
+        self._lon_order = lon_order
+
+        self.time = self.ds["time"].values
+        self.forecast_steps = np.unique(self.ds["step"].values)
+        self.regrid_data = self.eval_cfg.get("regrid_forecast", False)
+
+    def _sort_data(self, data: np.ndarray) -> np.ndarray:
+        """Re-order the lat/lon axes of *data* to match the sorted source grid."""
+        # data is expected to have shape (..., n_lat, n_lon)
+        return data[..., self._lat_order, :][..., :, self._lon_order]
+
+    def supports_channel(self, ch_: str) -> bool:
+        """Return True when a channel can be resolved from the loaded CAMS store."""
+        if ch_ in self.available_channels:
+            return True
+
+        ch_parts = ch_.split("_")
+        if len(ch_parts) != 2:
+            return False
+
+        var, level = ch_parts[0], ch_parts[1]
+        return (
+            var in self.channels['profiles']
+            and level in self.pressure_levels
+            and var in self.available_channels
+        )
+
+    def get_data(
+        self,
+        ch_: str,
+        step: int | None = None,
+        target_lat: np.ndarray | None = None,
+        target_lon: np.ndarray | None = None,
+        time: "np.datetime64 | str | None" = None,
+    ) -> np.ndarray:
+        """
+        Retrieve the data for a given channel, optionally regridded to a target grid.
+
+        If *target_lat* / *target_lon* are 1-D arrays of irregular (scatter)
+        coordinates, the data is interpolated at those points and returned as a
+        1-D array.  If they describe a regular grid the result is a 2-D
+        ``xr.DataArray``.
+
+        Parameters
+        ----------
+        ch_: str
+            The channel name to retrieve data for.
+        step: int | None
+            Forecast step (in hours) to select.  When ``None`` the first
+            available step is used (legacy behaviour).
+        target_lat: np.ndarray | None
+            Target latitude values for regridding / interpolation.
+        target_lon: np.ndarray | None
+            Target longitude values for regridding / interpolation.
+        time : np.datetime64 | str | None
+            Forecast initialisation time to select.  When provided the
+            nearest matching time entry is used instead of falling back to
+            the first entry.
+
+        Returns
+        -------
+        np.ndarray
+            The data array for the specified channel.
+        """
+        # first try using the channel name verbatim (surface or tc variables
+        # and also combined names like 'tc_co' live in the merged dataset).
+        if ch_ in self.ds:
+            da = self.ds[ch_]
+        else:
+            # fall back to splitting for profile variables such as 'co_500'
+            ch_parts = ch_.split("_")
+            if len(ch_parts) != 2:
+                available = sorted(self.available_channels)
+                raise ValueError(
+                    f"Channel {ch_} not found in CAMS dataset: {self.cams_forecast_path}. "
+                    + f"Available base variables: {available}"
+                )
+            var, level = ch_parts[0], ch_parts[1]
+            if (
+                var in self.channels['profiles']
+                and level in self.pressure_levels
+                and var in self.ds
+            ):
+                da = self.ds[var].sel(isobaricInhPa=level)
+            else:
+                available = sorted(self.available_channels)
+                raise ValueError(
+                    f"Channel {ch_} not found in CAMS dataset: {self.cams_forecast_path}. "
+                    + f"Available base variables: {available}"
+                )
+
+        # Select the requested forecast step before converting to numpy.
+        # The CAMS zarr stores `step` as timedelta, so convert hours -> Timedelta.
+        if step is not None and "step" in da.dims:
+            da = da.sel(step=pd.Timedelta(hours=int(step)))
+
+        # Select the correct forecast initialisation time.  When *time* is
+        # provided use nearest-neighbour lookup; otherwise fall back to the
+        # first entry (legacy behaviour used only when regridding).
+        if "time" in da.dims:
+            if time is not None:
+                da = da.sel(time=time, method="nearest")
+            elif (target_lat is not None and target_lon is not None) or self.regrid_data:
+                if da.sizes["time"] > 1:
+                    da = da.isel(time=0)
+
+        data = da.values
+
+        # Re-order to match the sorted lat/lon axes
+        data = self._sort_data(data)
+
+        if target_lat is not None and target_lon is not None:
+            data = self.regrid_to_scatter(data, target_lat, target_lon)
+        elif self.regrid_data:
+            raise ValueError("Target latitude and longitude must be provided for regridding.")
+        else:
+            _logger.debug("Regridding is disabled, returning original data.")
+
+        return data
+
+    def regrid_to_scatter(
+        self, data: np.ndarray, target_lat: np.ndarray, target_lon: np.ndarray
+    ) -> np.ndarray:
+        """
+        Interpolate *data* (on the sorted CAMS regular grid) at arbitrary
+        (lat, lon) scatter points.
+
+        Parameters
+        ----------
+        data : np.ndarray
+            Source data on the regular CAMS grid (shape ``(..., n_lat, n_lon)``).
+        target_lat : np.ndarray
+            1-D array of target latitude values.
+        target_lon : np.ndarray
+            1-D array of target longitude values.
+
+        Returns
+        -------
+        np.ndarray
+            Interpolated values at the target points (1-D, same length as
+            *target_lat*).
+        """
+        # Collapse any leading dimensions (e.g. time) — take the first slice
+        while data.ndim > 2:
+            data = data[0]
+
+        interpolator = RegularGridInterpolator(
+            (self.lat, self.lon),
+            data,
+            method='linear',
+            bounds_error=False,
+            fill_value=np.nan,
+        )
+
+        target_points = np.column_stack([target_lat, target_lon])
+        return interpolator(target_points)
+
+    def regrid_to_target(
+        self, data: np.ndarray, target_lat: np.ndarray, target_lon: np.ndarray
+    ) -> xr.DataArray:
+        """
+        Regrid the input data to a *regular* target latitude/longitude grid.
+
+        Parameters
+        ----------
+        data: np.ndarray
+            The input data array to be regridded.
+        target_lat: np.ndarray
+            Sorted 1-D array of target latitude grid values.
+        target_lon: np.ndarray
+            Sorted 1-D array of target longitude grid values.
+
+        Returns
+        -------
+        xr.DataArray
+            The regridded data array on the target grid.
+        """
+        # Collapse any leading dimensions
+        while data.ndim > 2:
+            data = data[0]
+
+        interpolator = RegularGridInterpolator(
+            (self.lat, self.lon),
+            data,
+            method='linear',
+            bounds_error=False,
+            fill_value=np.nan,
+        )
+
+        target_lat_sorted = np.sort(target_lat)
+        target_lon_sorted = np.sort(target_lon)
+        target_lon_grid, target_lat_grid = np.meshgrid(target_lon_sorted, target_lat_sorted)
+        target_points = np.column_stack([target_lat_grid.ravel(), target_lon_grid.ravel()])
+        forecast_regridded_values = interpolator(target_points).reshape(
+            len(target_lat_sorted), len(target_lon_sorted)
+        )
+
+        forecast_regridded = xr.DataArray(
+            forecast_regridded_values,
+            coords={'latitude': target_lat_sorted, 'longitude': target_lon_sorted},
+            dims=['latitude', 'longitude'],
+        )
+
+        return forecast_regridded

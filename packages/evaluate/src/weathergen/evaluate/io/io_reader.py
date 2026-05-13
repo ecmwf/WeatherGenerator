@@ -80,7 +80,7 @@ class Reader(ABC):
         self.eval_cfg = eval_cfg
         self.run_id = run_id
         self.private_paths = private_paths
-        self.streams = list(eval_cfg.streams.keys())
+        self.streams = list(eval_cfg["streams"].keys())
         # TODO: propagate it to the other functions using global plotting opts
         self.global_plotting_options = eval_cfg.get("global_plotting_options", {})
 
@@ -102,7 +102,7 @@ class Reader(ABC):
         dict
             the config dictionary associated to that stream
         """
-        return self.eval_cfg.streams.get(stream, {})
+        return self.eval_cfg["streams"].get(stream, {})
 
     @abstractmethod
     def get_samples(self) -> set[int]:

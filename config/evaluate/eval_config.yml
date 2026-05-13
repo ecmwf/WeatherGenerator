@@ -78,6 +78,30 @@ run_ids :
     label: "pretrained model ar40mckx"
     results_base_dir : "./results/"
     #NEW: if "streams" is not specified, the default streams are used
+    # CAMS comparison (optional): remove the comment markers below to enable
+    # cams_comparison:
+    #   cams_base_dir: "/path/to/cams"                      # required
+    #   cams_forecast_filename: "cams_forecast_2022.zarr"   # default shown
+    #   cams_stream: "CAMSEAC4"                             # stream name used for output paths
+    #   cams_channels:                                      # null => auto-detect from CAMS store
+    #     - "co_500"
+    #     - "no2_850"
+    #     - "o3_500"
+    #     - "tc_co"
+    #     - "pm2p5"
+    #   forecast_steps: "all"                               # "all", int, or list of hours
+    #   step_hrs: 6                                         # WG time-step in hours (optional)
+    #   plot_bias_maps: true
+    #   plot_value_maps: false
+    #   plot_rmse_curves: true
+    #   write_scorecard: true
+    #   create_video: false
+    #   fps: 2.0
+    #   convert_to_ppm: false                               # convert kg/kg profiles to ppmv
+    #   color_max_ppb: null                                 # symmetric colour-scale cap in ppb
+    #   rmse_rel_pct_clip: 40.0                             # clip relative RMSE% in scorecard heatmap
+    #   regrid_forecast: false
+    #   cams_analysis_filename: null                        # optional: zarr file for native-grid RMSE
     
       
   c8g5katp:

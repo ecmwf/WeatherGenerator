@@ -32,6 +32,7 @@ from weathergen.evaluate.io.wegen_reader import (
     WeatherGenReader,
     WeatherGenZarrReader,
 )
+from weathergen.evaluate.plotting.cams_comparison_plotter import plot_cams_wg_comparison
 from weathergen.evaluate.plotting.plot_orchestration import (
     plot_data,
     plot_score_maps_per_stream,
@@ -370,6 +371,24 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                         mlflow_run.info.run_id,
                         channels_set,
                     )
+
+    # CAMS comparison plots (one call per run that has a cams_comparison block)
+    for run_id, run in runs.items():
+        cams_cfg = run.get("cams_comparison", None)
+        if cams_cfg is None:
+            continue
+        cams_cfg = dict(cams_cfg)  # detach from OmegaConf if needed
+        forecast_steps = cams_cfg.pop("forecast_steps", "all")
+        _logger.info(f"Running CAMS comparison for run {run_id} …")
+        try:
+            plot_cams_wg_comparison(
+                eval_cfg=dict(run),
+                run_id=run_id,
+                cams_cfg=cams_cfg,
+                forecast_steps=forecast_steps,
+            )
+        except Exception:
+            _logger.exception(f"CAMS comparison failed for run {run_id}")
 
     # summary plots
     if scores_dict and cfg.evaluation.get("summary_plots", False):

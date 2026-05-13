@@ -34,6 +34,7 @@ from weathergen.evaluate.plotting.plot_utils import (
     ratio_plot_metric_region,
     score_card_metric_region,
 )
+from weathergen.evaluate.plotting.cams_comparison_plotter import plot_cams_wg_comparison
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards

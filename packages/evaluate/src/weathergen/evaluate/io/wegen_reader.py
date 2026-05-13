@@ -437,7 +437,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 self._cached_streams = set(zio.streams)
 
         if stream in self._cached_streams:
-            return self.eval_cfg.streams.get(stream, {})
+            return self.eval_cfg["streams"].get(stream, {})
         return {}
 
     def get_samples(self) -> set[int]:
