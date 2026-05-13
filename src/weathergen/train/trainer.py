@@ -308,6 +308,17 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
 
+        # --- Point 1: verify sigma is initialised correctly ---
+        if is_root():
+            _log_sigma = getattr(self.model, "latent_perturbation_log_sigma", None)
+            if _log_sigma is not None:
+                _s = _log_sigma.exp().item()
+                logger.info(
+                    f"[latent_perturbation] sigma at init: {_s:.6f}  "
+                    f"(log_sigma={_log_sigma.item():.4f}, "
+                    f"learnable={_log_sigma.requires_grad})"
+                )
+
         # if with_fsdp then parameter count is unreliable
         if is_root():
             # ddp-wrapped model does not expose this function
@@ -490,6 +501,22 @@ class Trainer(TrainerBase):
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
 
+            # --- Point 2: verify sigma gradient on the very first backward pass ---
+            if self.cf.general.istep == 0 and is_root():
+                _log_sigma = getattr(self.model, "latent_perturbation_log_sigma", None)
+                if _log_sigma is not None:
+                    _g = _log_sigma.grad
+                    if _g is None:
+                        logger.warning(
+                            "[latent_perturbation] log_sigma.grad is None after first backward! "
+                            "Sigma will not be learned. Check that kernel_crps is the active loss "
+                            "and that num_members > 1."
+                        )
+                    else:
+                        logger.info(
+                            f"[latent_perturbation] log_sigma.grad after first backward: {_g.item():.6f}"
+                        )
+
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
             total_norm = torch.nn.utils.clip_grad_norm_(
@@ -549,6 +576,21 @@ class Trainer(TrainerBase):
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
+                # --- Points 3 & 4: log sigma value and its gradient norm ---
+                if is_root():
+                    _log_sigma = getattr(self.model, "latent_perturbation_log_sigma", None)
+                    if _log_sigma is not None:
+                        _metrics = {
+                            "latent_perturbation/sigma": _log_sigma.exp().item(),
+                            "latent_perturbation/log_sigma": _log_sigma.item(),
+                        }
+                        if _log_sigma.grad is not None:
+                            _metrics["latent_perturbation/log_sigma_grad_norm"] = (
+                                _log_sigma.grad.norm().item()
+                            )
+                        self.train_logger.log_metrics(
+                            TRAIN, _metrics, step=self.cf.general.istep
+                        )
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
@@ -575,7 +617,9 @@ class Trainer(TrainerBase):
             with tqdm.tqdm(
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
-                for bidx, batch in enumerate(dataset_val_iter):
+                # --- Point 5: accumulators for spread-skill ratio ---
+                _num_members = self.cf.get("latent_perturbation_num_members", 0)
+                _spread_skill_acc = {}  # stream_name -> {"spread_sum", "rmse_sum", "count"}\n\n                for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
                         # pin memory for faster CPU-GPU transfer
                         batch = batch.pin_memory()
@@ -615,6 +659,39 @@ class Trainer(TrainerBase):
                         metadata=extract_batch_metadata(batch),
                     )
 
+                    # --- Point 5: accumulate spread and RMSE for spread-skill ratio ---
+                    if _num_members > 1 and is_root():
+                        for loss_name, t_aux in targets_and_auxs.items():
+                            if not hasattr(t_aux, "physical"):
+                                continue
+                            for step_idx, (pred_step, tgt_step) in enumerate(
+                                zip(preds.physical, t_aux.physical, strict=False)
+                            ):
+                                for stream_name, pred_list in pred_step.items():
+                                    tgt_dict = tgt_step.get(stream_name)
+                                    if tgt_dict is None:
+                                        continue
+                                    tgt_list = tgt_dict.get("target", [])
+                                    for pred_s, tgt_s in zip(pred_list, tgt_list, strict=False):
+                                        # pred_s: [ens, pts, C], tgt_s: [pts, C]
+                                        if pred_s.numel() == 0 or tgt_s.numel() == 0:
+                                            continue
+                                        p = pred_s.float()
+                                        t = tgt_s.float()
+                                        ens_mean = p.mean(0)  # [pts, C]
+                                        rmse = (ens_mean - t).pow(2).mean(0).sqrt()  # [C]
+                                        spread = p.std(0).mean(0)  # [C]
+                                        key = f"{stream_name}/step{step_idx}"
+                                        if key not in _spread_skill_acc:
+                                            _spread_skill_acc[key] = {
+                                                "spread": torch.zeros_like(spread),
+                                                "rmse": torch.zeros_like(rmse),
+                                                "n": 0,
+                                            }
+                                        _spread_skill_acc[key]["spread"] += spread.detach()
+                                        _spread_skill_acc[key]["rmse"] += rmse.detach()
+                                        _spread_skill_acc[key]["n"] += 1
+
                     # log output
                     if bidx < num_samples_write:
                         # denormalization function for data
@@ -643,6 +720,27 @@ class Trainer(TrainerBase):
 
                 self._log_terminal(0, mini_epoch, VAL)
                 self._log(VAL)
+
+                # --- Point 5: log spread-skill ratio ---
+                if _num_members > 1 and is_root() and _spread_skill_acc:
+                    ss_metrics = {}
+                    for key, acc in _spread_skill_acc.items():
+                        n = acc["n"]
+                        mean_spread = (acc["spread"] / n).mean().item()
+                        mean_rmse = (acc["rmse"] / n).mean().item()
+                        ratio = mean_spread / (mean_rmse + 1e-8)
+                        ss_metrics[f"spread_skill/{key}/spread"] = mean_spread
+                        ss_metrics[f"spread_skill/{key}/rmse"] = mean_rmse
+                        ss_metrics[f"spread_skill/{key}/ratio"] = ratio
+                        logger.info(
+                            f"[spread-skill] {key}: spread={mean_spread:.4f}, "
+                            f"rmse={mean_rmse:.4f}, ratio={ratio:.3f} "
+                            f"(target≈1.0)"
+                        )
+                    samples = self.cf.general.istep * self.get_batch_size_total(
+                        self.batch_size_per_gpu
+                    )
+                    self.train_logger.log_metrics(VAL, ss_metrics, step=samples)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()

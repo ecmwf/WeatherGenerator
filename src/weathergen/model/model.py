@@ -336,6 +336,7 @@ class Model(torch.nn.Module):
         self.num_register_tokens = cf.num_register_tokens
         self.latent_heads = None
         self.latent_pre_norm = None
+        self.latent_perturbation_log_sigma = None
         # auxiliary tokens
         self.class_token_idxs = list(
             range(cf.num_register_tokens, cf.num_register_tokens + cf.num_class_tokens)
@@ -590,6 +591,14 @@ class Model(torch.nn.Module):
                         use_patch_token=False,
                     )
 
+        # Latent-perturbation noise scale (learnable or fixed)
+        # torch.zeros() is used (not torch.tensor) so this respects the meta-device context used by FSDP. The actual value is filled in reset_parameters().
+        num_mem = cf.get("latent_perturbation_num_members", 0)
+        if num_mem > 1:
+            if cf.get("latent_perturbation_sigma_learnable", True):
+                self.latent_perturbation_log_sigma = nn.Parameter(torch.zeros(()))
+            else:
+                self.register_buffer("latent_perturbation_log_sigma", torch.zeros(()))
         return self
 
     def reset_parameters(self):
@@ -600,6 +609,11 @@ class Model(torch.nn.Module):
                 pass
 
         self.apply(_reset_params)
+
+        if self.latent_perturbation_log_sigma is not None:
+            sigma_init = self.cf.get("latent_perturbation_sigma_init", 0.01)
+            with torch.no_grad():
+                self.latent_perturbation_log_sigma.fill_(math.log(sigma_init))
 
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
@@ -773,80 +787,146 @@ class Model(torch.nn.Module):
         if not self.pred_heads:
             return output
 
-        # remove register  and class tokens
-        tokens = tokens[:, self.num_aux_tokens :]
+        # ── ① Strip aux tokens ─────────────────────────────────────────────
+        # tokens: [B, num_aux + H*Q, D] → [B, H*Q, D]
+        tokens = tokens[:, self.num_aux_tokens:]
 
-        # get 1-ring neighborhood for prediction
-        batch_size = len(batch)
-        s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-        idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
-        tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
-        # TODO: precompute in model_params?
-        tokens_nbors_lens = torch.full(
-            (s[0] * s[1] + 1,), fill_value=9, dtype=torch.int32, device=tokens_nbors.device
-        )
-        tokens_nbors_lens[0] = 0
+        B = len(batch)
+        H = self.num_healpix_cells
+        Q = self.cf.ae_local_num_queries   # 1 per default config; must stay 1 (see assert below)
+        D = tokens.shape[-1]
+        assert tokens.shape == (B, H * Q, D), f"unexpected token shape {tokens.shape}"
+        # tokens_nbors_lens uses fill_value=9 (one entry per neighbour cell), which is only
+        # correct when Q=1.  If Q>1 each neighbour contributes Q tokens and the value must
+        # change to 9*Q.
+        assert Q == 1, "predict_decoders assumes ae_local_num_queries==1; update tokens_nbors_lens fill_value if Q>1"
 
-        # pair with tokens from assimilation engine to obtain target tokens
+        # ── ② Latent Gaussian perturbation ────────────────────────────────
+        # Sample M independent members by treating each as an extra batch element so the
+        # entire decoder forward pass runs exactly once, fully vectorised.
+        # Layout convention (used throughout): M is the OUTER axis, B is the INNER axis.
+        #   tokens_tiled[m*B + b]  belongs to member m, batch item b
+        M = self.cf.get("latent_perturbation_num_members", 0)
+        if M > 1 and self.latent_perturbation_log_sigma is not None:
+            sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
+            eps = torch.randn(M, B, H * Q, D, device=tokens.device, dtype=tokens.dtype)
+            tokens_tiled = (tokens.unsqueeze(0) + sigma * eps).reshape(M * B, H * Q, D)
+        else:
+            M = 1
+            tokens_tiled = tokens
+        # tokens_tiled: [M*B, H, D]  (Q=1 so H*Q == H)
+        assert tokens_tiled.shape == (M * B, H * Q, D)
+
+        # ── ③ Flatten to cell level ────────────────────────────────────────
+        # tokens_flat[i*H + h]  =  D-dim token for (member i//B, batch i%B, cell h)
+        tokens_flat = tokens_tiled.reshape(M * B, H, Q, D).flatten(0, 1)  # [M*B*H, Q, D]
+        assert tokens_flat.shape == (M * B * H, Q, D)
+
+        # ── ④ Neighbour token gather ───────────────────────────────────────
+        # hp_nbours[h, k] is the k-th neighbour cell index of cell h; values in [0, H).
+        #
+        # For the i-th (m, b) pair (i = m*B + b) the neighbour of cell h lives at flat row
+        #   i*H + nbr   in tokens_flat   (NOT just at `nbr`)
+        # We therefore add a per-(m,b) offset of i*H to every cell index.
+        MB = M * B
+        cell_offsets = torch.arange(MB, device=tokens.device).view(MB, 1, 1) * H
+        idxs = (model_params.hp_nbours.unsqueeze(0) + cell_offsets).flatten(0, 1)  # [M*B*H, 9]
+        assert idxs.shape == (MB * H, 9)
+        assert idxs.min() >= 0 and idxs.max() < MB * H, \
+            f"neighbour indices out of range [0, {MB * H}): min={idxs.min()}, max={idxs.max()}"
+
+        # Gather neighbours: [M*B*H, 9, Q, D] → flatten (9, Q) → [M*B*H*9*Q, D]
+        tokens_nbors = tokens_flat[idxs.flatten()].flatten(0, 1)  # [M*B*H * 9*Q, D]
+        assert tokens_nbors.shape == (MB * H * 9 * Q, D)
+
+        # KV sequence lengths for varlen attention.
+        # attention.py does cumsum(x_kv_lens) before flash_attn, so these are INDIVIDUAL counts
+        # (not already cumulative).  M*B*H groups × 9 neighbour cells (each with Q=1 token).
+        tokens_nbors_lens = tokens_flat.new_zeros(MB * H + 1, dtype=torch.int32)
+        tokens_nbors_lens[1:] = 9 * Q
+
+        # ── ⑤ Per-stream decoding ──────────────────────────────────────────
         for stream_name in self.stream_names:
-            # extract target coords for current stream and fstep and convert to one tensor
+            # Collect target coordinates for this stream + step across the batch.
             t_coords = [
                 batch.samples[i_b].streams_data[stream_name].target_coords[step]
-                for i_b in range(batch_size)
+                for i_b in range(B)
             ]
-            t_coords_lens = [len(t) for t in t_coords]
-            t_coords = torch.cat(t_coords)
+            t_coords_lens = [len(t) for t in t_coords]  # per-batch-item point counts
+            t_coords = torch.cat(t_coords)               # [P, coord_dim]
+            P = t_coords.shape[0]
 
-            if len(t_coords) == 0:
+            if P == 0:
                 continue
 
-            # embed token coords
-            tc_embed = self.embed_target_coords[stream_name]
-            tc_tokens = checkpoint(tc_embed, t_coords, use_reentrant=False)
+            tc_tokens = checkpoint(
+                self.embed_target_coords[stream_name], t_coords, use_reentrant=False
+            )  # [P, embed_dim]
+            assert tc_tokens.shape[0] == P
 
-            # skip when coordinate embeddings yields nan (i.e. the coord embedding network diverged)
             if torch.isnan(tc_tokens).any():
                 logger.warning(
-                    (
-                        f"Skipping prediction for {stream_name} because",
-                        f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens.",
-                    )
+                    f"Skipping prediction for {stream_name} because"
+                    f" of {torch.isnan(tc_tokens).sum()} NaN in tc_tokens."
                 )
-                pred = torch.tensor([], device=tc_tokens.device)
-
-            # skip empty lengths
-            elif tc_tokens.shape[0] == 0:
                 pred = torch.tensor([], device=tc_tokens.device)
 
             else:
-                # lens for varlen attention
-                tcls = torch.cat(
-                    [
-                        sample.streams_data[stream_name].target_coords_lens[step]
-                        for sample in batch.samples
-                    ]
-                )
+                # Build query-group lens for varlen attention.
+                # tcs_lens = [0, c_0, ..., c_{N-1}] where N = B*H, individual counts.
+                tcls = torch.cat([
+                    sample.streams_data[stream_name].target_coords_lens[step]
+                    for sample in batch.samples
+                ])
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
+                N = tcs_lens.shape[0] - 1   # must equal B*H for the KV pairing to be valid
+                assert N == B * H, \
+                    f"expected N={B * H} query groups (B*H), got N={N}"
+
+                # Tile M times: M-major ordering matches tokens_tiled / tokens_nbors layout.
+                #   tc_tokens_in: [M*P, embed_dim]  — [P pts for m=0 | P pts for m=1 | ...]
+                #   tcs_lens_in:  [0, c_0,..,c_{N-1}, c_0,..,c_{N-1}, ...] (M repetitions)
+                tc_tokens_in = tc_tokens.repeat(M, 1)
+                tcs_lens_in = torch.cat([
+                    torch.zeros(1, dtype=torch.int32, device=tcs_lens.device),
+                    tcs_lens[1:].repeat(M),
+                ])
+                assert tc_tokens_in.shape == (M * P, tc_tokens.shape[-1])
+                assert tcs_lens_in.shape[0] == M * N + 1
 
                 if self.cf.decoder_type == "Linear":
                     pred = self.target_token_engines[stream_name](
-                        tc_tokens,
-                        tokens.reshape(-1, s[-1]),  # collapse the batch and token dimensions
-                        tcs_lens,
-                    ).unsqueeze(0)  # add ensemble dim: shape is then [1, preds_per_coord, channels]
+                        tc_tokens_in,
+                        tokens_tiled.reshape(-1, D),   # [M*B*H*Q, D]  all latent tokens flat
+                        tcs_lens_in,
+                    )
+                    # [M*P, C] → [M, P, C]
+                    assert pred.shape[0] == M * P
+                    pred = pred.reshape(M, P, pred.shape[-1])
                 else:
-                    tc_tokens = self.target_token_engines[stream_name](
+                    tc_tokens_out = self.target_token_engines[stream_name](
                         latent=tokens_nbors,
-                        output=tc_tokens,
+                        output=tc_tokens_in,
                         latent_lens=tokens_nbors_lens,
-                        output_lens=tcs_lens,
-                        coordinates=t_coords,
+                        output_lens=tcs_lens_in,
+                        coordinates=t_coords.repeat(M, 1),    # [M*P, coord_dim]
+                    )
+                    pred = self.pred_heads[stream_name](tc_tokens_out)
+                    # pred: [E, M*P, C]
+                    # The M blocks in dim-1 are contiguous (repeat(M,1) ordering), so we can
+                    # split on M and permute: [E, M*P, C] → [M, E, P, C] → [M*E, P, C]
+                    E, pts_M, C = pred.shape
+                    assert pts_M == M * P, f"expected {M * P} pts in pred, got {pts_M}"
+                    pred = (
+                        pred.reshape(E, M, P, C)
+                        .permute(1, 0, 2, 3)
+                        .reshape(M * E, P, C)
                     )
 
-                    # final prediction head to map back to physical space
-                    pred = self.pred_heads[stream_name](tc_tokens)
+                assert pred.shape[1] == P, f"expected {P} points in dim=1, got {pred.shape[1]}"
 
-            # recover batch dimension (ragged, so as list)
+            # ── ⑥ Unpack into per-batch-item list ─────────────────────────
+            # pred: [M or M*E, P, C]  →  list of B tensors, each [M or M*E, pts_b, C]
             pred = torch.split(pred, t_coords_lens, dim=1)
             output.add_physical_prediction(step, stream_name, pred)
 
