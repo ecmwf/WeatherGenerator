@@ -42,9 +42,11 @@ class CscsFirecrestContext:
     `hpc` is the FirecREST `system_name` (e.g. "santis", "alps").
 
     Authentication — provide one of the following, in priority order:
-      1. `consumer_key` + `consumer_secret`: OAuth2 client credentials from
-         the CSCS developer portal. The client mints short-lived JWT tokens
-         via `token_uri` and refreshes them automatically. **Preferred.**
+      1. `consumer_key` (or `consumer_key_path`) + `consumer_secret` (or
+         `consumer_secret_path`): OAuth2 client credentials from the CSCS
+         developer portal. The client mints short-lived JWT tokens via
+         `token_uri` and refreshes them automatically. Prefer the `_path`
+         variants so secrets aren't checked into source. **Preferred.**
       2. `api_token` or `api_token_path`: a pre-issued bearer token (string
          or file). Kept as a fallback for environments where only a static
          token is available.
@@ -69,6 +71,14 @@ class CscsFirecrestContext:
     hpc: CscsHpc
     # Preferred: OAuth2 client credentials. The token gateway issues a fresh
     # short-lived bearer per request, refreshed automatically by pyfirecrest.
+    # Pass the literal value, or a file path to read it from — the `_path`
+    # variants exist so secrets don't have to be embedded in source.
+    consumer_key_path: str | Path | None = None
+    consumer_secret_path: str | Path | None = None
+    # Alternative: provide credentials as strings.
+    # WARNING: embedding secrets in source is STRONGLY DISCOURAGED. 
+    # If these credentials are committed to source, they will likely be leaked 
+    # and should be considered compromised. Rotate immediately if that happens.
     consumer_key: str | None = None
     consumer_secret: str | None = None
     token_uri: str = (
@@ -227,19 +237,38 @@ def _default_firecrest_url(hpc: CscsHpc) -> str:
 def _build_authorization(ctx: CscsFirecrestContext) -> object:
     # Priority 1: OAuth2 client credentials. pyfirecrest's
     # `ClientCredentialsAuth` handles minting and refreshing the JWT.
-    if ctx.consumer_key and ctx.consumer_secret:
-        return f7t.ClientCredentialsAuth(ctx.consumer_key, ctx.consumer_secret, ctx.token_uri)
+    key = _resolve_secret("consumer_key", ctx.consumer_key, ctx.consumer_key_path)
+    secret = _resolve_secret("consumer_secret", ctx.consumer_secret, ctx.consumer_secret_path)
+    if key and secret:
+        return f7t.ClientCredentialsAuth(key, secret, ctx.token_uri)
+    if key or secret:
+        raise ValueError(
+            "Partial OAuth2 credentials: provide both consumer_key "
+            "(or consumer_key_path) and consumer_secret (or consumer_secret_path)."
+        )
     # Priority 2: a pre-issued bearer token (literal or read from file).
-    if ctx.api_token and ctx.api_token_path:
-        raise ValueError("Provide exactly one of api_token or api_token_path, not both.")
-    if ctx.api_token:
-        return _BearerTokenAuth(ctx.api_token)
-    if ctx.api_token_path:
-        return _BearerTokenAuth(Path(ctx.api_token_path).read_text().strip())
+    token = _resolve_secret("api_token", ctx.api_token, ctx.api_token_path)
+    if token:
+        return _BearerTokenAuth(token)
     raise ValueError(
         "No FirecREST credentials provided: set either "
         "(consumer_key + consumer_secret) or (api_token / api_token_path)."
     )
+
+
+def _resolve_secret(name: str, value: str | None, path: str | Path | None) -> str | None:
+    if value and path:
+        raise ValueError(f"Provide exactly one of {name} or {name}_path, not both.")
+    if value:
+        return value
+    if path:
+        resolved = Path(path).expanduser()
+        if not resolved.is_file():
+            raise FileNotFoundError(
+                f"{name}_path points to {resolved} (from {path!r}), but no such file exists."
+            )
+        return resolved.read_text().strip()
+    return None
 
 
 def _find_default_work_dir(client: f7t.v2.Firecrest, hpc: str) -> str:

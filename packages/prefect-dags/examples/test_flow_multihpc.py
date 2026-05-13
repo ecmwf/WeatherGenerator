@@ -15,35 +15,37 @@
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task
 from weathergen.prefect_dags.cmd_runners import CmdContext, CscsFirecrestContext, EcmwfSshContext
 
-# ctx: CmdContext = LocalContext()
-# ctx: CmdContext = EcmwfSshContext(
-#     host="santis",
-#     account="ch17",
-# )
-# ctx: CmdContext = CscsFirecrestContext(
-#     hpc="santis",
-#     account="ch17",
-#     consumer_key_path="~/.ssh/cscs_consumer_key",
-#     consumer_secret_path="~/.ssh/cscs_consumer_secret",
-# )
-ctx = EcmwfSshContext(
-    host="hpc-login",
-)
+all_contexts = {
+    "atos-ssh": EcmwfSshContext(
+        host="hpc-login",
+    ),
+    "santis-firecrest": CscsFirecrestContext(
+        hpc="santis",
+        account="ch17",
+        consumer_key_path="~/.ssh/cscs_consumer_key",
+        consumer_secret_path="~/.ssh/cscs_consumer_secret",
+    ),
+    "santis-ssh": EcmwfSshContext(
+        host="santis",
+        account="ch17",
+    ),
+}
 
 
 
-
-@task
-def get_pwd() -> str:
+@task(task_run_name="get_pwd-{ctx_name}")
+def get_pwd(ctx_name) -> str:
+    ctx = all_contexts[ctx_name]
     return run(ctx, command=["pwd"]).stdout.strip()
 
 
-@task(task_run_name="sleep_and_print-{sleep_sec}s")
-def sleep_and_print(sleep_sec: int, pwd: str) -> SlurmJobResult:
+@task(task_run_name="sleep_and_print-{ctx_name}-{sleep_sec}s")
+def sleep_and_print(ctx_name, sleep_sec: int, pwd: str) -> SlurmJobResult:
+    ctx = all_contexts[ctx_name]
     print(f"Working directory is {pwd}, sleeping for {sleep_sec} seconds...")
     res = sbatch(
         ctx,
-        job_name=f"prefect_test_{sleep_sec}s",
+        job_name="test_job",
         command=[
             "python3",
             "-c",
@@ -58,16 +60,18 @@ def sleep_and_print(sleep_sec: int, pwd: str) -> SlurmJobResult:
 
 
 @flow(log_prints=True)
-def test_run_cmd_flow(
+def run_multi_hpc(
     rerun_token=None,
 ):
-    # Get pwd on HPC
-    pwd = get_pwd()
-    print(f"Current working directory: {pwd}")
-    sleep_times = [5, 10]
-    # Submit all my jobs
-    jobs = [sleep_and_print.submit(sleep_sec, pwd)
-             for sleep_sec in sleep_times]
+    jobs = []
+    for ctx_name in all_contexts.keys():
+        print(f"Running flow with context: {ctx_name}")
+        # Get pwd on HPC
+        pwd = get_pwd.submit(ctx_name)
+        sleep_times = [5, 10]
+        # Submit all my jobs
+        jobs.extend([sleep_and_print.submit(ctx_name, sleep_sec, pwd)
+                     for sleep_sec in sleep_times])
     # Wait for all the jobs to complete and print the results:
     for job in jobs:
         res = job.result()
@@ -80,4 +84,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rerun-token", default=None)
     args = parser.parse_args()
-    test_run_cmd_flow(rerun_token=args.rerun_token)
+    run_multi_hpc(rerun_token=args.rerun_token)

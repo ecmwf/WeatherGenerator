@@ -63,7 +63,7 @@ class SlurmJobResult:
     submission: SlurmSubmissionResult
 
 
-@task
+@task(task_run_name="sbatch-{job_name}")
 def sbatch(
     ctx: CmdContext,
     *,
@@ -176,7 +176,7 @@ def sbatch_submit(
         return OpError(err=e)
 
 
-@task
+@task(task_run_name="sbatch-submit-{job.job_name}")
 async def _sbatch_submit_async(
     job: SlurmJob,
     context: CmdContext,

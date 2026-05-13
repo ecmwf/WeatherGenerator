@@ -327,7 +327,7 @@ async def submit_slurm(
     stderr_path = Path(job.stderr) if job.stderr is not None else stdout_path
 
     # Construct sbatch command.
-    cmd_parts = ["sbatch", f"--output={stdout_path}"]
+    cmd_parts = ["sbatch", f"--job-name={job.job_name}", f"--output={stdout_path}"]
     if job.stderr is not None:
         cmd_parts.append(f"--error={stderr_path}")
 
