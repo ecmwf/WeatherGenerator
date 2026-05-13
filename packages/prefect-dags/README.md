@@ -137,7 +137,7 @@ What replays vs. what doesn't:
 
 ### ECMWF-SSH
 
-Works out
+Works out of the box.
 
 ### ECMWF-ECACCESS
 
@@ -145,6 +145,12 @@ Get a certificate at https://boaccess.ecmwf.int/ecmwf/ecaccess > "Get certificat
 
 Store the certificate for example at `~/.ecaccess_cert.crt`
 
+### CSCS-FirecREST
+
+Get a consumer key and secret by following the instructions in:
+https://docs.cscs.ch/access/firecrest
+
+Copy and then store securely the certificates, for example in `~/.ssh/cscs_consumer_key` and `~/.ssh/cscs_consumer_secret` .
 
 ## Examples
 

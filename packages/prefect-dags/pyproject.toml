@@ -80,6 +80,10 @@ ignore = [
   "N812", # prevents us following the convention for importing torch.nn.functional as F
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Examples are illustrative scripts: long URLs/comments and print() are fine.
+"examples/**" = ["E501", "T201"]
+
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "numpy.ndarray".msg = "Do not use 'ndarray' to describe a numpy array type, it is a function. Use numpy.typing.NDArray or numpy.typing.NDArray[np.float32] for example"
 
