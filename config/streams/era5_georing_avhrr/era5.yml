@@ -16,7 +16,10 @@ ERA5_in :
   geoinfo_channels : ['z', 'lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.
   location_weight : cosine_latitude
-  masking_rate : 0.6
+  masking_override :
+    model_input :
+      masking_strategy_config :
+        rate: 0.1
   token_size : 8
   tokenize_spacetime : True
   max_num_targets: -1
@@ -26,7 +29,7 @@ ERA5_in :
     net : transformer
     num_tokens : 1
     num_heads : 8
-    dim_embed : 256
+    dim_embed : 512
     num_blocks : 2
   embed_target_coords :
     net : linear
