@@ -40,10 +40,17 @@ class CscsFirecrestContext:
     Connection info for CSCS FirecREST v2.
 
     `hpc` is the FirecREST `system_name` (e.g. "santis", "alps").
-    `api_token` / `api_token_path`: provide exactly one. The token is a
-        pre-issued bearer string from the CSCS user portal; we wrap it for
-        pyfirecrest instead of going through the OAuth2 client-credentials
-        flow.
+
+    Authentication — provide one of the following, in priority order:
+      1. `consumer_key` + `consumer_secret`: OAuth2 client credentials from
+         the CSCS developer portal. The client mints short-lived JWT tokens
+         via `token_uri` and refreshes them automatically. **Preferred.**
+      2. `api_token` or `api_token_path`: a pre-issued bearer token (string
+         or file). Kept as a fallback for environments where only a static
+         token is available.
+
+    `token_uri` is the OIDC token endpoint used with consumer credentials;
+        defaults to the CSCS firecrest-clients realm.
     `firecrest_url` is the FirecREST v2 base URL. When None (the default),
         it's derived from `hpc`: santis → `/cw/`, alps → `/hpc/`. Override
         for ML-platform machines (`/ml/`) or non-prod endpoints.
@@ -60,9 +67,16 @@ class CscsFirecrestContext:
     """
 
     hpc: CscsHpc
-    # TODO directly putting an API token does not work.
-    # These tokens are not working correctly
-    # Exactly one of these two must be provided.
+    # Preferred: OAuth2 client credentials. The token gateway issues a fresh
+    # short-lived bearer per request, refreshed automatically by pyfirecrest.
+    consumer_key: str | None = None
+    consumer_secret: str | None = None
+    token_uri: str = (
+        "https://auth.cscs.ch/auth/realms/firecrest-clients/protocol/openid-connect/token"
+    )
+    # Fallback: a pre-issued static bearer token (string or file). Kept for
+    # environments where only an API token is available, but consumer
+    # credentials are the supported path on CSCS today.
     api_token: str | None = None
     api_token_path: str | Path | None = None
     # The rest is mostly automatic.
@@ -70,8 +84,8 @@ class CscsFirecrestContext:
     scratch_dir: str | None = None
     partition: str | None = None
     account: str | None = None
-    wall_time: str = "00:30:00"
-    wait_timeout: float = 1800.0
+    wall_time: str = "00:10:00"
+    wait_timeout: float = 600.0
 
 
 class _BearerTokenAuth:
@@ -108,11 +122,9 @@ class CscsFirecrestCommandRunner(CommandRunner):
     def __init__(self, context: CscsFirecrestContext):
         self._ctx = context
         self.hpc = context.hpc
-        token = _load_token(context)
-        print("token", token)
         self._client = f7t.v2.Firecrest(
             firecrest_url=context.firecrest_url or _default_firecrest_url(context.hpc),
-            authorization=_BearerTokenAuth(token),
+            authorization=_build_authorization(context),
         )
         self._resolved_scratch_dir = context.scratch_dir
 
@@ -210,14 +222,24 @@ def _default_firecrest_url(hpc: CscsHpc) -> str:
     return f"https://api.cscs.ch/{platform}/firecrest/v2"
 
 
-def _load_token(ctx: CscsFirecrestContext) -> str:
+def _build_authorization(ctx: CscsFirecrestContext) -> object:
+    # Priority 1: OAuth2 client credentials. pyfirecrest's
+    # `ClientCredentialsAuth` handles minting and refreshing the JWT.
+    if ctx.consumer_key and ctx.consumer_secret:
+        return f7t.ClientCredentialsAuth(
+            ctx.consumer_key, ctx.consumer_secret, ctx.token_uri
+        )
+    # Priority 2: a pre-issued bearer token (literal or read from file).
     if ctx.api_token and ctx.api_token_path:
         raise ValueError("Provide exactly one of api_token or api_token_path, not both.")
     if ctx.api_token:
-        return ctx.api_token
+        return _BearerTokenAuth(ctx.api_token)
     if ctx.api_token_path:
-        return Path(ctx.api_token_path).read_text().strip()
-    raise ValueError("Either api_token or api_token_path must be set.")
+        return _BearerTokenAuth(Path(ctx.api_token_path).read_text().strip())
+    raise ValueError(
+        "No FirecREST credentials provided: set either "
+        "(consumer_key + consumer_secret) or (api_token / api_token_path)."
+    )
 
 
 def _find_default_work_dir(client: f7t.v2.Firecrest, hpc: str) -> str:
@@ -304,8 +326,26 @@ def _extract_job_id(submit_resp: dict) -> str:
 
 
 def _safe_view(client: f7t.v2.Firecrest, system_name: str, path: str, logger: Logger) -> str:
-    try:
-        return client.view(system_name=system_name, path=path)
-    except f7t.FirecrestException as e:
-        logger.warning(f"Could not read {path}: {e}")
-        return ""
+    # The CSCS gateway sometimes drops the keep-alive connection after the
+    # long `wait_for_job` poll loop, so the very next `view` raises
+    # `httpx.RemoteProtocolError` instead of returning data. One retry on a
+    # fresh connection is enough in practice. A missing file is a
+    # `FirecrestException` (404) — treat as empty.
+    last_exc: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            return client.view(system_name=system_name, path=path)
+        except f7t.FirecrestException as e:
+            logger.warning(f"Could not read {path}: {e}")
+            return ""
+        except Exception as e:
+            last_exc = e
+            logger.warning(f"view({path}) attempt {attempt} failed transiently: {e}")
+            # Force a fresh httpx session before retrying.
+            try:
+                client.close_session()
+                client.create_new_session()
+            except Exception:
+                pass
+    assert last_exc is not None
+    raise last_exc
