@@ -594,7 +594,7 @@ def plot_loss_per_run(
 
             x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
             # find the cols of the requested metric (e.g. mse) for all streams
-            data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
+            data_cols = []
             for col in run_data_mode.columns:
                 col_split = col.split(".")
                 if len(col_split) < 4:
