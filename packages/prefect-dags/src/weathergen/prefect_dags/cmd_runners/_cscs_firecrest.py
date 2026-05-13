@@ -212,7 +212,6 @@ class CscsFirecrestCommandRunner(CommandRunner):
         if self._resolved_scratch_dir is not None:
             return self._resolved_scratch_dir
         logger.info(f"Resolving scratch_dir for {self._ctx.hpc} via FirecREST")
-        logger.info(f"FirecREST systems: {self._client.systems()}")
 
         base = _find_default_work_dir(self._client, self._ctx.hpc)
         username = _find_username(self._client, self._ctx.hpc)

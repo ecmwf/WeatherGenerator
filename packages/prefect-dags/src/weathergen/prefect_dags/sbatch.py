@@ -1,6 +1,22 @@
 """
 Wrapper for prefect tasks to submit and monitor sbatch jobs on HPCs.
 
+Implementation notes:
+This wrapper is rather complex because of the following:
+- handling transient errors (network failures, sacct outages, prefect crash, driver script crash) without losing the state
+- avoid duplicate slurm submitions on retries (best effort)
+- limit the number of concurrent polling calls to the HPC (1 per HPC at a time) to avoid overwhelming it with sacct calls.
+This requires coordination between all running jobs to prevent duplicatte polling. 
+This itself has to account for issues like crashes during polling.
+
+As a result:
+- the submission step is cached as a separate task, so on retry we replay the cached submission result instead of re-submitting (which would create a new job on the HPC).
+- we use prefect variables as a shared source of truth for the job status, which the monitoring
+loop updates and the polling steps read from. This way, if the polling loop crashes or encounters a transient error, we don't lose the state and can resume from the last known status on retry.
+- we implement a leasing mechanism for the polling loop to ensure only one active poller per HPC at a time. The lease is stored in a prefect variable with an expiry time; any poller
+that finds an expired lease can attempt to acquire it by writing a new lease with a fresh expiry. This way, if a poller crashes while holding the lease, other pollers can detect the expired lease and take over the polling responsibilities without manual intervention.
+
+
 """
 
 import asyncio
@@ -40,6 +56,9 @@ _LEASE_DURATION = timedelta(seconds=20)
 _POLL_INTERVAL_SECS = 5
 
 _PRFEFECT_NUM_READS = 200
+# The children processes can update for 3 minutes, after which the lease expires.
+# Useful for hard crashes.
+_PREFECT_LEASE_DURATION_SECS = 180
 
 _ensured_limits: set[str] = set()
 
@@ -446,33 +465,43 @@ async def _try_update_status(
     """
     # 1. Fast path.
     if not await _lease_expired(runner.hpc):
+        # The lease has not expired, another task may be refreshing right now.
         return
 
     # 2. Per-HPC critical section.
     limit_name = f"sacct-refresh-{runner.hpc}"
+    logger.info(f"Lease expired for hpc {runner.hpc}, attempting to acquire lock for sacct refresh")
     await _ensure_concurrency_limit(limit_name)
-    async with _async_concurrency(limit_name):
+    logger.info(f"Ensured concurrency limit {limit_name} for sacct refresh")
+    async with _async_concurrency(limit_name,
+                                  lease_duration=_PREFECT_LEASE_DURATION_SECS,
+                                  strict=True):
         # 3. Double check — another task may have refreshed while we waited.
+        logger.info(f"Acquired lock for hpc {runner.hpc}, re-checking lease")
         if not await _lease_expired(runner.hpc):
             return
-
+        logger.info(f"Lease still expired for hpc {runner.hpc} after acquiring lock, refreshing")
         # 4. We hold both lock and an expired lease. Write the new lease
         # first so any task currently in step 1 sees fresh state and bails.
         await _write_lease(runner.hpc)
 
         logger.info(f"Acquired lease for hpc {runner.hpc} — refreshing SLURM job states")
 
-        job_ids = await _list_running_job_ids(runner.hpc, logger)
-        if not job_ids:
-            return
-        logger.info(f"Found {len(job_ids)} running jobs for hpc {runner.hpc}: {job_ids}")
-        states_res = await get_slurm_job_states(ctx, job_ids, logger)
-        if isinstance(states_res, OpError):
-            # Don't propagate: this is opportunistic refresh. The next
-            # monitor will retry. Surface in the log so the operator can
-            # act on chronic failures (e.g. sacct outage, network issue).
-            logger.warning(f"Failed to refresh slurm states for hpc={runner.hpc}: {states_res.err}")
-            return
-        for info in states_res:
-            await _set_status(runner.hpc, info.job_id, info.state)
-        logger.info(f"Refreshed {len(states_res)} states for hpc {runner.hpc}")
+    # The lease has been renewed.
+    # Do the refresh outside the critical section.
+    logger.info(f"Refreshing SLURM job states for hpc {runner.hpc}")
+
+    job_ids = await _list_running_job_ids(runner.hpc, logger)
+    if not job_ids:
+        return
+    logger.info(f"Found {len(job_ids)} running jobs for hpc {runner.hpc}: {job_ids}")
+    states_res = await get_slurm_job_states(ctx, job_ids, logger)
+    if isinstance(states_res, OpError):
+        # Don't propagate: this is opportunistic refresh. The next
+        # monitor will retry. Surface in the log so the operator can
+        # act on chronic failures (e.g. sacct outage, network issue).
+        logger.warning(f"Failed to refresh slurm states for hpc={runner.hpc}: {states_res.err}")
+        return
+    for info in states_res:
+        await _set_status(runner.hpc, info.job_id, info.state)
+    logger.info(f"Refreshed {len(states_res)} states for hpc {runner.hpc}")
