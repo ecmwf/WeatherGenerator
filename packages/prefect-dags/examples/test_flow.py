@@ -24,8 +24,8 @@ from weathergen.prefect_dags.cmd_runners import CmdContext, CscsFirecrestContext
 # ctx: CmdContext = CscsFirecrestContext(
 #     hpc="santis",
 #     account="ch17",
-#     consumer_key="eb1f48aa-3317-44e9-8316-38dde71c3f94",
-#     consumer_secret="vaSIryqsgq6VJ2oR7AMXSPhykFpAEg9e",
+#     consumer_key="...",
+#     consumer_secret="...,
 # )
 ctx: CmdContext = EcmwfSshContext(
     host="hpc-login",
@@ -75,4 +75,9 @@ def test_run_cmd_flow(
 
 
 if __name__ == "__main__":
-    test_run_cmd_flow(rerun_token=None)
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--rerun-token", default=None)
+    args = parser.parse_args()
+    test_run_cmd_flow(rerun_token=args.rerun_token)
