@@ -12,7 +12,7 @@
 # # When developing locally, swap the source above for the line below:
 # weathergen-prefect-dags = { path = "../", editable = true }
 # ///
-from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task
+from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task, sbatch_try
 from weathergen.prefect_dags.cmd_runners import *
 # ctx: CmdContext = LocalContext()
 # ctx: CmdContext = EcmwfSshContext(
@@ -50,7 +50,7 @@ def get_pwd() -> str:
 @task(task_run_name="sleep_and_print-{sleep_sec}s")
 def sleep_and_print(sleep_sec: int, pwd: str) -> SlurmJobResult:
     print(f"Working directory is {pwd}, sleeping for {sleep_sec} seconds...")
-    res = sbatch(
+    res1 = sbatch_try(
         ctx,
         job_name=f"prefect_test_{sleep_sec}s",
         command=[
@@ -61,7 +61,23 @@ def sleep_and_print(sleep_sec: int, pwd: str) -> SlurmJobResult:
         time_limit="00:01:00",
         working_directory=pwd,
     )
-    print(f"result: {res}, type: {type(res)}")
+    print(f"sbatch_try result: {res1}")
+    try:
+        res = sbatch(
+            ctx,
+            job_name=f"prefect_test_{sleep_sec}s",
+            command=[
+                "python3",
+                "-c",
+                f"import time; time.sleep({sleep_sec}); print('hello')",
+            ],
+            time_limit="00:01:00",
+            working_directory=pwd,
+        )
+        print(f"result: {res}, type: {type(res)}")
+    except Exception as e:
+        print(f"sbatch failed with error: {e}")
+        raise e
     # assert sleep_sec < 6, "xxx"
     return res
 

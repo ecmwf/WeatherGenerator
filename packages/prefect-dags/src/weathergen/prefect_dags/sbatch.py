@@ -96,6 +96,20 @@ class SlurmJobResult:
     submission: SlurmSubmissionResult
 
 
+class SlurmTerminalFailure(Exception):
+    """
+    Exception raised when a slurm job ends in a non-successful terminal state.
+    """
+
+    result: SlurmJobResult
+
+    def __init__(self, result: SlurmJobResult):
+        super().__init__(
+            f"Slurm job {result.job_id} ended with non-successful state: {result.status}"
+        )
+        self.result = result
+
+
 @task(task_run_name="sbatch-{job_name}")
 def sbatch(
     ctx: CmdContext,
@@ -110,6 +124,7 @@ def sbatch(
     time_limit: str | None = None,
     slurm_options: dict[str, str] | None = None,
     account: str | Literal["auto"] | None = "auto",
+    _accept_failure: bool = False,  # Internal, non-documented.
 ) -> SlurmJobResult:
     """
     Submits a slurm job and await its completion, returning the final state.
@@ -143,38 +158,51 @@ def sbatch(
         # preserved (e.g. FileNotFoundError on a missing script_path).
         raise res.err
     job_res: SlurmJobResult = res
-    if job_res.status != "COMPLETED":
-        raise RuntimeError(
-            f"Slurm job {job_res.job_id} ended with non-successful state: {job_res.status}"
-        )
+    if job_res.status != "COMPLETED" and not _accept_failure:
+        raise SlurmTerminalFailure(result=job_res)
     return job_res
 
 
 def sbatch_try(
-    job: SlurmJob,
-    context: CmdContext,
+    ctx: CmdContext,
+    *,
+    job_name: str,
+    stdout: str | Path | None = None,
+    stderr: str | Path | None = None,
+    script_path: str | Path | None = None,
+    command: str | list[str] | None = None,
+    working_directory: str | Path | None = None,
+    submission_directory: str | Path | None = None,
+    time_limit: str | None = None,
+    slurm_options: dict[str, str] | None = None,
+    account: str | Literal["auto"] | None = "auto",
 ) -> Result[SlurmJobResult]:
     """
     Same as `sbatch`, but returns a Result instead of throwing on failure.
-    """
-    # Delegates to `sbatch` (the cached @task) rather than calling `_sbatch_try`
-    # directly: if we returned an OpError from a Prefect task here, Prefect
-    # would persist it as the task's result and replay the cached failure on
-    # every rerun with the same `rerun_token`.
 
+    The signature mirrors `sbatch`. A non-successful terminal Slurm state (TIMEOUT,
+    FAILED, CANCELLED, ...) becomes a successful return value here — inspect
+    `result.status` to branch on it. Only exceptions raised by the
+    underlying call (e.g. unreachable HPC) are wrapped as OpError.
+    """
+    # Delegate to `sbatch` (the cached @task) with `_accept_failure=True`
+    # rather than to `_sbatch_try` directly: if we returned an OpError from
+    # a Prefect task, Prefect would persist it as the task's result and
+    # replay the cached failure on every rerun with the same `rerun_token`.
     try:
         return sbatch(
-            context,
-            job_name=job.job_name,
-            stdout=job.stdout,
-            stderr=job.stderr,
-            script_path=job.script_path,
-            command=job.command,
-            working_directory=job.working_directory,
-            submission_directory=job.submission_directory,
-            time_limit=job.time_limit,
-            slurm_options=job.slurm_options,
-            account=job.account,
+            ctx,
+            job_name=job_name,
+            stdout=stdout,
+            stderr=stderr,
+            script_path=script_path,
+            command=command,
+            working_directory=working_directory,
+            submission_directory=submission_directory,
+            time_limit=time_limit,
+            slurm_options=slurm_options,
+            account=account,
+            _accept_failure=True,
         )
     except Exception as e:
         return OpError(err=e)
