@@ -15,10 +15,10 @@ METEOSAT_SEVIRI_IR :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   masking_override :
-    source_input :
+    model_input :
       masking_strategy_config :
         rate: 0.5
-  token_size : 128
+  token_size : 256
   tokenize_spacetime : True
   max_num_targets: 262144
   forcing: True
@@ -47,10 +47,10 @@ GOES_ABI_IR :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   masking_override :
-    source_input :
+    model_input :
       masking_strategy_config :
         rate: 0.5
-  token_size : 128
+  token_size : 256
   tokenize_spacetime : True
   max_num_targets: 262144
   forcing: True
@@ -79,10 +79,10 @@ HIMAWARI_AHI_IR :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   masking_override :
-    source_input :
+    model_input :
       masking_strategy_config :
         rate: 0.5
-  token_size : 128
+  token_size : 256
   tokenize_spacetime : True
   max_num_targets: 262144
   forcing: True
@@ -111,10 +111,10 @@ GOES_ABI_VIS :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   masking_override :
-    source_input :
+    model_input :
       masking_strategy_config :
         rate: 0.5
-  token_size : 128
+  token_size : 256
   tokenize_spacetime : True
   max_num_targets: 262144
   forcing: True
@@ -143,10 +143,10 @@ HIMAWARI_AHI_VIS :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   masking_override :
-    source_input :
+    model_input :
       masking_strategy_config :
         rate: 0.5
-  token_size : 128
+  token_size : 256
   tokenize_spacetime : True
   max_num_targets: 262144
   forcing: True

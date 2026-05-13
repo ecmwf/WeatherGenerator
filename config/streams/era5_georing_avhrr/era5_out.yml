@@ -11,8 +11,8 @@ ERA5 :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr']
   stream_id : 1
-  source_exclude : ['w_', 'slor', 'sdor', 'skt', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
-  target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
+  source_exclude : ['w_', 'slor', 'sdor', 'skt', 'tcw', 'cp', 'tp']
+  target_exclude : ['w_', 'slor', 'sdor', 'tcw', 'cp', 'tp']
   geoinfo_channels : ['lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.
   location_weight : cosine_latitude
