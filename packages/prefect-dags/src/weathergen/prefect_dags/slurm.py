@@ -268,7 +268,8 @@ async def submit_slurm(
     """
     Submits a Slurm job using the provided context and logger.
 
-    This function constructs the appropriate sbatch command based on the SlurmJob details and submits it using the run_cmd utility.
+    This function constructs the appropriate sbatch command based on the SlurmJob details and
+    submits it using the run_cmd utility.
 
     Even if no stdout path is provided, this function will always construct one.
     This is necessary to fully capture the final state of the job.
@@ -283,7 +284,8 @@ async def submit_slurm(
     default behavior when only --output is set). To capture stderr separately,
     set `stderr` explicitly on the SlurmJob.
 
-    It returns a SlurmSubmissionResult containing the job ID if submission is successful, or an OpError if there was an issue.
+    It returns a SlurmSubmissionResult containing the job ID if submission is successful, or an
+    OpError if there was an issue.
     """
     # Validate path requirements.
     if job.working_directory is not None and not Path(job.working_directory).is_absolute():
@@ -367,7 +369,8 @@ async def submit_slurm(
         return result
 
     logger.info(
-        f"Slurm job submitted successfully with output: stdout: {result.stdout.strip()} stderr: {result.stderr.strip()}"
+        f"Slurm job submitted successfully with output: "
+        f"stdout: {result.stdout.strip()} stderr: {result.stderr.strip()}"
     )
 
     # Extract job id from sbatch output.

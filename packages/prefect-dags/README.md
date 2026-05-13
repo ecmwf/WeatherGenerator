@@ -141,7 +141,10 @@ Works out
 
 ### ECMWF-ECACCESS
 
-Get a
+Get a certificate at https://boaccess.ecmwf.int/ecmwf/ecaccess > "Get certificate"
+
+Store the certificate for example at `~/.ecaccess_cert.crt`
+
 
 ## Examples
 

@@ -35,9 +35,11 @@ class CommandRunner(Protocol):
 
         This method blocks until the command finishes executing.
 
-        If any error occurs during command execution, it should be captured and returned as an OpError, rather than being raised.
+        If any error occurs during command execution, it should be captured and returned as an
+        OpError, rather than being raised.
 
         logger: must be provided. Default loggers do not work well in python
-        between asynchronous and multi-threaded contexts, so we require the caller to provide a logger that they know works in their context.
+        between asynchronous and multi-threaded contexts, so we require the caller to provide a
+        logger that they know works in their context.
         """
         ...

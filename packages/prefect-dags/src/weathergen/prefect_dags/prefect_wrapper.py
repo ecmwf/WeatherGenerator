@@ -9,7 +9,8 @@ The code is mostly boilerplate:
 - `flow` wrapper:
     sets flow_run_name to a consistent convention,
     enforces the presence of `rerun_token: str | None` in the signature for cache replay to work,
-    logs the rerun token at the start of every run so users know what to pass to resume if interrupted.
+    logs the rerun token at the start of every run so users know what to pass to resume if
+    interrupted.
 """
 
 import datetime
@@ -232,7 +233,8 @@ def flow(__fn: Any = None, /, **kwargs: Any) -> Any:
     Wrapper around @flow with sensible defaults for a machine learning workflow.
     - does not depend on the code to check if the flow needs a rerun. The code is typically
       called separately in a slurm script.
-    - expects an additional (optional) parameter `rerun_token` in the flow signature, which is used to determine caching keys for tasks. See `rerun_aware_cache_key` for details.
+    - expects an additional (optional) parameter `rerun_token` in the flow signature, which is
+      used to determine caching keys for tasks. See `rerun_aware_cache_key` for details.
 
     Usable as both `@flow` and `@flow(...)`. The signature mirrors `prefect.flow`;
     `flow_run_name` is reserved — the codebase enforces a single naming convention.

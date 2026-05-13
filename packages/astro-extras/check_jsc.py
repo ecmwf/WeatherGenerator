@@ -64,7 +64,8 @@ def discover_sites(credential):
 @dataclass
 class SlurmJobInfo:
     """
-    Holds information about a submitted UNICORE job that can be used to query its status or cancel it later.
+    Holds information about a submitted UNICORE job that can be used to query its status or
+    cancel it later.
     """
 
     slurm_job_id: str

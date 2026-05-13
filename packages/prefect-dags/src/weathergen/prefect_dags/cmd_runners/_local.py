@@ -35,7 +35,8 @@ class LocalCommandRunner(CommandRunner):
         # HOME, etc. and breaks most commands. None inherits the parent env unchanged.
         env = {**os.environ, **cmd.env_vars} if cmd.env_vars is not None else None
         logger.info(
-            f"Running local command: {cmd.command} with env vars: {cmd.env_vars} and working directory: {cmd.working_directory}"
+            f"Running local command: {cmd.command} with env vars: {cmd.env_vars} "
+            f"and working directory: {cmd.working_directory}"
         )
         try:
             proc = subprocess.run(

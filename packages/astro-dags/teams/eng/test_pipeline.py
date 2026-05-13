@@ -30,12 +30,16 @@ from pendulum import datetime, duration
 # -------------- #
 
 
-# instantiate a DAG with the @dag decorator and set DAG parameters (see: https://www.astronomer.io/docs/learn/airflow-dag-parameters)
+# instantiate a DAG with the @dag decorator and set DAG parameters
+# (see: https://www.astronomer.io/docs/learn/airflow-dag-parameters)
 @dag(
     start_date=datetime(2025, 4, 1),  # date after which the DAG can be scheduled
-    schedule="@monthly",  # see: https://www.astronomer.io/docs/learn/scheduling-in-airflow for options
-    max_consecutive_failed_dag_runs=5,  # auto-pauses the DAG after 5 consecutive failed runs, experimental
-    doc_md=__doc__,  # add DAG Docs in the UI, see https://www.astronomer.io/docs/learn/custom-airflow-ui-docs-tutorial
+    # see: https://www.astronomer.io/docs/learn/scheduling-in-airflow for options
+    schedule="@monthly",
+    # auto-pauses the DAG after 5 consecutive failed runs, experimental
+    max_consecutive_failed_dag_runs=5,
+    # add DAG Docs in the UI, see https://www.astronomer.io/docs/learn/custom-airflow-ui-docs-tutorial
+    doc_md=__doc__,
     default_args={
         "owner": "Astro",  # owner of this DAG in the Airflow UI
         "retries": 3,  # tasks retry 3 times before they fail
@@ -54,7 +58,8 @@ def example_astronauts():
     # if one exists for your use case you can still use traditional Airflow operators
     # and mix them with @task decorators. Checkout registry.astronomer.io for available operators
     # see: https://www.astronomer.io/docs/learn/airflow-decorators for information about @task
-    # see: https://www.astronomer.io/docs/learn/what-is-an-operator for information about traditional operators
+    # see: https://www.astronomer.io/docs/learn/what-is-an-operator for information about
+    # traditional operators
 
     @task(
         outlets=[Asset("current_astronauts")]

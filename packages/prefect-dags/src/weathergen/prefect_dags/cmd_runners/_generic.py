@@ -1,5 +1,6 @@
 """
-Generic ssh command runner, when there is no specific logic for a given HPC.  This is used as a fallback by the higher-level run_cmd function.
+Generic ssh command runner, when there is no specific logic for a given HPC.  This is used as a
+fallback by the higher-level run_cmd function.
 """
 
 import io

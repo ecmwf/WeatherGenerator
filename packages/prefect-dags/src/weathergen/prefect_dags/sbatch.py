@@ -3,18 +3,26 @@ Wrapper for prefect tasks to submit and monitor sbatch jobs on HPCs.
 
 Implementation notes:
 This wrapper is rather complex because of the following:
-- handling transient errors (network failures, sacct outages, prefect crash, driver script crash) without losing the state
+- handling transient errors (network failures, sacct outages, prefect crash, driver script crash)
+  without losing the state
 - avoid duplicate slurm submitions on retries (best effort)
-- limit the number of concurrent polling calls to the HPC (1 per HPC at a time) to avoid overwhelming it with sacct calls.
+- limit the number of concurrent polling calls to the HPC (1 per HPC at a time) to avoid
+  overwhelming it with sacct calls.
 This requires coordination between all running jobs to prevent duplicatte polling.
 This itself has to account for issues like crashes during polling.
 
 As a result:
-- the submission step is cached as a separate task, so on retry we replay the cached submission result instead of re-submitting (which would create a new job on the HPC).
+- the submission step is cached as a separate task, so on retry we replay the cached submission
+  result instead of re-submitting (which would create a new job on the HPC).
 - we use prefect variables as a shared source of truth for the job status, which the monitoring
-loop updates and the polling steps read from. This way, if the polling loop crashes or encounters a transient error, we don't lose the state and can resume from the last known status on retry.
-- we implement a leasing mechanism for the polling loop to ensure only one active poller per HPC at a time. The lease is stored in a prefect variable with an expiry time; any poller
-that finds an expired lease can attempt to acquire it by writing a new lease with a fresh expiry. This way, if a poller crashes while holding the lease, other pollers can detect the expired lease and take over the polling responsibilities without manual intervention.
+  loop updates and the polling steps read from. This way, if the polling loop crashes or
+  encounters a transient error, we don't lose the state and can resume from the last known
+  status on retry.
+- we implement a leasing mechanism for the polling loop to ensure only one active poller per HPC
+  at a time. The lease is stored in a prefect variable with an expiry time; any poller that
+  finds an expired lease can attempt to acquire it by writing a new lease with a fresh expiry.
+  This way, if a poller crashes while holding the lease, other pollers can detect the expired
+  lease and take over the polling responsibilities without manual intervention.
 
 
 """
@@ -259,7 +267,8 @@ async def _sbatch_try(
 ) -> Result[SlurmJobResult]:
     """
     Implementation of sbatch_try.
-    It is separated so that the graph of tasks in prefect stays clean (no nested sbatch_try inside sbatch)
+    It is separated so that the graph of tasks in prefect stays clean (no nested sbatch_try
+    inside sbatch)
     """
     logger = get_run_logger()
     # Commit the submission eagerly so a downstream failure (polling crash,
@@ -432,9 +441,11 @@ async def _wait_completion_single(
         status = await _read_status(runner.hpc, job_id)
         if status is None:
             # Variable missing. It should not happen.
-            # Reinsert the variable with a "PENDING" status so the monitor loop can update the status.
+            # Reinsert the variable with a "PENDING" status so the monitor loop can update the
+            # status.
             logger.warning(
-                f"Status variable for job {job_id} on hpc {runner.hpc} is missing. Reinserting with PENDING status."
+                f"Status variable for job {job_id} on hpc {runner.hpc} is missing. "
+                f"Reinserting with PENDING status."
             )
             await _set_status(runner.hpc, job_id, "PENDING")
         elif status is not None and is_err(status):

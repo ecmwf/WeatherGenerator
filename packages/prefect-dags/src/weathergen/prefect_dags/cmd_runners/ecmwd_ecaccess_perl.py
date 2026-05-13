@@ -568,7 +568,8 @@ class ECaccessClient:
             '<ns:sendMailOnSuccess xsi:type="xsd:boolean">false</ns:sendMailOnSuccess>',
             '<ns:sendMailOnFailure xsi:type="xsd:boolean">false</ns:sendMailOnFailure>',
             '<ns:sendMailOnRetry xsi:type="xsd:boolean">false</ns:sendMailOnRetry>',
-            f'<ns:containsDirectives xsi:type="xsd:boolean">{_bool(not no_directives)}</ns:containsDirectives>',
+            f'<ns:containsDirectives xsi:type="xsd:boolean">'
+            f"{_bool(not no_directives)}</ns:containsDirectives>",
             _opt("queueName", queue),
             _opt("name", name),
             _opt("transferGatewayName", None),
@@ -578,7 +579,8 @@ class ECaccessClient:
             '<ns:transferInputFile xsi:type="xsd:boolean">false</ns:transferInputFile>',
             '<ns:transferKeepInSpool xsi:type="xsd:boolean">false</ns:transferKeepInSpool>',
             '<ns:renewSubscription xsi:type="xsd:boolean">true</ns:renewSubscription>',
-            f'<ns:errorToOutput xsi:type="xsd:boolean">{_bool(stderr_to_stdout)}</ns:errorToOutput>',
+            f'<ns:errorToOutput xsi:type="xsd:boolean">'
+            f"{_bool(stderr_to_stdout)}</ns:errorToOutput>",
             _opt("manPageContent", None),
             f"<ns:lifeTime>{life_time}</ns:lifeTime>",
             f"<ns:retryCount>{retry_count}</ns:retryCount>",
@@ -703,7 +705,10 @@ def _print_queues(client: ECaccessClient, detail: str | None) -> None:
             logger.info("%-20s %s", q["name"], q["comment"])
     else:
         for q in queues:
-            counts = f"INIT={q['INIT']},WAIT={q['WAIT']},EXEC={q['EXEC']},DONE={q['DONE']},STOP={q['STOP']}"
+            counts = (
+                f"INIT={q['INIT']},WAIT={q['WAIT']},EXEC={q['EXEC']},"
+                f"DONE={q['DONE']},STOP={q['STOP']}"
+            )
             logger.info(
                 "%-15s %-15s %s (%s)",
                 q["queueName"],
