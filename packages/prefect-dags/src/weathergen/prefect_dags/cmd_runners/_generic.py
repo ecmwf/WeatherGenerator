@@ -180,7 +180,11 @@ def _build_remote_command(cmd: Command) -> str:
     return " ".join(parts)
 
 
-def _load_private_key(key_path: Path, logger: Logger) -> paramiko.PKey:
+def _load_private_key(
+    key_path: Path,
+    logger: Logger,
+    cert_pub_path: Path | None = None,
+) -> paramiko.PKey:
     # Paramiko 4.0 can't parse OpenSSH-format ECDSA keys directly. Re-serialize
     # to traditional PEM via cryptography, then dispatch to the matching paramiko
     # key class. This works uniformly across RSA / Ed25519 / ECDSA / DSA.
@@ -203,7 +207,9 @@ def _load_private_key(key_path: Path, logger: Logger) -> paramiko.PKey:
         raise ValueError(f"Unsupported private key type: {type(crypto_key).__name__}")
 
     # Optional companion certificate (e.g. issued by step-ca on CINECA Leonardo).
-    cert_pub = Path(f"{key_path}-cert.pub")
+    # When `cert_pub_path` is given, use it as-is; otherwise fall back to the
+    # `<key_path>-cert.pub` convention.
+    cert_pub = cert_pub_path if cert_pub_path is not None else Path(f"{key_path}-cert.pub")
     if cert_pub.exists():
         pkey.load_certificate(cert_pub.read_text().strip())
         logger.info(f"Loaded SSH certificate: {cert_pub}")

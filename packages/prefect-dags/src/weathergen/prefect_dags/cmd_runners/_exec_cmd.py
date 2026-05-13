@@ -7,6 +7,7 @@ import functools
 import logging
 from typing import Any
 
+from weathergen.prefect_dags.cmd_runners._cineca import CinecaCommandRunner, CinecaSshContext
 from weathergen.prefect_dags.cmd_runners._cscs_firecrest import (
     CscsFirecrestCommandRunner,
     CscsFirecrestContext,
@@ -35,7 +36,12 @@ be immutable). This is important to detect when credentials are updated
 and to invalidate cached clients if needed.
 """
 type CmdContext = (
-    LocalContext | GenericContext | EcmwfSshContext | CscsFirecrestContext | EcmwfEcaccessContext
+    LocalContext
+    | GenericContext
+    | EcmwfSshContext
+    | CscsFirecrestContext
+    | EcmwfEcaccessContext
+    | CinecaSshContext
 )
 
 
@@ -49,6 +55,8 @@ def slurm_account(context: CmdContext) -> str | None:
         case EcmwfSshContext():
             return context.account
         case EcmwfEcaccessContext():
+            return context.account
+        case CinecaSshContext():
             return context.account
         case _:
             return None
@@ -66,6 +74,8 @@ def get_command_runner(context: CmdContext) -> CommandRunner | Exception:
             return GenericSshCommandRunner(context)
         case CscsFirecrestContext():
             return CscsFirecrestCommandRunner(context)
+        case CinecaSshContext():
+            return CinecaCommandRunner(context)
         case _:
             return ValueError(f"Unsupported context type: {type(context)}")
 

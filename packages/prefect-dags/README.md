@@ -132,6 +132,7 @@ What replays vs. what doesn't:
 | Any cluster                   | `GenericContext`       | Passwordless SSH (~1–2 days)             | Suitable for JSC, CINECA, BSC, etc. — anything reachable via key-based SSH.                 |
 | JSC (jupiter, juwels, jureca) |                        | SSH (12 hours) / UNICORE (unlimited)     |                                                                                             |
 | BSC (Marenostrum5)            |                        | SSH (3-4 days)                           | No official interface for long-running sessions, use `GenericContext`                       |
+| Cineca(leonardo)            |                        | SSH (4 days)                           | No official interface for long-running sessions, use `CinecaSshContext`                       |
 
 **Never embed secrets directly in source** . All contexts can load secrets from disk. These secrets can be updated during computation, as they are regularly checked and reloaded.
 

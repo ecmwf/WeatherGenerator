@@ -6,6 +6,11 @@ abstracting away the details of communicating with the various HPCs,
 with a focus on EuropHPC.
 """
 
+from weathergen.prefect_dags.cmd_runners._cineca import (
+    CinecaCommandRunner,
+    CinecaHpc,
+    CinecaSshContext,
+)
 from weathergen.prefect_dags.cmd_runners._cscs_firecrest import (
     CscsFirecrestCommandRunner,
     CscsFirecrestContext,
@@ -45,4 +50,7 @@ __all__ = [
     "CscsFirecrestCommandRunner",
     "CscsFirecrestContext",
     "CscsHpc",
+    "CinecaCommandRunner",
+    "CinecaSshContext",
+    "CinecaHpc",
 ]
