@@ -67,8 +67,6 @@ num_register_tokens: 0
 
 healpix_level: 5
 
-max_number_tokens_local_per_cell: 64
-
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding

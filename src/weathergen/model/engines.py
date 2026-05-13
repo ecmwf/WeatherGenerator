@@ -110,10 +110,10 @@ class EmbeddingEngine(torch.nn.Module):
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
         # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
-        max_tokens = self.cf.get("max_number_tokens_local_per_cell", 64)
+        max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
         assert (
             batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens
-        ), "max number of tokens per cell for positional encoding exceeded."
+        ), "max number of tokens per cell for positional encoding exceeded. Increase ae_local_max_tokens_per_cell."
 
         if batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
