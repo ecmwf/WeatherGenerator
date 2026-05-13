@@ -55,6 +55,11 @@ def test_run_cmd_flow(
     print(f"Slurm job finished: {slurm_result.status}")
 ```
 
+The whole file is on Github:
+https://github.com/ecmwf/WeatherGenerator/blob/tjh/dev/prefect-test/packages/prefect-dags/examples/hello_world.py
+
+You can run it from the terminal:
+
 
 
 ## Supported HPCs

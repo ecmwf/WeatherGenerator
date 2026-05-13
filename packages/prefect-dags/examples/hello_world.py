@@ -7,7 +7,7 @@
 #
 # [tool.uv.sources]
 # # Directly pull the package from Github.
-# # weathergen-prefect-dags = { git = "https://github.com/ecmwf/WeatherGenerator", branch = "tjh/dev/prefect-test", subdirectory = "packages/prefect-dags" }
+# weathergen-prefect-dags = { git = "https://github.com/ecmwf/WeatherGenerator", branch = "tjh/dev/prefect-test", subdirectory = "packages/prefect-dags" }
 # ///
 from weathergen.prefect_dags.cmd_runners import EcmwfSshContext
 from weathergen.prefect_dags import flow, run, sbatch
