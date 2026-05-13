@@ -42,7 +42,12 @@ all_contexts = {
 @task(task_run_name="get_pwd-{ctx_name}")
 def get_pwd(ctx_name) -> str:
     ctx = all_contexts[ctx_name]
-    return run(ctx, command=["pwd"]).stdout.strip()
+    # ECMWF appends many other lines to the output, so we need to get the last one:
+    res = run(ctx, command=["pwd"])
+    assert res.stdout, "No output from pwd command"
+    last_line = res.stdout.strip().split("\n")[-1]
+    print(f"last line of pwd output: '{last_line}'")
+    return last_line
 
 
 @task(task_run_name="sleep_and_print-{ctx_name}-{sleep_sec}s")
