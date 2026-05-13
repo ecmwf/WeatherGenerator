@@ -36,6 +36,71 @@ class GenericContext:
     port: int = 22
 
 
+class ConnectionClosedError(Exception):
+    """
+    Raised when it is detected that the SSH connection has terminated.
+    """
+
+    result: CommandResult
+
+    def __init__(self, result: CommandResult) -> None:
+        self.result = result
+        super().__init__(f"SSH connection closed unexpectedly. Last result: {result}")
+
+
+# ssh / sshd / paramiko emit connection diagnostics at the very top of stderr.
+# Bound the scan so a long remote command can't trip the heuristic with a
+# stray phrase deep in its output.
+_CONNECTION_CLOSED_HEAD_LINES = 5
+
+
+def is_connection_closed(result: CommandResult) -> bool:
+    """
+    Heuristic to detect if an SSH connection died mid-command, distinguishing
+    a remote-side disconnect from a legitimate non-zero exit in the user's
+    command.
+
+    Signals, in order of confidence:
+
+    1. ``return_code == -1`` — paramiko's ``recv_exit_status()`` returns -1
+       when the channel was closed before the remote sent an exit-status
+       message. Effectively a smoking gun for a dropped connection.
+    2. ``return_code == 255`` — ssh(1)'s reserved code for connection
+       failures. A user command could theoretically exit 255, but in
+       practice that's vanishingly rare compared to a real SSH error.
+    3. A connection-failure phrase in **the first few lines of stderr**.
+       stdout is excluded because commands that legitimately print these
+       strings as data (e.g. ``cat /var/log/auth.log``) would otherwise be
+       flagged. Only the head of stderr is scanned because ssh/sshd emit
+       these messages first — anything further down belongs to the remote
+       command and could trip the heuristic by accident.
+
+    Matching is case-insensitive — OpenSSH and paramiko don't agree on the
+    capitalization of these messages.
+    """
+    if result.return_code in (-1, 255):
+        return True
+
+    # Phrases observed in practice from OpenSSH client, sshd, and paramiko.
+    # Lower-cased here; the haystack is lower-cased once below.
+    closed_phrases = (
+        "connection closed by remote host",
+        "connection reset by peer",
+        "connection refused",
+        "connection timed out",
+        "broken pipe",
+        "client_loop: send disconnect",
+        "kex_exchange_identification:",
+        "ssh_exchange_identification:",
+        "no route to host",
+        "network is unreachable",
+        "ssh session terminated",
+    )
+    head_lines = (result.stderr or "").splitlines()[:_CONNECTION_CLOSED_HEAD_LINES]
+    haystack = "\n".join(head_lines).lower()
+    return any(phrase in haystack for phrase in closed_phrases)
+
+
 class GenericSshCommandRunner(CommandRunner):
     name = "generic_ssh"
     _ctx: GenericContext

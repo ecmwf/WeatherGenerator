@@ -294,6 +294,11 @@ async def submit_slurm(
     It returns a SlurmSubmissionResult containing the job ID if submission is successful, or an
     OpError if there was an issue.
     """
+    # TODO: the submission may fail because we do not have valid 
+    # credentials against the cluster. This is detected by OpError with ConnectionClosedError.
+    # In this case, we should be lenient and not crash the whole flow, but 
+    # rather try again for a certain amount of time (up to hours for this specific case).
+    
     # Validate path requirements.
     if job.working_directory is not None and not Path(job.working_directory).is_absolute():
         return OpError(

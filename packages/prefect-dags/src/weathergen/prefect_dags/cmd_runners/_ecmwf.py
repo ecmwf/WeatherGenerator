@@ -15,6 +15,10 @@ import subprocess
 from dataclasses import dataclass
 from logging import Logger
 
+from weathergen.prefect_dags.cmd_runners._generic import (
+    ConnectionClosedError,
+    is_connection_closed,
+)
 from weathergen.prefect_dags.cmd_runners._types import (
     Command,
     CommandResult,
@@ -82,8 +86,13 @@ class EcmwfSshCommandRunner(CommandRunner):
             logger.error(f"SSH command failed: {e}")
             return OpError(err=e)
 
-        return CommandResult(
+        result = CommandResult(
             stdout=proc.stdout,
             stderr=proc.stderr,
             return_code=proc.returncode,
         )
+        if is_connection_closed(result):
+            err = ConnectionClosedError(result)
+            logger.error(f"SSH connection closed unexpectedly: {err}")
+            return OpError(err=err)
+        return result
