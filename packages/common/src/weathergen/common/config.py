@@ -140,6 +140,7 @@ def _strip_interpolation(conf: Config) -> Config:
     stripped = {}
     if OmegaConf.is_dict(conf):
         for key in list(conf.keys()):
+            key = str(key)
             if OmegaConf.is_missing(conf, key):
                 val = "???"
             elif OmegaConf.is_config(conf[key]):
