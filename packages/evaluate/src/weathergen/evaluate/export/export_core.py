@@ -54,12 +54,6 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     coords_arr = np.asarray(ds_group["coords"])  # (npoints, 2)
     times_arr = np.asarray(ds_group["times"]).astype("datetime64[ns]")  # (npoints,)
     channels = list(ds_group.attrs["channels"])
-    source_interval_start = np.asarray(ds_group.attrs["source_interval"]["start"]).astype(
-        "datetime64[ns]"
-    )
-    source_interval_end = np.asarray(ds_group.attrs["source_interval"]["end"]).astype(
-        "datetime64[ns]"
-    )
 
     # Build a lightweight xarray DataArray with the same structure
     # that process_sample / assign_coords expects:
@@ -81,8 +75,6 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
             "valid_time": ("ipoint", times_arr),
             "lat": ("ipoint", coords_arr[:, 0]),
             "lon": ("ipoint", coords_arr[:, 1]),
-            "source_interval_start": source_interval_start,
-            "source_interval_end": source_interval_end,
         },
     )
 
@@ -229,51 +221,53 @@ def get_grid_type(data_type, stream: str, fname_zarr: str) -> str:
 
 
 # TODO: this will change after restructuring the lead time.
-def get_ref_times(fname_zarr, stream, samples, fstep_hours, n_processes) -> list[np.datetime64]:
+def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], list[np.datetime64]]:
     """
-    Retrieve reference times for the specified samples from the Zarr store.
+    Retrieve source interval boundaries from the source group at forecast step 0.
 
-    Reads only the lightweight 'times' array from the zarr hierarchy
-    instead of loading the full data arrays.
+    Values are derived from the actual ``times`` array of the **source**
+    group at forecast step 0:
+    - ``source_start = min(source_times)``
+    - ``source_end   = max(source_times)``
+
+    The ``source_end`` also serves as the reference (initialisation) time.
 
     Parameters
     ----------
-        fname_zarr : str
-            Path to the Zarr store.
-        stream : str
-            Stream name to retrieve data for (e.g., 'ERA5').
-        samples : list
-            List of samples to process.
-        fstep_hours : np.timedelta64
-            Time difference between forecast steps in hours.
-        n_processes : int
-            Number of parallel processes to use (unused, kept for API compat).
+    fname_zarr : str
+        Path to the Zarr store.
+    stream : str
+        Stream name to retrieve data for (e.g., 'ERA5').
+    samples : list
+        List of samples to process.
+
     Returns
     -------
-        list[np.datetime64]
-            List of reference times corresponding to the samples.
+    tuple[list, list]
+        ``(source_starts, source_ends)`` — one entry per sample,
+        all as ``datetime64[ns]``.
     """
-    _logger.info(f"Retrieving reference times for {len(samples)} samples...")
+    _logger.info(f"Retrieving source info for {len(samples)} samples...")
 
-    ref_times = []
+    source_starts = []
+    source_ends = []
     with zarrio_reader(fname_zarr) as zio:
-        first_fstep = sorted([int(step) for step in zio.forecast_steps])[0]
+        for sample in tqdm(samples, desc="Getting source info"):
+            group_path = f"{sample}/{stream}/0/source"
+            source_group = zio.data_root.get(group_path)
 
-        for sample in tqdm(samples, desc="Getting ref times"):
-            # Navigate directly to the target group and read only the 'times' array,
-            # avoiding the expensive full-data load via get_data() / as_xarray().
-            group_path = f"{sample}/{stream}/{first_fstep}/target"
-            target_group = zio.data_root.get(group_path)
-
-            if target_group is None:
+            if source_group is None:
                 raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
 
-            times_arr = np.array(target_group["times"]).astype("datetime64[ns]")
-            valid_time = times_arr[0]
-            ref_time = valid_time - fstep_hours * first_fstep
-            ref_times.append(ref_time)
+            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
+            source_start = np.min(times_arr)
+            source_end = np.max(times_arr)
 
-    return ref_times
+            _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
+            source_starts.append(source_start)
+            source_ends.append(source_end)
+
+    return source_starts, source_ends
 
 
 def get_streams(stream, fname_zarr):
@@ -310,7 +304,6 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     n_processes = kwargs.n_processes
     epoch = kwargs.epoch
     rank = kwargs.rank
-    fstep_hours = np.timedelta64(kwargs.fstep_hours, "h")
 
     if data_type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
@@ -322,7 +315,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     for stream in streams:
         grid_type = get_grid_type(data_type, stream, fname_zarr)
         channels = get_channels(channels, stream, fname_zarr)
-        ref_times = get_ref_times(fname_zarr, stream, samples, fstep_hours, n_processes)
+        source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
         kwargs["grid_type"] = grid_type
         kwargs["channels"] = channels
         kwargs["data_type"] = data_type
@@ -356,7 +349,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                 batch_start = batch_idx * batch_size
                 batch_end = min(batch_start + batch_size, len(samples))
                 batch_samples = samples[batch_start:batch_end]
-                batch_ref_times = ref_times[batch_start:batch_end]
+                batch_source_starts = source_starts[batch_start:batch_end]
+                batch_source_ends = source_ends[batch_start:batch_end]
 
                 # Map sample -> index within this batch for ref_times lookup.
                 sample_to_batch_idx = {s: i for i, s in enumerate(batch_samples)}
@@ -386,7 +380,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                 processed_samples = []
 
                 for sample, _fstep, data in pool.imap_unordered(
-                    get_data_worker, batch_tasks, chunksize=max(1, n_fsteps)
+                    get_data_worker, batch_tasks, chunksize=1
                 ):
                     sample_results[sample].append(data)
                     pbar.update(1)
@@ -394,9 +388,15 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                     # Check if this sample is complete (all fsteps received).
                     if len(sample_results[sample]) == n_fsteps:
                         b_idx = sample_to_batch_idx[sample]
-                        ref_time = batch_ref_times[b_idx]
+                        source_start = batch_source_starts[b_idx]
+                        source_end = batch_source_ends[b_idx]
                         results_iter = iter(sample_results[sample])
-                        processed = parser.process_sample(results_iter, ref_time=ref_time)
+                        processed = parser.process_sample(
+                            results_iter,
+                            ref_time=source_end,
+                            source_interval_start=source_start,
+                            source_interval_end=source_end,
+                        )
                         processed_samples.append(processed)
 
                         # Free memory immediately.

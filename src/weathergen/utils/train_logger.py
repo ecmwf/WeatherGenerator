@@ -63,7 +63,7 @@ class TrainLogger:
         self.cf = cf
         self.path_run = path_run
 
-    def log_metrics(self, stage: Stage, metrics: dict[str, float]) -> None:
+    def log_metrics(self, stage: Stage, metrics: dict[str, float], step: int | None = None) -> None:
         """
         Log metrics to a file.
         For now, just scalar values are expected. There is no check.
@@ -75,6 +75,8 @@ class TrainLogger:
             _weathergen_time: int(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
             "stage": stage,
         }
+        if step is not None:
+            clean_metrics["weathergen.step"] = step
         for key, value in metrics.items():
             v = float(value)
             if math.isnan(v) or math.isinf(v):

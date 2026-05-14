@@ -72,6 +72,8 @@ class QuaverParser(CfParser):
         self,
         fstep_iterator_results: iter,
         ref_time: np.datetime64,
+        source_interval_start: np.datetime64 = None,
+        source_interval_end: np.datetime64 = None,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -79,6 +81,8 @@ class QuaverParser(CfParser):
         ----------
             fstep_iterator_results : Iterator over results from get_data_worker.
             ref_time : Forecast reference time for the sample.
+            source_interval_start : Start of the source (conditioning) window.
+            source_interval_end : End of the source (conditioning) window.
         Returns
         -------
             None
@@ -90,39 +94,50 @@ class QuaverParser(CfParser):
             if not isinstance(result, xr.DataArray):
                 result = result.as_xarray().squeeze()
             result = result.sel(channel=self.channels)
-            da_fs = self.assign_coords(result)
 
-            step = np.unique(result.forecast_step.values)
-            if len(step) != 1:
-                raise ValueError(f"Expected single step value, got {step}")
+            # Each zarr fstep may contain multiple hourly sub-steps
+            # concatenated along ipoint.  Split by unique valid_time so
+            # each GRIB message gets exactly one time step worth of grid
+            # points, with step = valid_time - source_interval_start.
+            unique_times = np.unique(result.valid_time.values)
 
-            step = int(step[0])
+            for vt in unique_times:
+                mask = result.valid_time.values == vt
+                sub = result.isel(ipoint=mask)
+                da_sub = self.assign_coords(sub)
 
-            sf_fields = []
-            pl_fields = []
-            for var in self.channels:
-                _, level, level_type = self.extract_var_info(var)
+                sf_fields = []
+                pl_fields = []
+                for var in self.channels:
+                    _, level, level_type = self.extract_var_info(var)
 
-                _logger.info(f"[Worker] Encoding var={var}, level={level}")
+                    _logger.info(f"[Worker] Encoding var={var}, level={level}")
 
-                field_data = da_fs.sel(channel=var)
-                field_data = self.scale_data(field_data, var)
-                template_field = self.template_cache.get((var, level), None)
-                if template_field is None:
-                    _logger.error(f"Template for var={var}, level={level} not found. Skipping.")
-                    continue
+                    field_data = da_sub.sel(channel=var)
+                    field_data = self.scale_data(field_data, var)
+                    template_field = self.template_cache.get((var, level), None)
+                    if template_field is None:
+                        _logger.error(f"Template for var={var}, level={level} not found. Skipping.")
+                        continue
 
-                metadata = self.get_metadata(ref_time=ref_time, step=step, level=level)
+                    metadata = self.get_metadata(
+                        ref_time=ref_time,
+                        valid_time=vt,
+                        source_interval_end=source_interval_end,
+                        level=level,
+                    )
 
-                encoded = self.encoder.encode(
-                    values=field_data.values, template=template_field, metadata=metadata
-                )
+                    encoded = self.encoder.encode(
+                        values=field_data.values,
+                        template=template_field,
+                        metadata=metadata,
+                    )
 
-                field_list = pl_fields if level_type == "pl" else sf_fields
-                field_list.append(encoded.to_field())
+                    field_list = pl_fields if level_type == "pl" else sf_fields
+                    field_list.append(encoded.to_field())
 
-            self.save(pl_fields, "pl")
-            self.save(sf_fields, "sfc")
+                self.save(pl_fields, "pl")
+                self.save(sf_fields, "sfc")
 
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
 
@@ -220,16 +235,22 @@ class QuaverParser(CfParser):
     def get_metadata(
         self,
         ref_time: pd.Timestamp,
-        step: int,
+        valid_time: np.datetime64,
+        source_interval_end: np.datetime64,
         level: str,
     ):
         """
         Add metadata to the dataset attributes.
+
+        The GRIB ``step`` is computed as ``valid_time - source_interval_end``
+        (in hours), i.e. the lead time relative to the end of the
+        conditioning window.
         """
+        step_hours = int((valid_time - source_interval_end) / np.timedelta64(1, "h"))
 
         metadata = {
             "date": ref_time,
-            "step": step * self.fstep_hours.astype(int),
+            "step": step_hours,
             "expver": self.expver,
             "marsClass": "rd",
         }

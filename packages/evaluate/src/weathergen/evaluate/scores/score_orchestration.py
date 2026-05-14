@@ -49,6 +49,7 @@ def _score_single_fstep(
     bbox: "RegionBoundingBox",
     metrics: dict,
     group_by_coord: str | None,
+    agg_dims: str | list[str] = "ipoint",
 ) -> tuple[int, xr.DataArray, dict[tuple[int, str], dict]] | None:
     """Score all metrics for one fstep in one region. Stateless, thread-safe.
 
@@ -89,7 +90,7 @@ def _score_single_fstep(
         score = get_score(
             score_data,
             metric,
-            agg_dims="ipoint",
+            agg_dims=agg_dims,
             group_by_coord=group_by_coord,
             parameters=parameters,
         )
@@ -151,6 +152,9 @@ def calc_scores_per_stream(
     local_scores = {}
 
     available_data = reader.check_availability(stream, mode="evaluation")
+    if not available_data.score_availability:
+        _logger.warning(f"RUN {reader.run_id} - {stream}: Skipping scoring.")
+        return {}
     fsteps = available_data.fsteps
     samples = available_data.samples
     channels = available_data.channels
@@ -173,6 +177,7 @@ def calc_scores_per_stream(
     aligned_clim_data = get_climatology(reader, da_tars, stream)
 
     max_workers = reader.eval_cfg.get("max_workers", None)
+    agg_dims = reader.eval_cfg.get("agg_dims", "ipoint")
 
     for region in regions:
         bbox = RegionBoundingBox.from_region_name(region)
@@ -191,6 +196,7 @@ def calc_scores_per_stream(
             bbox,
             metrics,
             max_workers,
+            agg_dims,
         )
 
         store_metrics_for_region(
@@ -224,6 +230,7 @@ def compute_scores_for_region(
     bbox: "RegionBoundingBox",
     metrics: dict,
     max_workers: int | None,
+    agg_dims: str | list[str] = "ipoint",
 ) -> tuple[list, dict]:
     """Dispatch parallel scoring for all fsteps in one region.
 
@@ -286,6 +293,7 @@ def compute_scores_for_region(
             bbox,
             metrics,
             group_by_coord,
+            agg_dims,
         )
         for fstep, tars_fs, preds_fs, preds_next, tars_next, climatology in fstep_tasks
     ]
