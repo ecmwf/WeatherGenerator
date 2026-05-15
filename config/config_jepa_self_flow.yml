@@ -272,6 +272,7 @@ training_config:
           rate: 0.3
           hl_mask: 4
         # Noise schedule bounds
+        noise_schedule: "variable_covariance_linear_information"
         t_min: 0.1
         t_max: 0.9
 
