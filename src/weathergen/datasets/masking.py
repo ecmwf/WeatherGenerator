@@ -769,6 +769,17 @@ class Masker:
         """
         params = metadata.params
         if not params.get("is_self_flow"):
+            if add_geoinfo_noise:
+                input_data_geoinfo = []
+                for _, rdata in enumerate(input_data):
+                    rd = copy.copy(rdata)
+                    geoinfos = rd.geoinfos
+                    noise_level_per_cell = torch.zeros(
+                        geoinfos.shape[0], dtype=geoinfos.dtype, device=geoinfos.device
+                    )
+                    rd.geoinfos = torch.cat([geoinfos,noise_level_per_cell.unsqueeze(1)], dim=-1)
+                    input_data_geoinfo.append(rd)
+                input_data = input_data_geoinfo
             return input_data
 
         cell_ids_list = (
@@ -810,11 +821,11 @@ class Masker:
                     rd.geoinfos.shape[0], dtype=noised_data.dtype, device=noised_data.device
                 )
                 if is_student:  # correct the highly noise cells
-                    noise_level_s = params["noise_t"] * torch.ones(
+                    noise_level_t = params["noise_t"] * torch.ones(
                         point_noise_mask.shape, dtype=noised_data.dtype, device=noised_data.device
                     )
                     noise_level_per_cell = torch.where(
-                        point_noise_mask, noise_level_per_cell, noise_level_s
+                        point_noise_mask, noise_level_per_cell, noise_level_t
                     )
                 rd.geoinfos = torch.cat([rd.geoinfos,noise_level_per_cell.unsqueeze(1)], dim=-1)
 
