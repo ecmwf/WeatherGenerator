@@ -114,7 +114,12 @@ def kernel_crps(
 
     # apply point weighting
     if weights_points is not None:
-        kcrps_locs_chs = kcrps_locs_chs * weights_points
+        if weights_points.dim() == 1:
+            # uniform location weight across channels
+            kcrps_locs_chs = kcrps_locs_chs * weights_points
+        else:
+            # per-channel location weight
+            kcrps_locs_chs = kcrps_locs_chs * weights_points.T.unsqueeze(0)
     # apply channel weighting
     kcrps_chs = torch.mean(torch.mean(kcrps_locs_chs, 0), -1)
     if weights_channels is not None:
@@ -195,7 +200,12 @@ def lp_loss(
         torch.abs(torch.where(mask_nan, target, 0) - torch.where(mask_nan, pred, 0)), p_norm
     )
     if weights_points is not None:
-        diff_p = (diff_p.transpose(1, 0) * weights_points).transpose(1, 0)
+        if weights_points.dim() == 1:
+            # uniform location weight across channels
+            diff_p = (diff_p.transpose(1, 0) * weights_points).transpose(1, 0)
+        else:
+            # per-channel location weight
+            diff_p = diff_p * weights_points
     loss_chs = diff_p.mean(0) if with_mean else diff_p.sum(0)
     loss_chs = torch.pow(loss_chs, 1.0 / p_norm) if with_p_root else loss_chs
     loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
