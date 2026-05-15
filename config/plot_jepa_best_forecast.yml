@@ -1,0 +1,14 @@
+train:
+  plot:
+    k47tobdl-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space self-flow swiglu+xsa higher lr 1e-4 no noise"
+    k47tobdl-ft32-lpyi0gq3:
+      slurm_id: 0
+      description: "Pretrain JEPA k47tobdl epoch 32, 5e-5 noise"
+    e8bd7ejo-finetune-forecast:
+      slurm_id: 0
+      description: "Pretrain JEPA 2 nodes"
+    sj0kxavt-finetune-forecast:
+      slurm_id: 0
+      description: "Pretrain JEPA 2 nodes correct self flow"

@@ -27,8 +27,10 @@ coordinates aligned with the token order (lat, lon in radians).
 def _apply_xsa(attn_out: torch.Tensor, self_values: torch.Tensor) -> torch.Tensor:
     attn_out_float = attn_out.float()
     self_values_float = self_values.float()
-    denom = self_values_float.pow(2).sum(dim=-1, keepdim=True).clamp_min(
-        torch.finfo(self_values_float.dtype).eps
+    denom = (
+        self_values_float.pow(2)
+        .sum(dim=-1, keepdim=True)
+        .clamp_min(torch.finfo(self_values_float.dtype).eps)
     )
     proj = (attn_out_float * self_values_float).sum(dim=-1, keepdim=True) / denom
     return (attn_out_float - (proj * self_values_float)).to(attn_out.dtype)

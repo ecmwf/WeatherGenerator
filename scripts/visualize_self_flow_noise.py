@@ -14,12 +14,12 @@ Usage:
 """
 
 import argparse
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from astropy_healpix.healpy import ang2pix
-from pathlib import Path
 
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import TimeWindowHandler
@@ -30,8 +30,9 @@ from weathergen.datasets.noise_schedule import (
 )
 from weathergen.datasets.tokenizer_utils import theta_phi_to_standard_coords
 
-
-ERA5_PATH = Path("/capstor/store/cscs/userlab/ch17/data/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr")
+ERA5_PATH = Path(
+    "/capstor/store/cscs/userlab/ch17/data/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr"
+)
 HEALPIX_LEVEL = 5  # matches default training config
 
 
@@ -92,7 +93,9 @@ def plot_mollweide(
     """Scatter plot on Mollweide projection."""
     lat_rad = np.radians(coords[:, 0])
     lon_rad = np.radians(coords[:, 1])
-    sc = ax.scatter(lon_rad, lat_rad, c=values, s=0.3, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
+    sc = ax.scatter(
+        lon_rad, lat_rad, c=values, s=0.3, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True
+    )
     ax.set_title(title, fontsize=9)
     ax.grid(True, alpha=0.3)
     plt.colorbar(sc, ax=ax, fraction=0.03, pad=0.04)
@@ -101,11 +104,19 @@ def plot_mollweide(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Visualize self-flow noise on real ERA5 data")
     parser.add_argument("--channel", type=int, default=0, help="Channel index to visualize")
-    parser.add_argument("--noise_rate", type=float, default=0.8, help="Fraction of cells with high noise")
+    parser.add_argument(
+        "--noise_rate", type=float, default=0.8, help="Fraction of cells with high noise"
+    )
     parser.add_argument("--s_val", type=float, default=0.3, help="Noise level s (low)")
-    parser.add_argument("--t_val", type=float, default=0.7, help="Noise level t (high, masked cells)")
-    parser.add_argument("--seed", type=int, default=777, help="Noise seed (shared by student/teacher)")
-    parser.add_argument("--save", type=str, default=None, help="Save figure to path instead of showing")
+    parser.add_argument(
+        "--t_val", type=float, default=0.7, help="Noise level t (high, masked cells)"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=777, help="Noise seed (shared by student/teacher)"
+    )
+    parser.add_argument(
+        "--save", type=str, default=None, help="Save figure to path instead of showing"
+    )
     args = parser.parse_args()
 
     # Load real data
@@ -120,8 +131,10 @@ def main() -> None:
     schedule = CosineNoiseSchedule()
     alpha_s, sigma_s = schedule.alpha_sigma(args.s_val)
     alpha_t, sigma_t = schedule.alpha_sigma(args.t_val)
-    print(f"Noise levels: s={args.s_val:.2f} (alpha={alpha_s:.3f}, sigma={sigma_s:.3f}), "
-          f"t={args.t_val:.2f} (alpha={alpha_t:.3f}, sigma={sigma_t:.3f})")
+    print(
+        f"Noise levels: s={args.s_val:.2f} (alpha={alpha_s:.3f}, sigma={sigma_s:.3f}), "
+        f"t={args.t_val:.2f} (alpha={alpha_t:.3f}, sigma={sigma_t:.3f})"
+    )
 
     # Build per-point noise mask via HEALPix cells (same as training pipeline)
     nside = 2**HEALPIX_LEVEL
@@ -131,11 +144,17 @@ def main() -> None:
 
     n_masked = point_noise_mask.sum().item()
     print(f"HEALPix level={HEALPIX_LEVEL}, nside={nside}")
-    print(f"Points masked (high noise): {n_masked}/{num_points} ({n_masked/num_points:.1%})")
+    print(f"Points masked (high noise): {n_masked}/{num_points} ({n_masked / num_points:.1%})")
 
     # Apply noise (exactly as in the training pipeline)
     student_data = apply_self_flow_noise(
-        data, point_noise_mask, alpha_s, sigma_s, alpha_t, sigma_t, args.seed,
+        data,
+        point_noise_mask,
+        alpha_s,
+        sigma_s,
+        alpha_t,
+        sigma_t,
+        args.seed,
     )
     teacher_data = apply_uniform_noise(data, alpha_s, sigma_s, args.seed)
 
@@ -156,10 +175,21 @@ def main() -> None:
     )
 
     plot_mollweide(axes[0, 0], coords, clean, "Clean data (model target)", vmin=vmin, vmax=vmax)
-    plot_mollweide(axes[0, 1], coords, point_noise_mask.numpy().astype(float),
-                   f"Noise mask (rate={args.noise_rate})", vmin=0, vmax=1, cmap="coolwarm")
-    plot_mollweide(axes[1, 0], coords, student, "Student input (self-flow noise)", vmin=vmin, vmax=vmax)
-    plot_mollweide(axes[1, 1], coords, teacher, "Teacher input (uniform noise at s)", vmin=vmin, vmax=vmax)
+    plot_mollweide(
+        axes[0, 1],
+        coords,
+        point_noise_mask.numpy().astype(float),
+        f"Noise mask (rate={args.noise_rate})",
+        vmin=0,
+        vmax=1,
+        cmap="coolwarm",
+    )
+    plot_mollweide(
+        axes[1, 0], coords, student, "Student input (self-flow noise)", vmin=vmin, vmax=vmax
+    )
+    plot_mollweide(
+        axes[1, 1], coords, teacher, "Teacher input (uniform noise at s)", vmin=vmin, vmax=vmax
+    )
 
     plt.tight_layout()
 
@@ -171,34 +201,56 @@ def main() -> None:
     teacher_residual = teacher - clean
     res_lim = max(abs(student_residual).max(), abs(teacher_residual).max())
 
-    plot_mollweide(axes2[0, 0], coords, student_residual,
-                   "Student residual (noised - clean)", vmin=-res_lim, vmax=res_lim)
-    plot_mollweide(axes2[0, 1], coords, teacher_residual,
-                   "Teacher residual (noised - clean)", vmin=-res_lim, vmax=res_lim)
+    plot_mollweide(
+        axes2[0, 0],
+        coords,
+        student_residual,
+        "Student residual (noised - clean)",
+        vmin=-res_lim,
+        vmax=res_lim,
+    )
+    plot_mollweide(
+        axes2[0, 1],
+        coords,
+        teacher_residual,
+        "Teacher residual (noised - clean)",
+        vmin=-res_lim,
+        vmax=res_lim,
+    )
 
     # Consistency: on unmasked points, student == teacher
     mask_np = point_noise_mask.numpy()
     diff_unmasked = np.where(~mask_np, student - teacher, 0.0)
     diff_masked = np.where(mask_np, student - teacher, 0.0)
 
-    plot_mollweide(axes2[1, 0], coords, diff_unmasked,
-                   "Student - Teacher (unmasked, should be 0)", cmap="PuOr")
-    plot_mollweide(axes2[1, 1], coords, diff_masked,
-                   "Student - Teacher (masked, shows noise difference)", cmap="PuOr")
+    plot_mollweide(
+        axes2[1, 0], coords, diff_unmasked, "Student - Teacher (unmasked, should be 0)", cmap="PuOr"
+    )
+    plot_mollweide(
+        axes2[1, 1],
+        coords,
+        diff_masked,
+        "Student - Teacher (masked, shows noise difference)",
+        cmap="PuOr",
+    )
 
     plt.tight_layout()
 
     # --- Numerical checks ---
     max_diff_unmasked = np.abs(diff_unmasked).max()
-    print(f"\nConsistency checks:")
+    print("\nConsistency checks:")
     print(f"  Max |student - teacher| on UNMASKED points: {max_diff_unmasked:.2e} (should be 0)")
     if max_diff_unmasked < 1e-6:
-        print("  PASS: Student and teacher agree on unmasked points (same eps, same alpha_s/sigma_s)")
+        print(
+            "  PASS: Student and teacher agree on unmasked points (same eps, same alpha_s/sigma_s)"
+        )
     else:
         print("  FAIL: Student and teacher DISAGREE on unmasked points!")
 
     mean_abs_diff_masked = np.abs(diff_masked[mask_np]).mean() if mask_np.any() else 0.0
-    print(f"  Mean |student - teacher| on MASKED points: {mean_abs_diff_masked:.4f} (should be > 0)")
+    print(
+        f"  Mean |student - teacher| on MASKED points: {mean_abs_diff_masked:.4f} (should be > 0)"
+    )
     print(f"  VP check s: alpha_s^2 + sigma_s^2 = {alpha_s**2 + sigma_s**2:.6f} (should be 1)")
     print(f"  VP check t: alpha_t^2 + sigma_t^2 = {alpha_t**2 + sigma_t**2:.6f} (should be 1)")
 
