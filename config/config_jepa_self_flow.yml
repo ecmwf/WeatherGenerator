@@ -252,9 +252,9 @@ training_config:
       masking_strategy: "random"  # anything; identity relationship overrides
       num_samples: 1
       num_steps_input: 1
-      masking_strategy_config:
+      masking_strategy_config: #ignored in self flow
         rate: 0.3
-        hl_mask: 0
+        hl_mask: 4
         method: "random"
 
   target_input:
@@ -263,13 +263,13 @@ training_config:
       num_samples: 1
       masking_strategy_config:
         # Crop (teacher visibility = student visibility)
-        rate: 0.8
+        rate: 0.8 #percentage of cells cropped
         hl_mask: 3
         # method must be some kind of crop
         method: "geodesic_disk"
         # Noise mask config (which cells get high noise, always random)
         noise_mask_config:
-          rate: 0.3
+          rate: 0.3 # percentage of cells receiving the lower noise time (s)
           hl_mask: 4
         # Noise schedule bounds
         noise_schedule: "variable_covariance_linear_information"
