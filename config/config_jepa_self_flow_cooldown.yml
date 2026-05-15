@@ -1,0 +1,41 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+# config for training
+training_config:
+
+  num_mini_epochs: 2
+  samples_per_mini_epoch: 4096
+
+  target_input:
+    random_easy_target:
+      masking_strategy: "self_flow"
+      num_samples: 1
+      masking_strategy_config:
+        # Crop (teacher visibility = student visibility)
+        rate: 0.8 #percentage of cells cropped
+        hl_mask: 3
+        # method must be some kind of crop
+        method: "geodesic_disk"
+        # Noise mask config (which cells get high noise, always random)
+        noise_mask_config:
+          rate: 0.3 # percentage of cells receiving the lower noise time (s)
+          hl_mask: 4
+        # Noise schedule bounds
+        noise_schedule: "variable_covariance_linear_information"
+        t_min: 0.01
+        t_max: 0.15
+

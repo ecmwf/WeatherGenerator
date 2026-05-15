@@ -169,7 +169,7 @@ data_loading :
 training_config:
 
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["student_teacher"]
+  training_mode: ["masking", "student_teacher"]
 
   # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
   # When enabled, intermediate encoder representations are tapped and used as additional
@@ -190,7 +190,7 @@ training_config:
     weight: 0.4
     warmup_steps: 8000             # linear warmup from 0 to weight over this many steps
 
-  num_mini_epochs: 64
+  num_mini_epochs: 60
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -224,6 +224,17 @@ training_config:
       eps : 2e-08
 
   losses : {
+    "physical": {
+        type: LossPhysical,
+        weight: 0.5,
+        loss_fcts: {
+          "mse": {
+            weight: 1.0,
+            target_source_correspondence: { 0 : { 0 : "identity"} },
+          },
+        },
+        target_and_aux_calc: "Physical",
+    },
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
