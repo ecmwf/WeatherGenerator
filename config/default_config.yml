@@ -130,6 +130,17 @@ train_logging:
   checkpoint: 250
   log_grad_norms: False
 
+  # Detect anomalous training losses and optionally skip those batches.
+  loss_spike_detection:
+    enabled: False
+    window_size: 50
+    min_history: 20
+    ratio_threshold: 5.0
+    loss_threshold: 0.0
+    skip_batch: True
+    max_unique_times_per_step: 8
+    file_name: "loss_spikes.jsonl"
+
 # parameters for data loading
 data_loading :
 

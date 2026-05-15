@@ -36,7 +36,7 @@ stages:
     from: pretrain
     config: ./config/config_jepa_finetuning.yml
     chain: 1
-    nodes: 2
+    nodes: 1
 
   # Stage 3: Forecasting finetuning (freezes encoder)
   - name: finetune-forecast

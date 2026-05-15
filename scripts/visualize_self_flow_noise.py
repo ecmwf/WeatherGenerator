@@ -1,3 +1,6 @@
+# ruff: noqa: T201
+# ruff: noqa: TID251
+
 """Visualize self-flow noise augmentation on real ERA5 data.
 
 Loads a single timestep from the ERA5 zarr dataset, applies student (self-flow)
