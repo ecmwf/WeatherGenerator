@@ -13,9 +13,11 @@ from weathergen.datasets.batch import SampleMetaData
 # Sample noise levels
 from weathergen.datasets.noise_schedule import (
     CosineNoiseSchedule,
+    LinearInformationNoiseSchedule,
+    VariableCovarianceLinearInformationNoiseSchedule,
     apply_self_flow_noise,
     apply_uniform_noise,
-    sample_noise_levels,
+    sample_noise_coordinates,
 )
 from weathergen.datasets.tokenizer_utils import precompute_cell_ids
 from weathergen.train.utils import Stage
@@ -352,6 +354,7 @@ class Masker:
         """
 
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
+        source_channel_names = stream_info.get(f"{self.stage}_source_channels", [])
 
         # target and source configs
         target_cfgs = stream_masking_cfg.get("target_input", [])
@@ -389,6 +392,7 @@ class Masker:
                         strategy=target_cfg.get("masking_strategy"),
                         masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
                         target_relationship_mask=("independent", None),
+                        channel_names=source_channel_names,
                     )
 
                 # get all losses and flatten
@@ -442,6 +446,7 @@ class Masker:
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
+                        channel_names=source_channel_names,
                     )
 
                 corr = target_idx
@@ -456,15 +461,21 @@ class Masker:
                 ):
                     sf_params = target_masks.metadata[target_idx].params
                     source_meta = source_masks.metadata[-1]
+                    self_flow_keys = (
+                        "noise_mask",
+                        "alpha_s",
+                        "sigma_s",
+                        "alpha_t",
+                        "sigma_t",
+                        "is_self_flow",
+                        "noise_seed",
+                        "noise_s",
+                        "noise_t",
+                        "noise_schedule",
+                    )
                     source_meta.params = {
                         **source_meta.params,
-                        "noise_mask": sf_params["noise_mask"],
-                        "alpha_s": sf_params["alpha_s"],
-                        "sigma_s": sf_params["sigma_s"],
-                        "alpha_t": sf_params["alpha_t"],
-                        "sigma_t": sf_params["sigma_t"],
-                        "is_self_flow": True,
-                        "noise_seed": sf_params["noise_seed"],
+                        **{key: sf_params[key] for key in self_flow_keys if key in sf_params},
                     }
                     # student_masks for JEPA loss: crop & ~noise_mask
                     crop_mask = source_masks.masks[-1]
@@ -483,6 +494,7 @@ class Masker:
         strategy: str,
         masking_strategy_config: dict,
         target_relationship_mask: (str, np.typing.NDArray),
+        channel_names: list[str] | None = None,
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
 
@@ -527,7 +539,12 @@ class Masker:
             return mask, {}
 
         # get mask
-        mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
+        mask, params = self._generate_cell_mask(
+            num_cells,
+            strategy,
+            masking_strategy_config,
+            channel_names=channel_names,
+        )
 
         # handle cases where mask needs to be combined with target_mask
         # without the assert we can fail silently
@@ -549,6 +566,7 @@ class Masker:
         num_cells: int,
         strategy: str,
         masking_strategy_config: dict,
+        channel_names: list[str] | None = None,
     ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
@@ -630,7 +648,11 @@ class Masker:
                 )
 
         elif strategy == "self_flow":
-            mask, masking_params = self._generate_self_flow_mask(num_cells, masking_strategy_config)
+            mask, masking_params = self._generate_self_flow_mask(
+                num_cells,
+                masking_strategy_config,
+                channel_names=channel_names,
+            )
 
         else:
             raise NotImplementedError(
@@ -642,7 +664,10 @@ class Masker:
         return (mask, masking_params)
 
     def _generate_self_flow_mask(
-        self, num_cells: int, masking_strategy_config: dict
+        self,
+        num_cells: int,
+        masking_strategy_config: dict,
+        channel_names: list[str] | None = None,
     ) -> tuple[NDArray, dict]:
         """Generate mask and noise params for the self-flow strategy.
 
@@ -686,13 +711,33 @@ class Masker:
         # Intersect noise mask with crop (noise only within visible region)
         noise_mask = np.asarray(noise_mask) & np.asarray(mask)
 
-        schedule = CosineNoiseSchedule()
-        alpha_s, sigma_s, alpha_t, sigma_t = sample_noise_levels(
-            self.rng,
-            schedule,
-            t_min=masking_strategy_config.get("t_min", 0.1),
-            t_max=masking_strategy_config.get("t_max", 0.9),
-        )
+        t_min = float(masking_strategy_config.get("t_min", 0.1))
+        t_max = float(masking_strategy_config.get("t_max", 0.9))
+        schedule_name = masking_strategy_config.get("noise_schedule", "linear_information")
+        s_raw, t_raw = sample_noise_coordinates(self.rng, t_min=t_min, t_max=t_max)
+
+        if schedule_name == "linear_information":
+            schedule = LinearInformationNoiseSchedule(t_min=t_min, t_max=t_max)
+            alpha_s, sigma_s = schedule.alpha_sigma(s_raw)
+            alpha_t, sigma_t = schedule.alpha_sigma(t_raw)
+        elif schedule_name == "cosine":
+            schedule = CosineNoiseSchedule()
+            alpha_s, sigma_s = schedule.alpha_sigma(s_raw)
+            alpha_t, sigma_t = schedule.alpha_sigma(t_raw)
+        elif schedule_name == "variable_covariance_linear_information":
+            if not channel_names:
+                raise ValueError(
+                    "variable_covariance_linear_information requires source channel names."
+                )
+            schedule = VariableCovarianceLinearInformationNoiseSchedule(
+                variable_eigenvalues=masking_strategy_config.get("variable_covariance_eigenvalues"),
+                t_min=t_min,
+                t_max=t_max,
+            )
+            alpha_s, sigma_s = schedule.alpha_sigma_for_channels(s_raw, channel_names)
+            alpha_t, sigma_t = schedule.alpha_sigma_for_channels(t_raw, channel_names)
+        else:
+            raise ValueError(f"Unsupported self-flow noise_schedule '{schedule_name}'.")
 
         masking_params["noise_mask"] = to_bool_tensor(noise_mask)
         masking_params["alpha_s"] = alpha_s
@@ -701,6 +746,9 @@ class Masker:
         masking_params["sigma_t"] = sigma_t
         masking_params["is_self_flow"] = True
         masking_params["noise_seed"] = int(self.rng.integers(0, 2**31))
+        masking_params["noise_s"] = s_raw
+        masking_params["noise_t"] = t_raw
+        masking_params["noise_schedule"] = schedule_name
 
         return mask, masking_params
 
@@ -709,6 +757,7 @@ class Masker:
         input_data: list,
         metadata: SampleMetaData,
         is_student: bool,
+        add_geoinfo_noise: bool,
     ) -> list:
         """Apply self-flow noise to a list of reader-data objects.
 
@@ -754,6 +803,21 @@ class Masker:
 
             rd = copy.copy(rdata)
             rd.data = noised_data
+
+            # add the noise time to the geoinfos
+            if add_geoinfo_noise:  # TODO figure out whether noise level is in the geoinfos
+                noise_level_per_cell = params["noise_s"] * torch.ones(
+                    rd.geoinfos.shape[0], dtype=noised_data.dtype, device=noised_data.device
+                )
+                if is_student:  # correct the highly noise cells
+                    noise_level_s = params["noise_t"] * torch.ones(
+                        point_noise_mask.shape, dtype=noised_data.dtype, device=noised_data.device
+                    )
+                    noise_level_per_cell = torch.where(
+                        point_noise_mask, noise_level_per_cell, noise_level_s
+                    )
+                rd.geoinfos = torch.cat([rd.geoinfos,noise_level_per_cell.unsqueeze(1)], dim=-1)
+
             noised.append(rd)
         return noised
 

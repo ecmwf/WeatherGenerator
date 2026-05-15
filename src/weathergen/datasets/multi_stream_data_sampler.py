@@ -729,6 +729,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     input_data,
                     source_masks.metadata[sidx],
                     is_student=True,
+                    add_geoinfo_noise="noise_time" in stream_info["geoinfo_channels"],
                 )
 
                 sdata = self._build_stream_data(
@@ -757,7 +758,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 # Apply self-flow noise to teacher data (handled by masker)
                 input_data_target = self.masker.apply_noise_to_data(
-                    input_data_target_orig, target_masks.metadata[tidx], is_student=False
+                    input_data_target_orig, target_masks.metadata[tidx], is_student=False,
+                    add_geoinfo_noise="noise_time" in stream_info["geoinfo_channels"],
                 )
 
                 sdata = self._build_stream_data(

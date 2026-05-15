@@ -107,7 +107,7 @@ class EmbeddingEngine(torch.nn.Module):
             # skip empty stream
             if sdata.numel() == 0:
                 continue
-
+            
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 
