@@ -193,6 +193,9 @@ class Trainer(TrainerBase):
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
 
+        for stream in cf.streams:
+            stream["max_num_targets"] = -1
+
         # create data loader
         # only one needed since we only run the validation code path
         self.dataset = MultiStreamDataSampler(
@@ -636,6 +639,16 @@ class Trainer(TrainerBase):
                             targets_and_auxs,
                         )
 
+                    # update progress bar with initial date of batch
+                    first_stream_data = next(
+                        sd
+                        for sd in batch.source_samples.samples[0].streams_data.values()
+                        if sd is not None
+                    )
+                    init_date = self.dataset_val.time_window_handler.window(
+                        first_stream_data.sample_idx
+                    ).start
+                    pbar.set_postfix({"init": str(init_date)})
                     pbar.update(batch_size)
 
                     if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
