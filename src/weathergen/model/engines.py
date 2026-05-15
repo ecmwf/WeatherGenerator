@@ -32,8 +32,6 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
-MAX_NUMBER_TOKENS_LOCAL_PER_CELL = 64
-
 
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
@@ -111,6 +109,13 @@ class EmbeddingEngine(torch.nn.Module):
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
+        # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
+        max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
+        assert (
+            batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens
+        ), "max number of tokens per cell for positional encoding exceeded."
+        " Increase ae_local_max_tokens_per_cell in config."
+
         if batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
             tokens_all = torch.cat(x_embeds)
@@ -119,10 +124,6 @@ class EmbeddingEngine(torch.nn.Module):
             scatter_idxs = self.get_scatter_idxs_vectorized(batch)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-            # if the assert is hit, MAX_NUMBER_TOKENS_LOCAL_PER_CELL needs to be increased
-            assert (
-                batch.tokens_lens.flatten(0, 2).sum(0).max() < MAX_NUMBER_TOKENS_LOCAL_PER_CELL
-            ), "max number of tokens per cell for positional encoding exceeded"
             # actual scatter operation and apply per cell positional encoding
             tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
 
