@@ -103,7 +103,7 @@ class LossPhysical(LossModuleBase):
     def _get_location_weights(self, stream_info, target_coords, substep_masks):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
-            return None
+            return [None for _ in substep_masks]
 
         target_coords = target_coords.to(self.device, non_blocking=True)
         weights_locations_fct = getattr(loss_fns, location_weight_type)
