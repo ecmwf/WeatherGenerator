@@ -72,6 +72,9 @@ def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
     """
     n_pred = len(preds.physical)
     for t_aux in targets_and_auxs.values():
+        # if the first entry is None (e.g. when forecast_offset > 0), then remove it
+        if not t_aux.physical[0]:
+            t_aux.physical = t_aux.physical[1:]
         n_tgt = len(t_aux.physical)
         if n_tgt == n_pred or n_tgt == 0:
             continue

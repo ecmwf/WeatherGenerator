@@ -63,6 +63,8 @@ def write_output(
 
     # TODO Maybe stopping at forecast_steps explained #1657
     for t_idx in timestep_idxs:
+        if cf.training_config.forecast.offset == 1:
+            t_idx = t_idx - 1
         preds_all += [[]]
         targets_all += [[]]
         targets_coords_all += [[]]
