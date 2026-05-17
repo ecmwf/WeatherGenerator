@@ -529,6 +529,17 @@ class GlobalAssimilationEngine(torch.nn.Module):
         return tokens
 
 
+class IdentityEngine(torch.nn.Module):
+    """Identity engine that passes tokens through unchanged."""
+
+    def __init__(self):
+        super().__init__()
+        self.fe_blocks = torch.nn.ModuleList()
+
+    def forward(self, tokens, *args, **kwargs):
+        return tokens
+
+
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 

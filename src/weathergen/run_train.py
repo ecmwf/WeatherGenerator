@@ -96,6 +96,7 @@ def run_inference(args):
         cli_overwrite,
     )
     cf = config.set_run_id(cf, args.run_id, args.reuse_run_id)
+    cf.data_loading.rng_seed = 42
     cf.stage = args.stage
 
     devices = Trainer.init_torch()
