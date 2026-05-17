@@ -508,6 +508,21 @@ def _plot_all_samples(
     plotter.clean_data_selection()
 
 
+def _plot_distribution_analysis(
+    plotter_cfg: dict,
+    output_basedir: str,
+    stream: str,
+    fstep: int | str,
+    tars: xr.DataArray,
+    preds: xr.DataArray,
+    channels: list[str],
+) -> None:
+    """Aggregate-over-samples distribution histogram for one fstep (loky worker)."""
+    matplotlib.use("Agg")
+    plotter = Plotter(plotter_cfg, Path(output_basedir), stream)
+    plotter.create_distribution_histograms(tars, preds, channels, fstep, stream)
+
+
 def plot_data(
     reader: Reader,
     stream: str,
