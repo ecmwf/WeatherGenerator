@@ -25,6 +25,16 @@ class SampleMetaData:
 
     global_params: dict | None = None
 
+    def add_global_params(self, params: dict) -> None:
+        if self.global_params is None:
+            self.global_params = {}
+        self.global_params.update(params)
+
+    def add_params(self, params: dict) -> None:
+        if self.params is None:
+            self.params = {}
+        self.params.update(params)
+
 
 class Sample:
     # keys: stream name, values: SampleMetaData
@@ -125,6 +135,7 @@ class Sample:
         """
         Add metadata for stream @stream_name to sample
         """
+
         self.meta_info[stream_name] = meta_info
 
     def get_stream_data(self, stream_name: str) -> StreamData:
@@ -332,6 +343,7 @@ class ModelBatch:
         """
         Add data for one stream to sample @source_sample_idx
         """
+
         self.source_samples.samples[source_sample_idx].add_stream_data(stream_name, stream_data)
 
         # add the meta_info

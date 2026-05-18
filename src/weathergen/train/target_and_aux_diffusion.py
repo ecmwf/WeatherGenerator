@@ -58,6 +58,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
     ) -> tuple[Any, Any]:
         # During validation (model in eval mode), use fixed noise level
         # so that sigma = exp(eta * p_std + p_mean) is deterministic
+
         if model.training:
             noise_level_rn = (
                 batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]

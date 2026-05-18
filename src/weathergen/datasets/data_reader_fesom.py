@@ -94,7 +94,54 @@ class DataReaderFesom(DataReaderTimestep):
 
         # This flag ensures initialization happens only once per worker
         self._initialized = False
-        # print(f"checking stream info {list(stream_info.keys())}")
+        if len(self.filenames) > 0 and len(self.target_files) > 0:
+            # We need to initialize the channels in __init__ so that the
+            # MultiStreamDataSampler can correctly identify if a stream is forcing or not.
+            s_group = zarr.open_group(self.filenames[0], mode="r")
+            t_group = zarr.open_group(self.target_files[0], mode="r")
+
+            self.source_mesh_size = self._get_mesh_size(s_group)
+            self.target_mesh_size = self._get_mesh_size(t_group)
+
+            source_colnames: list[str] = list(s_group["data"].attrs["colnames"])
+            target_colnames: list[str] = list(t_group["data"].attrs["colnames"])
+
+            source_cols_idx = list(np.arange(len(source_colnames), dtype=int))
+            target_cols_idx = list(np.arange(len(target_colnames), dtype=int))
+
+            src_lat_index: int = source_colnames.index("lat")
+            src_lon_index: int = source_colnames.index("lon")
+            trg_lat_index: int = target_colnames.index("lat")
+            trg_lon_index: int = target_colnames.index("lon")
+
+            source_colnames = self._remove_lonlat(source_colnames)
+            target_colnames = self._remove_lonlat(target_colnames)
+
+            source_cols_idx.remove(src_lat_index)
+            source_cols_idx.remove(src_lon_index)
+            source_cols_idx = np.array(source_cols_idx)
+
+            target_cols_idx.remove(trg_lat_index)
+            target_cols_idx.remove(trg_lon_index)
+            target_cols_idx = np.array(target_cols_idx)
+
+            source_channels = self._stream_info.get("source")
+            source_excl = self._stream_info.get("source_exclude")
+            self.source_channels, self.source_idx = (
+                self.select(source_colnames, source_cols_idx, source_channels, source_excl)
+                if source_channels or source_excl
+                else (source_colnames, source_cols_idx)
+            )
+
+            target_channels = self._stream_info.get("target")
+            target_excl = self._stream_info.get("target_exclude")
+            self.target_channels, self.target_idx = (
+                self.select(target_colnames, target_cols_idx, target_channels, target_excl)
+                if target_channels or target_excl
+                else (target_colnames, target_cols_idx)
+            )
+
+            self.target_channel_weights = self.parse_target_channel_weights()
 
     def _get_mesh_size(self, group: zarr.Group) -> int:
         if "n_points" in group["data"].attrs:

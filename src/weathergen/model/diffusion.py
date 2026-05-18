@@ -26,6 +26,7 @@
 import logging
 import math
 
+import numpy as np
 import torch
 
 from weathergen.common.config import Config, get_path_run
@@ -49,6 +50,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.noise_embedder = NoiseEmbedder(
             embedding_dim=self.embedding_dim, frequency_embedding_dim=self.frequency_embedding_dim
         )
+        self.conditioning = self.cf.fe_diffusion_model_conditioning
+        if "date" in self.conditioning or "time" in self.conditioning:
+            self.datetime_embedder = DateTimeEncoder(self.conditioning)
 
         # Parameters
         self.sigma_min = self.cf.sigma_min
@@ -64,6 +68,77 @@ class DiffusionForecastEngine(torch.nn.Module):
         self._noise = None
 
     def forward(
+        self,
+        tokens: torch.Tensor = None,
+        fstep: int = None,
+        meta_info: dict[str, SampleMetaData] = None,
+        coords: torch.Tensor = None,
+        num_steps: int = 10,
+    ) -> torch.Tensor:
+        """
+        Forward pass that routes to training_forward or inference_forward based on model status.
+
+        During training:
+            - calls training_forward with tokens, fstep, meta_info, coords
+            - extracts datetime conditioning from meta_info and passes through datetime embedder
+            - adds noise to target and returns denoised prediction
+
+        During inference:
+            - calls inference_forward with fstep, num_steps, and meta_info
+            - generates samples via iterative diffusion steps with conditional temporal modulation
+
+        Args:
+            tokens: Training tensor of shape (B, H, D) - required during training
+            fstep: Forecast step index - required for both modes
+            meta_info: Sample metadata dict containing timestamps - required for both modes
+            coords: Optional coordinate tensor
+            num_steps: Number of diffusion steps for inference (default: 30)
+
+        Returns:
+            torch.Tensor: Model output (denoised prediction during training,
+                         or generated sample during inference)
+
+        Raises:
+            ValueError: If required arguments are missing for current mode
+        """
+        # called during training in training mode
+        # called during training in training mode
+        if self.training:
+            if tokens is None or fstep is None or meta_info is None:
+                raise ValueError(
+                    f"During training, tokens, fstep, and meta_info are required. "
+                    f"Got tokens={tokens is not None}, fstep={fstep}, meta_info={meta_info is not None}"
+                )
+            return self.training_forward(
+                tokens=tokens,
+                fstep=fstep,
+                meta_info=meta_info,
+                coords=coords,
+            )
+        else:
+            # called in evaluation mode :
+            # decide btw pure noise generation (inference) vs denoising a sample for
+            # evaluation (train) using the stage variable
+            if self.cf.stage == 'train' or self.cf.stage == 'train_continue':
+                # NOTE: temporary for analysing denoising
+                return self.training_forward(
+                    tokens=tokens,
+                    fstep=fstep,
+                    meta_info=meta_info,
+                    coords=coords,
+                )
+            elif self.cf.stage == 'inference':
+                if fstep is None:
+                    raise ValueError(f"During inference, fstep is required. Got fstep={fstep}")
+                self.cur_token = tokens.detach() if tokens is not None else None
+                return self.inference_forward(
+                    fstep=fstep,
+                    num_steps=num_steps,
+                    meta_info=meta_info,
+                    coords=coords,
+                )
+
+    def training_forward(
         self,
         tokens: torch.Tensor,
         fstep: int,
@@ -82,26 +157,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         # y = data.get_input_data(-1)
         # eta = data.get_input_metadata(-1)
 
-        # TODO: remove after single sample experiments
-        if self.cur_token is not None:
-            # logger.info("checking single sampling")
-            assert self.cur_token[0].shape == tokens[0].shape, (
-                "first token shape was different between iterations "
-                "– violates single sample overfitting with difference"
-            )
-            assert torch.equal(self.cur_token[0], tokens[0]), (
-                f"first token was different between iterations "
-                f"– violates single sample overfitting {self.cur_token[0] - tokens[0]}"
-            )
-            assert torch.equal(self.cur_token, tokens), (
-                f"tokens were different between iterations "
-                f"– violates single sample overfitting {self.cur_token - tokens}"
-            )
         self.cur_token = tokens.detach()
 
-        # return self.inference(fstep=fstep, num_steps=10, coords=coords)
+        if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
+            c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
+        else:
+            c = None
 
-        c = 1  # TODO: add correct preconditioning (e.g., sample/s in previous time step)
         y = tokens
 
         if self.training:
@@ -119,7 +181,14 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         return self.denoise(x=y + n, c=c, sigma=sigma, fstep=fstep, coords=coords)
 
-    def denoise(self, x: torch.Tensor, c: torch.Tensor, sigma: float, fstep: int, coords: torch.Tensor = None) -> torch.Tensor:
+    def denoise(
+        self,
+        x: torch.Tensor,
+        c: torch.Tensor,
+        sigma: float,
+        fstep: int,
+        coords: torch.Tensor = None,
+    ) -> torch.Tensor:
         """
         The actual diffusion step, where the model removes noise from the input x under
         consideration of a conditioning c (e.g., previous time steps) and the current diffusion
@@ -135,24 +204,46 @@ class DiffusionForecastEngine(torch.nn.Module):
         noise_emb = self.noise_embedder(c_noise)
 
         # Precondition input and feed through network
-        x = self.preconditioner.precondition(x, c)
+        x = self.preconditioner.precondition(x, c)  # currently does nothing
+        if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
+            c = self.datetime_embedder(c).to(x.device)
 
-        # Direct prediction: network outputs denoised estimate directly
         return c_skip * x + c_out * self.net(
-            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb
+            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=c
         )  # Eq. (7) in EDM paper
 
-    def inference(
+    def inference_forward(
         self,
         fstep: int,
         num_steps: int = 50,
+        meta_info: dict[str, SampleMetaData] = None,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
-        # Forward pass of the diffusion model during inference (Heun sampler)
-        # https://github.com/NVlabs/edm/blob/main/generate.py
+        """
+        Forward pass of the diffusion model during inference.
+
+        Iteratively denoises a random sample using the learned score function,
+        with optional temporal conditioning extracted from meta_info.
+        https://github.com/NVlabs/edm/blob/main/generate.py
+
+        Args:
+            fstep: Forecast step index for the network
+            num_steps: Number of diffusion denoising steps (default: 30)
+            meta_info: Optional sample metadata dict containing timestamps for temporal conditioning
+            coords: Optional coordinate tensor for spatial conditioning
+        Returns:
+            torch.Tensor: Generated sample of shape (1, num_healpix_cells, ae_global_dim_embed)
+        """
+
+        # Extract conditioning from meta_info (same as training_forward)
+        c = None
+
+        if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
+            c = meta_info["ERA5"].params["timestamp"]
+
 
         # Sample pure noise (assuming single batch element for now)
-        torch.manual_seed(42)
+        # torch.manual_seed(42)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
 
         ### OLD WAY OF COMPUTING SIGMA SCHEDULE
@@ -199,13 +290,24 @@ class DiffusionForecastEngine(torch.nn.Module):
             * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
         ) ** self.rho
         t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
+        # t_steps = torch.cat(
+        #     [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+        # )  # t_N = 0
 
         # --- Per-step tracking for diagnostics ---
         track = {
-            "sigma": [], "x_std": [], "denoised_std": [],
-            "l2_to_target": [], "cosine_to_target": [],
-            "c_skip": [], "x": [x.cpu()]
+            "sigma": [],
+            "x_std": [],
+            "denoised_std": [],
+            "l2_to_target": [],
+            "cosine_to_target": [],
+            "c_skip": [],
+            "x": [x.cpu()],
         }
+
+        # Per-step intermediate denoised states (one per ODE step).
+        # Returned to the caller so they can be treated as a forecast-step dimension.
+        intermediate_x: list[torch.Tensor] = []
 
         # Main sampling loop.
         x_next = x * t_steps[0]
@@ -225,13 +327,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             t_hat = t_cur
 
             # Euler step.
-            denoised = self.denoise(x=x_hat, c=None, sigma=t_hat, fstep=fstep, coords=coords)
+            denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep, coords=coords)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.denoise(x=x_next, c=None, sigma=t_next, fstep=fstep, coords=coords)
+                denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
@@ -245,17 +347,22 @@ class DiffusionForecastEngine(torch.nn.Module):
                 track["x"].append(x_next.cpu())
                 if self.cur_token is not None:
                     track["l2_to_target"].append((x_next - self.cur_token).norm().item())
-        track["x"].append(self.cur_token.cpu())
+                    track["x"].append(self.cur_token.cpu())
+
+            # Record intermediate denoised state for this ODE step.
+            intermediate_x.append(x_next)
+
         self._plot_sampling_diagnostics(track, num_steps)
 
-        return x_next
+        return intermediate_x
 
     def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
         """Save a diagnostic plot of the sampling trajectory."""
         import matplotlib
+
         matplotlib.use("Agg")
+        import os
         import matplotlib.pyplot as plt
-        import matplotlib.colors as mcolors
 
         steps = list(range(len(track["sigma"])))
         has_target = len(track["l2_to_target"]) > 0
@@ -270,7 +377,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"Sampling diagnostics  |  sigma_max_eff={track['sigma'][0]:.2f}, "
             f"sigma_data={self.sigma_data}, steps={num_steps}"
         )
-        axes[0].axhline(self.sigma_data, color="grey", ls="--", lw=0.8, label=f"sigma_data={self.sigma_data}")
+        axes[0].axhline(
+            self.sigma_data, color="grey", ls="--", lw=0.8, label=f"sigma_data={self.sigma_data}"
+        )
         axes[0].legend(fontsize=8)
         axes[0].grid(True, alpha=0.3)
 
@@ -279,7 +388,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         axes[1].plot(steps, track["denoised_std"], "s-", markersize=3, label="denoised estimate")
         if self.cur_token is not None:
             target_std = self.cur_token.std().item()
-            axes[1].axhline(target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}")
+            axes[1].axhline(
+                target_std, color="grey", ls="--", lw=0.8, label=f"target std={target_std:.3f}"
+            )
         axes[1].set_ylabel("std")
         axes[1].legend(fontsize=8)
         axes[1].grid(True, alpha=0.3)
@@ -330,12 +441,16 @@ class NoiseEmbedder(torch.nn.Module):
     def timestep_embedding(self, t: float, max_period: int = 10000):
         """
         Create sinusoidal timestep embeddings.
-        :param t: a 1-D Tensor of N indices, one per batch element.
+        :param t: a scalar or 1-D Tensor of N indices, one per batch element.
                           These may be fractional.
         :param dim: the dimension of the output.
         :param max_period: controls the minimum frequency of the embeddings.
         :return: an (N, D) Tensor of positional embeddings.
         """
+        # Ensure t is 1D
+        if t.ndim == 0:
+            t = t.view(1)
+
         half = self.frequency_embedding_dim // 2
         freqs = torch.exp(
             -math.log(max_period) * torch.arange(start=0, end=half, dtype=self.dtype) / half
@@ -350,3 +465,81 @@ class NoiseEmbedder(torch.nn.Module):
         t_freq = self.timestep_embedding(t)
         t_emb = self.mlp(t_freq)
         return t_emb
+
+
+class DateTimeEncoder(torch.nn.Module):
+    """
+    Encodes timestamp(s) into multi-frequency sinusoidal calendar embeddings.
+
+    Inspired by cBottle (Climate in a Bottle) with k=1..8 frequency scales.
+    Captures seasonal (day-of-year) and diurnal (time-of-day) cycles at multiple timescales.
+
+    Input shape:  scalar or any tensor shape (...)
+    Output shape:  (..., 32) — 8 frequencies × 4 components (cos/sin per signal)
+
+    Output structure for k=1..num_frequencies:
+        [cos(2πk·doy_frac), sin(2πk·doy_frac), cos(2πk·tod_frac), sin(2πk·tod_frac)]
+    where:
+    - doy_frac = day_of_year / days_in_year
+    - tod_frac = seconds_of_day / 86400.0
+    """
+
+    def __init__(self, conditioning: str):
+        super().__init__()
+        self.num_frequencies = 8
+        assert conditioning in ["date_time", "date", "time"], f"Unsupported conditioning: {conditioning}"
+        self.date_only = conditioning == "date"
+        self.time_only = conditioning == "time"
+
+
+    def forward(self, timestamp: np.ndarray | np.datetime64) -> torch.Tensor:
+        """
+        Encode numpy datetime64 timestamps into 32D multi-frequency calendar embeddings.
+
+        Args:
+            timestamp: np.datetime64 scalar or array of timestamps
+
+        Returns:
+            torch.Tensor of shape (..., 32) containing multi-frequency embeddings
+        """
+
+        # TODO: Consider adding local time encoding (e.g., using longitude)
+
+        timestamp = np.asarray(timestamp)
+        orig_shape = timestamp.shape
+        timestamp_flat = timestamp.reshape(-1)
+
+        two_pi = 2.0 * np.pi
+
+        # --- Extract time components ---
+        ts_int64 = timestamp_flat.astype("int64")  # seconds since Unix epoch
+        seconds_in_day = 86400.0
+        tod_frac = (ts_int64 % int(seconds_in_day)) / seconds_in_day  # [0, 1)
+
+        # --- Extract day of year ---
+        day_np = timestamp_flat.astype("datetime64[D]")
+        year_start = day_np.astype("datetime64[Y]").astype("datetime64[D]")
+        next_year_start = (day_np.astype("datetime64[Y]") + np.timedelta64(1, "Y")).astype(
+            "datetime64[D]"
+        )
+
+        day_of_year_0 = (day_np - year_start).astype(np.int64)  # [0, 365] or [0, 366]
+        days_in_year = (next_year_start - year_start).astype(np.int64)  # 365 or 366
+        doy_frac = day_of_year_0.astype(np.float32) / days_in_year.astype(np.float32)  # [0, 1)
+
+        # --- Multi-frequency sinusoidal embeddings (vectorized over k) ---
+        k = np.arange(1, self.num_frequencies + 1, dtype=np.float32)[None, :]
+        doy_phase = two_pi * doy_frac[:, None] * k
+        tod_phase = two_pi * tod_frac[:, None] * k
+
+        doy_cos = np.cos(doy_phase).astype(np.float32) if not self.time_only else np.zeros_like(doy_phase).astype(np.float32)
+        doy_sin = np.sin(doy_phase).astype(np.float32) if not self.time_only else np.zeros_like(doy_phase).astype(np.float32)
+        tod_cos = np.cos(tod_phase).astype(np.float32) if not self.date_only else np.zeros_like(tod_phase).astype(np.float32)
+        tod_sin = np.sin(tod_phase).astype(np.float32) if not self.date_only else np.zeros_like(tod_phase).astype(np.float32)
+
+        # Stack all components: (N, K, 4) -> (N, K*4)
+        out = np.stack([doy_cos, doy_sin, tod_cos, tod_sin], axis=-1)
+        out = out.reshape(out.shape[0], self.num_frequencies * 4)
+        out = torch.from_numpy(out).float()
+
+        return out.reshape(*orig_shape, self.num_frequencies * 4)
