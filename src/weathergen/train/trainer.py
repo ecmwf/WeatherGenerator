@@ -22,7 +22,6 @@ from omegaconf import OmegaConf
 from torch.distributed.tensor import DTensor
 
 import weathergen.common.config as config
-import weathergen.common.run_state as rs
 from weathergen.common.config import Config
 from weathergen.common.run_state import RunState
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
@@ -59,8 +58,8 @@ logger = logging.getLogger(__name__)
 
 
 class Trainer(TrainerBase):
-    def __init__(self, train_logging: Config):
-        TrainerBase.__init__(self)
+    def __init__(self, train_logging: Config, runstate: RunState, devices: list[str]):
+        TrainerBase.__init__(self, runstate, devices)
 
         self.train_logging = train_logging
 
@@ -93,9 +92,9 @@ class Trainer(TrainerBase):
         """
         Get total, effective batch size across all DDP ranks
         """
-        return self.world_size_original * batch_size_per_gpu
+        return self.runstate.world_size_original * batch_size_per_gpu
 
-    def init(self, cf: Config, runstate: RunState, devices):
+    def init(self, cf: Config):
         # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
@@ -110,7 +109,6 @@ class Trainer(TrainerBase):
             cf,
         )
         cf = self.cf
-        self.runstate = runstate
 
         self.freeze_modules = cf.get("freeze_modules", "")
 
@@ -144,19 +142,6 @@ class Trainer(TrainerBase):
 
         self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 
-        self.devices = devices
-
-        # Get world_size of previous, to be continued run before
-        # world_size gets overwritten by current setting during init_ddp()
-        if self.runstate.world_size_original:
-            self.world_size_original = runstate.world_size_original
-        elif self.runstate.world_size:
-            self.world_size_original = runstate.world_size
-        else:
-            self.world_size_original = None
-
-        self.runstate.world_size_original = self.world_size_original
-
         self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
 
         # create output directory
@@ -189,19 +174,19 @@ class Trainer(TrainerBase):
         for loss_name, loss_cfg in mode_cfg.losses.items():
             target_and_aux_calculators[loss_name] = get_target_aux_calculator(
                 self.cf,
+                self.runstate,
                 loss_cfg,
                 self.dataset,
                 self.model,
                 self.device,
-                self.runstate.is_sharded,
                 batch_size,
             ).to_device(self.device)
 
         return target_and_aux_calculators
 
-    def inference(self, cf, runstate, devices, run_id_contd, mini_epoch_contd):
+    def inference(self, cf, run_id_contd, mini_epoch_contd):
         # general initalization
-        self.init(cf, runstate, devices)
+        self.init(cf)
 
         cf = self.cf
         device_type = torch.accelerator.current_accelerator()
@@ -212,7 +197,6 @@ class Trainer(TrainerBase):
         # only one needed since we only run the validation code path
         self.dataset = MultiStreamDataSampler(
             cf,
-            runstate,
             self.test_cfg,
             stage=VAL,
         )
@@ -239,7 +223,7 @@ class Trainer(TrainerBase):
             run_id_contd,
             mini_epoch_contd,
             self.test_cfg.training_mode,
-            devices[0],
+            self.devices[0],
         )
 
         # get target_aux calculators for different loss terms
@@ -248,7 +232,8 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
         if is_root():
-            rs.save_runstate(self.runstate, self.cf, mini_epoch=0)
+            self.runstate.save(cf.general.run_id, 0)
+            config.save(self.cf)
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -256,9 +241,9 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(self, cf, runstate, devices, run_id_contd=None, mini_epoch_contd=None):
+    def run(self, cf, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
-        self.init(cf, runstate, devices)
+        self.init(cf)
         cf = self.cf
 
         device_type = torch.accelerator.current_accelerator()
@@ -268,8 +253,8 @@ class Trainer(TrainerBase):
         self.collapse_monitor.device = self.device
 
         # create data loaders
-        self.dataset = MultiStreamDataSampler(cf, runstate, self.training_cfg, stage=TRAIN)
-        self.dataset_val = MultiStreamDataSampler(cf, runstate, self.validation_cfg, stage=VAL)
+        self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
+        self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
 
         loader_params = {
             "batch_size": None,
@@ -289,7 +274,7 @@ class Trainer(TrainerBase):
             run_id_contd,
             mini_epoch_contd,
             self.training_cfg.training_mode,
-            devices[0],
+            self.devices[0],
         )
 
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
@@ -307,7 +292,7 @@ class Trainer(TrainerBase):
                 run_id_contd,
                 mini_epoch_contd,
                 cf.training_config.training_mode,
-                devices[0],
+                self.devices[0],
             )
             self.ema_model = EMAModel(
                 self.model,
@@ -370,23 +355,22 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
 
         # recover mini_epoch when continuing run
-        if self.world_size_original is None:
-            mini_epoch_base = int(self.runstate.istep / len(self.data_loader))
-        else:
-            len_per_rank = (
-                len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu)
-            ) * self.batch_size_per_gpu
-            mini_epoch_base = int(
-                self.runstate.istep
-                / (
-                    min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
-                    * self.world_size_original
-                )
+        len_per_rank = (
+            len(self.dataset) // (self.runstate.world_size_original * self.batch_size_per_gpu)
+        ) * self.batch_size_per_gpu
+        mini_epoch_base = int(
+            self.runstate.istep
+            / (
+                min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
+                * self.runstate.world_size_original
             )
+        )
 
         if is_root():
-            config.save(self.cf, None)
-            rs.save_runstate(self.runstate, self.cf, None)
+            config.save(self.cf)
+            self.runstate.save(self.cf.general.run_id, 0)
+            # Also save with suffix "_latest"
+            self.runstate.save(self.cf.general.run_id, -1)
             logger.info(config.format_cf(self.cf))
 
         # run validation before training if requested
@@ -637,7 +621,6 @@ class Trainer(TrainerBase):
                         # write output
                         write_output(
                             self.cf,
-                            self.runstate,
                             mode_cfg,
                             batch_size,
                             mini_epoch,
@@ -731,7 +714,7 @@ class Trainer(TrainerBase):
                 logger.info(f"Saved model to {file_out}")
 
             # save runstate
-            rs.save_runstate(self.runstate, self.cf, mini_epoch)
+            self.runstate.save(self.cf.general.run_id, mini_epoch)
 
     def _log(self, stage: Stage):
         """

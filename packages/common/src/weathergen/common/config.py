@@ -27,6 +27,7 @@ from omegaconf.omegaconf import open_dict
 
 from weathergen.common.io import StoreType
 from weathergen.common.paths import _REPO_ROOT, get_wg_private_path
+from weathergen.common.run_state import RunState, _HistoryItem
 
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
@@ -135,7 +136,7 @@ def _sanitize_time_keys(conf: Config) -> Config:
     return conf
 
 
-def _strip_interpolation(conf: Config) -> Config:
+def _strip_interpolation(conf: Config) -> Config | ListConfig:
     """Recursively convert interpolated timedelta/datetime objects to strings."""
     stripped = {}
     if OmegaConf.is_dict(conf):
@@ -195,13 +196,13 @@ def format_cf(config: Config) -> str:
     return stream.getvalue()
 
 
-def save(config: Config, mini_epoch: int | None):
+def save(config: Config):
     """Save current config into the current runs model directory."""
     # save in directory with model files
     dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
 
-    fname = _get_model_config_file_write_name(get_run_id_from_config(config), mini_epoch)
+    fname = _get_model_config_file_name(get_run_id_from_config(config))
 
     json_str = json.dumps(OmegaConf.to_container(_strip_interpolation(config)))
     with (dirname / fname).open("w") as f:
@@ -232,56 +233,25 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path) / run_id
 
-        config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
-        config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
+        fname = path / _get_model_config_file_name(run_id)
 
-        if config_path_with_epoch.exists():
-            fname = config_path_with_epoch
-            _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
-        elif config_path_without_epoch.exists():
-            fname = config_path_without_epoch
-            _logger.info(
-                f"Config for mini_epoch {mini_epoch} not found. "
-                f"Falling back to config without mini_epoch: {fname}"
-            )
-        else:
-            raise FileNotFoundError(
-                f"Could not find model config for run_id '{run_id}' "
-                f"(mini_epoch={mini_epoch}) in '{path}'. "
-                f"Tried: '{config_path_with_epoch.name}' and '{config_path_without_epoch.name}'. "
-                f"Please check run_id and mini_epoch."
-            )
+        assert fname.exists(), (
+            f"Could not find \
+            model config for run_id: '{run_id}' in '{path}'. "
+        )
 
     with fname.open() as f:
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _apply_fixes(config)
+    return _apply_fixes(config, mini_epoch)
 
 
-def _get_model_config_file_write_name(run_id: str, mini_epoch: int | None):
+def _get_model_config_file_name(run_id: str):
     """Generate the filename for writing a model config file."""
-    if mini_epoch is None:
-        mini_epoch_str = ""
-    elif mini_epoch == -1:
-        mini_epoch_str = "_latest"
-    else:
-        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
 
-    return f"model_{run_id}{mini_epoch_str}.json"
-
-
-def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
-    """Generate the filename for reading a model config file."""
-    if mini_epoch is None:
-        mini_epoch_str = ""
-    elif mini_epoch == -1:
-        mini_epoch_str = "_latest"
-    else:
-        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
-
-    return f"model_{run_id}{mini_epoch_str}.json"
+    return f"model_{run_id}.json"
 
 
 def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
@@ -301,7 +271,7 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     )
 
 
-def _apply_fixes(config: Config) -> Config:
+def _apply_fixes(config: Config, mini_epoch: int) -> Config:
     """
     Apply fixes to maintain a best effort backward combatibility.
 
@@ -312,6 +282,34 @@ def _apply_fixes(config: Config) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
+    config = _check_runstate(config, mini_epoch)
+    return config
+
+
+def _check_runstate(config: Config, mini_epoch: int) -> Config:
+    """
+    Detect if previous run has not implemented yet config/runstate split.
+
+    Create required runstate file.
+    """
+    config = config.copy()
+    run_id = config.general.run_id
+    runstate_file = get_path_model(run_id=run_id) / RunState._get_file_name(run_id, mini_epoch)
+
+    if not runstate_file.is_file():  # run from before separate runstate
+        runstate = RunState(
+            world_size=config.general.world_size,
+            rank=config.general.rank,
+            local_rank=config.general.local_rank,
+            with_fsdp=config.general.with_fsdp,
+            istep=config.general.istep,
+            world_size_original=config.general.world_size_original,
+            run_history=[
+                _HistoryItem(run_id, istep) for run_id, istep in config.general.run_history
+            ],
+        )
+        runstate.save(run_id, mini_epoch)
+
     return config
 
 
@@ -680,6 +678,15 @@ def get_path_model(config: Config | None = None, run_id: str | None = None) -> P
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
     return _get_shared_wg_path() / "models" / run_id
+
+
+def get_path_results(config: Config, mini_epoch: int, rank: int) -> Path:
+    """Get the path to validation results for a specific mini_epoch and rank."""
+    ext = StoreType(config.zarr_store).value  # validate extension
+    base_path = get_path_run(config)
+    fname = f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
+
+    return base_path / fname
 
 
 @functools.cache

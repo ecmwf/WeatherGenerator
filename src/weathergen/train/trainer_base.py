@@ -24,9 +24,10 @@ PORT = 1345
 
 
 class TrainerBase:
-    def __init__(self):
+    def __init__(self, runstate: RunState, devices: list[str]):
         self.cf: Config | None = None
-        self.runstate: RunState | None = None
+        self.runstate: RunState = runstate
+        self.devices: list[str] = devices
 
     @staticmethod
     def init_torch(use_cuda=True, num_accs_per_task=1, multiprocessing_method="fork"):
@@ -65,7 +66,7 @@ class TrainerBase:
         return devices
 
     @staticmethod
-    def init_ddp(cf, runstate):
+    def init_ddp(cf) -> tuple[Config, RunState]:
         """Initializes the distributed environment."""
         rank = 0
         local_rank = 0
@@ -138,10 +139,12 @@ class TrainerBase:
                     dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
                     cf.data_loader_rng_seed = l_seed.item()
 
-        runstate.world_size = world_size
-        runstate.rank = rank
-        runstate.local_rank = local_rank
-        runstate.with_ddp = world_size > 1
-        runstate.is_sharded = runstate.with_ddp and cf.with_fsdp
+        runstate = RunState(
+            world_size=world_size,
+            world_size_original=world_size,
+            rank=rank,
+            local_rank=local_rank,
+            with_fsdp=cf.with_fsdp,
+        )
 
         return cf, runstate

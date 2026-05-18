@@ -140,7 +140,7 @@ class TrainLogger:
             cf = config.load_merge_configs(
                 private_home=None, from_run_id=run_id, mini_epoch=mini_epoch
             )
-        run_id = cf.run_id
+        run_id = cf.general.run_id
 
         result_dir_base = config.get_path_run(cf)
         result_dir = result_dir_base / run_id
