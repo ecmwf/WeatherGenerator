@@ -332,6 +332,12 @@ class DataReaderGREP(DataReaderTimestep):
         """
         self._lazy_init()
 
+        if not channels_idx:
+            return ReaderData.empty(
+                num_data_fields=0,
+                num_geo_fields=0,
+            )
+
         (t_idxs, dtr) = self._get_dataset_idxs(idx)
 
         if self.ds is None or self.len == 0 or len(t_idxs) == 0:
@@ -374,6 +380,8 @@ class DataReaderGREP(DataReaderTimestep):
                 continue
 
             # (n_points, n_channels)
+            # TODO remove try/except: should be able to just use time or time_centered
+            # depending on dataset, without needing to guess per-timestep.
             try:
                 timestep_data = np.stack(
                     [

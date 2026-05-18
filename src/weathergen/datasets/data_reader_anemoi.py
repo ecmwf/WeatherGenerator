@@ -25,6 +25,7 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     check_reader_data,
 )
+from weathergen.train.utils import Stage
 
 _logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
+        stage: Stage,
     ) -> None:
         """
         Construct data reader for anemoi dataset
@@ -104,19 +106,35 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.longitudes = _clip_lon(ds.longitudes)
 
         # select/filter requested source channels
-        self.source_idx = self.select_channels(ds0, "source")
-        self.source_channels = [ds.variables[i] for i in self.source_idx]
+        if stream_info.get(str(stage) + "_source_channels") is None:
+            self.source_idx = self.select_channels(ds, "source")
+            self.source_channels = [ds.variables[i] for i in self.source_idx]
+        else:
+            self.source_channels = stream_info.get(str(stage) + "_source_channels")
+            self.source_idx = [ds.variables.index(ch) for ch in self.source_channels]
 
         # select/filter requested target channels
-        self.target_idx = self.select_channels(ds0, "target")
-        self.target_channels = [ds.variables[i] for i in self.target_idx]
+        if stream_info.get(str(stage) + "_target_channels") is None:
+            self.target_idx = self.select_channels(ds, "target")
+            self.target_channels = [ds.variables[i] for i in self.target_idx]
+        else:
+            self.target_channels = stream_info.get(str(stage) + "_target_channels")
+            self.target_idx = [ds.variables.index(ch) for ch in self.target_channels]
 
         # get target channel weights from stream config
-        self.target_channel_weights = self.parse_target_channel_weights()
+        if stream_info.get("target_channel_weights") is None:
+            self.target_channel_weights = self.parse_target_channel_weights()
+        else:
+            self.target_channel_weights = stream_info.get("target_channel_weights")
 
         # select/filter requested geoinfo channels (can be any variable, not just constant-in-time)
-        self.geoinfo_idx = self.select_geoinfo_channels(ds0)
-        self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
+        if stream_info.get("geoinfo_channels") is None:
+            self.geoinfo_idx = self.select_geoinfo_channels(ds)
+            self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
+        else:
+            self.geoinfo_channels = stream_info.get("geoinfo_channels")
+            self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
+
         # set geoinfo normalization statistics
         if len(self.geoinfo_idx) > 0:
             self.mean_geoinfo = ds.statistics["mean"][self.geoinfo_idx]
@@ -253,9 +271,9 @@ class DataReaderAnemoi(DataReaderTimestep):
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
                     and (
-                        np.array([f in k for f in channels]).any() if channels is not None else True
+                        np.array([f == k for f in channels]).any() if channels is not None else True
                     )
-                    and not np.array([f in k for f in channels_exclude]).any()
+                    and not np.array([f == k for f in channels_exclude]).any()
                 )
             ]
         )
