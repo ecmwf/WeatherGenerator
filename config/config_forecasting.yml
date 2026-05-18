@@ -66,11 +66,13 @@ forecast_att_dense_rate: 1.0
 
 healpix_level: 5
 
-rope_2D: False
+# Generalized RoPE selector.
+rope_mode: none  # one of: none, 2d, spherical
+# Optional spherical harmonic band for spherical RoPE. If null, the model picks one
+# conservative shared band that fits all spherical-RoPE attention modules.
+rope_spherical_band: null
 mlp_type: swiglu
 use_xsa: True
-# mlp_type: mlp
-# use_xsa: False
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -207,7 +209,7 @@ validation_config:
   validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
-    ema_halflife_in_thousands: 1e-3
+    ema_halflife_in_thousands: 600
 
   # parameters for validation samples that are written to disk
   output : {

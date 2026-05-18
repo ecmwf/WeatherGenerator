@@ -359,9 +359,7 @@ class Trainer(TrainerBase):
             self._load_optimizer_state(run_id_contd, mini_epoch_contd)
 
         if self.cf.general.istep > 0 and is_root():
-            str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            if is_root():
-                logger.info(str)
+            logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
