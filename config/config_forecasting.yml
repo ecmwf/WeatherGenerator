@@ -68,6 +68,10 @@ fe_diffusion_model: False
 healpix_level: 5
 
 rope_2D: True
+mlp_type: swiglu
+use_xsa: True
+# mlp_type: mlp
+# use_xsa: False
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -88,6 +92,7 @@ freeze_modules: ""
 load_chkpt: {}
 
 norm_type: "LayerNorm"
+qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
@@ -185,8 +190,8 @@ training_config:
 
   forecast :
       time_step: 06:00:00
-      offset: 0
-      num_steps: 2
+      offset: 1
+      num_steps: 3
       policy: "fixed"
 
 
