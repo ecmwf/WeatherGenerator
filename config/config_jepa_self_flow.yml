@@ -280,10 +280,10 @@ training_config:
         method: "geodesic_disk"
         # Noise mask config (which cells get high noise, always random)
         noise_mask_config:
-          rate: 0.3 # percentage of cells receiving the lower noise time (s)
+          rate: 0.1 # percentage of cells receiving the lower noise time (s)
           hl_mask: 4
         # Noise schedule bounds
-        noise_schedule: "variable_covariance_linear_information"
+        noise_schedule: "cosine"
         t_min: 0.1
         t_max: 0.9
 
