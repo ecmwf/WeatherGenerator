@@ -31,6 +31,7 @@ from weathergen.model.embeddings import (
 from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 
 
 class EmbeddingEngine(torch.nn.Module):
@@ -555,6 +556,27 @@ class ForecastingEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
+        self.rope_2D = cf.get("rope_2D", False)
+        self.healpix_level = cf.healpix_level
+        self.dtype = get_dtype(cf.attention_dtype)
+
+
+        if self.rope_2D:
+            num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
+            total_tokens = (
+                self.num_healpix_cells + num_extra_tokens
+                ) * cf.ae_local_num_queries
+            self.register_buffer(
+                "rope_coords", 
+                torch.zeros(
+                    1, 
+                    total_tokens, 
+                    2, 
+                    dtype=self.dtype
+                ),
+            )
+        else:
+            self.rope_coords = None
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
@@ -621,7 +643,24 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep, coords=None):
+
+    def reset_parameters(self) -> None:
+        """HEALPix neighbourhood based parameter initializing for target prediction."""
+
+        cf = self.cf
+
+        if self.rope_2D:
+            verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
+            coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
+            coords_flat = coords.flatten(0, 1).unsqueeze(0)
+            num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
+            offset = num_extra_tokens * cf.ae_local_num_queries
+            self.rope_coords.data.fill_(0.0)
+            self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
+
+        
+    def forward(self, tokens, fstep):
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
@@ -633,7 +672,7 @@ class ForecastingEngine(torch.nn.Module):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = checkpoint(block, tokens, use_reentrant=False)
             else:
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+                tokens = checkpoint(block, tokens, self.rope_coords, aux_info, use_reentrant=False)
         return tokens
 
 
