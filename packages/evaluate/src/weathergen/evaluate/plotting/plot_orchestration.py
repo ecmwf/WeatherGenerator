@@ -541,7 +541,7 @@ def plot_data(
         "dpi_val": global_plotting_opts.get("dpi_val", 300),
         "fig_size": global_plotting_opts.get("fig_size"),
         "fps": global_plotting_opts.get("fps", 2),
-        "regions": global_plotting_opts.get("regions", ["global"]),
+        "regions": global_plotting_opts.get("regions", stream_cfg.get("regions", ["global"])),
         "log_x": global_plotting_opts.get("log_x", False),
         "log_y": global_plotting_opts.get("log_y", False),
         "n_bins": global_plotting_opts.get("n_bins", 50),
@@ -766,7 +766,6 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
     print_summary = cfg.evaluation.get("print_summary", False)
-    regions = cfg.evaluation.get("regions", ["global"])
     # image_format / dpi_val etc. live at the top level of the config,
     # not under a "global_plotting_options" sub-key.
     plt_opt = cfg.get("global_plotting_options", cfg)
@@ -786,8 +785,8 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     sc_plotter = ScoreCards(plot_cfg, summary_dir)
     br_plotter = BarPlots(plot_cfg, summary_dir)
     quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
-    for region in regions:
-        for metric in metrics:
+    for metric in metrics:
+        for region in scores_dict[metric].keys():
             if eval_opt.get("summary_plots", False):
                 plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("ratio_plots", False):

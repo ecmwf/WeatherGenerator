@@ -14,13 +14,13 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.norms import AdaLayerNorm, RMSNorm
-from weathergen.model.positional_encoding import rotary_pos_emb_2d
+from weathergen.model.positional_encoding import apply_rope
 
 """
 Attention blocks used by WeatherGenerator.
 
-Some blocks optionally apply 2D RoPE. When enabled, the caller must provide per-token 2D
-coordinates aligned with the token order (lat, lon in radians).
+Some blocks optionally apply RoPE-like positional modulation. When enabled, the caller must
+provide per-token coordinates aligned with the token order (lat, lon in radians).
 """
 
 
@@ -40,7 +40,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-        with_2d_rope=False,
+        rope_mode="none",
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -49,7 +49,10 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
         self.with_residual = with_residual
-        self.with_2d_rope = with_2d_rope
+        self.rope_mode = rope_mode
+        self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
+        if self.rope_post_mod_qk_lnorm:
+            assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -79,6 +82,9 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         lnorm = qk_norm if with_qk_lnorm else torch.nn.Identity
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
+        post_rope_lnorm = norm if self.rope_post_mod_qk_lnorm else torch.nn.Identity
+        self.post_rope_lnorm_q = post_rope_lnorm(self.dim_head_proj, eps=norm_eps)
+        self.post_rope_lnorm_k = post_rope_lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
 
@@ -96,10 +102,12 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s)
 
-        if self.with_2d_rope:
-            if coords is None:
-                raise ValueError("coords must be provided when with_2d_rope=True")
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
+        qs, ks = apply_rope(
+            qs, ks, coords, self.rope_mode, 1
+        )
+        if self.rope_post_mod_qk_lnorm:
+            qs = self.post_rope_lnorm_q(qs).to(self.dtype)
+            ks = self.post_rope_lnorm_k(ks).to(self.dtype)
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
@@ -225,7 +233,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-        with_2d_rope=False,
+        rope_mode="none",
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -233,7 +241,10 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
         self.with_residual = with_residual
-        self.with_2d_rope = with_2d_rope
+        self.rope_mode = rope_mode
+        self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
+        if self.rope_post_mod_qk_lnorm:
+            assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -263,6 +274,9 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         lnorm = qk_norm if with_qk_lnorm else torch.nn.Identity
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
+        post_rope_lnorm = norm if self.rope_post_mod_qk_lnorm else torch.nn.Identity
+        self.post_rope_lnorm_q = post_rope_lnorm(self.dim_head_proj, eps=norm_eps)
+        self.post_rope_lnorm_k = post_rope_lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
         assert with_flash, "Only flash attention supported."
@@ -288,10 +302,12 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
         vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
 
-        if self.with_2d_rope:
-            if coords is None:
-                raise ValueError("coords must be provided when with_2d_rope=True")
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=1)
+        qs, ks = apply_rope(
+            qs, ks, coords, self.rope_mode, 1
+        )
+        if self.rope_post_mod_qk_lnorm:
+            qs = self.post_rope_lnorm_q(qs).to(self.dtype)
+            ks = self.post_rope_lnorm_k(ks).to(self.dtype)
 
         outs = self.flex_attention(qs, ks, vs, block_mask=self.block_mask).transpose(1, 2)
 
@@ -540,7 +556,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-        with_2d_rope=False,
+        rope_mode="none",
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -549,7 +565,10 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.softcap = softcap
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
-        self.with_2d_rope = with_2d_rope
+        self.rope_mode = rope_mode
+        self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
+        if self.rope_post_mod_qk_lnorm:
+            assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -579,6 +598,9 @@ class MultiSelfAttentionHead(torch.nn.Module):
         lnorm = qk_norm if with_qk_lnorm else torch.nn.Identity
         self.lnorm_q = lnorm(self.dim_head_proj, eps=norm_eps)
         self.lnorm_k = lnorm(self.dim_head_proj, eps=norm_eps)
+        post_rope_lnorm = norm if self.rope_post_mod_qk_lnorm else torch.nn.Identity
+        self.post_rope_lnorm_q = post_rope_lnorm(self.dim_head_proj, eps=norm_eps)
+        self.post_rope_lnorm_k = post_rope_lnorm(self.dim_head_proj, eps=norm_eps)
 
         self.dtype = attention_dtype
         if with_flash:
@@ -599,10 +621,12 @@ class MultiSelfAttentionHead(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
 
-        if self.with_2d_rope:
-            if coords is None:
-                raise ValueError("coords must be provided when with_2d_rope=True")
-            qs, ks = rotary_pos_emb_2d(qs, ks, coords, unsqueeze_dim=2)
+        qs, ks = apply_rope(
+            qs, ks, coords, self.rope_mode, 2
+        )
+        if self.rope_post_mod_qk_lnorm:
+            qs = self.post_rope_lnorm_q(qs).to(self.dtype)
+            ks = self.post_rope_lnorm_k(ks).to(self.dtype)
 
         # set dropout rate according to training/eval mode as required by flash_attn
         dropout_rate = self.dropout_rate if self.training else 0.0
