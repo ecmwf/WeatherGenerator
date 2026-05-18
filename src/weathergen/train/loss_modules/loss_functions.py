@@ -62,9 +62,47 @@ def stats_normalized_erf(target, ens, mu, stddev):
     return torch.mean(d * d)  # + torch.mean( torch.sqrt( stddev) )
 
 
-def mse_ens(target, ens, mu, stddev):
-    mse_loss = torch.nn.functional.mse_loss
-    return torch.stack([mse_loss(target, mem) for mem in ens], 0).mean()
+def mse_ens(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    weights_channels: torch.Tensor | None,
+    weights_points: torch.Tensor | None,
+    use_ensemble_mean: bool = False,
+):
+    """
+    MSE loss for ensemble predictions, with two modes:
+
+    use_ensemble_mean=False (default):
+        Mean of per-member MSE — equivalent to mean(mse(target, mem) for mem in ens).
+        Penalises every member independently; each member is pushed toward the target.
+
+    use_ensemble_mean=True:
+        MSE of the ensemble mean against the target.
+        Collapses the ensemble to a single prediction before comparing, which
+        ignores spread and rewards a well-calibrated ensemble mean.
+
+    target : shape (num_data_points, num_channels)
+    pred   : shape (ens_dim, num_data_points, num_channels)
+    weights_channels : shape (num_channels,)  or None
+    weights_points   : shape (num_data_points,) or None
+    """
+    mask_nan = ~torch.isnan(target)
+    t = torch.where(mask_nan, target, torch.zeros_like(target))
+    p = torch.where(mask_nan.unsqueeze(0), pred, torch.zeros_like(pred))
+
+    if use_ensemble_mean:
+        # MSE( target, mean_over_members(pred) )
+        diff_sq = (t - p.mean(0)).pow(2)  # [num_data_points, num_channels]
+    else:
+        # mean_over_members( MSE(target, member) )
+        diff_sq = (t.unsqueeze(0) - p).pow(2).mean(0)  # [num_data_points, num_channels]
+
+    if weights_points is not None:
+        diff_sq = (diff_sq.transpose(1, 0) * weights_points).transpose(1, 0)
+
+    loss_chs = diff_sq.mean(0)  # [num_channels]
+    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
+    return loss, loss_chs
 
 
 def kernel_crps(
