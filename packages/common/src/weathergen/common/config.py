@@ -140,12 +140,12 @@ def _strip_interpolation(conf: Config) -> Config:
     stripped = {}
     if OmegaConf.is_dict(conf):
         for key in list(conf.keys()):
-            key = str(key)
+            # key = str(key)
             if OmegaConf.is_missing(conf, key):
                 val = "???"
             elif OmegaConf.is_config(conf[key]):
                 val = _strip_interpolation(conf[key])
-            elif key.startswith("_"):
+            elif isinstance(key, str) and key.startswith("_"):
                 continue  # Skip hidden/backup keys
             elif OmegaConf.is_interpolation(conf, key):
                 raw_key = f"_{key}"

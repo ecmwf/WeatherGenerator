@@ -71,6 +71,8 @@ rope_mode: none  # one of: none, 2d, spherical
 # Optional spherical harmonic band for spherical RoPE. If null, the model picks one
 # conservative shared band that fits all spherical-RoPE attention modules.
 rope_spherical_band: null
+mlp_type: swiglu
+use_xsa: True
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -91,6 +93,7 @@ freeze_modules: ""
 load_chkpt: {}
 
 norm_type: "LayerNorm"
+qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
@@ -140,7 +143,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 64
+  num_mini_epochs: 196
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -187,7 +190,7 @@ training_config:
     }
 
   forecast :
-      time_step: 06:00:00
+      # time_step: 01:00:00
       offset: 1
       num_steps: 3
       policy: "fixed"
