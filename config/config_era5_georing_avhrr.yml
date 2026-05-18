@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "full" #"block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1536
+ae_local_dim_embed: 2048
 ae_local_num_blocks: 4
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -19,7 +19,7 @@ ae_local_with_qk_lnorm: True
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
-ae_adapter_num_heads: 12
+ae_adapter_num_heads: 20
 ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
@@ -136,14 +136,14 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 128
+  num_mini_epochs: 24
   samples_per_mini_epoch: 4096
   shuffle: True
 
   start_date: 2014-01-01T00:00
   end_date: 2022-12-31T00:00
 
-  time_window_step: 06:00:00
+  time_window_step: 01:00:00
   time_window_len: 06:00:00
   
   learning_rate_scheduling :

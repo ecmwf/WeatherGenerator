@@ -21,12 +21,15 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     check_reader_data,
 )
+from weathergen.train.utils import Stage
 
 _logger = logging.getLogger(__name__)
 
 
 class DataReaderObs(DataReaderBase):
-    def __init__(self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict) -> None:
+    def __init__(
+        self, tw_handler: TimeWindowHandler, filename: Path, stream_info: dict, stage: Stage
+    ) -> None:
         super().__init__(tw_handler, stream_info)
 
         self.filename = filename
@@ -52,22 +55,21 @@ class DataReaderObs(DataReaderBase):
 
         # determine source / target channels and corresponding idx using include and exclude lists
 
-        s_chs = stream_info.get("source")
-        s_chs_exclude = stream_info.get("source_exclude", [])
-
-        t_chs = stream_info.get("target")
-        t_chs_exclude = stream_info.get("target_exclude", [])
-
-        # source_n_empty = len(s_chs) > 0 if s_chs is not None else True
-        # assert source_n_empty, "source is empty; at least one channels must be present."
-        # target_n_empty = len(t_chs) > 0 if t_chs is not None else True
-        # assert target_n_empty, "target is empty; at least one channels must be present."
-
-        self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
+        if stream_info.get(str(stage) + "_source_channels") is None:
+            s_chs = stream_info.get("source")
+            s_chs_exclude = stream_info.get("source_exclude", [])
+            self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
+        else:
+            self.source_channels = stream_info.get(str(stage) + "_source_channels")
         self.source_idx = [self.colnames.index(c) for c in self.source_channels]
         self.source_idx = np.array(self.source_idx, dtype=np.int64)
 
-        self.target_channels = self.select_channels(data_colnames, t_chs, t_chs_exclude)
+        if stream_info.get(str(stage) + "_target_channels") is None:
+            t_chs = stream_info.get("target")
+            t_chs_exclude = stream_info.get("target_exclude", [])
+            self.target_channels = self.select_channels(data_colnames, t_chs, t_chs_exclude)
+        else:
+            self.target_channels = stream_info.get(str(stage) + "_target_channels")
         self.target_idx = [self.colnames.index(c) for c in self.target_channels]
         self.target_idx = np.array(self.target_idx, dtype=np.int64)
 
