@@ -678,7 +678,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             num_target_samples,
             self.output_offset,
             num_output_steps,
-            train_step,
         )
 
         # for all streams
