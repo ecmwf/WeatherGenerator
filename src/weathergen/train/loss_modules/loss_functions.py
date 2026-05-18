@@ -86,23 +86,15 @@ def mse_ens(
     weights_channels : shape (num_channels,)  or None
     weights_points   : shape (num_data_points,) or None
     """
-    mask_nan = ~torch.isnan(target)
-    t = torch.where(mask_nan, target, torch.zeros_like(target))
-    p = torch.where(mask_nan.unsqueeze(0), pred, torch.zeros_like(pred))
-
     if use_ensemble_mean:
-        # MSE( target, mean_over_members(pred) )
-        diff_sq = (t - p.mean(0)).pow(2)  # [num_data_points, num_channels]
-    else:
-        # mean_over_members( MSE(target, member) )
-        diff_sq = (t.unsqueeze(0) - p).pow(2).mean(0)  # [num_data_points, num_channels]
+        # lp_loss collapses the ensemble via .mean(0) before computing MSE
+        return mse(target, pred, weights_channels, weights_points)
 
-    if weights_points is not None:
-        diff_sq = (diff_sq.transpose(1, 0) * weights_points).transpose(1, 0)
-
-    loss_chs = diff_sq.mean(0)  # [num_channels]
-    loss = torch.mean(loss_chs * weights_channels if weights_channels is not None else loss_chs)
-    return loss, loss_chs
+    losses, losses_chs = zip(
+        *[mse(target, member.unsqueeze(0), weights_channels, weights_points) for member in pred],
+        strict=False,
+    )
+    return torch.stack(list(losses)).mean(), torch.stack(list(losses_chs)).mean(0)
 
 
 def kernel_crps(
