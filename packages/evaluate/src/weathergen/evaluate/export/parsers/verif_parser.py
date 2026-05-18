@@ -11,11 +11,11 @@ from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import (
-    InterpolatorFactory,
     find_pl,
     get_grid_points,
     get_obs_coordinates,
 )
+from weathergen.evaluate.export.verif_interpolator import InterpolatorFactory
 from weathergen.evaluate.utils.derived_channels import compute_mslp, compute_precip
 
 _logger = logging.getLogger(__name__)

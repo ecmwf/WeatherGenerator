@@ -11,6 +11,7 @@ import datetime
 import logging
 import os
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import cartopy
@@ -23,6 +24,8 @@ import xarray as xr
 from astropy_healpix import HEALPix as HEALPixGrid
 from cartopy.io import DownloadWarning
 from matplotlib.collections import LineCollection
+from scipy.stats import skew
+from scipy.stats import wasserstein_distance as wd
 
 try:
     import datashader as ds
@@ -54,7 +57,7 @@ def _download_cartopy_off(enabled: bool) -> None:
     """Enable/disable blocking Cartopy downloads by elevating DownloadWarning to error."""
     if enabled:
         warnings.filterwarnings("error", category=DownloadWarning)
-        _logger.info(
+        _logger.debug(
             "Auto-downloads are blocked for cartopy; only local cartopy data will be used."
         )
     else:
@@ -66,6 +69,39 @@ np.seterr(divide="ignore", invalid="ignore")
 logging.getLogger("matplotlib.category").setLevel(logging.ERROR)
 
 _logger.debug(f"Taking cartopy paths from {work_dir}")
+
+
+@dataclass
+class DistStats:
+    """Summary statistics for a 1-D distribution."""
+
+    count: int
+    min: float
+    max: float
+    mean: float
+    median: float
+    std: float
+    skewness: float
+
+    @classmethod
+    def from_array(cls, v: np.typing.NDArray) -> "DistStats":
+        v = np.asarray(v).ravel()
+        return cls(
+            count=len(v),
+            min=float(np.min(v)),
+            max=float(np.max(v)),
+            mean=float(np.mean(v)),
+            median=float(np.median(v)),
+            std=float(np.std(v)),
+            skewness=float(skew(v, nan_policy="omit")),
+        )
+
+    def summary(self, label: str) -> str:
+        return (
+            f"{label:8s} N={self.count}  min={self.min:.3g}  max={self.max:.3g}  "
+            f"mean={self.mean:.3g}  med={self.median:.3g}  "
+            f"std={self.std:.3g}  skew={self.skewness:.3g}"
+        )
 
 
 class Plotter:
@@ -94,7 +130,7 @@ class Plotter:
             It can also be set later via update_data_selection.
         """
 
-        _logger.info(f"Taking cartopy paths from {work_dir}")
+        _logger.debug(f"Taking cartopy paths from {work_dir}")
 
         self.image_format = plotter_cfg.get("image_format")
         self.animation_format = plotter_cfg.get("animation_format")
@@ -102,6 +138,9 @@ class Plotter:
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
         self.regions = plotter_cfg.get("regions")
+        self.log_x = plotter_cfg.get("log_x", False)
+        self.log_y = plotter_cfg.get("log_y", False)
+        self.n_bins = plotter_cfg.get("n_bins", 50)
         _download_cartopy_off(enabled=True)
         self.plot_subtimesteps = plotter_cfg.get(
             "plot_subtimesteps", False
@@ -137,6 +176,10 @@ class Plotter:
             _logger.warning("No sample in the selection. Might lead to unexpected results.")
         else:
             self.sample = select["sample"]
+            # "all_samples" is a proxy for across-samples aggregation;
+            # remove it from self.select so it won't be used in .sel()
+            if select["sample"] == "all_samples":
+                self.select.pop("sample")
 
         if "stream" not in select:
             _logger.warning("No stream in the selection. Might lead to unexpected results.")
@@ -190,13 +233,14 @@ class Plotter:
                 da = da.sel({key: value})
         return da
 
-    def create_histograms_per_sample(
+    def create_histograms(
         self,
         target: xr.DataArray,
         preds: xr.DataArray,
         variables: list,
         select: dict,
         tag: str = "",
+        ranges: dict | None = None,
     ) -> list[str]:
         """
         Plot histogram of target vs predictions for each variable and valid time in the DataArray.
@@ -222,44 +266,64 @@ class Plotter:
 
         self.update_data_selection(select)
 
-        # Basic map output directory for this stream
-        hist_output_dir = self.out_plot_basedir / self.stream / "histograms"
+        # Basic histogram output directory for this stream
+        hist_output_dir = self.get_hist_output_dir()
 
         if not os.path.exists(hist_output_dir):
             _logger.info(f"Creating dir {hist_output_dir}")
             os.makedirs(hist_output_dir, exist_ok=True)
 
-        for var in variables:
-            select_var = self.select | {"channel": var}
+        for region in self.regions:
+            if region != "global":
+                bbox = RegionBoundingBox.from_region_name(region)
+                reg_target = bbox.apply_mask(target)
+                reg_preds = bbox.apply_mask(preds)
+            else:
+                reg_target = target
+                reg_preds = preds
 
-            targ, prd = (
-                self.select_from_da(target, select_var),
-                self.select_from_da(preds, select_var),
-            )
+            for var in variables:
+                select_var = self.select | {"channel": var}
 
-            # Remove NaNs
-            targ = targ.dropna(dim="ipoint")
-            prd = prd.dropna(dim="ipoint")
-            assert targ.size > 0, "Data array must not be empty or contain only NAs"
-            assert prd.size > 0, "Data array must not be empty or contain only NAs"
-
-            if self.plot_subtimesteps:
-                ntimes_unique = len(np.unique(targ.valid_time))
-                _logger.info(
-                    f"Creating histograms for {ntimes_unique} valid times of variable {var}."
+                targ, prd = (
+                    self.select_from_da(reg_target, select_var),
+                    self.select_from_da(reg_preds, select_var),
                 )
 
-                groups = zip(targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False)
-            else:
-                _logger.info(f"Plotting histogram for all valid times of {var}")
+                # Remove NaNs
+                targ = targ.dropna(dim="ipoint")
+                prd = prd.dropna(dim="ipoint")
+                assert targ.size > 0, "Data array must not be empty or contain only NAs"
+                assert prd.size > 0, "Data array must not be empty or contain only NAs"
 
-                groups = [((None, targ), (None, prd))]  # wrap once with dummy valid_time
+                if self.plot_subtimesteps and str(self.sample) != "all_samples":
+                    ntimes_unique = len(np.unique(targ.valid_time))
+                    _logger.debug(
+                        f"Creating histograms for {ntimes_unique} valid times of variable {var}."
+                    )
 
-            for (valid_time, targ_t), (_, prd_t) in groups:
-                if valid_time is not None:
-                    _logger.debug(f"Plotting histogram for {var} at valid_time {valid_time}")
-                name = self.plot_histogram(targ_t, prd_t, hist_output_dir, var, tag=tag)
-                plot_names.append(name)
+                    groups = zip(
+                        targ.groupby("valid_time"), prd.groupby("valid_time"), strict=False
+                    )
+                else:
+                    _logger.debug(f"Plotting histogram for all valid times of {var}")
+
+                    groups = [((None, targ), (None, prd))]  # wrap once with dummy valid_time
+
+                for (valid_time, targ_t), (_, prd_t) in groups:
+                    if valid_time is not None:
+                        _logger.debug(f"Plotting histogram for {var} at valid_time {valid_time}")
+                    var_range = ranges.get(var, {}) if ranges else {}
+                    name = self.plot_histogram(
+                        targ_t,
+                        prd_t,
+                        hist_output_dir,
+                        var,
+                        tag=tag,
+                        region=region,
+                        xlim=(var_range.get("vmin"), var_range.get("vmax")),
+                    )
+                    plot_names.append(name)
 
         self.clean_data_selection()
 
@@ -272,6 +336,8 @@ class Plotter:
         hist_output_dir: Path,
         varname: str,
         tag: str = "",
+        region: str = "",
+        xlim: tuple | None = None,
     ) -> str:
         """
         Plot a histogram comparing target and prediction data for a specific variable.
@@ -294,47 +360,121 @@ class Plotter:
             Name of the saved plot file.
         """
 
-        # Get common bin edges
-        vals = np.concatenate([target_data, pred_data])
-        bins = np.histogram_bin_edges(vals, bins=50)
+        tar_vals = np.asarray(target_data).ravel()
+        prd_vals = np.asarray(pred_data).ravel()
 
-        # Plot histograms
-        plt.hist(target_data, bins=bins, alpha=0.7, label="Target")
-        plt.hist(pred_data, bins=bins, alpha=0.7, label="Prediction")
+        # Get common bin edges — use fixed xlim range if provided for consistency
+        xmin, xmax = xlim if xlim else (None, None)
+        # Fall back to data-derived bounds if either limit is missing
+        if xmin is None or xmax is None:
+            vals = np.concatenate([tar_vals, prd_vals])
+            if xmin is None:
+                xmin = float(np.nanmin(vals))
+            if xmax is None:
+                xmax = float(np.nanmax(vals))
+        # Add 5% margin on each side so tails are clearly visible
+        margin = (xmax - xmin) * 0.05
+        xmin -= margin
+        xmax += margin
+        bins = np.linspace(xmin, xmax, self.n_bins + 1)
 
-        # set labels and title
-        plt.xlabel(f"Variable: {varname}")
-        plt.ylabel("Frequency")
-        plt.title(
-            f"Histogram of Target and Prediction: {self.stream}, {varname} : "
-            f"fstep = {self.fstep:03}"
+        # Compute histograms
+        target_counts, _ = np.histogram(tar_vals, bins=bins)
+        pred_counts, _ = np.histogram(prd_vals, bins=bins)
+        bin_centers = (bins[:-1] + bins[1:]) / 2
+
+        color_tar = "black"
+        color_pred = "#00897B"  # teal / green-blue
+
+        # Create figure with two subplots: histogram + ratio
+        fig, (ax_hist, ax_ratio) = plt.subplots(
+            2,
+            1,
+            sharex=True,
+            figsize=self.fig_size or (8, 6),
+            gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
         )
-        plt.legend(frameon=False)
 
-        valid_time = (
-            target_data["valid_time"][0]
-            .values.astype("datetime64[m]")
-            .astype(datetime.datetime)
-            .strftime("%Y-%m-%dT%H%M")
+        # Upper panel: histogram curves
+        ax_hist.plot(
+            bin_centers, target_counts, alpha=0.7, label="Target", linewidth=1.5, color=color_tar
+        )
+        ax_hist.plot(
+            bin_centers, pred_counts, alpha=0.7, label="Prediction", linewidth=1.5, color=color_pred
+        )
+        ax_hist.set_ylabel("Frequency")
+        ax_hist.set_title(f"{self.stream}, {varname} : fstep = {self.fstep:03}")
+        ax_hist.legend(frameon=False)
+        if self.log_y:
+            ax_hist.set_yscale("log")
+        ax_hist.grid(True, linestyle="--", alpha=0.5)
+
+        # Lower panel: ratio (prediction / target)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(target_counts > 0, pred_counts / target_counts, np.nan)
+        ax_ratio.plot(bin_centers, ratio, linewidth=1.2, color=color_pred)
+        ax_ratio.axhline(1.0, linestyle="--", color="gray", linewidth=0.8)
+        ax_ratio.set_ylabel("Pred / Target")
+        ax_ratio.set_xlabel(f"Variable: {varname}")
+        ax_ratio.set_ylim(0, 2)
+        ax_ratio.grid(True, linestyle="--", alpha=0.5)
+
+        if self.log_x:
+            ax_hist.set_xscale("log")
+            ax_ratio.set_xscale("log")
+        ax_ratio.set_xlim(xmin, xmax)
+
+        t_s = DistStats.from_array(tar_vals)
+        p_s = DistStats.from_array(prd_vals)
+
+        # Wasserstein distance
+        w_dist = wd(tar_vals, prd_vals)
+
+        stat_text = (
+            f"Wasserstein distance: {w_dist:.4g}\n{t_s.summary('Target:')}\n{p_s.summary('Pred:')}"
         )
 
-        # TODO: make this nicer
+        fig.text(
+            0.5,
+            -0.02,
+            stat_text,
+            ha="center",
+            va="top",
+            fontsize=7,
+            family="monospace",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5),
+        )
+
+        # For "all_samples" (across-samples) histograms, omit the valid_time from the name
+        is_global = str(self.sample) == "all_samples"
+
+        if is_global:
+            valid_time = None
+        else:
+            valid_time = (
+                target_data["valid_time"][0]
+                .values.astype("datetime64[m]")
+                .astype(datetime.datetime)
+                .strftime("%Y-%m-%dT%H%M")
+            )
+
         parts = [
             "histogram",
-            self.run_id,
-            tag,
+            str(self.run_id),
+            str(tag) if tag else "",
             str(self.sample),
             valid_time,
-            self.stream,
+            str(self.stream),
+            region if region else "",
             varname,
-            str(self.fstep).zfill(3),
+            f"{self.fstep:03d}",
         ]
         name = "_".join(filter(None, parts))
 
         fname = hist_output_dir / f"{name}.{self.image_format}"
         _logger.debug(f"Saving histogram to {fname}")
-        plt.savefig(fname, bbox_inches="tight")
-        plt.close()
+        fig.savefig(fname, bbox_inches="tight")
+        plt.close(fig)
 
         return name
 
@@ -695,7 +835,7 @@ class Plotter:
         parts.append(varname)
 
         if self.fstep is not None:
-            parts.extend(["fstep", f"{self.fstep:03d}"])
+            parts.append(f"{self.fstep:03d}")
 
         return "_".join(filter(None, parts))
 
@@ -901,6 +1041,16 @@ class Plotter:
             Resolved directory path: ``<out_plot_basedir>/<stream>/maps/<tag>``.
         """
         return self.out_plot_basedir / self.stream / "maps" / tag
+
+    def get_hist_output_dir(self):
+        """Return the output directory path for histogram plots.
+
+        Returns
+        -------
+        Path
+            Resolved directory path: ``<out_plot_basedir>/<stream>/histograms``.
+        """
+        return self.out_plot_basedir / self.stream / "histograms"
 
     def get_map_title(self, var, valid_time, data):
         """Build the title string for a map plot.
