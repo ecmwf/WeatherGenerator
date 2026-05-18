@@ -14,7 +14,9 @@ from typing import override
 
 import numpy as np
 import zarr
+from numpy.typing import NDArray
 
+from weathergen.datasets.data_reader_alphaearth import DataReaderAlphaEarthGeoinfo
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     ReaderData,
@@ -75,15 +77,27 @@ class DataReaderObs(DataReaderBase):
 
         # determine idx for coords and geoinfos
         self.coords_idx = [self.colnames.index("lat"), self.colnames.index("lon")]
-        self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
-        self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
+        self.native_geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
+        native_geoinfo_channels = [self.colnames[i] for i in self.native_geoinfo_idx]
+        self.external_geoinfo_readers = self._init_external_geoinfo_readers(stream_info)
+        external_geoinfo_channels = [
+            channel
+            for reader in self.external_geoinfo_readers
+            for channel in reader.channel_names
+        ]
+        self.geoinfo_channels = native_geoinfo_channels + external_geoinfo_channels
+        self.geoinfo_idx = list(range(len(self.geoinfo_channels)))
 
         # load additional properties (mean, var)
         self._load_properties()
         self.mean = np.array(self.properties["means"])  # [data_idx]
         self.stdev = np.sqrt(np.array(self.properties["vars"]))  # [data_idx])
-        self.mean_geoinfo = np.array(self.properties["means"])[self.geoinfo_idx]
-        self.stdev_geoinfo = np.sqrt(np.array(self.properties["vars"])[self.geoinfo_idx])
+        native_mean_geoinfo = np.array(self.properties["means"])[self.native_geoinfo_idx]
+        native_stdev_geoinfo = np.sqrt(np.array(self.properties["vars"])[self.native_geoinfo_idx])
+        external_mean_geoinfo = [reader.mean for reader in self.external_geoinfo_readers]
+        external_stdev_geoinfo = [reader.stdev for reader in self.external_geoinfo_readers]
+        self.mean_geoinfo = np.concatenate([native_mean_geoinfo, *external_mean_geoinfo])
+        self.stdev_geoinfo = np.concatenate([native_stdev_geoinfo, *external_stdev_geoinfo])
 
         # Create index for samples
         self._setup_sample_index()
@@ -215,6 +229,40 @@ class DataReaderObs(DataReaderBase):
         self.properties["means"] = self.data.attrs["means"]
         self.properties["vars"] = self.data.attrs["vars"]
 
+    def _init_external_geoinfo_readers(
+        self, stream_info: dict
+    ) -> list[DataReaderAlphaEarthGeoinfo]:
+        readers = []
+        for geoinfo_source in stream_info.get("geoinfo_sources", []):
+            source_type = str(geoinfo_source.get("type", "")).lower()
+            if source_type != "alphaearth":
+                raise ValueError(
+                    "Unknown geoinfo source type "
+                    f"{source_type} for stream {stream_info.get('name', '<unknown>')}"
+                )
+
+            geoinfo_filename = Path(geoinfo_source["filename"])
+            if not geoinfo_filename.is_absolute():
+                geoinfo_filename = self.filename.parent / geoinfo_filename
+            readers.append(DataReaderAlphaEarthGeoinfo(geoinfo_filename, geoinfo_source))
+
+        return readers
+
+    def _append_external_geoinfos(
+        self,
+        geoinfos: NDArray,
+        coords: NDArray,
+        datetimes: NDArray,
+    ) -> NDArray:
+        if not self.external_geoinfo_readers:
+            return geoinfos
+
+        external_geoinfos = [
+            reader.get(coords.astype(np.float32, copy=False), datetimes)
+            for reader in self.external_geoinfo_readers
+        ]
+        return np.concatenate([geoinfos, *external_geoinfos], axis=1)
+
     @override
     def _get(self, idx: int, channels_idx: list[int]) -> ReaderData:
         """
@@ -242,8 +290,8 @@ class DataReaderObs(DataReaderBase):
 
         coords = self.data.oindex[start_row:end_row, self.coords_idx]
         geoinfos = (
-            self.data.oindex[start_row:end_row, self.geoinfo_idx]
-            if len(self.geoinfo_idx) > 0
+            self.data.oindex[start_row:end_row, self.native_geoinfo_idx]
+            if len(self.native_geoinfo_idx) > 0
             else np.zeros((coords.shape[0], 0), np.float32)
         )
 
@@ -256,12 +304,12 @@ class DataReaderObs(DataReaderBase):
         t_win = self.time_window_handler.window(idx)
         t_mask = np.logical_and(datetimes >= t_win.start, datetimes < t_win.end)
 
-        rdata = ReaderData(
-            coords=coords[t_mask],
-            geoinfos=geoinfos[t_mask],
-            data=data[t_mask],
-            datetimes=datetimes[t_mask],
-        )
+        coords = coords[t_mask]
+        geoinfos = self._append_external_geoinfos(geoinfos[t_mask], coords, datetimes[t_mask])
+        data = data[t_mask]
+        datetimes = datetimes[t_mask]
+
+        rdata = ReaderData(coords=coords, geoinfos=geoinfos, data=data, datetimes=datetimes)
 
         dtr = self.time_window_handler.window(idx)
         check_reader_data(rdata, dtr)
