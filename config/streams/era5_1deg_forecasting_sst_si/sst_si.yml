@@ -21,6 +21,7 @@ ERA5SST :
   token_size : 8
   tokenize_spacetime : True
   max_num_targets: 20000
+  frequency : 06:00:00
   embed : 
     net : transformer
     num_tokens : 1
