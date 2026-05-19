@@ -1,0 +1,16 @@
+model_path: "./models"
+
+training_config:
+  learning_rate_scheduling:
+    lr_max: 8.82e-05
+  losses:
+    student-teacher:
+      target_and_aux_calc:
+        EMATeacher:
+          ema_halflife_in_thousands: 843858
+
+wgtags:
+  exp: jepa_latent_forecast_sweep
+  parent_run: sxwo1umx
+  lr_max: "8.82e-05"
+  ema_halflife: "843858"

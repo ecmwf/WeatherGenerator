@@ -1,0 +1,217 @@
+#optional: if commented out all is taken care of by the default settings
+# NB. global options apply to all run_ids 
+#global_plotting_options:
+#  regions: ["europe", "global"]
+#  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+#  dpi_val : 300
+#  fps: 2
+#  ERA5:
+#    marker_size: 2
+#    scale_marker_size: 1
+#    marker: "o"
+#    # alpha: 0.5
+#    2t: 
+#      vmin: 250
+#      vmax: 300
+#    10u:
+#      vmin: -40
+#      vmax: 40
+
+evaluation:
+  metrics  : ["rmse", "froct", "acc"] # 
+  regions: ["global"]
+  summary_plots : true
+  ratio_plots : false
+  heat_maps : false
+  summary_dir: "./plots/"
+  plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: false
+  score_cards: false
+  bar_plots: false
+  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
+  # baseline: "ar40mckx"
+
+
+default_streams:
+  ERA5:
+    channels: ["2t",  "z_500", "q_850", "10u", "10v", "t_850", "u_850", "v_850"]
+    evaluation:
+      forecast_step: "1-20"
+      sample: "all"
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
+    plotting:
+      sample: [0]
+      forecast_step: "1-20" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
+      plot_maps: true
+      plot_bias: false
+      plot_target: false
+      plot_histograms: false
+      plot_animations: true
+      
+run_ids :
+  # p1ye2cou:
+  #   label: "longest trained ERA5 ft, after spike, lgsm07m3-stage1"
+  #   results_base_dir : "./results/p1ye2cou/"
+  #   #NEW: if "streams" is not specified, the default streams are used     
+  # b95ypng6:
+  #   label: "best trained ERA5 ft, after spike, lbgl68d5-stage2"
+  #   results_base_dir : "./results/b95ypng6/"
+    #NEW: if "streams" is not specified, the default streams are used
+  # tyou4bef:
+  #   label: "2nd best trained ERA5 ft, after spike, lxtgxy03-stage2 (no layernorm)"
+  #   results_base_dir : "./results/tyou4bef/"
+  # dvguij1d:
+  #   label: "2nd best trained ERA5 ft, before spike, l5mdil6s-stage2, (no layernorm)"
+  #   results_base_dir : "./results/dvguij1d/"
+  # # bwvue78q:
+  # #   label: "best LeJEPA ERA5 ft, kkmsh8wa-stage2, (no layernorm)"
+  # #   results_base_dir : "./results/bwvue78q/"
+  # tf8juxqi:
+  #   label: "best second sweep, layernorm mq04z6g2-stage2, (with layernorm)"
+  #   results_base_dir : "./results/tf8juxqi/"
+  
+  # t63v0aq8:
+  #   label: "96 epochs, JEPA, val spikes, nbx7sema-stage2 (with layernorm)"
+  #   results_base_dir : "./results/t63v0aq8/"
+
+  # v56un0lr:
+  #   label: "96 epochs, JEPA, fixed spikes, nbx7stv2-stage2 (with layernorm)"
+  #   results_base_dir : "./results/v56un0lr/"
+
+  # es9m8k23:
+  #   label: "96 epochs, JEPA, fixed spikes, nbx7stv2-stage2-stage1 (with layernorm)"
+  #   results_base_dir : "./results/es9m8k23/"
+
+  # h0sxivbz:
+  #   label: "96 epochs, JEPA, fixed spikes, nbx7stv2-stage2-stage1 (with layernorm), first step"
+  #   results_base_dir : "./results/h0sxivbz/"
+
+
+  # ld3whu2b:
+  #   label: "96 epochs, JEPA, fixed spikes, nbx7stv2-stage2 (with layernorm), correct offset, no noise"
+  #   results_base_dir : "./results/ld3whu2b/"
+
+  # xxp06csg:
+  #   label: "160 epochs, JEPA, only 25 epochs era5 no cooldown, fixed spikes, correct offset, with noise"
+  #   results_base_dir : "./results/xxp06csg/"
+
+  # enbmwze6:
+  #   label: "temporal jepa, 160 epochs, too few epochs era5 + no cooldown, fixed spikes, correct offset, with noise"
+  #   results_base_dir : "./results/enbmwze6/"
+
+
+
+  # tq60natw:
+  #   label: "256 fcst model, atmosfs1, rollout finetuned, correct 2023 eval"
+  #   type: "json"
+  #   results_base_dir : "./results/tq60natw/"
+
+  # ydapu89v:
+  #   label: "space jepa with noise"
+  #   results_base_dir : "./results/ydapu89v/"
+
+  # xhan89f7:
+  #   label: "temporal jepa, 160 epochs, 32 epochs era5 + cooldown, with noise" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/xhan89f7/"
+
+  # nopxvnsq: 
+  #   label: "temporal jepa, 160 epochs, 15 epochs era5 (wrong LR?), fixed spikes, correct offset, no noise"
+  #   results_base_dir : "./results/nopxvnsq/"
+
+  # nqja0krp:
+  #   label: "temporal jepa, 160 epochs, 35 epochs no cooldown, fixed spikes, correct offset, no noise" 
+  #   results_base_dir : "./results/nqja0krp/"
+
+  # ggfie0lw:
+    # label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, no noise" # fixed spikes, correct offset,
+    # results_base_dir : "./results/ggfie0lw/"
+
+  # lsp9v75t:
+  #   label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, no noise, 32 samples" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/lsp9v75t/"
+
+  # h09ytv1b:
+  #   label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, 20 epochs 9 step ft + no cooldown + no frozen ERA5, no noise" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/h09ytv1b/"
+
+  # howlrvzj:
+  #   label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, 20 epochs 9 step ft + no cooldown + no frozen ERA5, no noise, 32 samples" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/howlrvzj/"
+
+  # l83ht0og:
+  #   label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, 32 epochs 9 step ft + cooldown + no frozen ERA5, no noise, 32 samples" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/l83ht0og/"
+
+  # uzbo49n5:
+  #   label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, 32 epochs 9 step ft + cooldown + frozen decoder, no noise, 16 samples" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/uzbo49n5/"
+
+  # tbo340gx:
+  #   label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, 32 epochs 9 step ft + cooldown + frozen decoder, no noise, 32 samples" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/tbo340gx/"
+
+  # zvq3g7ha:
+  #   label: "MTM model, forecast finetuned" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/zvq3g7ha/"
+
+  # yor3tc62:
+  #   label: "MTM model, forecast finetuned" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/yor3tc62/"
+
+  # tbo340gx:
+  #   label: "JEPA model 160 epochs, forecast finetuned" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/tbo340gx/"
+
+  # h8rlvo4e:
+  #   label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, 32 epochs 9 step ft + cooldown + frozen decoder, with noise, 16 samples" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/h8rlvo4e/"
+
+  # fselo9ki:
+  #   label: "temporal jepa, 160 epochs, 36 epochs era5 + cooldown, 32 epochs 9 step ft + cooldown + frozen decoder, with noise, 32 samples" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/fselo9ki/"
+
+  # d0a8zqdy:
+  #   label: "better spatial jepa masking" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/d0a8zqdy/"
+
+  # fr9xyt50:
+  #   label: "space jepa no noise"
+  #   results_base_dir : "./results/fr9xyt50/"
+
+  # tq60natw:
+  #   label: "256 fcst model, atmosfs1, rollout finetuned, correct 2023 eval"
+  #   type: "json"
+  #   results_base_dir : "./results/tq60natw/"
+
+  # btw38cd9:
+  #   label: "JEPA + phys model 32 epochs, forecast finetuned" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/btw38cd9/"
+
+  e2bt8q13:
+    label: "JEPA + phys model 32 epochs, forecast finetuned, 1 ens" # fixed spikes, correct offset,
+    results_base_dir : "./results/e2bt8q13/"
+
+  # gactwjez:
+  #   label: "JEPA baseline model 32 epochs, forecast finetuned" # fixed spikes, correct offset,
+  #   results_base_dir : "./results/gactwjez/"
+
+  # tq60natw:
+  #   label: "forecast model"
+  #   type: "json"
+  #   results_base_dir : "./results/tq60natw/"
+  
+  # xoutbsx7:
+  #   label: "256 fcst model, atmosfs1, 3 step trained, incorrect 2022 eval"
+  #   type: "json"
+  #   results_base_dir : "./results/xoutbsx7/"
+
+  # aev90iny:
+  #   label: "256 fcst model, atmosfs1, rollout finetuned, incorrect 2022 eval"
+  #   type: "json"
+  #   results_base_dir : "./results/aev90iny/"
+
+

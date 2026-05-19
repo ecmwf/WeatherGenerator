@@ -1,0 +1,21 @@
+model_path: "./models"
+
+training_config:
+  learning_rate_scheduling:
+    lr_max: 8.67e-05
+  losses:
+    physical:
+      loss_fcts:
+        kernel_crps:
+          weight: 0.146
+    student-teacher:
+      target_and_aux_calc:
+        EMATeacher:
+          ema_halflife_in_thousands: 808536
+
+wgtags:
+  exp: jepa_latent_forecast_sweep
+  parent_run: qboc553l
+  lr_max: "8.67e-05"
+  ema_halflife: "808536"
+  kernel_crps_weight: "0.146"

@@ -1,0 +1,191 @@
+# Robust ERA5 MSE finetuning overlay for CRPS-decoder pretraining checkpoints.
+#
+# Important: when `train_continue` loads a checkpoint config, OmegaConf merges nested
+# dictionaries and does not delete keys that are omitted here. Therefore, a parent
+# config with `training_config.losses.physical.loss_fcts.kernel_crps` will keep that
+# key unless the entire inherited `physical` loss term is disabled. This overlay
+# disables the inherited `physical` term and adds a fresh `physical_mse` term.
+
+fe_num_blocks: 16
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+fe_layer_norm_after_blocks: [7]
+fe_impute_latent_noise_std: 0.0
+forecast_att_dense_rate: 1.0
+
+healpix_level: 5
+
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: False
+ddp_find_unused_parameters: False
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
+
+latent_noise_kl_weight: 0.0
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True
+
+freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
+norm_type: "LayerNorm"
+zarr_store: "zip"
+
+# This stream has ERA5 pred_head.ens_size = 1.
+streams_directory: "./config/streams/era5_1deg/"
+streams: ???
+
+general:
+  istep: 0
+  rank: ???
+  world_size: ???
+  multiprocessing_method: "fork"
+  desc: ""
+  run_id: ???
+  run_history: ???
+
+train_logging:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
+  log_grad_norms: False
+
+data_loading:
+  num_workers: 12
+  rng_seed: ???
+  repeat_data_in_mini_epoch: False
+  memory_pinning: True
+
+training_config:
+  training_mode: ["masking"]
+
+  context_loss:
+    enabled: false
+  deep_ssl:
+    enabled: false
+
+  num_mini_epochs: 32
+  samples_per_mini_epoch: 4096
+  shuffle: True
+
+  start_date: 1979-01-01T00:00
+  end_date: 2022-12-31T00:00
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
+  teacher_time_offset: 0
+  physical_target_time_offset: 0
+
+  learning_rate_scheduling:
+    lr_start: 1e-6
+    lr_max: 5e-5
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 512
+    num_steps_cooldown: 512
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw:
+      beta1: 0.975
+      beta2: 0.9875
+      eps: 2e-08
+
+  losses:
+    # Disable inherited loss entries from the CRPS parent checkpoint.
+    physical:
+      enabled: False
+      type: Disabled
+    student-teacher:
+      enabled: False
+      type: Disabled
+
+    # Fresh deterministic single-member MSE finetuning loss.
+    physical_mse:
+      type: LossPhysical
+      target_and_aux_calc: Physical
+      loss_fcts:
+        mse:
+          target_source_correspondence: {0: {0: "independent"}}
+
+  model_input:
+    input_physical:
+      enabled: False
+    input_jepa:
+      enabled: False
+    forecasting:
+      masking_strategy: "forecast"
+
+  target_input:
+    target_physical:
+      enabled: False
+    target_jepa:
+      enabled: False
+
+  forecast:
+    time_step: 06:00:00
+    num_steps: 3
+    offset: 1
+    policy: "fixed"
+
+validation_config:
+  samples_per_mini_epoch: 256
+  shuffle: False
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+
+  validate_with_ema:
+    enabled: False
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 1e-3
+
+  output:
+    num_samples: 0
+    normalized_samples: False
+    streams: null
+
+  validate_before_training: False
+
+  losses:
+    physical:
+      enabled: False
+      type: Disabled
+    student-teacher:
+      enabled: False
+      type: Disabled
+    physical_mse:
+      type: LossPhysical
+      target_and_aux_calc: Physical
+      loss_fcts:
+        mse:
+          weight: 1.0
+          target_source_correspondence: {0: {0: "independent"}}
+
+  model_input:
+    input_physical:
+      enabled: False
+    input_jepa:
+      enabled: False
+
+  target_input:
+    target_physical:
+      enabled: False
+    target_jepa:
+      enabled: False
+
+wgtags:
+  org: null
+  issue: null
+  exp: null
+  grid: null

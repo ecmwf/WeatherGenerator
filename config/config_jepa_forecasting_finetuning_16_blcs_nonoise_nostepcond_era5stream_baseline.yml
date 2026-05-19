@@ -13,10 +13,11 @@ fe_num_blocks: 16
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [7] adds a LayerNorm after the eighth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
+# with_step_conditioning: True # False
 
 healpix_level: 5
 
@@ -68,7 +69,7 @@ general:
 
   desc: ""
   run_id: ???
-  run_history: []
+  run_history: ???
 
 # logging frequency in the training loop (in number of batches)
 train_logging:
@@ -124,9 +125,9 @@ training_config:
   learning_rate_scheduling :
     lr_start: 1e-6
     lr_max: 5e-5
-    lr_final_decay: 2e-6
+    lr_final_decay: 1e-6
     lr_final: 0.0
-    num_steps_warmup: 256
+    num_steps_warmup: 512
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
@@ -139,7 +140,7 @@ training_config:
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.98125
+      beta1 : 0.975
       beta2 : 0.9875
       eps : 2e-08
 
@@ -151,10 +152,6 @@ training_config:
     "physical": {
         type: LossPhysical,
         loss_fcts: {
-          "kernel_crps": {
-            weight: 0.0,
-            target_source_correspondence: { 0 : { 0 : "independent" } },
-          },
           "mse": {
             target_source_correspondence: { 0 : { 0 : "independent" } },
           },
@@ -162,10 +159,11 @@ training_config:
         },
     }
   
+  # N.B. I changed these to run the baseline, and the streams dir
   model_input: {
-    "input_physical" : {
-      enabled: False,
-      },
+    # "input_physical" : {
+    #   enabled: False,
+    #   },
     "input_jepa" : {
       enabled: False,
       },
@@ -176,9 +174,9 @@ training_config:
     }
 
   target_input: {
-    "target_physical" : {
-      enabled: False,
-      },
+    # "target_physical" : {
+    #   enabled: False,
+    #   },
     "target_jepa" : {
       enabled: False,
       },
@@ -202,7 +200,7 @@ validation_config:
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
-    enabled : True
+    enabled : False
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 

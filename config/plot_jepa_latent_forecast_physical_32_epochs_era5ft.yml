@@ -1,0 +1,105 @@
+# qav8wdia,qav8wdia-stage1,   xrv85uo2,   xrv85uo2-stage1,  9.70e-05,524278,0.446
+# q1fbtaib,q1fbtaib-stage1,   et963mwv,   et963mwv-stage1,  8.21e-05,536206,0.029
+# q97777zf,q97777zf-stage1,   w96j83lw,   w96j83lw-stage1,  8.77e-05,982823,0.503
+# q6ls4vx7,q6ls4vx7-stage1,   a3c4at0x,   a3c4at0x-stage1,  9.80e-05,992473,0.257
+# qdqzwd1u,qdqzwd1u-stage1,   tqpbr3z7,   tqpbr3z7-stage1,  8.18e-05,884048,0.421
+# q4y0hx1m,q4y0hx1m-stage1,   yofkp54z,   yofkp54z-stage1,  1.14e-04,399457,0.023
+# qv40is0r,qv40is0r-stage1,   o3e6rczw,   o3e6rczw-stage1,  1.11e-04,629534,0.887
+# qboc553l,qboc553l-stage1,   cfnm8t9d,   cfnm8t9d-stage1,  8.67e-05,808536,0.146
+# q51jdypj,q51jdypj-stage1,   eltqxe3y,   eltqxe3y-stage1,  1.17e-04,401123,0.574
+# qwjmzgdx,qwjmzgdx-stage1,   xghp2x7r,   xghp2x7r-stage1,  1.18e-04,397593,0.206
+# q51jdypj,q51jdypj-stage1,   knp5qsc7,   knp5qsc7-stage1,  1.17e-04,401123,0.574
+# qwjmzgdx,qwjmzgdx-stage1,   o3xoacbi,   o3xoacbi-stage1,  1.18e-04,397593,0.206
+# qoca1swi,qoca1swi-stage1,   r3koftpj,   r3koftpj-stage1,  1.09e-04,662476,0.686
+# qoca1swi,qoca1swi-stage1,   ydgjct3l,   ydgjct3l-stage1,  1.09e-04,662476,0.686
+# q6xp5xzt,q6xp5xzt-stage1,   wum91g67,   wum91g67-stage1,  1.34e-04,117150,0.573
+
+# Plot config for JEPA pretraining runs (auto-generated)
+train:
+  plot:    
+    # op8wojf6-stage2:
+    #   slurm_id: 0
+    #   description: "lr, ema: 1.46e-04,812034"
+    # op8wojf6-stage2-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema: 1.46e-04,812034, continued"
+
+    # ae0ajskg-stage1:
+    #   slurm_id: 0
+    #   description: "32 epochs JEPA pt"
+    # kgy8jkse-stage1:
+    #   slurm_id: 0
+    #   description: "96 epochs JEPA pt"
+
+    # xrv85uo2-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema, phys weight: 1.46e-04,524278,0.446"
+    # et963mwv-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema, phys weight: 8.21e-05,536206,0.029"
+    # w96j83lw-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema, phys weight: 8.77e-05,982823,0.503"
+    # a3c4at0x-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema, phys weight: 9.80e-05,992473,0.257"
+    # yofkp54z-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema, phys weight: 1.14e-04,399457,0.023"
+    # knp5qsc7-stage1:
+    #   slurm_id: 0
+    #   description: "lr, ema, phys weight: 1.17e-04,401123,0.574"
+    
+    # best phys decoder runs:
+    o3xoacbi-stage1:
+      slurm_id: 0
+      description: "JEPA + crps phys decoder, lr, ema, phys weight: 1.18e-04,397593,0.206"
+    wum91g67-stage1:
+      slurm_id: 0
+      description: "JEPA + crps phys decoder, lr, ema, phys weight: 1.34e-04,117150,0.573"
+
+    qwjmftm3-stage1:
+      slurm_id: 0
+      description: "correct JEPA + crps phys decoder, lr, ema, phys weight: 1.18e-04,397593,0.206"
+    
+
+    hty306dg-stage1:
+      slurm_id: 0
+      description: "baseline JEPA, lr, ema: 1.49e-04,708620"
+
+    # c2ge65bp-stage1:
+    #   slurm_id: 0
+    #   description: "baseline, lr, ema: 1.46e-04,812034 ?"
+    s0uvhkol-stage1:
+      slurm_id: 0
+      description: "baseline JEPA, lr, ema: 1.32e-04,744946"
+    # zsh0jx47-stage1:
+    #   slurm_id: 0
+    #   description: "baseline, lr, ema: 1.46e-04,812034 ?"
+    # bwvhq1z7-stage1:
+    #   slurm_id: 0
+    #   description: "baseline, lr, ema: 1.46e-04,812034 ?"
+    # hgrc4oz9-stage1:
+    #   slurm_id: 0
+    #   description: "baseline, lr, ema: 1.46e-04,812034 ?"
+    # d0qoryw8-stage1:
+    #   slurm_id: 0
+    #   description: "baseline, lr, ema: 1.46e-04,812034 ?"
+    # ip7uftke:
+    #   slurm_id: 0
+    #   description: "baseline, lr, ema: 1.46e-04,812034 ?"
+
+    # op8wojf6-stage2:
+    #   slurm_id: 0
+    #   description: "160 epochs pure JEPA, current best"
+
+    # j1bjlaur-stage1:
+    #   slurm_id: 0      
+    #   description: "160 epochs pure JEPA, lr, ema: 1.12e-04,928170, current best"
+
+    # j1bjlaur-stage1-cooldown1ep2:
+    #   slurm_id: 0      
+    #   description: "160 epochs pure JEPA, lr, ema: 1.12e-04,928170, current best"
+    
+    
+    
