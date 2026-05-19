@@ -6,7 +6,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
+import logging
 import math
 
 import numpy as np
@@ -28,8 +28,15 @@ from weathergen.model.engines import (
 
 # from weathergen.model.model import ModelParams
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
-from weathergen.model.positional_encoding import positional_encoding_harmonic
+from weathergen.model.positional_encoding import (
+    build_spherical_rope_coeff_tensors,
+    get_rope_mode,
+    get_rope_spherical_band,
+    positional_encoding_harmonic,
+)
 from weathergen.utils.utils import get_dtype
+
+logger = logging.getLogger(__name__)
 
 
 class EncoderModule(torch.nn.Module):
@@ -72,8 +79,8 @@ class EncoderModule(torch.nn.Module):
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         # RoPE coordinates
-        self.rope_2D = cf.get("rope_2D", False)
-        if self.rope_2D:
+        self.rope_mode = get_rope_mode(cf, logger)
+        if self.rope_mode != "none":
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
             total_tokens = (
                 self.num_healpix_cells + self.num_extra_tokens
@@ -95,9 +102,31 @@ class EncoderModule(torch.nn.Module):
                     dtype=self.dtype,
                 ),
             )
+            if self.rope_mode == "spherical":
+                rope_spherical_band = get_rope_spherical_band(cf)
+                num_modes = 2 * int(rope_spherical_band) + 1
+                self.register_buffer(
+                    "rope_spherical_coeffs",
+                    torch.zeros(1, total_tokens, num_modes, 2, dtype=self.dtype),
+                )
+                self.register_buffer(
+                    "rope_spherical_cell_coeffs",
+                    torch.zeros(self.num_healpix_cells, num_modes, 2, dtype=self.dtype),
+                )
+                self.register_buffer(
+                    "rope_spherical_extra_coeffs",
+                    torch.zeros(self.num_extra_tokens, num_modes, 2, dtype=self.dtype),
+                )
+            else:
+                self.rope_spherical_coeffs = None
+                self.rope_spherical_cell_coeffs = None
+                self.rope_spherical_extra_coeffs = None
         else:
             self.rope_coords = None
             self.rope_cell_coords = None
+            self.rope_spherical_coeffs = None
+            self.rope_spherical_cell_coeffs = None
+            self.rope_spherical_extra_coeffs = None
 
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
@@ -203,16 +232,45 @@ class EncoderModule(torch.nn.Module):
 
         dim_embed = cf.ae_global_dim_embed
 
-        if self.rope_2D:
+        if self.rope_mode != "none":
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
             coords_flat = coords.flatten(0, 1).unsqueeze(0)
-            num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
-            offset = num_extra_tokens * cf.ae_local_num_queries
+            offset = self.num_extra_tokens * cf.ae_local_num_queries
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
+
+            if self.rope_mode == "spherical":
+                band = int(get_rope_spherical_band(cf))
+                (
+                    (cell_real, cell_imag),
+                    (extra_real, extra_imag),
+                    (packed_extra_real, packed_extra_imag),
+                    (packed_real, packed_imag),
+                ) = build_spherical_rope_coeff_tensors(
+                    nside=2**self.healpix_level,
+                    band=band,
+                    num_local_queries=cf.ae_local_num_queries,
+                    num_extra_tokens=self.num_extra_tokens,
+                    device=self.rope_spherical_coeffs.device,
+                    dtype=self.rope_spherical_coeffs.dtype,
+                )
+                self.rope_spherical_cell_coeffs.data[..., 0].copy_(cell_real)
+                self.rope_spherical_cell_coeffs.data[..., 1].copy_(cell_imag)
+                self.rope_spherical_extra_coeffs.data[..., 0].copy_(extra_real)
+                self.rope_spherical_extra_coeffs.data[..., 1].copy_(extra_imag)
+
+                self.rope_spherical_coeffs.data.fill_(0.0)
+                self.rope_spherical_coeffs.data[:, :offset, :, 0].copy_(packed_extra_real)
+                self.rope_spherical_coeffs.data[:, :offset, :, 1].copy_(packed_extra_imag)
+                self.rope_spherical_coeffs.data[
+                    :, offset : offset + packed_real.shape[1], :, 0
+                ].copy_(packed_real)
+                self.rope_spherical_coeffs.data[
+                    :, offset : offset + packed_imag.shape[1], :, 1
+                ].copy_(packed_imag)
 
         self.pe_global.data.fill_(0.0)
         xs = 2.0 * np.pi * torch.arange(0, dim_embed, 2, device=self.pe_global.device) / dim_embed
@@ -256,7 +314,11 @@ class EncoderModule(torch.nn.Module):
         tokens_global = checkpoint(
             self.ae_global_engine,
             tokens_global,
-            coords=self.rope_coords,
+            coords=(
+                self.rope_spherical_coeffs.unbind(dim=-1)
+                if self.rope_spherical_coeffs is not None
+                else self.self.rope_coords
+            ),
             use_reentrant=False,
         )
 
@@ -344,6 +406,8 @@ class EncoderModule(torch.nn.Module):
         tokens_global_register_class,
         tokens_lens,
         rope_cell_coords=None,
+        rope_cell_coeffs=None,
+        rope_extra_coeffs=None,
     ):
         """
         Aggregation engine on the global latents of unmasked cells
@@ -374,8 +438,19 @@ class EncoderModule(torch.nn.Module):
         )
 
         # Build packed coords matching the interleaved token order
-        if rope_cell_coords is not None:
-            num_extra = self.num_class_tokens + self.num_register_tokens
+        num_extra = self.num_class_tokens + self.num_register_tokens
+        if rope_cell_coeffs is not None:
+            extra_real, extra_imag = rope_extra_coeffs.unbind(dim=-1)
+            cell_real, cell_imag = rope_cell_coeffs.unbind(dim=-1)
+            packed_real = []
+            packed_imag = []
+            for mask_b in cell_mask.flatten(0, 1):
+                packed_real.append(extra_real)
+                packed_imag.append(extra_imag)
+                packed_real.append(cell_real[mask_b])
+                packed_imag.append(cell_imag[mask_b])
+            packed_coords = (torch.cat(packed_real, dim=0), torch.cat(packed_imag, dim=0))
+        elif rope_cell_coords is not None:
             zero_coords = torch.zeros(
                 num_extra, 2, device=rope_cell_coords.device, dtype=rope_cell_coords.dtype
             )
@@ -437,6 +512,8 @@ class EncoderModule(torch.nn.Module):
             tokens_global_register_class,
             batch.tokens_lens,
             rope_cell_coords=self.rope_cell_coords,
+            rope_cell_coeffs=self.rope_spherical_cells_coeffs,
+            rope_extra_coeffs=self.rope_spherical_extra_coeffs,
         )
 
         # final processing
