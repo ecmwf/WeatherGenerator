@@ -161,10 +161,15 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
-        else:
-            c = None
-
-        y = tokens
+            y = meta_info["ERA5"].params.get("diffusion_target_tokens")
+        elif self.cf.fe_diffusion_model_conditioning in ["forecast"]:
+            # In diffusion_forecast mode, meta_info carries X_{t+1} tokens written by
+            # DiffusionLatentTargetEncoder.pre_compute(). Noise X_{t+1} as the target and
+            # use X_t (the incoming rollout state) as the conditioning signal c.
+            # Falls back to denoising-autoencoder behaviour when no target is cached
+            # (e.g. validation or unconditional pre-training).
+            y = meta_info["ERA5"].params.get("diffusion_target_tokens")
+            c = tokens          # X_t as conditioning
 
         if self.training:
             eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
@@ -208,8 +213,11 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
 
+        # c (X_t conditioning) is not yet wired into the network blocks — ada_ln_aux
+        # is unsupported in fe_diffusion_model mode. c is passed through Preconditioner
+        # and available for future architectural integration (e.g. concat or cross-attn).
         return c_skip * x + c_out * self.net(
-            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=c
+            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=None
         )  # Eq. (7) in EDM paper
 
     def inference_forward(

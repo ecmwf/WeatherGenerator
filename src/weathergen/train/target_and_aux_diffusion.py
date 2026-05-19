@@ -21,6 +21,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
 
         self.is_model_sharded = is_model_sharded
         self._fixed_noise_level: float | None = None
+        self._pending_tokens: torch.Tensor | None = None
         # Build a name → param map once
         self.src_params = dict(self.encoder.named_parameters())
 
@@ -47,6 +48,23 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         if self.is_model_sharded:
             self.encoder.reshard()
 
+    def pre_compute(self, istep, source_batch, target_batch, model_params, model, **kwargs) -> None:
+        """
+        Encode the target batch (whose source_tokens_cells holds X_{t+1} in
+        diffusion_forecast mode) before model.forward() so that training_forward
+        can noise X_{t+1} and condition on X_t.
+
+        Stores encoded tokens in:
+          - self._pending_tokens   → reused by compute() to skip a second encoder pass
+          - source_batch.samples[0].meta_info["ERA5"].params["diffusion_target_tokens"]
+            → flows to DiffusionForecastEngine.training_forward via model.forward's meta_info
+        """
+        with torch.no_grad():
+            self.encoder.encoder.eval()
+            tokens, _ = self.encoder.encoder(model_params=model_params, batch=target_batch)
+        self._pending_tokens = tokens
+        source_batch.samples[0].meta_info["ERA5"].params["diffusion_target_tokens"] = tokens
+
     def compute(
         self,
         istep: int,
@@ -66,11 +84,15 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         else:
             noise_level_rn = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0
 
-        # TODO: check if there are scenarios where the encoder needs to be set to eval
-        with torch.no_grad():
-            self.encoder.encoder.eval()  # NOTE: might be redundant
-            tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
-        # NOTE: must not set to train afterwards unless it was already in train
+        # Reuse tokens from pre_compute when available (avoids a second encoder pass).
+        # Falls back to encoding the batch directly (e.g. during validation).
+        if self._pending_tokens is not None:
+            tokens = self._pending_tokens
+            self._pending_tokens = None
+        else:
+            with torch.no_grad():
+                self.encoder.encoder.eval()  # NOTE: might be redundant
+                tokens, _ = self.encoder.encoder(model_params=model_params, batch=batch)
 
         output_idxs = batch.get_output_idxs()
         assert len(output_idxs) > 0

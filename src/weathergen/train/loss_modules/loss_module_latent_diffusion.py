@@ -94,8 +94,8 @@ class LossLatentDiffusion(LossModuleBase):
             for _, _, loss_fct_name in self.loss_fcts
         }
 
-        pred_tokens_all = [pl["latent_state"].z_pre_norm for pl in preds.latent if pl]
-        target_tokens_all = [latent["diffusion_latent"] for latent in targets.latent if latent]
+        pred_tokens_all = [pl["latent_state"].z_pre_norm for pl in preds.latent if pl.get("latent_state") is not None]
+        target_tokens_all = [latent["diffusion_latent"] for latent in targets.latent if latent.get("diffusion_latent") is not None]
 
         eta = torch.tensor(
             [targets.aux_outputs["noise_level_rn"]], device=self.device, dtype=torch.float32

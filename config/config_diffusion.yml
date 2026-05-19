@@ -182,7 +182,7 @@ data_loading :
 training_config:
   
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["masking","student_teacher"] # ["student_teacher", "physical_loss"]  
+  training_mode: ["masking","diffusion_forecast"]
 
   num_mini_epochs: 128
   samples_per_mini_epoch: 4096
@@ -280,7 +280,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config
