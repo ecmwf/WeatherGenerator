@@ -245,7 +245,7 @@ training_config:
   forecast :
       time_step: 06:00:00
       num_steps: 1
-      offset: 0
+      offset: 1
       policy: "fixed"
 
 
