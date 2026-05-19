@@ -597,12 +597,12 @@ def plot_loss_per_run(
             data_cols = []
             for col in run_data_mode.columns:
                 col_split = col.split(".")
-                if len(col_split) < 4:
-                    continue
-                if col_split[2].lower() == err.lower() and col_split[3] in channels:
+                if (
+                    len(col_split) >= 4
+                    and col_split[2].lower() == err.lower()
+                    and col_split[3] in channels
+                ):
                     data_cols += [col]
-
-            data_cols = list(data_cols)
 
             for _, col in enumerate(data_cols):
                 for j, stream_name in enumerate(stream_names):
