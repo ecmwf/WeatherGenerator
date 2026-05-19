@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 
 from weathergen.common import config
 from weathergen.common.config import Config, merge_configs
+from weathergen.datasets.batch import Sample, SampleMetaData
 
 # Run stages
 Stage = Literal["train", "val", "test"]
@@ -127,12 +128,100 @@ def unflatten_dict(d, separator="."):
     return unflattened
 
 
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _merge_relationship(relationships):
+    relationships = [relationship for relationship in relationships if relationship is not None]
+    if not relationships:
+        return None
+    if all(relationship == "identity" for relationship in relationships):
+        return "identity"
+    return next(relationship for relationship in relationships if relationship != "identity")
+
+
+def _get_populated_source_mask(sample: Sample, stream_name: str, reference_mask: torch.Tensor):
+    stream_data = sample.streams_data.get(stream_name)
+    if stream_data is None:
+        return None
+
+    populated_mask = None
+    for source_tokens_lens in stream_data.source_tokens_lens:
+        if source_tokens_lens is None or len(source_tokens_lens) == 0:
+            continue
+        source_tokens_lens = source_tokens_lens.to(reference_mask.device)
+        step_populated_mask = source_tokens_lens > 0
+        populated_mask = (
+            step_populated_mask
+            if populated_mask is None
+            else torch.logical_or(populated_mask, step_populated_mask)
+        )
+
+    return populated_mask
+
+
+def merge_sample_metadata(sample: Sample) -> SampleMetaData:
+    metadata_items = [
+        (stream_name, metadata)
+        for stream_name, metadata in sample.meta_info.items()
+        if isinstance(metadata, SampleMetaData)
+    ]
+    assert metadata_items, "sample contains no metadata"
+
+    merged_metadata = copy.deepcopy(metadata_items[0][1])
+    merged_masks = []
+    losses = []
+    correspondences = []
+    relationships = []
+
+    for stream_name, metadata in metadata_items:
+        global_params = metadata.global_params or {}
+        for loss_name in _as_list(global_params.get("loss")):
+            if loss_name not in losses:
+                losses.append(loss_name)
+        for correspondence in _as_list(global_params.get("correspondence")):
+            if correspondence not in correspondences:
+                correspondences.append(correspondence)
+        relationships.append(global_params.get("relationship"))
+
+        if metadata.mask is None:
+            continue
+        stream_mask = metadata.mask.clone()
+        populated_mask = _get_populated_source_mask(sample, stream_name, stream_mask)
+        if populated_mask is not None:
+            assert populated_mask.shape == stream_mask.shape, (
+                "source token population mask shape must match metadata mask shape"
+            )
+            stream_mask = torch.logical_and(stream_mask, populated_mask)
+        merged_masks.append(stream_mask)
+
+    if merged_masks:
+        merged_metadata.mask = torch.stack(merged_masks, dim=0).any(dim=0)
+    else:
+        merged_metadata.mask = None
+
+    merged_global_params = copy.deepcopy(merged_metadata.global_params or {})
+    if losses:
+        merged_global_params["loss"] = losses
+    if correspondences:
+        merged_global_params["correspondence"] = correspondences
+    merged_global_params["relationship"] = _merge_relationship(relationships)
+    merged_metadata.global_params = merged_global_params
+
+    return merged_metadata
+
+
 def extract_batch_metadata(batch):
     return (
         batch.source2target_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.source_samples.get_samples()],
+        [merge_sample_metadata(sample) for sample in batch.source_samples.get_samples()],
         batch.target2source_matching_idxs,
-        [list(sample.meta_info.values())[0] for sample in batch.target_samples.get_samples()],
+        [merge_sample_metadata(sample) for sample in batch.target_samples.get_samples()],
     )
 
 

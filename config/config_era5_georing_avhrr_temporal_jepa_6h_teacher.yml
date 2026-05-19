@@ -1,0 +1,11 @@
+# Overlay for config_era5_georing_avhrr_temporal_jepa.yml.
+# Keeps the 1h sliding sample grid but shifts the teacher by six samples, i.e. +6h.
+
+general:
+  desc: "temporal_jepa_era5_georing_avhrr_6h_teacher"
+
+training_config:
+  teacher_time_offset: 6
+
+wgtags:
+  teacher_offset: 6h

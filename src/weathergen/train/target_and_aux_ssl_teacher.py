@@ -27,6 +27,7 @@ from weathergen.train.teacher_utils import (
     load_encoder_from_checkpoint,
     prepare_encoder_teacher,
 )
+from weathergen.train.utils import merge_sample_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class EncoderTeacher(TargetAndAuxModuleBase):
                         ]
 
             # collect target meta-information for selected samples
-            aux_outputs = [list(sample.meta_info.values())[0] for sample in batch.get_samples()]
+            aux_outputs = [merge_sample_metadata(sample) for sample in batch.get_samples()]
 
             targets_out = TargetAuxOutput(batch.get_output_len(), batch.get_output_idxs())
             targets_out.latent = targets

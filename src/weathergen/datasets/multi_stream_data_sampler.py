@@ -114,18 +114,19 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         # teacher_time_offset: number of time windows to shift the teacher's input
         # relative to the student's. When > 0 the teacher sees a future time window.
-        # Only active when student_teacher mode is used; ignored in masking mode to
-        # prevent stale offsets from JEPA pretraining leaking into forecasting
-        # finetuning/inference (where it would shift all target times by one window).
+        # Only active when student_teacher mode and an enabled student-teacher loss are used;
+        # ignored otherwise to prevent stale temporal pretraining offsets from leaking into
+        # forecasting finetuning/inference.
         training_mode = mode_cfg.get("training_mode", [])
-        if "student_teacher" in training_mode:
+        self.has_student_teacher_loss = self._has_enabled_loss("LossLatentSSLStudentTeacher")
+        if "student_teacher" in training_mode and self.has_student_teacher_loss:
             self.teacher_time_offset = mode_cfg.get("teacher_time_offset", 0)
         else:
             configured_offset = mode_cfg.get("teacher_time_offset", 0)
             if configured_offset != 0:
                 logger.warning(
-                    f"teacher_time_offset={configured_offset} is set but training_mode="
-                    f"{training_mode} does not include 'student_teacher'. "
+                    f"teacher_time_offset={configured_offset} is set but no enabled "
+                    "student-teacher target path requires it. "
                     "Ignoring teacher_time_offset (setting to 0)."
                 )
             self.teacher_time_offset = 0
@@ -163,12 +164,16 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
 
-        max_index = self.index_range.end - (
-            (  # max time units needed to make a forecast
-                self.time_step * (fsm + self.output_offset)  # translation due to forecasting
-                + self.len_timedelta  # length of forecasting window
+        max_index = (
+            self.index_range.end
+            - self.teacher_time_offset
+            - (
+                (  # max time units needed to make a forecast
+                    self.time_step * (fsm + self.output_offset)  # translation due to forecasting
+                    + self.len_timedelta  # length of forecasting window
+                )
+                // self.step_timedelta  # as number of indexs
             )
-            // self.step_timedelta  # as number of indexs
         )
 
         available_samples = max_index * self.batch_size  # as number of samples
@@ -206,6 +211,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         depends on fsm so must be repeated for __init__ and reset"""
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
+        perms_len -= self.teacher_time_offset
 
         return np.arange(perms_len)
 
@@ -340,6 +346,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if fsm > 0:
             logger.info(f"forecast_steps : {fsm}")
         return fsm
+
+    def _has_enabled_loss(self, loss_type: str) -> bool:
+        losses_cfg = self.mode_cfg.get("losses", {})
+        return any(
+            loss_cfg.get("enabled", True) and loss_cfg.get("type") == loss_type
+            for loss_cfg in losses_cfg.values()
+        )
 
     def advance(self):
         """

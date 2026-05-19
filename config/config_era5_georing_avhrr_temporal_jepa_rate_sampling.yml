@@ -1,0 +1,20 @@
+# Overlay for config_era5_georing_avhrr_temporal_jepa.yml.
+# Enables per-batch stochastic keep-rate sampling while preserving the per-stream mean rates.
+
+general:
+  desc: "temporal_jepa_era5_georing_avhrr_rate_sampling"
+
+training_config:
+  model_input:
+    forecasting:
+      masking_strategy_config:
+        rate_sampling: true
+
+validation_config:
+  model_input:
+    forecasting:
+      masking_strategy_config:
+        rate_sampling: false
+
+wgtags:
+  masking: per_stream_sampled

@@ -1,0 +1,78 @@
+# Small local smoke overlay for config_era5_georing_avhrr_temporal_jepa.yml.
+# It keeps the real stream set but reduces model and loader cost.
+
+general:
+  desc: "temporal_jepa_era5_georing_avhrr_smoke"
+
+run_path: "./results"
+model_path: "./models"
+
+with_fsdp: False
+compile_model: False
+ae_local_dim_embed: 128
+ae_local_num_blocks: 1
+ae_local_num_heads: 4
+ae_adapter_num_heads: 4
+ae_global_dim_embed: 256
+ae_global_num_blocks: 1
+ae_global_num_heads: 8
+ae_aggregation_num_blocks: 1
+ae_aggregation_num_heads: 8
+fe_num_blocks: 1
+fe_num_heads: 8
+num_class_tokens: 0
+num_register_tokens: 0
+
+train_logging:
+  terminal: 1
+  metrics: 1
+  checkpoint: 100
+  collapse_monitoring:
+    enabled: false
+
+data_loading:
+  num_workers: 0
+  memory_pinning: False
+
+training_config:
+  num_mini_epochs: 1
+  samples_per_mini_epoch: 4
+  start_date: 2018-01-01T00:00
+  end_date: 2018-01-03T00:00
+  learning_rate_scheduling:
+    lr_start: 1e-6
+    lr_max: 1e-5
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 1
+    num_steps_cooldown: 1
+    policy_warmup: "linear"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+  losses:
+    student-teacher:
+      loss_fcts:
+        JEPA:
+          out_dim: 256
+          hidden_factor: 1
+      target_and_aux_calc:
+        EMATeacher:
+          model_param_overrides:
+            training_config:
+              losses:
+                student-teacher:
+                  loss_fcts:
+                    JEPA:
+                      out_dim: 256
+                      hidden_factor: 1
+
+validation_config:
+  samples_per_mini_epoch: 2
+  start_date: 2018-01-03T00:00
+  end_date: 2018-01-04T00:00
+  output:
+    num_samples: 0
+
+wgtags:
+  exp: temporal_jepa_georing_smoke
