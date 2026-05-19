@@ -158,6 +158,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.rng = None
 
+
     def check_samples(self, fsm: int):
         """Check if samples_per_mini_epoch is suitable
         Repeated both to initialise the MultiStreamDataSampler and for each mini epoch"""
