@@ -216,8 +216,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         # c (X_t conditioning) is not yet wired into the network blocks — ada_ln_aux
         # is unsupported in fe_diffusion_model mode. c is passed through Preconditioner
         # and available for future architectural integration (e.g. concat or cross-attn).
+        ada_ln_aux = c if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"] else None
         return c_skip * x + c_out * self.net(
-            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=None
+            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=ada_ln_aux
         )  # Eq. (7) in EDM paper
 
     def inference_forward(
