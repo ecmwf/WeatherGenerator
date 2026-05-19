@@ -31,19 +31,15 @@ class RunState:
     world_size: int
     rank: int
     local_rank: int
-    with_fsdp: bool
+    with_fsdp: dataclasses.InitVar[bool] # only use during initialization
     # set/modified when loading additional RunState from file
     istep: int = 0
     world_size_original: int | None = None
     run_history: list[_HistoryItem] = dataclasses.field(default_factory=list)
 
-    @property
-    def with_ddp(self) -> bool:
-        return self.world_size > 1
-
-    @property
-    def is_sharded(self) -> bool:
-        return self.with_ddp and self.with_fsdp
+    def __post_init__(self, with_fsdp):
+        self.with_ddp = self.world_size > 1
+        self.is_sharded = self.with_ddp and with_fsdp
 
     @staticmethod
     def _get_file_name(run_id: str, mini_epoch: int):
