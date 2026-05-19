@@ -60,23 +60,21 @@ class EncoderModule(torch.nn.Module):
 
         # Positional embeddings
         self.max_tokens_local_per_cell = cf.get("ae_local_max_tokens_per_cell", 64)
-        self.pe_embed = torch.nn.Parameter(
+        self.register_buffer(
+            "pe_embed",
             torch.zeros(self.max_tokens_local_per_cell, cf.ae_local_dim_embed, dtype=self.dtype),
-            requires_grad=False,
         )
 
-        self.q_cells_lens = torch.nn.Parameter(
-            torch.ones(self.num_healpix_cells + 1, dtype=torch.int32), requires_grad=False
+        self.register_buffer(
+            "q_cells_lens", torch.ones(self.num_healpix_cells + 1, dtype=torch.int32)
         )
-        self.q_cells_lens.data[0] = 0
+        self.q_cells_lens[0] = 0
 
-        pe = torch.zeros(
-            self.num_healpix_cells,
-            cf.ae_local_num_queries,
-            cf.ae_global_dim_embed,
-            dtype=self.dtype,
+        self.register_buffer(
+            "pe_global",
+            torch.zeros(self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed, dtype=self.dtype),
         )
-        self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
+        
 
         # RoPE coordinates
         self.rope_mode = get_rope_mode(cf, logger)
