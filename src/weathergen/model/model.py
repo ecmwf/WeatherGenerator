@@ -108,10 +108,9 @@ class ModelParams(torch.nn.Module):
         return self
 
     def reset_parameters(self) -> "ModelParams":
-        """HEALPix neighbourhood structure: Determine the neighbors for each cell and initialize each
-            with its own cell number as well as the cell numbers of its neighbors. If a cell has
-            fewer than eight neighbors, use its own cell number to fill the remaining slots.
-
+        """HEALPix neighbourhood structure: Determine the neighbors for each cell and initialize
+        each with its own cell number as well as the cell numbers of its neighbors. If a cell has
+        fewer than eight neighbors, use its own cell number to fill the remaining slots.
         """
         hlc = self.healpix_level
         num_healpix_cells = self.num_healpix_cells

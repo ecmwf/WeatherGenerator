@@ -7,14 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import math
+
+import numpy as np
 import torch
 from astropy_healpix import healpy
 from torch.utils.checkpoint import checkpoint
-import math 
-import numpy as np
 
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
@@ -28,7 +30,6 @@ from weathergen.model.engines import (
 from weathergen.model.parametrised_prob_dist import LatentInterpolator
 from weathergen.model.positional_encoding import positional_encoding_harmonic
 from weathergen.utils.utils import get_dtype
-from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 
 
 class EncoderModule(torch.nn.Module):
@@ -50,7 +51,7 @@ class EncoderModule(torch.nn.Module):
 
         self.dtype = get_dtype(cf.attention_dtype)
 
-        # Positional embeddings 
+        # Positional embeddings
         self.max_tokens_local_per_cell = cf.get("ae_local_max_tokens_per_cell", 64)
         self.pe_embed = torch.nn.Parameter(
             torch.zeros(self.max_tokens_local_per_cell, cf.ae_local_dim_embed, dtype=self.dtype),
@@ -98,7 +99,6 @@ class EncoderModule(torch.nn.Module):
             self.rope_coords = None
             self.rope_cell_coords = None
 
-        self.cf = cf
         self.sources_size = sources_size
         self.targets_num_channels = targets_num_channels
         self.targets_coords_size = targets_coords_size
@@ -395,9 +395,7 @@ class EncoderModule(torch.nn.Module):
 
         return tokens_global_unmasked
 
-    def assimilate_local(
-        self, tokens: torch.Tensor, batch: ModelBatch
-    ) -> torch.Tensor:
+    def assimilate_local(self, tokens: torch.Tensor, batch: ModelBatch) -> torch.Tensor:
         """
         Processes embedded tokens locally and prepares them for the global assimilation
 

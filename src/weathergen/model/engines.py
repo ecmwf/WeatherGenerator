@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -31,7 +32,6 @@ from weathergen.model.embeddings import (
 from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
-from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 
 
 class EmbeddingEngine(torch.nn.Module):
@@ -112,9 +112,9 @@ class EmbeddingEngine(torch.nn.Module):
 
         # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
         max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
-        assert (
-            batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens
-        ), "max number of tokens per cell for positional encoding exceeded."
+        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+            "max number of tokens per cell for positional encoding exceeded."
+        )
         " Increase ae_local_max_tokens_per_cell in config."
 
         if batch.tokens_lens.shape[2] == 1:
@@ -560,20 +560,12 @@ class ForecastingEngine(torch.nn.Module):
         self.healpix_level = cf.healpix_level
         self.dtype = get_dtype(cf.attention_dtype)
 
-
         if self.rope_2D:
             num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
-            total_tokens = (
-                self.num_healpix_cells + num_extra_tokens
-                ) * cf.ae_local_num_queries
+            total_tokens = (self.num_healpix_cells + num_extra_tokens) * cf.ae_local_num_queries
             self.register_buffer(
-                "rope_coords", 
-                torch.zeros(
-                    1, 
-                    total_tokens, 
-                    2, 
-                    dtype=self.dtype
-                ),
+                "rope_coords",
+                torch.zeros(1, total_tokens, 2, dtype=self.dtype),
             )
         else:
             self.rope_coords = None
@@ -643,7 +635,6 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-
     def reset_parameters(self) -> None:
         """HEALPix neighbourhood based parameter initializing for target prediction."""
 
@@ -659,7 +650,6 @@ class ForecastingEngine(torch.nn.Module):
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
 
-        
     def forward(self, tokens, fstep):
         if self.training:
             # Impute noise to the latent state
