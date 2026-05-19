@@ -122,6 +122,8 @@ class Masker:
         self.healpix_num_cells = 12 * (4**healpix_level)
 
         self.stage = stage
+        self.mini_epoch = 0
+        self.num_mini_epochs = mode_cfg.get("num_mini_epochs") if mode_cfg is not None else None
 
         # Build and store per-stream effective masking configs
         if streams is not None and mode_cfg is not None:
@@ -129,11 +131,13 @@ class Masker:
         else:
             self._effective_masking_cfgs = {}
 
-    def reset_rng(self, rng) -> None:
+    def reset_rng(self, rng, mini_epoch: int | None = None) -> None:
         """
         Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
+        if mini_epoch is not None:
+            self.mini_epoch = mini_epoch
 
     def merge_masking_config(self, mode_cfg, override):
         """Merge a stream's masking override into the base mode config.
@@ -213,6 +217,15 @@ class Masker:
 
         rate = cfg.get("rate", None)
         assert rate is not None, 'No sampling rate "rate" specified.'
+
+        rate_end = cfg.get("rate_end")
+        if rate_end is not None and self.stage == "train":
+            assert self.num_mini_epochs is not None, (
+                'Linear keep-rate scheduling requires mode_cfg.num_mini_epochs in training.'
+            )
+            progress = self.mini_epoch / max(self.num_mini_epochs - 1, 1)
+            progress = float(np.clip(progress, 0.0, 1.0))
+            rate = (1.0 - progress) * rate + progress * rate_end
 
         if cfg.get("rate_sampling", False):
             rate = np.clip(

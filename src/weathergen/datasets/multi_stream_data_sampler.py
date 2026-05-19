@@ -307,8 +307,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         else:
             raise ValueError(f"Unknown forecast policy {self.forecast_policy}")
 
-        # reset tokenizer RNG
-        self.tokenizer.reset_rng(self.rng)
+        # reset tokenizer RNG and expose the current mini_epoch for scheduled masking
+        self.tokenizer.reset_rng(self.rng, mini_epoch=self.mini_epoch)
         return (perms, fs)
 
     def _get_fsm(self) -> int:

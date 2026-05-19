@@ -46,11 +46,11 @@ class TokenizerMasking(Tokenizer):
         self.rng = None
         self.token_size = None
 
-    def reset_rng(self, rng) -> None:
+    def reset_rng(self, rng, mini_epoch: int | None = None) -> None:
         """
         Reset rng after mini_epoch to ensure proper randomization
         """
-        self.masker.reset_rng(rng)
+        self.masker.reset_rng(rng, mini_epoch=mini_epoch)
         self.rng = rng
 
     def get_tokens_windows(self, stream_info, data, pad_tokens):
