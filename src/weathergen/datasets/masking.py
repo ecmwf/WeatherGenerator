@@ -200,7 +200,7 @@ class Masker:
     def build_effective_masking_cfgs(self, streams: Config, mode_cfg):
         """Build effective masking configs for all streams."""
         cfgs = {}
-        for stream_info, stream_name in streams.items():
+        for stream_name, stream_info in streams.items():
             override = stream_info.get("masking_override", {})
             cfgs[stream_name] = self.merge_masking_config(mode_cfg, override)
 

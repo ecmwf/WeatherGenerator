@@ -865,6 +865,7 @@ class TargetPredictionEngine(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
 
+        target_readout_num_heads = next(self.cf.streams.values())["target_readout"]["num_heads"]
         for ith, dim in enumerate(self.dims_embed[:-1]):
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
@@ -873,7 +874,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=False,
                         with_adanorm=False,
                         with_mlp=False,
@@ -885,7 +886,7 @@ class TargetPredictionEngine(nn.Module):
                     SelfAttentionBlock(
                         dim=dim,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
                         dropout_rate=0.1,
@@ -897,7 +898,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=self.cf.ae_global_dim_embed,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=False,
                         with_mlp=True,
@@ -911,7 +912,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=True,
                         with_mlp=True,
@@ -927,7 +928,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_out=self.dims_embed[ith + 1],
                         dim_kv=dim_aux,
                         dim_aux=self.dim_coord_in,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,

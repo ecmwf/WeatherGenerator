@@ -138,7 +138,7 @@ class WeatherGenReader(Reader):
         clim_fn = next(streams.get("filenames"), None)
 
         try:
-            clim_fn = streams[streams].get("filenames")
+            clim_fn = streams[stream].get("filenames")
         except KeyError:
             clim_fn = None
 
