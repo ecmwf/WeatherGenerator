@@ -646,7 +646,7 @@ class Trainer(TrainerBase):
         maybe_sharded_sd = (
             self.model.state_dict() if self.ema_model is None else self.ema_model.state_dict()
         )
-        if self.runstate.with_ddp and self.cf.with_fsdp:
+        if self.runstate.is_sharded:
             cpu_state_dict = {}
             for param_name, sharded_param in maybe_sharded_sd.items():
                 full_param = sharded_param.full_tensor()
