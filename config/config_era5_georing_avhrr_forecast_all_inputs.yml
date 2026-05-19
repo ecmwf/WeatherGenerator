@@ -90,7 +90,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_georing_avhrr_forecast_random_inputs/"
+streams_directory: "./config/streams/era5_georing_avhrr_forecast_all_inputs/"
 streams: ???
 
 # type of zarr_store
