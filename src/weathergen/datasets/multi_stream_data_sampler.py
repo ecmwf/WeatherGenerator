@@ -211,7 +211,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     dataset = DataReaderObs
                 case "anemoi":
                     dataset = DataReaderAnemoi
-                    from anemoi.datasets import add_dataset_path
                 case "fesom":
                     dataset = DataReaderFesom
                 case type_name:
@@ -221,31 +220,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_info['name']}'."
                         raise ValueError(msg)
 
-            for fname in stream_info["filenames"]:
-                fname = pathlib.Path(fname)
-                # dont check if file exists since zarr stores might be directories
-                if fname.exists():
-                    # check if fname is a valid path to allow for simple overwriting
-                    filename = fname
-                else:
-                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
-
-                filename = stream_info.get("filenames")
-                if type(filename) is omegaconf.dictconfig.DictConfig:
-                    # join case, valid for anemoi only
-                    if stream_info["type"] != "anemoi":
-                        msg = (
-                            f"Unsupported stream type {stream_info['type']}"
-                            f"Only 'anemoi' supports the join operation."
-                        )
-                        raise ValueError(msg)
-                    # Convert OmegaConf DictConfig to dict
-                    filename = dict(filename)
-                    # Prepend datapath to each dataset
-                    for path in cf.data_paths:
-                        add_dataset_path(path)
-                else:
-                    # normal list case
+            # use anemoi_config only if it's defined and anemoi data reader is selected
+            anemoi_config = stream_info.get("anemoi_config")
+            if anemoi_config and stream_info["type"] == "anemoi":
+                # Convert OmegaConf DictConfig to dict
+                filename = dict(anemoi_config)
+                # Prepend datapath to each dataset
+                from anemoi.datasets import add_dataset_path
+                for path in cf.data_paths:
+                    add_dataset_path(path)
+            else:
+                for fname in stream_info["filenames"]:
                     fname = pathlib.Path(fname)
                     # dont check if file exists since zarr stores might be directories
                     if fname.exists():
@@ -265,15 +250,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         # so we need to choose here.
                         filename = filenames[0]
 
-                ds_type = stream_info["type"]
-                if is_root():
-                    logger.info(
-                        f"Opening dataset with type: {ds_type}"
-                        + f" from stream config {stream_info['name']}.",
-                    )
-                ds = dataset(filename=filename, **kwargs)
+            ds_type = stream_info["type"]
+            if is_root():
+                logger.info(
+                    f"Opening dataset with type: {ds_type}"
+                    + f" from stream config {stream_info['name']}."
+                    + f" Resolved filename: {filename}",
+                )
+            ds = dataset(filename=filename, **kwargs)
 
-                streams_datasets[stream_info["name"]] += [ds]
+            streams_datasets[stream_info["name"]] += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
