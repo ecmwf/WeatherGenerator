@@ -1,0 +1,39 @@
+# obs_types
+# 0 : polar orbiting satellites
+# 1 : geostationay satellites
+# 2 : conventional observations
+
+SurfaceCombined :
+  type : obs
+  stream_id : 2
+  # source: []
+  diagnostic: True
+  filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
+  geoinfo_sources :
+    - type: alphaearth
+      filename: /e/data1/slmet/ml_training/aef_synops_stations_9x9_mod2.zarr
+      patch_mode: center
+      # Only attach AlphaEarth features for close coordinate matches; unmatched rows get the
+      # AlphaEarth mean, which normalizes to neutral zeros in the decoder geoinfo vector.
+      max_distance_deg: 0.05
+      stats_sample_size: 2048
+      missing_value: mean
+  loss_weight : 1.0
+  token_size : 64
+  tokenize_spacetime : True
+  max_num_targets: -1
+  embed :
+    net : transformer
+    num_tokens : 1
+    num_heads : 4
+    dim_embed : 128
+    num_blocks : 2
+  embed_target_coords :
+    net : linear
+    dim_embed : 128
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head :
+    ens_size : 1
+    num_layers : 1
