@@ -164,7 +164,7 @@ def init_model_and_shard(
 
     # model params
     model_params = ModelParams(cf).create(cf)
-    model_params.reset_parameters(cf)
+    model_params.reset_parameters()
     model_params = model_params.to(f"cuda:{cf.local_rank}")
 
     return model, model_params

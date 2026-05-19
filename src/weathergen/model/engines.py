@@ -565,7 +565,7 @@ class ForecastingEngine(torch.nn.Module):
         rope_mode = get_rope_mode(self.cf)
         self.fe_blocks = torch.nn.ModuleList()
         self.rope_2D = cf.get("rope_2D", False)
-        self.healpix_level = cf.healpix_level
+        self.healpix_level = cf.get("fe_healpix_level") if cf.get("fe_healpix_level") is not None else cf.get("healpix_level")
         self.dtype = get_dtype(cf.attention_dtype)
 
         # RoPE coordinates
@@ -743,12 +743,10 @@ class ForecastingEngine(torch.nn.Module):
                 tokens = checkpoint(
                     block,
                     tokens,
-                    coords=(
-                        self.rope_spherical_coeffs.unbind(dim=-1)
-                        if self.rope_spherical_coeffs is not None
-                        else self.rope_coords
-                    ),
-                    aux_info=aux_info,
+                    self.rope_spherical_coeffs.unbind(dim=-1)
+                    if self.rope_spherical_coeffs is not None
+                    else self.rope_coords,
+                    aux_info,
                     use_reentrant=False,
                 )
         return tokens

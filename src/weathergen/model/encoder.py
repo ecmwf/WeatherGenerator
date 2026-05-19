@@ -317,7 +317,7 @@ class EncoderModule(torch.nn.Module):
             coords=(
                 self.rope_spherical_coeffs.unbind(dim=-1)
                 if self.rope_spherical_coeffs is not None
-                else self.self.rope_coords
+                else self.rope_coords
             ),
             use_reentrant=False,
         )
@@ -512,7 +512,7 @@ class EncoderModule(torch.nn.Module):
             tokens_global_register_class,
             batch.tokens_lens,
             rope_cell_coords=self.rope_cell_coords,
-            rope_cell_coeffs=self.rope_spherical_cells_coeffs,
+            rope_cell_coeffs=self.rope_spherical_cell_coeffs,
             rope_extra_coeffs=self.rope_spherical_extra_coeffs,
         )
 
