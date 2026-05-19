@@ -27,7 +27,6 @@ from omegaconf.omegaconf import open_dict
 
 from weathergen.common.io import StoreType
 from weathergen.common.paths import _REPO_ROOT, get_wg_private_path
-from weathergen.common.run_state import RunState, _HistoryItem
 
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
@@ -245,7 +244,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
 
     config = OmegaConf.create(json.loads(json_str))
 
-    return _apply_fixes(config, mini_epoch)
+    return _apply_fixes(config)
 
 
 def _get_model_config_file_name(run_id: str):
@@ -271,7 +270,7 @@ def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
     )
 
 
-def _apply_fixes(config: Config, mini_epoch: int) -> Config:
+def _apply_fixes(config: Config) -> Config:
     """
     Apply fixes to maintain a best effort backward combatibility.
 
@@ -282,34 +281,6 @@ def _apply_fixes(config: Config, mini_epoch: int) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
-    config = _check_runstate(config, mini_epoch)
-    return config
-
-
-def _check_runstate(config: Config, mini_epoch: int) -> Config:
-    """
-    Detect if previous run has not implemented yet config/runstate split.
-
-    Create required runstate file.
-    """
-    config = config.copy()
-    run_id = config.general.run_id
-    runstate_file = get_path_model(run_id=run_id) / RunState._get_file_name(run_id, mini_epoch)
-
-    if not runstate_file.is_file():  # run from before separate runstate
-        runstate = RunState(
-            world_size=config.general.world_size,
-            rank=config.general.rank,
-            local_rank=config.general.local_rank,
-            with_fsdp=config.general.with_fsdp,
-            istep=config.general.istep,
-            world_size_original=config.general.world_size_original,
-            run_history=[
-                _HistoryItem(run_id, istep) for run_id, istep in config.general.run_history
-            ],
-        )
-        runstate.save(run_id, mini_epoch)
-
     return config
 
 

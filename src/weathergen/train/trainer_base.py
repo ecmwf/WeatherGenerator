@@ -139,12 +139,14 @@ class TrainerBase:
                     dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
                     cf.data_loader_rng_seed = l_seed.item()
 
+        with_ddp = world_size > 1
         runstate = RunState(
             world_size=world_size,
             world_size_original=world_size,
             rank=rank,
             local_rank=local_rank,
-            with_fsdp=cf.with_fsdp,
+            with_ddp=with_ddp,
+            is_sharded=with_ddp and cf.with_fsdp,
         )
 
         return cf, runstate
