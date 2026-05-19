@@ -19,7 +19,7 @@ METOP_ABC_AVHRR_IASI :
     model_input :
       masking_strategy : random
       masking_strategy_config :
-        rate: 0.2
+        rate: 0.9
   token_size : 512 # 256
   forcing: True
   embed :

@@ -23,6 +23,7 @@ ERA5_in :
       masking_strategy : random
       masking_strategy_config :
         rate: 0.05
+        rate_end: 0.99
   token_size : 8
   tokenize_spacetime : True
   max_num_targets: -1
