@@ -61,7 +61,7 @@ fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
-fe_diffusion_model_conditioning_type: "concat" #options: "ada_ln", "concat", "cross_attn"
+fe_diffusion_model_conditioning_type: "cross_attn" # options: "ada_ln", "cross_attn"
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -190,7 +190,7 @@ training_config:
   shuffle: True
  
   start_date: 1979-01-01T00:00
-  end_date: 2022-12-31T18:00
+  end_date: 1979-02-01T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -261,8 +261,8 @@ validation_config:
   samples_per_mini_epoch: 256
   shuffle: True
 
-  start_date: 2023-10-01T00:00
-  end_date: 2023-12-31T18:00
+  start_date: 1979-01-01T00:00
+  end_date: 1979-02-01T00:00
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
@@ -281,7 +281,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config
