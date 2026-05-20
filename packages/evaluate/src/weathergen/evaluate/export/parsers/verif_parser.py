@@ -158,7 +158,9 @@ class VerifParser(CfParser):
                 Time difference between source interval start and end in hours.
         """
         zarr_dt = (source_interval_end - source_interval_start).astype("timedelta64[h]")
-
+        #TODO: pull default value from config
+        if zarr_dt == np.timedelta64(0, "h"):
+            zarr_dt = np.timedelta64(6, "h")
         return zarr_dt
 
     def get_output_filename(self, variable: str) -> Path:

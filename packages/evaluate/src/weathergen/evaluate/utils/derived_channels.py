@@ -272,10 +272,8 @@ def compute_precip(
         Accumulated precipitation values for the forecast time step."""
     obs_dt = obs_data.time.values[1] - obs_data.time.values[0]
     obs_dt = obs_dt.astype("timedelta64[h]")
-    if zarr_dt == 0:
-        # indicates nowcasting
-        return obs_data["precipitation_amount_1h"].sel(time=valid_time).values.squeeze()
-    elif obs_dt >= zarr_dt:
+
+    if obs_dt >= zarr_dt:
         if obs_dt % zarr_dt == np.timedelta64(0):
             return obs_data["precipitation_amount_1h"].sel(time=valid_time).values.squeeze()
         else:

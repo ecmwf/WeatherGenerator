@@ -34,7 +34,7 @@ variables:
     var: tp
     long: Total precipitation amount
     wg_unit:  {CERRA:   kg/m^2,
-               MEPS:    kg/m^2,
+               MEPS:    m,
                NORA3:   kg/m^2,
                ERA5:    m,
                DEFAULT: kg/m^2}
