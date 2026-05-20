@@ -1,0 +1,17 @@
+runid : "i0xr7z48"
+init_time :  "2023-10-07T00"
+inpath : "/p/project1/weatherai/buschow1/wegen_export/cyclones/"
+outpath : "./plots/"
+latmin: -30
+latmax: 30
+selected_storm :
+  lon : 154.7
+  lat : 9.6 
+  time : "2023-10-07T00:00"
+tracking_params:
+  laplace_size : 2
+  laplace_threshold : 0 
+  pressure_threshold : 103000
+  wind_threshold : 0 
+  peak_separation : 5
+  merge_distance: 300
