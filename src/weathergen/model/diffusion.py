@@ -65,7 +65,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"(got '{self.conditioning_type}')"
         )
 
-        if "date" in self.conditioning or "time" in self.conditioning:
+        if self.conditioning and (self.conditioning in ["date_time", "date", "time"]):
             self.datetime_embedder = DateTimeEncoder(self.conditioning)
 
         # Parameters
@@ -173,17 +173,17 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = tokens.detach()
 
+        c = None
         if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
-            c = meta_info["ERA5"].params["timestamp"]  # TODO: add correct preconditioning (e.g., sample/s in previous time step, datetime encoding, etc.)
+            c = meta_info["ERA5"].params["timestamp"]
             y = meta_info["ERA5"].params.get("diffusion_target_tokens")
-        elif self.cf.fe_diffusion_model_conditioning in ["forecast"]:
-            # In diffusion_forecast mode, meta_info carries X_{t+1} tokens written by
-            # DiffusionLatentTargetEncoder.pre_compute(). Noise X_{t+1} as the target and
-            # use X_t (the incoming rollout state) as the conditioning signal c.
-            # Falls back to denoising-autoencoder behaviour when no target is cached
-            # (e.g. validation or unconditional pre-training).
+        elif self.cf.fe_diffusion_model_conditioning == "forecast":
             y = meta_info["ERA5"].params.get("diffusion_target_tokens")
             c = tokens          # X_t as conditioning
+        else:
+            # Unconditional: denoise the current tokens as an autoencoder
+            y = tokens
+            c = None
 
         if self.training:
             eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
@@ -224,7 +224,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Precondition input and feed through network
         x = self.preconditioner.precondition(x, c)  # currently does nothing
-        if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
+        if self.conditioning in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
 
         # "ada_ln":  pass conditioning through ada_ln_aux into DiT AdaLN blocks.
