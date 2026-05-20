@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 from scipy.cluster.hierarchy import DisjointSet
 from scipy.ndimage import gaussian_laplace, maximum_filter
 from skimage.feature import peak_local_max
@@ -25,9 +26,12 @@ class Cyclone:
         angle = haversine_distances(X=np.array(p1).reshape(1, -1), Y=np.array(p2).reshape(1, -1))
         return r_earth * angle
 
-    def match(self, cyclones, maxdist=3000) -> "Cyclone":
+    def match(self, cyclones: list["Cyclone"], maxdist_km: float = 3000) -> "Cyclone":
+        """
+        Select the closest from a set of other cyclones
+        """
         dists = [self.dist_to(other) for other in cyclones]
-        if min(dists) < maxdist:
+        if min(dists) < maxdist_km:
             return cyclones[np.argmin(dists)]
         else:
             return None
@@ -68,7 +72,7 @@ class CycloneFinder:
         windmask = windmax > self.th_wind
         return pressuremask & windmask
 
-    def find_cyclones(self, pressure, wind, windmaxsize=5, timestamp=None):
+    def find_cyclones(self, pressure, wind, windmaxsize=5, timestamp=None) -> list["Cyclone"]:
         # apply the LoG filter to pressure
         filtered = self.filter(pressure)
         # find candidate maxima
@@ -92,7 +96,7 @@ class CycloneFinder:
         return res
 
 
-def track_cyclones(timesteps: list[list["Cyclone"]], merge_distance_km: float = 300):
+def track_cyclones(timesteps: list[list["Cyclone"]], merge_distance_km: float = 300) -> DisjointSet:
     """
     Takes a list of lists of cyclones, each top level entry representing one timestep,
     returns a DisjointSet where each entry represents a track.
@@ -132,29 +136,38 @@ def track_cyclones(timesteps: list[list["Cyclone"]], merge_distance_km: float = 
     return tracks
 
 
-def track2pandas(track: list["Cyclone"]):
+def track2pandas(track: list["Cyclone"]) -> pd.DataFrame:
     return pd.DataFrame([storm.__dict__ for storm in track]).set_index("time").sort_index()
 
 
-def cyclones_in_ds(ds, finder, time):
+def cyclones_in_ds(ds: xr.Dataset, finder: "CycloneFinder", time: np.datetime64) -> list["Cyclone"]:
+    """
+    Find cyclones in a dataset containing at least msl, u10, v10,
+    at a given timestep, using a given CycloneFinder.
+    """
     ds_t = ds.sel(valid_time=time)
     msl = ds_t.msl
     v = np.sqrt(ds_t.u10**2 + ds_t.v10**2)
     return finder.find_cyclones(pressure=msl, wind=v, timestamp=time)
 
 
-def track_error(tr1, tr2):
+def track_error(track1: pd.DataFrame, track2: pd.DataFrame) -> pd.DataFrame:
+    """
+    Given two tracks as pd.DataFrames, compute their distance in km.
+    At timesteps where one track is missing, the result is NaN.
+    """
     r_earth = 6371.0
-    coords = [np.deg2rad(x.loc[:, ["lat", "lon"]]) for x in tr1.align(tr2, join="inner")]
+    coords = [np.deg2rad(x.loc[:, ["lat", "lon"]]) for x in track1.align(track2, join="inner")]
     angle = haversine_distances(X=coords[0].values, Y=coords[1].values)
     distance = pd.DataFrame({"distance": r_earth * np.diag(angle)}, index=coords[0].index)
-    all_idx = tr1.index.union(tr2.index)
+    all_idx = track1.index.union(track2.index)
     distance = distance.reindex(all_idx)
 
     return distance
 
 
-def wrap_lon(ds):
+def wrap_lon(ds: xr.Dataset) -> xr.Dataset:
+    "Convert longitude from 0...360 to -180...180"
     ds["longitude"] = (ds["longitude"] + 180) % 360 - 180
     ds = ds.sortby("longitude")
     return ds

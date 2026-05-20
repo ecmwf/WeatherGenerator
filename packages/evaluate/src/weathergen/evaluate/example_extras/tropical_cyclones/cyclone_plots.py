@@ -7,6 +7,13 @@ from cyclone_finder import track_error
 
 
 def track_eval_plot(matched_tracks):
+    """
+    A four panel plot showing
+    * the target and predicted track on a map
+    * the track error in km
+    * the pressure at the cyclone core for target and prediction
+    * the maximum wind speed near the cyclone center
+    """
     fig, axs = plt.subplots(2, 2, sharex=True, figsize=(10, 6))
     fig.delaxes(axs[0, 0])
     axs[0, 0] = fig.add_subplot(2, 2, 1, projection=ccrs.PlateCarree())
@@ -24,6 +31,9 @@ def track_eval_plot(matched_tracks):
 
 
 def bounding_box(matched_tracks, pad=2):
+    """
+    Compute a lon/lat box containing the matched cyclone tracks.
+    """
     all_lons = pd.concat([matched_tracks["target"]["lon"], matched_tracks["prediction"]["lon"]])
     all_lats = pd.concat([matched_tracks["target"]["lat"], matched_tracks["prediction"]["lat"]])
     lon_min = all_lons.min() - pad
@@ -35,6 +45,12 @@ def bounding_box(matched_tracks, pad=2):
 
 
 def track_snapshots(matched_tracks, datasets, skip=5):
+    """
+    A plot with two rows showing the spatial distribution of windspeeds
+    in prediction and target, with crosses marking the cyclone centers found
+    by the tracker. The time difference between snapshots is controlled by
+    skip.
+    """
     bbox = bounding_box(matched_tracks)
     all_steps = matched_tracks["target"].index.union(matched_tracks["prediction"].index)
     selsteps = np.arange(0, len(all_steps), skip)

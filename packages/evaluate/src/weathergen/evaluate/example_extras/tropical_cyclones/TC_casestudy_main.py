@@ -17,6 +17,12 @@ from omegaconf import OmegaConf
 
 
 class TcCaseStudy:
+    """
+    Read the cyclone tracker settings, data paths and the target cyclone
+    from config, then find the matched tracks corresponding to that cyclones
+    in the prediction and target.
+    """
+
     def __init__(self, cfg: dict):
         self.cfg = cfg
         self.selected_storm = Cyclone(
