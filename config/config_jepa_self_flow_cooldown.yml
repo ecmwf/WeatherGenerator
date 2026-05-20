@@ -17,7 +17,7 @@ general:
 # config for training
 training_config:
 
-  num_mini_epochs: 2
+  num_mini_epochs: 4
   samples_per_mini_epoch: 4096
 
   target_input:
