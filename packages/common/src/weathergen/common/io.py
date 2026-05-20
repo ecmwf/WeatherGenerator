@@ -338,7 +338,7 @@ class OutputItem:
     def __init__(
         self,
         key: ItemKey,
-        forecast_offset:int | None,
+        forecast_offset: int | None,
         target: OutputDataset | None = None,
         prediction: OutputDataset | None = None,
         source: OutputDataset | None = None,
