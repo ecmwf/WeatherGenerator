@@ -298,7 +298,6 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
-    regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})
@@ -318,6 +317,9 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
             run["max_workers"] = max_workers
 
         for stream in run.get("streams", {}):
+            regions = cfg.evaluation.get(
+                "regions", run.get("streams", {}).get(stream, {}).get("regions", ["global"])
+            )
             tasks.append(
                 {
                     "run_id": run_id,
