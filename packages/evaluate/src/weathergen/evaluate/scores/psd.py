@@ -355,23 +355,22 @@ def zonal_psd(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute zonal PSD using 1-D FFT along the longitude dimension.
 
-    The input data is expected to be on a regular lat-lon grid already (or
-    will be interpolated/regridded by the caller).
+    For unstructured grids (where lats/lons are per-point coordinates rather
+    than regular axis arrays), the data is first regridded to a regular lat-lon
+    grid using scipy nearest-neighbor interpolation.
 
     Parameters
     ----------
     data : np.ndarray
-        Field values.  If 1-D, interpreted as flattened ``(nlat * nlon,)``.
-        If 2-D, interpreted as ``(nlat, nlon)`` or ``(n_samples, nlat * nlon)``.
-        If 3-D, interpreted as ``(n_samples, nlat, nlon)``.
+        Field values.  Shape ``(n_samples, n_points)`` or ``(n_points,)``.
     lats : np.ndarray
-        1-D array of latitude values (descending, length ``nlat``).
+        Latitude values. Either per-point (length ``n_points``) or axis (length ``nlat``).
     lons : np.ndarray
-        1-D array of longitude values (ascending, length ``nlon``).
+        Longitude values. Either per-point (length ``n_points``) or axis (length ``nlon``).
     lat_range : tuple[float, float]
         Latitude bounds to restrict the computation to.
     regrid_resolution : float
-        Grid spacing in degrees (used only for frequency calculation).
+        Grid spacing in degrees for the regular target grid.
 
     Returns
     -------
@@ -381,29 +380,51 @@ def zonal_psd(
         Power spectral density averaged over samples and latitude rows,
         shape ``(nfreq,)``.
     """
-    nlat = len(lats)
-    nlon = len(lons)
+    from scipy.interpolate import griddata
 
-    # Reshape to (n_samples, nlat, nlon)
+    # Ensure 2-D: (n_samples, n_points)
     if data.ndim == 1:
-        data = data.reshape(1, nlat, nlon)
-    elif data.ndim == 2:
-        if data.shape == (nlat, nlon):
-            data = data[np.newaxis, :, :]
-        else:
-            # (n_samples, nlat * nlon)
-            data = data.reshape(data.shape[0], nlat, nlon)
-    # data is now (n_samples, nlat, nlon)
+        data = data.reshape(1, -1)
+
+    n_samples, n_points = data.shape
+
+    # Determine if the grid is regular or unstructured
+    unique_lats = np.unique(lats)
+    unique_lons = np.unique(lons)
+    is_regular = (len(unique_lats) * len(unique_lons) == n_points)
+
+    if is_regular and len(lats) == len(unique_lats):
+        # lats/lons are axis arrays for a regular grid
+        lat_axis = unique_lats
+        lon_axis = unique_lons
+        nlat, nlon = len(lat_axis), len(lon_axis)
+        data_3d = data.reshape(n_samples, nlat, nlon)
+    else:
+        # Unstructured grid — regrid to regular lat-lon
+        lat_min = max(lat_range[0], lats.min())
+        lat_max = min(lat_range[1], lats.max())
+        lon_min, lon_max = lons.min(), lons.max()
+
+        lat_axis = np.arange(lat_min, lat_max + regrid_resolution / 2, regrid_resolution)
+        lon_axis = np.arange(lon_min, lon_max + regrid_resolution / 2, regrid_resolution)
+        nlat, nlon = len(lat_axis), len(lon_axis)
+
+        grid_lon, grid_lat = np.meshgrid(lon_axis, lat_axis)
+        points = np.column_stack((lats, lons))
+
+        data_3d = np.empty((n_samples, nlat, nlon))
+        for s in range(n_samples):
+            data_3d[s] = griddata(points, data[s], (grid_lat, grid_lon), method="nearest")
 
     # Apply latitude mask
-    lat_mask = (lats >= lat_range[0]) & (lats <= lat_range[1])
-    data = data[:, lat_mask, :]
-    nlon_sub = data.shape[2]
+    lat_mask = (lat_axis >= lat_range[0]) & (lat_axis <= lat_range[1])
+    data_3d = data_3d[:, lat_mask, :]
+    nlon_sub = data_3d.shape[2]
 
     # Compute PSD per sample and average
     psds = []
-    for s in range(data.shape[0]):
-        psds.append(ZonalPSD.compute(data[s]))
+    for s in range(data_3d.shape[0]):
+        psds.append(ZonalPSD.compute(data_3d[s]))
     psd = np.mean(psds, axis=0)
 
     spacing = 360.0 / nlon_sub if nlon_sub > 0 else regrid_resolution
