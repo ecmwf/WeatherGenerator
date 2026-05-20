@@ -96,18 +96,47 @@ def align_clim_data(
 ) -> dict:
     """
     Align climatology data with target data structure.
+
+    Supports two climatology formats:
+
+    - Legacy format (no ``statistic`` dimension): the aligned DataArray for each
+      forecast step has the same shape as the target.
+    - New format (with ``statistic`` dimension): the aligned DataArray keeps the
+      full ``statistic`` dimension (e.g. ``['mean', 'q20', ..., 'q80']``), so that
+      each score function can select the statistics it needs.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping forecast step -> aligned climatology DataArray.
     """
-    # create empty climatology data for each forecast step
-    aligned_clim_data = {}
-    for fstep, _ in target_output.items():
-        aligned_clim_data[fstep] = xr.DataArray(
-            np.full_like(
-                target_output[fstep].values,
-                np.nan,  # Create array with same shape filled with NaNs
-            ),
-            coords=target_output[fstep].coords,  # Use the same coordinates as target
-            dims=target_output[fstep].dims,  # Use the same dimensions as target
-        )
+    has_statistic_dim = clim_data is not None and "statistic" in clim_data.dims
+    all_stats: list[str] | None = list(clim_data.statistic.values) if has_statistic_dim else None
+
+    # Create empty climatology arrays for each forecast step
+    aligned_clim: dict = {}
+
+    for fstep, target_da in target_output.items():
+        if has_statistic_dim:
+            all_stat_coords: dict = {"statistic": all_stats}
+            for dim in target_da.dims:
+                if dim in target_da.coords and target_da.coords[dim].dims == (dim,):
+                    all_stat_coords[dim] = target_da.coords[dim].values
+            aligned_clim[fstep] = xr.DataArray(
+                np.full(
+                    (len(all_stats),) + target_da.shape,
+                    np.nan,
+                    dtype=np.float32,
+                ),
+                dims=["statistic"] + list(target_da.dims),
+                coords=all_stat_coords,
+            )
+        else:
+            aligned_clim[fstep] = xr.DataArray(
+                np.full_like(target_da.values, np.nan),
+                coords=target_da.coords,
+                dims=target_da.dims,
+            )
 
     # Cache for previously computed indices
     cached_target_lats = None
@@ -115,7 +144,7 @@ def align_clim_data(
     cached_clim_indices = None
 
     if clim_data is None:
-        return aligned_clim_data
+        return aligned_clim
 
     # Build KDTree indexer once
     clim_lats = clim_data.latitude.values
@@ -124,33 +153,35 @@ def align_clim_data(
 
     for fstep, target_data in target_output.items():
         samples = np.unique(target_data.sample.values)
+        has_sample_dim = "sample" in target_data.dims
+
         for sample in tqdm(samples, f"Aligning climatology for forecast step {fstep}"):
-            sel_key = "sample" if "sample" in target_data.dims else "ipoint"
-            sel_val = (
-                sample if "sample" in target_data.dims else (target_data.sample.values == sample)
-            )
+            sel_key = "sample" if has_sample_dim else "ipoint"
+            sel_val = sample if has_sample_dim else (target_data.sample.values == sample)
             sel_mask = {sel_key: sel_val}
 
             timestamp = np.unique(target_data.sel(sel_mask).valid_time.values)[0]
-            # Prepare climatology data for each sample
             matching_time_idx = match_climatology_time(timestamp, clim_data)
 
             if matching_time_idx is None:
                 continue
 
-            prepared_clim_data = (
-                clim_data.data.isel(
-                    time=matching_time_idx,
+            if has_statistic_dim:
+                # Keep the full statistic dimension; score functions select what they need.
+                prepared_clim_data = (
+                    clim_data.data.isel(time=matching_time_idx)
+                    .sel(channels=target_data.channel.values)
+                    .transpose("statistic", "grid_points", "channels")
                 )
-                .sel(
-                    channels=target_data.channel.values,
+            else:
+                prepared_clim_data = (
+                    clim_data.data.isel(time=matching_time_idx)
+                    .sel(channels=target_data.channel.values)
+                    .transpose("grid_points", "channels")  # dimensions specific to anemoi
                 )
-                .transpose("grid_points", "channels")  # dimensions specific to anemoi
-            )
+
             target_lats = target_data.loc[sel_mask].lat.values
             target_lons = target_data.loc[sel_mask].lon.values
-            # check if target coords match cached target coords
-            # if they do, use cached clim_indices
             if (
                 cached_clim_indices is not None
                 and np.array_equal(target_lats, cached_target_lats)
@@ -158,11 +189,7 @@ def align_clim_data(
             ):
                 clim_indices = cached_clim_indices
             else:
-                clim_lats = prepared_clim_data.latitude.values
-                clim_lons = prepared_clim_data.longitude.values
-
                 clim_indices = clim_indexer(target_lats, target_lons)
-                # Check for unmatched coordinates
                 unmatched_mask = clim_indices == -1
                 if np.any(unmatched_mask):
                     n_unmatched = np.sum(unmatched_mask)
@@ -171,33 +198,28 @@ def align_clim_data(
                         f"coordinates. This will cause incorrect ACC calculations. "
                         f"Check coordinate alignment between target and climatology data."
                     )
-                # Cache the computed indices and target coords
                 cached_clim_indices = clim_indices
                 cached_target_lats = target_lats
                 cached_target_lons = target_lons
 
-            # TODO: generalize to potential variation of grid_point dimension name
             clim_values = prepared_clim_data.isel(grid_points=clim_indices).values
             try:
-                if len(samples) > 1:
-                    aligned_clim_data[fstep].loc[sel_mask] = clim_values
-                else:
-                    aligned_clim_data[fstep] = clim_values
+                aligned_clim[fstep].loc[sel_mask] = clim_values
             except (ValueError, IndexError) as e:
                 raise ValueError(
-                    f"Failed to align climatology data with target data for ACC calculation. "
+                    f"Failed to align climatology data with target data. "
                     f"This error typically occurs when the number of points per sample varies "
                     f"between samples. "
-                    f"ACC metric is currently only supported for forecasting data with constant "
+                    f"ACC/RPS/RPSS are currently only supported for forecasting data with constant "
                     f"points per sample. "
                     f"Please ensure all samples have the same spatial coverage and grid points. "
                     f"Original error: {e}"
                 ) from e
 
-    return aligned_clim_data
+    return aligned_clim
 
 
-def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
+def get_climatology(reader, da_tars, stream: str) -> dict | None:
     """
     Load climatology data if specified in the evaluation configuration.
 
@@ -209,19 +231,20 @@ def get_climatology(reader, da_tars, stream: str) -> xr.Dataset | None:
         Dictionary of target data arrays keyed by forecast step
     stream : str
         Name of the data stream
+
     Returns
     -------
-    xr.Dataset or None
-        Climatology dataset if available, otherwise None
+    dict | None
+        Dictionary mapping forecast step -> aligned climatology DataArray, or ``None``
+        if no climatology path is configured.  For the new climatology format the
+        DataArrays carry a leading ``statistic`` dimension; for the legacy format they
+        do not.  Score functions select the statistics they need.
     """
-    # Get climatology data path from configuration
     clim_data_path = reader.get_climatology_filename(stream)
-
-    aligned_clim_data = None
 
     if clim_data_path is not None:
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
-        aligned_clim_data = align_clim_data(da_tars, clim_data)
+        return align_clim_data(da_tars, clim_data)
 
-    return aligned_clim_data
+    return None

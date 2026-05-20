@@ -17,7 +17,7 @@ import xarray as xr
 # Local application / package
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.io.wegen_reader import WeatherGenJsonReader, WeatherGenZarrReader
-from weathergen.evaluate.utils.utils import merge
+from weathergen.evaluate.utils.dict_utils import merge
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -236,8 +236,14 @@ class WeatherGenMergeReader(Reader):
         """
         for reader in self.readers:
             clim_data_path = reader.get_climatology_filename(stream)
-            if clim_data_path:
+            if clim_data_path and Path(clim_data_path).exists():
                 return clim_data_path
+            else:
+                _logger.warning(
+                    f"Climatology file {clim_data_path} does not exist or configuration is invalid"
+                    " for stream {stream} in reader with run_id {reader.run_id}."
+                    " Please check that the path is correct and that the file exists."
+                )
         return None
 
     def get_stream(self, stream: str):
