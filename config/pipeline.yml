@@ -1,0 +1,37 @@
+stages:
+  - name: pretrain
+    stage: train
+    config_files:
+      - config/config_forecasting.yml
+    options:
+      - training_config.num_mini_epochs=32
+    chain_jobs: 4
+    nodes: 2
+    slurm_args:
+      - "--time=10:00:00"
+
+  - name: finetune
+    stage: train
+    from_run_id: STAGE.pretrain   
+    config_files:
+      - config/config_forecasting_finetuning.yml
+    chain_jobs: 2
+    nodes: 2
+    slurm_args:
+      - "--time=10:00:00"
+      
+  - name: inference
+    stage: inference
+    from_run_id: STAGE.pretrain
+    options:
+      - training_config.forecast.num_steps=120 
+      - test_config.output.num_samples=10 
+      - test_config.start_date=202310010000 
+      - test_config.end_date=202312300000 
+      - test_config.samples_per_mini_epoch=128 
+    chain_jobs: 2
+    nodes: 1
+    slurm_args:
+      - "--time=10:00:00"
+
+
