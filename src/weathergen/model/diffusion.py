@@ -59,8 +59,8 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"fe_diffusion_model_conditioning is '{self.conditioning}' "
             f"(got '{self.conditioning_type}')"
         )
-        assert self.conditioning != "forecast" or self.conditioning_type == "concat", (
-            f"fe_diffusion_model_conditioning_type must be 'concat' when "
+        assert self.conditioning != "forecast" or self.conditioning_type in {"concat", "cross_attn"}, (
+            f"fe_diffusion_model_conditioning_type must be 'concat' or 'cross_attn' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
             f"(got '{self.conditioning_type}')"
         )
@@ -245,8 +245,9 @@ class DiffusionForecastEngine(torch.nn.Module):
             net_input = self.cond_proj(torch.cat([net_input, c], dim=-1))
 
         ada_ln_aux = c if self.conditioning_type == "ada_ln" else None
+        x_kv = c if self.conditioning_type == "cross_attn" else None
         return c_skip * x + c_out * self.net(
-            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=ada_ln_aux
+            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=ada_ln_aux, x_kv=x_kv
         )  # Eq. (7) in EDM paper
 
     def inference_forward(

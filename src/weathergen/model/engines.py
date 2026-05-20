@@ -17,6 +17,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.attention import (
+    MultiCrossAttentionHead,
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
@@ -610,6 +611,24 @@ class ForecastingEngine(torch.nn.Module):
                             dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                         )
                     )
+                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
+                if self.cf.get("fe_diffusion_model_conditioning_type") == "cross_attn":
+                    self.fe_blocks.append(
+                        MultiCrossAttentionHead(
+                            dim_embed_q=self.cf.ae_global_dim_embed,
+                            dim_embed_kv=self.cf.ae_global_dim_embed,
+                            num_heads=self.cf.fe_num_heads,
+                            dropout_rate=self.cf.fe_dropout_rate,
+                            with_residual=True,
+                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+                            with_flash=self.cf.with_flash_attention,
+                            norm_type=self.cf.norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
+                            norm_eps=self.cf.norm_eps,
+                            attention_dtype=get_dtype(self.cf.attention_dtype),
+                            is_dit=self.cf.fe_diffusion_model,
+                        )
+                    )
                 # Add MLP block
                 self.fe_blocks.append(
                     MLP(
@@ -649,6 +668,7 @@ class ForecastingEngine(torch.nn.Module):
         noise_emb: torch.Tensor = None,
         ada_ln_aux: torch.Tensor = None,
         coords: torch.Tensor = None,
+        x_kv: torch.Tensor = None,
     ) -> torch.Tensor:
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
         # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
@@ -670,9 +690,11 @@ class ForecastingEngine(torch.nn.Module):
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
+                elif isinstance(block, MultiCrossAttentionHead):
+                    assert x_kv is not None, "x_kv (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                    tokens = checkpoint(block, tokens, x_kv, noise_emb, use_reentrant=False)
                 else:
                     if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
-                        # Assuming ada_ln_aux contains the date_time embedding in this case
                         assert ada_ln_aux is not None, "ada_ln_aux must be provided for diffusion model conditioning"
                         tokens = checkpoint(block, tokens, coords, noise_emb, ada_ln_aux, use_reentrant=False)
                     else:
