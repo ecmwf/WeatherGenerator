@@ -735,7 +735,7 @@ def validate_forecast_policy_and_steps(forecast_cfg: OmegaConf, mode: str):
     forecast_cfg.chunk_size = forecast_cfg.get("chunk_size", forecast_cfg.num_steps)
     assert (
         isinstance(forecast_cfg.chunk_size, int) and forecast_cfg.chunk_size <= 0,
-        f"'{mode}.forecast.fstep_chunk_size' must be a positive integer."
+        f"'{mode}.forecast.fstep_chunk_size' must be a positive integer.",
     )
 
     provide_forecast_policy = (

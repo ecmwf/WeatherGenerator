@@ -190,16 +190,6 @@ class Trainer(TrainerBase):
 
         return target_and_aux_calculators
 
-    """
-    def _init_fcst_chunks(self, mode_cfg):
-        forecast_cfg = mode_cfg.get("forecast", {})
-        rollout_steps = forecast_cfg.get("num_steps", 1)
-        chunk_size = forecast_cfg.get("chunk_size", forecast_cfg.get("fstep_chunk_size", rollout_steps))
-        return [chunk_size] * (rollout_steps // chunk_size) + (
-            [rollout_steps % chunk_size] if rollout_steps % chunk_size else []
-        )
-    """
-
     def _get_output_target_and_auxs(self, mode_cfg, batch):
         output_target_and_auxs = {}
         for loss_name, loss_cfg in mode_cfg.losses.items():
@@ -216,15 +206,6 @@ class Trainer(TrainerBase):
             )
 
         return output_target_and_auxs
-
-    """
-    def _get_fcst_chunks(self, mode_cfg):
-        if mode_cfg is self.test_cfg:
-            return self.fcst_chunks_by_mode["test"]
-        if mode_cfg is self.training_cfg:
-            return self.fcst_chunks_by_mode["training"]
-        return self.fcst_chunks_by_mode["validation"]
-    """
 
     def _get_forecast_chunks(self, forecast_cfg):
         n_full_chunks = forecast_cfg.num_steps // forecast_cfg.chunk_size
