@@ -59,6 +59,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"fe_diffusion_model_conditioning is '{self.conditioning}' "
             f"(got '{self.conditioning_type}')"
         )
+        _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)
+        assert self.conditioning not in _date_time_modes or _offset == 0, (
+            f"forecast.offset must be 0 when fe_diffusion_model_conditioning is "
+            f"'{self.conditioning}' (got offset={_offset})"
+        )
         assert self.conditioning != "forecast" or self.conditioning_type == "cross_attn", (
             f"fe_diffusion_model_conditioning_type must be 'cross_attn' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
