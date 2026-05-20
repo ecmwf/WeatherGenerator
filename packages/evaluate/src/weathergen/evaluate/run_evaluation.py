@@ -216,7 +216,7 @@ def _process_stream(
 
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
-        _logger.info(f"No evaluation config for {run_id} - {stream}. Skipping.")
+        _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
         return run_id, stream, {}
 
     needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
@@ -226,17 +226,17 @@ def _process_stream(
     if (needs_plotting or needs_scoring) and type_ == "zarr":
         available_data = reader.check_availability(stream, mode="evaluation")
 
-        output_data = reader.get_data(
-            stream,
-            fsteps=available_data.fsteps,
-            samples=available_data.samples,
-            channels=available_data.channels,
-            ensemble=available_data.ensemble,
-        )
+        output_data = None
+        if available_data.score_availability:
+            output_data = reader.get_data(
+                stream,
+                fsteps=available_data.fsteps,
+                samples=available_data.samples,
+                channels=available_data.channels,
+                ensemble=available_data.ensemble,
+            )
 
-        _logger.info(
-            f"RUN {run_id} - {stream}: Data loaded once — sharing between plotting and scoring."
-        )
+            _logger.info(f"RUN {run_id} - {stream}: Data loaded successfully.")
 
     # Plotting (pass pre-loaded data)
     if needs_plotting:
@@ -298,7 +298,6 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
-    regions = cfg.evaluation.get("regions", ["global"])
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})
@@ -318,6 +317,9 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
             run["max_workers"] = max_workers
 
         for stream in run.get("streams", {}):
+            regions = cfg.evaluation.get(
+                "regions", run.get("streams", {}).get(stream, {}).get("regions", ["global"])
+            )
             tasks.append(
                 {
                     "run_id": run_id,
@@ -372,8 +374,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     )
 
     # summary plots
-    if scores_dict and cfg.evaluation.get("summary_plots", False):
-        _logger.info("Started creating summary plots...")
+    if scores_dict:
         plot_summary(cfg, scores_dict, summary_dir)
 
 
