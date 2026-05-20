@@ -321,7 +321,9 @@ class ModelBatch:
 
         return self
 
-    def to_device(self, device, include_targets: bool = True, include_sources: bool = True):  # -> ModelBatch
+    def to_device(
+        self, device, include_targets: bool = True, include_sources: bool = True
+    ):  # -> ModelBatch
         """
         Move batch to device
         """

@@ -161,11 +161,11 @@ class Trainer(TrainerBase):
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
-        #self.fcst_chunks_by_mode = {
+        # self.fcst_chunks_by_mode = {
         #    "training": self._init_fcst_chunks(self.training_cfg),
         #    "validation": self._init_fcst_chunks(self.validation_cfg),
         #    "test": self._init_fcst_chunks(self.test_cfg),
-        #}
+        # }
 
         if cf.train_logging.get("track_performance_metrics"):
             self.perf_tracker = ThroughputTracker(
@@ -229,7 +229,9 @@ class Trainer(TrainerBase):
     def _get_forecast_chunks(self, forecast_cfg):
         n_full_chunks = forecast_cfg.num_steps // forecast_cfg.chunk_size
         remainder_fsteps = forecast_cfg.num_steps % forecast_cfg.chunk_size
-        return [forecast_cfg.chunk_size] * n_full_chunks + ([remainder_fsteps] if remainder_fsteps else [])
+        return [forecast_cfg.chunk_size] * n_full_chunks + (
+            [remainder_fsteps] if remainder_fsteps else []
+        )
 
     def _process_validation_chunks(
         self,
@@ -241,7 +243,7 @@ class Trainer(TrainerBase):
         targets_and_auxs,
         preds_full,
     ):
-        #chunks = self._get_fcst_chunks(mode_cfg)
+        # chunks = self._get_fcst_chunks(mode_cfg)
         chunks = self._get_forecast_chunks(mode_cfg.get("forecast", {}))
         source_samples = batch.get_source_samples()
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
@@ -761,7 +763,10 @@ class Trainer(TrainerBase):
                         )
                         if compute_loss and needs_targets_and_aux:
                             targets_and_auxs = {}
-                            for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                            for (
+                                loss_name,
+                                target_aux,
+                            ) in self.target_and_aux_calculators_val.items():
                                 target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                                 targets_and_auxs[loss_name] = target_aux.compute(
                                     self.cf.general.istep,
@@ -949,10 +954,8 @@ class Trainer(TrainerBase):
                 if stage == VAL:
                     if len(avg_loss) == 0:
                         logger.info(
-                            (
-                                f"validation ({self.cf.general.run_id}) : {mini_epoch:03d} : "
-                                "loss disabled"
-                            )
+                            f"validation ({self.cf.general.run_id}) : {mini_epoch:03d} : "
+                            "loss disabled"
                         )
                     else:
                         logger.info(

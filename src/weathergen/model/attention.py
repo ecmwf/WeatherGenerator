@@ -102,9 +102,7 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s)
 
-        qs, ks = apply_rope(
-            qs, ks, coords, self.rope_mode, 1
-        )
+        qs, ks = apply_rope(qs, ks, coords, self.rope_mode, 1)
         if self.rope_post_mod_qk_lnorm:
             qs = self.post_rope_lnorm_q(qs).to(self.dtype)
             ks = self.post_rope_lnorm_k(ks).to(self.dtype)
@@ -302,9 +300,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype).permute([0, 2, 1, 3])
         vs = self.proj_heads_v(x).reshape(s).permute([0, 2, 1, 3])
 
-        qs, ks = apply_rope(
-            qs, ks, coords, self.rope_mode, 1
-        )
+        qs, ks = apply_rope(qs, ks, coords, self.rope_mode, 1)
         if self.rope_post_mod_qk_lnorm:
             qs = self.post_rope_lnorm_q(qs).to(self.dtype)
             ks = self.post_rope_lnorm_k(ks).to(self.dtype)
@@ -621,9 +617,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         ks = self.lnorm_k(self.proj_heads_k(x).reshape(s)).to(self.dtype)
         vs = self.proj_heads_v(x).reshape(s).to(self.dtype)
 
-        qs, ks = apply_rope(
-            qs, ks, coords, self.rope_mode, 2
-        )
+        qs, ks = apply_rope(qs, ks, coords, self.rope_mode, 2)
         if self.rope_post_mod_qk_lnorm:
             qs = self.post_rope_lnorm_q(qs).to(self.dtype)
             ks = self.post_rope_lnorm_k(ks).to(self.dtype)
