@@ -51,6 +51,15 @@ class DiffusionForecastEngine(torch.nn.Module):
             embedding_dim=self.embedding_dim, frequency_embedding_dim=self.frequency_embedding_dim
         )
         self.conditioning = self.cf.fe_diffusion_model_conditioning
+        self.conditioning_type = self.cf.get("fe_diffusion_model_conditioning_type", None)
+
+        _date_time_modes = {"date_time", "date", "time"}
+        assert self.conditioning not in _date_time_modes or self.conditioning_type == "ada_ln", (
+            f"fe_diffusion_model_conditioning_type must be 'ada_ln' when "
+            f"fe_diffusion_model_conditioning is '{self.conditioning}' "
+            f"(got '{self.conditioning_type}')"
+        )
+
         if "date" in self.conditioning or "time" in self.conditioning:
             self.datetime_embedder = DateTimeEncoder(self.conditioning)
 
@@ -213,10 +222,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
 
-        # c (X_t conditioning) is not yet wired into the network blocks — ada_ln_aux
-        # is unsupported in fe_diffusion_model mode. c is passed through Preconditioner
-        # and available for future architectural integration (e.g. concat or cross-attn).
-        ada_ln_aux = c if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"] else None
+        ada_ln_aux = c if self.conditioning_type == "ada_ln" else None
         return c_skip * x + c_out * self.net(
             c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=ada_ln_aux
         )  # Eq. (7) in EDM paper
