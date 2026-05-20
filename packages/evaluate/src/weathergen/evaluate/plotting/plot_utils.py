@@ -768,6 +768,116 @@ def quantile_plot_metric_region(
                     )
 
 
+def psd_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+) -> None:
+    """Create PSD plots for all streams and channels for a given metric and region.
+
+    Follows the same pattern as ``quantile_plot_metric_region``: the PSD
+    curves (frequencies, target PSD, prediction PSD) are stored in
+    ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+
+    Parameters
+    ----------
+    metric : str
+        Metric name (should be ``"psd"``).
+    region : str
+        Region name.
+    runs : dict
+        Run config dict (run_id → config).
+    scores_dict : dict
+        Nested score dict ``{metric: {region: {stream: {run_id: DataArray}}}}``.
+    plotter : object
+        Plotter that has a ``psd_summary_plot`` method (or a generic line plotter).
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        for ch in channels_set:
+            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+                if ch not in np.atleast_1d(data.channel.values):
+                    continue
+
+                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
+
+                if data_ch.isnull().all():
+                    continue
+
+                # Get list of fsteps that have PSD attrs
+                attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
+                if not attr_fsteps:
+                    _logger.warning(
+                        f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping."
+                    )
+                    continue
+
+                label = runs[run_id].get("label", run_id)
+
+                for fstep in attr_fsteps:
+                    # Look up per-fstep, per-channel attrs
+                    fstep_prefix = f"fstep_{fstep}/"
+                    ch_prefix = f"{ch}/"
+
+                    # Try fstep+channel prefix first, then fstep-only
+                    freq_key = None
+                    for candidate in [
+                        f"{fstep_prefix}{ch_prefix}frequencies",
+                        f"{fstep_prefix}frequencies",
+                    ]:
+                        if candidate in data_ch.attrs:
+                            freq_key = candidate
+                            break
+
+                    if freq_key is None:
+                        continue
+
+                    # Derive the other keys from the same prefix pattern
+                    key_prefix = freq_key.replace("frequencies", "")
+                    psd_t_key = f"{key_prefix}psd_target"
+                    psd_p_key = f"{key_prefix}psd_prediction"
+
+                    if psd_t_key not in data_ch.attrs:
+                        continue
+
+                    psd_datasets = [
+                        {
+                            "frequencies": np.array(data_ch.attrs[freq_key]),
+                            "psd_target": np.array(data_ch.attrs[psd_t_key]),
+                            "psd_prediction": np.array(data_ch.attrs[psd_p_key]),
+                            "psd_method": data_ch.attrs.get(
+                                f"{fstep_prefix}psd_method",
+                                data_ch.attrs.get("psd_method", "sht"),
+                            ),
+                        }
+                    ]
+
+                    # Resolve lead time for title
+                    lead_time_str = f"fstep {fstep}"
+                    if "lead_time" in data_ch.coords and "forecast_step" in data_ch.dims:
+                        try:
+                            lt = int(data_ch.coords["lead_time"].sel(forecast_step=fstep).values)
+                            if lt > 0:
+                                lead_time_str = f"{lt}h"
+                        except Exception:
+                            pass
+
+                    _logger.info(
+                        f"Creating PSD plot for {metric} - {region} - {stream} - "
+                        f"{ch} - {lead_time_str}."
+                    )
+                    name = create_filename(
+                        prefix=[metric, region],
+                        middle=[run_id],
+                        suffix=[stream, ch, f"fstep{fstep}"],
+                    )
+                    plotter.psd_plot(psd_datasets, [label], tag=name)
+
+
 def create_filename(
     *,
     prefix: Sequence[str] = (),

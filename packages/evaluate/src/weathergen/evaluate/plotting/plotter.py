@@ -478,6 +478,269 @@ class Plotter:
 
         return name
 
+    # ------------------------------------------------------------------
+    # PSD plots
+    # ------------------------------------------------------------------
+
+    # -- PSD plot annotation helpers (from psd_plots.py) ----------------
+
+    @staticmethod
+    def _psd_add_wavenumbers(ax: plt.Axes) -> None:
+        """Add vertical lines at selected total wavenumbers."""
+        yscale = ax.yaxis.get_scale()
+        ylims = ax.get_ylim()
+        if yscale == "log":
+            ytxt = 10.0 ** (0.85 * (np.log10(ylims[1] / ylims[0])) + np.log10(ylims[0]))
+        else:
+            ytxt = 0.85 * (ylims[1] - ylims[0]) + ylims[0]
+
+        for wvn in (1, 2, 4, 8, 16, 24, 48, 96, 144, 216, 320, 640, 1280, 2560):
+            ax.plot(
+                [wvn / 360.0, wvn / 360.0], ylims,
+                color="black", lw=0.6, scalex=False, scaley=False,
+            )
+            ax.text(wvn / 360.0, ytxt, f"n{wvn}", rotation="vertical", fontsize=6)
+
+    @staticmethod
+    def _psd_add_lengths(ax: plt.Axes, lat_center: float = 0.0) -> None:
+        """Add vertical dashed lines at selected physical length scales (km)."""
+        re = 6.37e6  # earth radius in metres
+        yscale = ax.yaxis.get_scale()
+        ylims = ax.get_ylim()
+        if yscale == "log":
+            ytxt = 10.0 ** (0.05 * (np.log10(ylims[1] / ylims[0])) + np.log10(ylims[0]))
+        else:
+            ytxt = 0.05 * (ylims[1] - ylims[0]) + ylims[0]
+
+        lengths_km = np.array([1.0e4, 3.0e3, 1.0e3, 3.0e2, 1.0e2, 3.0e1, 1.0e1])
+        f_lengths = (
+            2.0 * np.pi * re * np.cos(np.radians(lat_center)) / (1000.0 * lengths_km * 360.0)
+        )
+        for fl, lkm in zip(f_lengths, lengths_km):
+            ax.plot(
+                [fl, fl], ylims,
+                color="black", ls="--", lw=0.6, scalex=False, scaley=False,
+            )
+            ax.text(fl, ytxt, f"{lkm:.0f}km", rotation="vertical", fontsize=6)
+
+    @staticmethod
+    def _psd_add_ideal_slope(
+        ax: plt.Axes, slope: float = -3.0,
+        x_range: tuple[float, float] = (0.01, 0.1), y0: float = 10.0,
+    ) -> None:
+        """Add an idealised slope line on a log-log axes."""
+        xs = np.array(x_range)
+        ys = y0 * np.array([1.0, (xs[1] / xs[0]) ** slope])
+        ax.plot(xs, ys, color="black", lw=2.0, scalex=False, scaley=False)
+        xt = np.sqrt(np.prod(xs))
+        yt = np.sqrt(np.prod(ys))
+        ax.text(xt, yt, f"$k^{{{slope:.0f}}}$", fontsize=10, weight="bold")
+
+    def plot_psd(
+        self,
+        freq: np.ndarray,
+        tar_psd: np.ndarray,
+        pred_psd: np.ndarray,
+        psd_output_dir: Path,
+        varname: str,
+        tag: str = "",
+        region: str = "",
+    ) -> str:
+        """Plot power spectral density: log-log spectra + ratio.
+
+        Parameters
+        ----------
+        freq : np.ndarray
+            Positive frequencies (or wavenumbers).
+        tar_psd : np.ndarray
+            Target PSD values.
+        pred_psd : np.ndarray
+            Prediction PSD values.
+        psd_output_dir : Path
+            Output directory for PSD plots.
+        varname : str
+            Variable / channel name.
+        tag, region : str
+            Filename parts (same convention as histograms / maps).
+
+        Returns
+        -------
+        str
+            Plot name (without extension).
+        """
+        fig, (ax_spec, ax_ratio) = plt.subplots(
+            2, 1, figsize=self.fig_size or (8, 8),
+            gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
+        )
+
+        # Upper panel: log-log spectra
+        ax_spec.loglog(freq, tar_psd, color="black", lw=1.5, label="Target")
+        ax_spec.loglog(freq, pred_psd, color="#00897B", lw=1.5, label="Prediction")
+        ax_spec.set_ylabel("Power")
+        ax_spec.set_title(f"PSD: {self.stream}, {varname}")
+        ax_spec.legend(frameon=False)
+        ax_spec.grid(True, which="both", ls="--", alpha=0.4)
+        ax_spec.set_xlim(1.0e-3, 1.0e1)
+        self._psd_add_wavenumbers(ax_spec)
+        self._psd_add_ideal_slope(ax_spec)
+
+        # Lower panel: ratio
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(tar_psd > 0, pred_psd / tar_psd, np.nan)
+        ax_ratio.semilogx(freq, ratio, color="#00897B", lw=1.2)
+        ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
+        ax_ratio.set_ylabel("Pred / Target")
+        ax_ratio.set_xlabel("Frequency (1/deg)")
+        ax_ratio.set_ylim(0, 2)
+        ax_ratio.set_xlim(1.0e-3, 1.0e1)
+        ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+        self._psd_add_wavenumbers(ax_ratio)
+
+        # Build filename (same pattern as maps / histograms)
+        is_global = str(self.sample) == "all_samples"
+        valid_time = None  # PSD is always aggregated across time
+        parts = [
+            "psd",
+            str(self.run_id),
+            str(tag) if tag else "",
+            str(self.sample),
+            valid_time,
+            str(self.stream),
+            region if region else "",
+            varname,
+            f"{self.fstep:03d}",
+        ]
+        name = "_".join(filter(None, parts))
+
+        fname = psd_output_dir / f"{name}.{self.image_format}"
+        _logger.debug(f"Saving PSD plot to {fname}")
+        fig.savefig(fname, bbox_inches="tight")
+        plt.close(fig)
+
+        return name
+
+    def create_psd_plots(
+        self,
+        target: xr.DataArray,
+        preds: xr.DataArray,
+        variables: list,
+        select: dict,
+        tag: str = "",
+        psd_method: str = "sht",
+        psd_regions: list[str] | None = None,
+        psd_regrid_resolution: float = 1.0,
+        psd_sht_truncation: int | None = None,
+    ) -> list[str]:
+        """Compute and plot PSD for target and prediction.
+
+        Parameters
+        ----------
+        target, preds : xr.DataArray
+            Target / prediction arrays.
+        variables : list
+            List of channel names to process.
+        select : dict
+            Data selection dict (sample, stream, forecast_step).
+        tag : str
+            Filename tag (e.g., ``"preds_ens_0"``).
+        psd_method : str
+            ``"sht"`` or ``"zonal"``.
+        psd_regions : list[str] | None
+            Region names.  ``None`` → use ``self.regions``.
+        psd_regrid_resolution : float
+            Grid spacing for the zonal method.
+        psd_sht_truncation : int | None
+            Spectral truncation for SHT method.
+
+        Returns
+        -------
+        list[str]
+            Names of saved PSD plots.
+        """
+        from weathergen.evaluate.scores.psd import compute_psd_for_field
+
+        self.update_data_selection(select)
+        psd_output_dir = self.get_psd_output_dir()
+        os.makedirs(psd_output_dir, exist_ok=True)
+
+        regions = psd_regions or self.regions
+        plot_names: list[str] = []
+
+        for region in regions:
+            if region != "global":
+                bbox = RegionBoundingBox.from_region_name(region)
+                reg_target = bbox.apply_mask(target)
+                reg_preds = bbox.apply_mask(preds)
+            else:
+                reg_target = target
+                reg_preds = preds
+
+            for var in variables:
+                select_var = self.select | {"channel": var}
+                targ = self.select_from_da(reg_target, select_var).dropna(dim="ipoint")
+                prd = self.select_from_da(reg_preds, select_var).dropna(dim="ipoint")
+
+                if targ.size == 0 or prd.size == 0:
+                    _logger.warning(f"PSD: empty data for {var} in {region}. Skipping.")
+                    continue
+
+                targ_np = targ.values
+                prd_np = prd.values
+
+                # Determine nlat from the grid if available
+                nlat = None
+                if "lat" in targ.coords:
+                    nlat = len(np.unique(targ.coords["lat"].values))
+                elif hasattr(targ, "attrs") and "nlat" in targ.attrs:
+                    nlat = int(targ.attrs["nlat"])
+
+                lats = targ.coords["lat"].values if "lat" in targ.coords else None
+                lons = targ.coords["lon"].values if "lon" in targ.coords else None
+
+                try:
+                    freq_tar, psd_tar = compute_psd_for_field(
+                        data=targ_np,
+                        method=psd_method,
+                        nlat=nlat,
+                        lats=lats,
+                        lons=lons,
+                        lat_range=(-60.0, 60.0),
+                        regrid_resolution=psd_regrid_resolution,
+                        sht_truncation=psd_sht_truncation,
+                    )
+                    freq_prd, psd_prd = compute_psd_for_field(
+                        data=prd_np,
+                        method=psd_method,
+                        nlat=nlat,
+                        lats=lats,
+                        lons=lons,
+                        lat_range=(-60.0, 60.0),
+                        regrid_resolution=psd_regrid_resolution,
+                        sht_truncation=psd_sht_truncation,
+                    )
+                except Exception:
+                    _logger.exception(f"PSD computation failed for {var} in {region}")
+                    continue
+
+                name = self.plot_psd(
+                    freq_tar, psd_tar, psd_prd, psd_output_dir, var,
+                    tag=tag, region=region,
+                )
+                plot_names.append(name)
+
+        self.clean_data_selection()
+        return plot_names
+
+    def get_psd_output_dir(self) -> Path:
+        """Return the output directory path for PSD plots.
+
+        Returns
+        -------
+        Path
+            Resolved directory path: ``<out_plot_basedir>/<stream>/psd``.
+        """
+        return self.out_plot_basedir / self.stream / "psd"
+
     def create_maps_per_sample(
         self,
         data: xr.DataArray,

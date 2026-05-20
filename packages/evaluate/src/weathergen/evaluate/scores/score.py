@@ -16,6 +16,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
+from weathergen.evaluate.scores.psd import compute_psd_score
 from weathergen.evaluate.scores.score_utils import to_list
 
 # from common.io import MockIO
@@ -198,6 +199,7 @@ class Scores:
             "seeps": self.calc_seeps,
             "qq_analysis": self.calc_quantiles,
             "nse": self.calc_nse,
+            "psd": self.calc_psd,
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
@@ -1807,3 +1809,167 @@ class Scores:
         _logger.info(f"Q-Q analysis completed with {len(overall_qq_score.attrs)} attributes")
 
         return overall_qq_score
+
+    def calc_psd(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        psd_method: str = "sht",
+        psd_regrid_resolution: float = 1.0,
+        psd_sht_truncation: int | None = None,
+        lat_range: tuple[float, float] = (-60.0, 60.0),
+    ) -> xr.DataArray:
+        """Compute power spectral density for prediction and ground truth.
+
+        Returns a scalar summary score (log-spectral MSE) and stores the full
+        PSD curves in ``.attrs`` so that ``psd_plot_metric_region`` in the
+        summary-plot phase can produce spectral plots — following the same
+        pattern as ``calc_quantiles`` / ``qq_analysis``.
+
+        Parameters
+        ----------
+        p : xr.DataArray
+            Prediction data.
+        gt : xr.DataArray
+            Ground truth data.
+        psd_method : str
+            ``"sht"`` (default) or ``"zonal"``.
+        psd_regrid_resolution : float
+            Grid spacing for the zonal method (degrees).
+        psd_sht_truncation : int | None
+            Spectral truncation for the SHT method.
+        lat_range : tuple[float, float]
+            Latitude range for the zonal method.
+
+        Returns
+        -------
+        xr.DataArray
+            Scalar score (log-spectral MSE) with PSD data stored in ``.attrs``.
+        """
+
+        if self._agg_dims is None:
+            raise ValueError("Cannot calculate PSD without aggregation dimensions.")
+
+        # PSD expects exactly one spatial aggregation dimension (e.g. "ipoint").
+        if len(self._agg_dims) != 1:
+            raise ValueError(
+                f"PSD expects exactly one spatial aggregation dimension (points), "
+                f"but got agg_dims={self._agg_dims}. Do not flatten over multiple dims."
+            )
+        spatial_dim = self._agg_dims[0]
+        if spatial_dim not in gt.dims:
+            raise ValueError(
+                f"Spatial dimension '{spatial_dim}' not found in data dims {list(gt.dims)}."
+            )
+
+        # The data arriving here has dims like (sample, channel, ipoint).
+        # PSD must be computed per channel (and averaged over samples).
+        # We iterate over all non-spatial dims except the "sample" axis,
+        # which becomes the sample dimension for the SHT.
+        other_dims = [d for d in gt.dims if d != spatial_dim]
+        _logger.debug(
+            f"PSD: spatial_dim={spatial_dim}, other_dims={other_dims}, "
+            f"shape p={dict(zip(p.dims, p.shape))}, gt={dict(zip(gt.dims, gt.shape))}"
+        )
+
+        # Determine grid info from coords (same for all channels/samples)
+        n_points = gt.sizes[spatial_dim]
+        nlat = None
+        lats, lons = None, None
+        if "lat" in gt.coords and "lon" in gt.coords:
+            if gt.coords["lat"].dims == (spatial_dim,) and gt.coords["lon"].dims == (spatial_dim,):
+                lats = gt.coords["lat"].values
+                lons = gt.coords["lon"].values
+                nlat = len(np.unique(lats))
+            else:
+                _logger.warning(
+                    f"PSD: lat/lon coords exist but have unexpected dims "
+                    f"(lat: {gt.coords['lat'].dims}, lon: {gt.coords['lon'].dims}). "
+                    f"Expected ({spatial_dim},)."
+                )
+
+        if nlat is None and lats is None:
+            raise ValueError(
+                "PSD requires grid information. Either provide lat/lon coords on the "
+                f"spatial dimension '{spatial_dim}', or set 'nlat' in the DataArray attrs."
+            )
+        if psd_method == "zonal" and (lats is None or lons is None):
+            raise ValueError(
+                "PSD method 'zonal' requires lat/lon coordinate arrays on the spatial "
+                f"dimension '{spatial_dim}', but they are not available."
+            )
+
+        # Identify batch dimensions (to average PSD over) vs dims to preserve.
+        # Convention: "sample" and "ens" dims are averaged over (flattened into
+        # the batch axis); all other non-spatial dims (e.g. "channel") are preserved.
+        batch_dims = [d for d in other_dims if d in ("sample", "ens")]
+        preserve_dims = [d for d in other_dims if d not in ("sample", "ens")]
+
+        # Compute PSD per slice of the preserved dims (typically per channel).
+        # For each slice, samples form the batch axis for the SHT.
+        if preserve_dims:
+            # Iterate over the cartesian product of preserved dims
+            score_values = {}
+            attrs_per_slice = {}
+            for idx in np.ndindex(*[gt.sizes[d] for d in preserve_dims]):
+                sel = dict(zip(preserve_dims, idx))
+                gt_slice = gt.isel(**sel)  # dims: (sample, ipoint) or (ipoint,)
+                p_slice = p.isel(**sel)
+
+                # Ensure 2-D: (n_batch, n_points) — flatten batch dims into one axis
+                non_spatial = [d for d in gt_slice.dims if d != spatial_dim]
+                if non_spatial:
+                    gt_np = gt_slice.transpose(*non_spatial, spatial_dim).values.reshape(-1, n_points)
+                    p_np = p_slice.transpose(*[d for d in p_slice.dims if d != spatial_dim], spatial_dim).values.reshape(-1, n_points)
+                else:
+                    gt_np = gt_slice.values.reshape(1, -1)
+                    p_np = p_slice.values.reshape(1, -1)
+
+                slice_score, slice_attrs = compute_psd_score(
+                    gt=gt_np, p=p_np, lats=lats, lons=lons, nlat=nlat,
+                    n_points=n_points, psd_method=psd_method,
+                    psd_regrid_resolution=psd_regrid_resolution,
+                    psd_sht_truncation=psd_sht_truncation, lat_range=lat_range,
+                )
+                score_values[idx] = slice_score
+                attrs_per_slice[idx] = slice_attrs
+
+            # Build output DataArray with preserved dims
+            shape = tuple(gt.sizes[d] for d in preserve_dims)
+            score_np = np.array([score_values[idx] for idx in np.ndindex(*shape)]).reshape(shape)
+            coords = {d: gt.coords[d] for d in preserve_dims if d in gt.coords}
+            score = xr.DataArray(score_np, dims=preserve_dims, coords=coords)
+
+            # Store per-channel PSD curves in attrs (keyed by channel coord value)
+            all_attrs = {}
+            for idx in np.ndindex(*shape):
+                sel = dict(zip(preserve_dims, idx))
+                key = "_".join(str(gt.coords[d].values[i]) if d in gt.coords else str(i)
+                              for d, i in sel.items())
+                for k, v in attrs_per_slice[idx].items():
+                    all_attrs[f"{key}/{k}"] = v
+            all_attrs["psd_method"] = psd_method
+            all_attrs["preserve_dims"] = preserve_dims
+            score.attrs.update(all_attrs)
+        else:
+            # No preserved dims — compute single PSD over all data
+            non_spatial = [d for d in gt.dims if d != spatial_dim]
+            if non_spatial:
+                gt_np = gt.transpose(*non_spatial, spatial_dim).values.reshape(-1, n_points)
+                p_np = p.transpose(*[d for d in p.dims if d != spatial_dim], spatial_dim).values.reshape(-1, n_points)
+            else:
+                gt_np = gt.values.reshape(1, -1)
+                p_np = p.values.reshape(1, -1)
+
+            slice_score, slice_attrs = compute_psd_score(
+                gt=gt_np, p=p_np, lats=lats, lons=lons, nlat=nlat,
+                n_points=n_points, psd_method=psd_method,
+                psd_regrid_resolution=psd_regrid_resolution,
+                psd_sht_truncation=psd_sht_truncation, lat_range=lat_range,
+            )
+            score = xr.DataArray(slice_score)
+            score.attrs.update(slice_attrs)
+            score.attrs["psd_method"] = psd_method
+
+        _logger.info(f"PSD analysis completed (score shape={score.shape})")
+        return score

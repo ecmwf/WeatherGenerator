@@ -21,7 +21,14 @@ dependencies = [
     "earthkit-data==0.17.0",
     "earthkit-utils==0.1.2",
     "imageio[ffmpeg]>=2.37.2",
+    "scipy>=1.12",
     ]
+
+[project.optional-dependencies]
+zonal = [
+    "scitools-iris>=3.11",
+    "cf-units",
+]
 
 [dependency-groups]
 dev = [
