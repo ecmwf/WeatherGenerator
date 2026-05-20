@@ -31,8 +31,6 @@ from weathergen.utils.metrics import get_train_metrics_path, read_metrics_file
 _weathergen_timestamp = "weathergen.timestamp"
 _weathergen_reltime = "weathergen.reltime"
 _weathergen_time = "weathergen.time"
-_performance_gpu = "perf.gpu"
-_performance_memory = "perf.memory"
 
 _logger = logging.getLogger(__name__)
 
@@ -65,7 +63,7 @@ class TrainLogger:
         self.cf = cf
         self.path_run = path_run
 
-    def log_metrics(self, stage: Stage, metrics: dict[str, float]) -> None:
+    def log_metrics(self, stage: Stage, metrics: dict[str, float], step: int | None = None) -> None:
         """
         Log metrics to a file.
         For now, just scalar values are expected. There is no check.
@@ -77,6 +75,8 @@ class TrainLogger:
             _weathergen_time: int(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
             "stage": stage,
         }
+        if step is not None:
+            clean_metrics["weathergen.step"] = step
         for key, value in metrics.items():
             v = float(value)
             if math.isnan(v) or math.isinf(v):
@@ -102,8 +102,6 @@ class TrainLogger:
         stddev_all: dict,
         avg_loss: list[float] = None,
         lr: float = None,
-        perf_gpu: float = 0.0,
-        perf_mem: float = 0.0,
     ) -> None:
         """
         Log training or validation data
@@ -114,8 +112,6 @@ class TrainLogger:
             metrics["loss_avg_mean"] = np.nanmean(avg_loss)
             metrics["learning_rate"] = lr
             metrics["num_samples"] = int(samples)
-            metrics[_performance_gpu] = perf_gpu
-            metrics[_performance_memory] = perf_mem
 
         for key, value in losses_all.items():
             metrics[key] = np.nanmean(value)

@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import dataclasses
+import math
 
 import torch
 import torch.nn as nn
@@ -28,6 +29,7 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
+from weathergen.model.positional_encoding import get_rope_mode
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -131,18 +133,23 @@ class EmbeddingEngine(torch.nn.Module):
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
-        # computer scatter index across batch items and input steps
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten()
-        repeat = torch.repeat_interleave
-        scatter_idxs = repeat(
-            torch.ones(len(tok_counts), dtype=torch.int64, device=tok_counts.device), tok_counts
+        # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
+        max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
+        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+            "max number of tokens per cell for positional encoding exceeded."
+            " Increase ae_local_max_tokens_per_cell in config."
+        )
+        # compute scatter index across batch items and input steps
+        tok_counts_flat = batch.tokens_lens.permute([2, 0, 1, 3]).flatten()
+        scatter_idxs = torch.repeat_interleave(
+            torch.ones(len(tok_counts_flat), dtype=torch.int64, device=tok_counts_flat.device),
+            tok_counts_flat,
         )
         scatter_idxs = scatter_idxs.cumsum(0) - 1
 
         # per cell indices into positional encoding
         tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
         pe_idxs = torch.cat([torch.arange(int(c), device=tok_counts.device) for c in tok_counts])
-
         # iterate over all streams and write embedded tokens incrementally to lower peak memory
         offset = 0
         for stream_name in self.stream_names:
@@ -161,6 +168,74 @@ class EmbeddingEngine(torch.nn.Module):
         assert offset == num_tokens, "Embedded token count does not match token lens metadata."
 
         return tokens_all
+
+    def get_pe_idxs_vectorized(self, batch):
+        """
+        Compute per cell indices into positional encoding
+        """
+
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+        rows = rows.expand(tok_counts.shape[0], -1)
+        pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
+
+        return pe_idxs
+
+    def get_scatter_idxs(self, batch):
+        """
+        Compute reordering index so that tokens from different streams but same cell are
+        continguous
+
+        Simple version (reference implementation)
+        """
+
+        dev = batch.get_device()
+        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
+        # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+
+        scatter_idxs = []
+        for i in range(len(tok_counts)):
+            for j in range(tok_counts.shape[1]):
+                if tok_counts[i, j] == 0:
+                    continue
+                # offset from preceding cells
+                offset = tok_counts[:, :j].flatten().sum()
+                # offset from preceding streams in cells
+                offset += tok_counts[:i, j].sum()
+                # scatter idxs is offset and idxs for all tokens in cell for current stream
+                scatter_idxs += [offset[i, j] + torch.arange(tok_counts[i, j], device=dev)]
+
+        scatter_idxs = torch.cat(scatter_idxs).to(torch.int64)
+
+        return scatter_idxs
+
+    def get_scatter_idxs_vectorized(self, batch):
+        """
+        Compute reordering index so that tokens from different streams but same cell are
+        continguous
+
+        Vectorized version
+        """
+
+        dev = batch.get_device()
+        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
+        # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+
+        # partial sums for per cell offsets
+        pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)
+        offset = torch.cat([pad, tok_counts.cumsum(0)])[:-1]
+        offset[:, 1:] += tok_counts.sum(0).cumsum(0)[:-1]
+
+        ranges = torch.arange(tok_counts.max(), device=dev).repeat((tok_counts.numel(), 1))
+        idxs = (offset.flatten() + ranges.transpose(1, 0)).transpose(1, 0)
+        # select idxs[i][:ranges[i]] for each i; vectorized version
+        col_indices = torch.arange(idxs.shape[1], device=dev).unsqueeze(0)
+        valid_mask = col_indices < tok_counts.flatten().unsqueeze(1)
+        scatter_idxs = idxs[valid_mask].to(torch.int64)
+
+        return scatter_idxs
 
 
 class LocalAssimilationEngine(torch.nn.Module):
@@ -185,6 +260,7 @@ class LocalAssimilationEngine(torch.nn.Module):
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
@@ -231,6 +307,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 dropout_rate=self.cf.ae_adapter_dropout_rate,
                 with_flash=self.cf.with_flash_attention,
                 norm_type=self.cf.norm_type,
+                qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                 norm_eps=self.cf.norm_eps,
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
@@ -260,6 +337,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_adapter_dropout_rate,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
@@ -274,6 +352,63 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 cell_lens_c,
             )
         return tokens_global_c
+
+
+class Local2GlobalSumEngine(torch.nn.Module):
+    """Alternative to Local2GlobalAssimilationEngine.
+
+    Instead of cross-attention (Q=learnable query, KV=local tokens), this engine
+    sums local tokens per cell and projects to global dim. Masked cells are filled
+    externally by the encoder using the learnable query + pe_global (unchanged).
+
+    Forward signature matches Local2GlobalAssimilationEngine; tokens_global_c and
+    q_cells_lens_c are unused (masked-cell filling happens in the encoder).
+    """
+
+    name: "Local2GlobalSumEngine"
+
+    def __init__(self, cf: Config) -> None:
+        super(Local2GlobalSumEngine, self).__init__()
+        self.cf = cf
+        self.proj = torch.nn.Linear(cf.ae_local_dim_embed, cf.ae_global_dim_embed, bias=False)
+        ae_adapter_num_blocks = cf.get("ae_adapter_num_blocks", 2)
+        self.mlp_blocks = torch.nn.ModuleList()
+        for _ in range(ae_adapter_num_blocks - 1):
+            self.mlp_blocks.append(
+                MLP(
+                    cf.ae_global_dim_embed,
+                    cf.ae_global_dim_embed,
+                    with_residual=True,
+                    dropout_rate=cf.ae_adapter_dropout_rate,
+                    norm_type=cf.norm_type,
+                    norm_eps=cf.mlp_norm_eps,
+                )
+            )
+
+    def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
+        # tokens_c:        (total_local_tokens, local_dim)
+        # tokens_global_c: (num_unmasked_cells, num_queries, global_dim) — unused
+        # cell_lens_c:     (num_unmasked_cells + 1,) with 0 at index 0
+        num_cells = cell_lens_c.shape[0] - 1
+        cell_counts = cell_lens_c[1:]
+
+        # scatter-sum local tokens into per-cell summaries
+        cell_idx = torch.repeat_interleave(
+            torch.arange(num_cells, device=tokens_c.device, dtype=torch.long), cell_counts
+        )
+        cell_sums = torch.zeros(
+            num_cells, tokens_c.shape[-1], device=tokens_c.device, dtype=tokens_c.dtype
+        )
+        cell_sums.scatter_add_(0, cell_idx.unsqueeze(1).expand_as(tokens_c), tokens_c)
+
+        # project to global dim and match (num_cells, num_queries, global_dim)
+        num_queries = tokens_global_c.shape[1]
+        out = self.proj(cell_sums).unsqueeze(1).expand(-1, num_queries, -1)
+
+        for blk in self.mlp_blocks:
+            out = blk(out)
+
+        return out
 
 
 class QueryAggregationEngine(torch.nn.Module):
@@ -292,6 +427,7 @@ class QueryAggregationEngine(torch.nn.Module):
         super(QueryAggregationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+        rope_mode = get_rope_mode(self.cf)
 
         self.ae_aggregation_blocks = torch.nn.ModuleList()
 
@@ -309,9 +445,10 @@ class QueryAggregationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_mode=rope_mode,
                     )
                 )
             else:
@@ -326,6 +463,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                     )
@@ -366,6 +504,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
         super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+        rope_mode = get_rope_mode(self.cf)
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
@@ -383,9 +522,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_mode=rope_mode,
                     )
                 )
             else:
@@ -399,9 +539,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        with_2d_rope=self.cf.get("rope_2D", False),
+                        rope_mode=rope_mode,
                     )
                 )
             # MLP block
@@ -428,6 +569,17 @@ class GlobalAssimilationEngine(torch.nn.Module):
         return tokens
 
 
+class IdentityEngine(torch.nn.Module):
+    """Identity engine that passes tokens through unchanged."""
+
+    def __init__(self):
+        super().__init__()
+        self.fe_blocks = torch.nn.ModuleList()
+
+    def forward(self, tokens, *args, **kwargs):
+        return tokens
+
+
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
@@ -441,13 +593,14 @@ class ForecastingEngine(torch.nn.Module):
         super(ForecastingEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+        rope_mode = get_rope_mode(self.cf)
         self.fe_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
                 # Alternate between global and local attention
-                if (i % global_rate == 0) or i + 1 == self.cf.ae_global_num_blocks:
+                if (i % global_rate == 0) or i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
                         MultiSelfAttentionHead(
                             self.cf.ae_global_dim_embed,
@@ -456,10 +609,11 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_2d_rope=self.cf.get("rope_2D", False),
+                            rope_mode=rope_mode,
                         )
                     )
                 else:
@@ -473,10 +627,11 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            with_2d_rope=self.cf.get("rope_2D", False),
+                            rope_mode=rope_mode,
                         )
                     )
                 # Add MLP block
@@ -622,6 +777,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     softcap=self.softcap,
                     dim_aux=self.dim_coord_in,
                     norm_eps=self.cf.norm_eps,
@@ -639,6 +795,7 @@ class TargetPredictionEngineClassic(nn.Module):
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         dim_aux=self.dim_coord_in,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
@@ -734,6 +891,7 @@ class TargetPredictionEngine(nn.Module):
             "dropout_rate": 0.1,  # Assuming dropout_rate is 0.1
             "with_flash": self.cf.with_flash_attention,
             "norm_type": self.cf.norm_type,
+            "qk_norm_type": self.cf.qk_norm_type,
             "softcap": self.softcap,
             "dim_aux": self.dim_coord_in,
             "norm_eps": self.cf.norm_eps,
@@ -917,6 +1075,7 @@ class LatentPredictionHeadTransformer(nn.Module):
                     with_qk_lnorm=with_qk_lnorm,
                     with_flash=self.global_cf.with_flash_attention,
                     norm_type=self.global_cf.norm_type,
+                    qk_norm_type=self.global_cf.qk_norm_type,
                     # dim_aux=dim_aux,
                     norm_eps=self.global_cf.norm_eps,
                     attention_dtype=get_dtype(self.global_cf.attention_dtype),
@@ -996,13 +1155,31 @@ class LatentPredictionHeadMLP(nn.Module):
         return torch.cat(outputs, dim=1)
 
 
+class EfficientBilinear(torch.nn.Module):
+    def __init__(self, in_dim_lhs, in_dim_rhs, out, bias=False):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(out, in_dim_lhs, in_dim_rhs))
+        self.bias = nn.Parameter(torch.zeros(out)) if bias else 0.0
+        self.total_in = in_dim_lhs * in_dim_rhs
+
+    def forward(self, x_lhs, x_rhs):
+        return torch.einsum("bi,oij,bj->bo", x_lhs, self.weight, x_rhs) + self.bias
+
+    def reset_parameters(self):
+        if isinstance(self.weight, nn.Parameter):
+            bound = math.sqrt(2.0 / self.total_in)
+            nn.init.uniform_(self.weight, -bound, bound)
+        if isinstance(self.bias, nn.Parameter):
+            nn.init.zeros_(self.bias)
+
+
 class BilinearDecoder(nn.Module):
     def __init__(self, stream_name, coord_dim, latent_dim, out_dim):
         super().__init__()
 
         self.name = f"BilinearDecoder_{stream_name}"
         self.latent_dim = latent_dim
-        self.bilin = nn.Bilinear(coord_dim, latent_dim, out_dim, bias=False)
+        self.bilin = EfficientBilinear(coord_dim, latent_dim, out_dim)
 
     def forward(self, coords_md, latent_nd, tcs_lens_n1):
         """

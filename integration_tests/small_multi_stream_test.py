@@ -24,6 +24,7 @@ from pathlib import Path
 import omegaconf
 import pytest
 
+from weathergen.common.config import _get_shared_wg_path
 from weathergen.evaluate.run_evaluation import evaluate_from_config
 from weathergen.run_train import main
 from weathergen.utils.metrics import get_train_metrics_path
@@ -47,8 +48,9 @@ WEATHERGEN_HOME = Path(__file__).parent.parent
 @pytest.fixture()
 def setup(test_run_id):
     logger.info(f"setup fixture with {test_run_id}")
-    shutil.rmtree(WEATHERGEN_HOME / "results" / test_run_id, ignore_errors=True)
-    shutil.rmtree(WEATHERGEN_HOME / "models" / test_run_id, ignore_errors=True)
+
+    shutil.rmtree(_get_shared_wg_path() / "results" / test_run_id, ignore_errors=True)
+    shutil.rmtree(_get_shared_wg_path() / "models" / test_run_id, ignore_errors=True)
     yield
     logger.info("end fixture")
 
@@ -66,7 +68,7 @@ def test_train_multi_stream(setup, test_run_id):
             test_run_id,
         ]
     )
-   
+
     infer_multi_stream(test_run_id)
     evaluate_multi_stream_results(test_run_id)
     assert_metrics_file_exists(test_run_id)
@@ -81,22 +83,12 @@ def infer_multi_stream(run_id):
     main(
         [
             "inference",
-            "-start",
-            "2021-10-10",
-            "-end",
-            "2022-10-11",
-            "--samples",
-            "10",
             "--mini-epoch",
             "0",
             "--from-run-id",
             run_id,
             "--run-id",
             run_id,
-            "--streams-output",
-            "ERA5",
-            "SurfaceCombined",
-            "NPPATMS",
             "--config",
             f"{WEATHERGEN_HOME}/integration_tests/small_multi_stream.yaml",
         ]
@@ -164,12 +156,12 @@ def evaluate_multi_stream_results(run_id):
             },
         }
     )
-    evaluate_from_config(cfg, None, None)
+    evaluate_from_config(cfg, None)
 
 
 def load_metrics(run_id):
     """Helper function to load metrics"""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id)
+    file_path = get_train_metrics_path(base_path=_get_shared_wg_path() / "results" / run_id, run_id=run_id)
     if not file_path.is_file():
         raise FileNotFoundError(f"Metrics file not found for run_id: {run_id}")
     with open(file_path) as f:
@@ -179,7 +171,7 @@ def load_metrics(run_id):
 
 def assert_metrics_file_exists(run_id):
     """Test that the metrics file exists and can be loaded."""
-    file_path = get_train_metrics_path(base_path=WEATHERGEN_HOME / "results" / run_id, run_id=run_id)
+    file_path = get_train_metrics_path(base_path=_get_shared_wg_path() / "results" / run_id, run_id=run_id)
     assert file_path.is_file(), f"Metrics file does not exist for run_id: {run_id}"
     metrics = load_metrics(run_id)
     logger.info(f"Loaded metrics for run_id: {run_id}: {metrics}")

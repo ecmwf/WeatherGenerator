@@ -9,7 +9,7 @@ import xarray as xr
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.reshape import Regridder, find_pl
+from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_points
 
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
@@ -55,6 +55,7 @@ class NetcdfParser(CfParser):
         self,
         fstep_iterator_results: iter,
         ref_time: np.datetime64,
+        **kwargs,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -72,7 +73,9 @@ class NetcdfParser(CfParser):
             if result is None:
                 continue
 
-            result = result.as_xarray().squeeze()
+            # result is already a materialized xarray DataArray (built in the worker).
+            if not isinstance(result, xr.DataArray):
+                result = result.as_xarray().squeeze()
             if "channel" not in result.indexes:
                 result = result.expand_dims("channel")
             result = result.sel(channel=self.channels)
@@ -83,6 +86,11 @@ class NetcdfParser(CfParser):
         _logger.info(f"Saved sample data to {self.output_format} in {self.output_dir}.")
 
         if da_fs:
+            if len(da_fs) > 1:
+                assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
+                    "Grid points between forecast steps are not consistent."
+                    "Check that inference was not performed with masking"
+                )
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
@@ -107,7 +115,8 @@ class NetcdfParser(CfParser):
 
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
         out_fname = (
-            Path(self.output_dir) / f"{self.data_type}_{frt}_{self.run_id}.{self.file_extension}"
+            Path(self.output_dir)
+            / f"{self.data_type}_{frt}_{self.run_id}_{self.stream}.{self.file_extension}"
         )
         return out_fname
 
@@ -306,7 +315,9 @@ class NetcdfParser(CfParser):
             ds["forecast_reference_time"].encoding.update(time_encoding)
 
         if "forecast_period" in ds.coords:
-            ds["forecast_period"].encoding.update({"coordinates": "forecast_reference_time"})
+            ds["forecast_period"].attrs.update(
+                {"coordinates": "forecast_reference_time", "dtype": "timedelta64[ns]"}
+            )
 
         return ds
 
@@ -362,7 +373,7 @@ class NetcdfParser(CfParser):
         variables = {}
         dims_cfg = self.config.get("dimensions", {})
         ds, ds_attrs = self._assign_dim_attrs(ds, dims_cfg)
-        dims_list = ["pressure", "latitude", "longitude", "valid_time"]
+        dims_list = ["pressure", "valid_time", "latitude", "longitude"]
         for var_name, da in ds.data_vars.items():
             mapped_info = self.mapping.get(var_name, {})
             mapped_name = mapped_info.get("var", var_name)
@@ -449,11 +460,17 @@ class NetcdfParser(CfParser):
         coord_map = self.config.get("coordinates", {}).get(var_cfg.get("level_type"), {})
 
         for coord, new_name in coord_map.items():
-            coords[new_name] = (
-                ds.coords[coord].dims,
-                ds.coords[coord].values,
-                attrs[new_name],
-            )
+            try:
+                coords[new_name] = (
+                    ds.coords[coord].dims,
+                    ds.coords[coord].values,
+                    attrs[new_name],
+                )
+            except KeyError:
+                _logger.warning(
+                    f"Coordinate '{coord}' will be skipped for "
+                    f"variable '{var_cfg.get('var', 'unknown')}'."
+                )
 
         return coords
 
@@ -504,7 +521,7 @@ class NetcdfParser(CfParser):
             xarray Dataset with CF conventions added to attributes.
         """
         # ds = ds.copy()
-        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id} using stream {self.stream}"
+        ds.attrs["title"] = f"WeatherGenerator Output for {self.run_id}"
         ds.attrs["institution"] = "WeatherGenerator Project"
         ds.attrs["source"] = "WeatherGenerator v0.0"
         ds.attrs["history"] = (
@@ -512,8 +529,7 @@ class NetcdfParser(CfParser):
             + np.datetime_as_string(np.datetime64("now"), unit="s")
         )
         ds.attrs["Conventions"] = "CF-1.12"
-        # drop stream now it's in title
-        ds = ds.drop_vars("stream")
+
         return ds
 
     def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
