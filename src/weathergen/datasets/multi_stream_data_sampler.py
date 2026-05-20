@@ -12,7 +12,6 @@ import pathlib
 from collections.abc import Sequence
 
 import numpy as np
-import omegaconf
 import torch
 from omegaconf import OmegaConf
 
@@ -227,6 +226,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 filename = dict(anemoi_config)
                 # Prepend datapath to each dataset
                 from anemoi.datasets import add_dataset_path
+
                 for path in cf.data_paths:
                     add_dataset_path(path)
                 ds_type = stream_info["type"]
@@ -246,7 +246,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         filename = fname
                     else:
                         filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
-    
+
                         if not any(filename.exists() for filename in filenames):  # see above
                             msg = (
                                 f"Did not find input data for {stream_info['type']} "
