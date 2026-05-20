@@ -1818,6 +1818,7 @@ class Scores:
         psd_regrid_resolution: float = 1.0,
         psd_sht_truncation: int | None = None,
         lat_range: tuple[float, float] = (-60.0, 60.0),
+        grid_type: str = "octahedral",
     ) -> xr.DataArray:
         """Compute power spectral density for prediction and ground truth.
 
@@ -1930,6 +1931,7 @@ class Scores:
                     n_points=n_points, psd_method=psd_method,
                     psd_regrid_resolution=psd_regrid_resolution,
                     psd_sht_truncation=psd_sht_truncation, lat_range=lat_range,
+                    grid_type=grid_type,
                 )
                 score_values[idx] = slice_score
                 attrs_per_slice[idx] = slice_attrs
@@ -1966,6 +1968,7 @@ class Scores:
                 n_points=n_points, psd_method=psd_method,
                 psd_regrid_resolution=psd_regrid_resolution,
                 psd_sht_truncation=psd_sht_truncation, lat_range=lat_range,
+                grid_type=grid_type,
             )
             score = xr.DataArray(slice_score)
             score.attrs.update(slice_attrs)

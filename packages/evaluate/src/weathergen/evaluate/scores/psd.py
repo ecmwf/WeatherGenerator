@@ -511,6 +511,7 @@ def compute_psd_score(
     psd_regrid_resolution: float = 1.0,
     psd_sht_truncation: int | None = None,
     lat_range: tuple[float, float] = (-60.0, 60.0),
+    grid_type: str = "octahedral",
 ) -> tuple[float, dict]:
     """Compute PSD for a pair of 2-D fields and return a scalar score + curves.
 
@@ -545,8 +546,9 @@ def compute_psd_score(
         Dict with keys ``"frequencies"``, ``"psd_target"``, ``"psd_prediction"``
         (lists for JSON serialization).
     """
-    # Drop NaN columns (masked grid points)
+    # Handle NaN grid points (e.g. from regional masking).
     valid_mask = ~np.isnan(gt).all(axis=0)
+    n_valid = valid_mask.sum()
     gt = gt[:, valid_mask]
     p = p[:, valid_mask]
 
@@ -555,16 +557,35 @@ def compute_psd_score(
     lons_valid = lons[valid_mask] if lons is not None and len(lons) == n_points else lons
     nlat_valid = len(np.unique(lats_valid)) if lats_valid is not None else nlat
 
+    # SHT requires the structurally-complete grid (all points present).
+    # If the data is a regional subset, skip with a warning.
+    if psd_method == "sht":
+        if grid_type == "octahedral":
+            expected_pts = sum(_octahedral_lons_per_lat(nlat_valid))
+        elif grid_type == "regular":
+            expected_pts = sum(_regular_lons_per_lat(nlat_valid))
+        else:
+            expected_pts = None  # cannot validate
+        actual_pts = gt.shape[-1]
+        if expected_pts is not None and actual_pts != expected_pts:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"PSD (SHT): grid point mismatch ({actual_pts} vs expected {expected_pts} "
+                f"for grid_type={grid_type!r}, nlat={nlat_valid}). SHT scores are only "
+                f"available for the full (global/unmasked) grid. Skipping this region."
+            )
+            return np.nan, {}
+
     try:
         freq_gt, psd_gt = compute_psd_for_field(
             data=gt, method=psd_method, nlat=nlat_valid, lats=lats_valid, lons=lons_valid,
             lat_range=lat_range, regrid_resolution=psd_regrid_resolution,
-            sht_truncation=psd_sht_truncation,
+            sht_truncation=psd_sht_truncation, grid_type=grid_type,
         )
         freq_p, psd_p = compute_psd_for_field(
             data=p, method=psd_method, nlat=nlat_valid, lats=lats_valid, lons=lons_valid,
             lat_range=lat_range, regrid_resolution=psd_regrid_resolution,
-            sht_truncation=psd_sht_truncation,
+            sht_truncation=psd_sht_truncation, grid_type=grid_type,
         )
     except Exception:
         import logging

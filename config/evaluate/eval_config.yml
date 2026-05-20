@@ -34,7 +34,8 @@ evaluation:
   - mae
   - psd:
         psd_method: "sht"                    # "sht" (SHT-based) or "zonal" (iris FFT)
-        psd_regrid_resolution: 1.0             # degrees, only for zonal method
+        psd_regrid_resolution: 1.0           # degrees, only for zonal method
+        grid_type: "octahedral"              # "octahedral" (default), "regular", "reduced".
   regions: ["global", "nhem"]
   summary_plots : true
   ratio_plots : false

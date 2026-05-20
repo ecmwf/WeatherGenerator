@@ -717,7 +717,8 @@ class LinePlots:
                 color=c, lw=1.5, label=label,
             )
         ax_spec.set_ylabel("Power")
-        ax_spec.set_title("PSD summary")
+        psd_method = psd_datasets[0].get("psd_method", "sht")
+        ax_spec.set_title(f"PSD summary (psd_{psd_method})")
         ax_spec.legend(frameon=False, fontsize=7)
         ax_spec.grid(True, which="both", ls="--", alpha=0.4)
 

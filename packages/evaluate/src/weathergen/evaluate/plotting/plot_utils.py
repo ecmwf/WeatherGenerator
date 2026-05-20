@@ -870,8 +870,9 @@ def psd_plot_metric_region(
                         f"Creating PSD plot for {metric} - {region} - {stream} - "
                         f"{ch} - {lead_time_str}."
                     )
+                    method_tag = psd_datasets[0].get("psd_method", "sht")
                     name = create_filename(
-                        prefix=[metric, region],
+                        prefix=[metric, method_tag, region],
                         middle=[run_id],
                         suffix=[stream, ch, f"fstep{fstep}"],
                     )
