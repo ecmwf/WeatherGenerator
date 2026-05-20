@@ -229,6 +229,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 from anemoi.datasets import add_dataset_path
                 for path in cf.data_paths:
                     add_dataset_path(path)
+                ds_type = stream_info["type"]
+                if is_root():
+                    logger.info(
+                        f"Opening dataset with type: {ds_type}"
+                        + f" from stream config {stream_info['name']}.",
+                    )
+                ds = dataset(filename=filename, **kwargs)
+                streams_datasets[stream_info["name"]] += [ds]
             else:
                 for fname in stream_info["filenames"]:
                     fname = pathlib.Path(fname)
@@ -250,16 +258,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         # so we need to choose here.
                         filename = filenames[0]
 
-            ds_type = stream_info["type"]
-            if is_root():
-                logger.info(
-                    f"Opening dataset with type: {ds_type}"
-                    + f" from stream config {stream_info['name']}."
-                    + f" Resolved filename: {filename}",
-                )
-            ds = dataset(filename=filename, **kwargs)
-
-            streams_datasets[stream_info["name"]] += [ds]
+                    ds_type = stream_info["type"]
+                    if is_root():
+                        logger.info(
+                            f"Opening dataset with type: {ds_type}"
+                            + f" from stream config {stream_info['name']}.",
+                        )
+                    ds = dataset(filename=filename, **kwargs)
+                    streams_datasets[stream_info["name"]] += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
