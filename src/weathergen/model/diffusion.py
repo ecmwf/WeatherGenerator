@@ -59,6 +59,20 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"fe_diffusion_model_conditioning is '{self.conditioning}' "
             f"(got '{self.conditioning_type}')"
         )
+        assert self.conditioning != "forecast" or self.conditioning_type == "concat", (
+            f"fe_diffusion_model_conditioning_type must be 'concat' when "
+            f"fe_diffusion_model_conditioning is 'forecast' "
+            f"(got '{self.conditioning_type}')"
+        )
+
+        if self.conditioning_type == "concat":
+            D = self.cf.ae_global_dim_embed
+            self.cond_proj = torch.nn.Linear(2 * D, D, bias=False)
+            # Warm-start: pass the noisy input through unchanged, ignore conditioning initially.
+            # The network can then gradually learn to use the conditioning signal.
+            with torch.no_grad():
+                self.cond_proj.weight[:, :D] = torch.eye(D)
+                self.cond_proj.weight[:, D:] = 0.0
 
         if "date" in self.conditioning or "time" in self.conditioning:
             self.datetime_embedder = DateTimeEncoder(self.conditioning)
@@ -222,9 +236,17 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
 
+        # Build network input depending on conditioning type.
+        # "concat":  channel-concatenate enc(X_t) with the preconditioned noisy input and
+        #            project back to D via a learned linear layer (GenCast-style).
+        # "ada_ln":  pass conditioning through ada_ln_aux into DiT AdaLN blocks.
+        net_input = c_in * x
+        if self.conditioning_type == "concat" and c is not None:
+            net_input = self.cond_proj(torch.cat([net_input, c], dim=-1))
+
         ada_ln_aux = c if self.conditioning_type == "ada_ln" else None
         return c_skip * x + c_out * self.net(
-            c_in * x, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=ada_ln_aux
+            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=ada_ln_aux
         )  # Eq. (7) in EDM paper
 
     def inference_forward(
@@ -250,11 +272,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             torch.Tensor: Generated sample of shape (1, num_healpix_cells, ae_global_dim_embed)
         """
 
-        # Extract conditioning from meta_info (same as training_forward)
+        # Extract conditioning (mirrors training_forward).
         c = None
-
         if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
+        elif self.cf.fe_diffusion_model_conditioning == "forecast":
+            # cur_token = enc(X_t) stored in forward() before routing to inference_forward
+            c = self.cur_token
 
 
         # Sample pure noise (assuming single batch element for now)
