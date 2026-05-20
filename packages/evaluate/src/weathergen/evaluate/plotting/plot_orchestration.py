@@ -507,6 +507,7 @@ def _plot_all_samples(
 
     plotter.clean_data_selection()
 
+
 def plot_data(
     reader: Reader,
     stream: str,
