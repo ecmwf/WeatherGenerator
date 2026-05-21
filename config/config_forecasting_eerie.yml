@@ -66,8 +66,6 @@ forecast_att_dense_rate: 1.0
 
 healpix_level: 5
 
-rope_2D: False
-
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
