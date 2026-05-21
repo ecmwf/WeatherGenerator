@@ -14,9 +14,10 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
+from weathergen.readers_extra.registry import get_extra_reader
+
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
@@ -32,7 +33,6 @@ from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     get_tokens_lens,
 )
-from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 
@@ -293,7 +293,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # Use a rank-independent RNG so that all FSDP ranks generate the same
         # num_forecast_steps schedule; self.worker_rng is rank-specific (seeded from
         # data_loader_rng_seed which includes the rank factor).
-
         forecast_seed = self._advance_rng_seed(self._base_rng_seed, worker_id, self.mini_epoch)
         self.rank_synchronized_rng = np.random.default_rng(forecast_seed)
 
