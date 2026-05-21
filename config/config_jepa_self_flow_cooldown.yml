@@ -10,14 +10,13 @@
 general:
 
   # mutable parameters
-  istep: 0
   rank: ???
   world_size: ???
 
 # config for training
 training_config:
 
-  num_mini_epochs: 4
+  num_mini_epochs: 32
   samples_per_mini_epoch: 4096
 
   target_input:
@@ -32,10 +31,10 @@ training_config:
         method: "geodesic_disk"
         # Noise mask config (which cells get high noise, always random)
         noise_mask_config:
-          rate: 0.3 # percentage of cells receiving the lower noise time (s)
-          hl_mask: 4
+          rate: 0.1 # percentage of cells receiving the lower noise time (s)
+          hl_mask: 3
         # Noise schedule bounds
-        noise_schedule: "variable_covariance_linear_information"
+        noise_schedule: "cosine"
         t_min: 0.01
         t_max: 0.15
 

@@ -132,8 +132,10 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.geoinfo_idx = self.select_geoinfo_channels(ds)
             self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
         else:
-            self.geoinfo_channels = stream_info.get("geoinfo_channels")
-            self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
+            self.geoinfo_idx = self.select_geoinfo_channels(ds)
+            self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
+            # self.geoinfo_channels = stream_info.get("geoinfo_channels")
+            # self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
 
         # set geoinfo normalization statistics
         if len(self.geoinfo_idx) > 0:

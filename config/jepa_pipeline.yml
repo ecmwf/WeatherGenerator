@@ -24,28 +24,20 @@ stages:
   # Stage 1: JEPA pre-training with EMA teacher + deep SSL
   - name: pretrain
     command: train
-    base-config: ./config/config_jepa_self_flow.yml
-    config: ./config/config_jepa_self_flow.yml
+    base-config: ./config/config_jepa_self_flow_multi_data.yml
+    config: ./config/config_jepa_self_flow_multi_data.yml
     options: []
     chain: 2
-    nodes: 1
+    nodes: 2
 
   # Stage 1.1: JEPA pre-training with EMA teacher + deep SSL
   - name: pretrain-cooldown
-    command: train
-    base-config: ./config/config_jepa_self_flow.yml
-    config: ./config/config_jepa_self_flow.yml
+    command: train-continue
+    from: pretrain
+    config: ./config/config_jepa_self_flow_cooldown.yml
     options: []
     chain: 1
-    nodes: 1
-
-  # Stage 2: Masking-based finetuning (freezes encoder)
-  - name: finetune
-    command: train-continue
-    from: pretrain-cooldown
-    config: ./config/config_jepa_finetuning.yml
-    chain: 1
-    nodes: 1
+    nodes: 2
 
   # Stage 3: Forecasting finetuning (freezes encoder)
   - name: finetune-forecast
@@ -55,10 +47,3 @@ stages:
     chain: 3
     nodes: 1
 
-  # Stage 4: Forecasting finetuning (freezes encoder)
-  - name: finetune-forecast-long
-    command: train-continue
-    from: finetune-forecast
-    config: ./config/config_jepa_forecast_last_stage.yml
-    chain: 2
-    nodes: 1

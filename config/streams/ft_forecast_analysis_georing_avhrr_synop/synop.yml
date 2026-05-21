@@ -9,8 +9,6 @@ SurfaceCombined :
   filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
   loss_weight : 1.0
   diagnostic: True
-  masking_rate : 0.6
-  masking_rate_none : 0.05
   token_size : 64
   tokenize_spacetime : True
   max_num_targets: -1

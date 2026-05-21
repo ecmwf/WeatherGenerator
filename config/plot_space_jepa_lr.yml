@@ -1,0 +1,32 @@
+train:
+  plot:
+    ju4t5mo9-pretrain:
+      slurm_id: 0
+      description: "Space JEPA previous"
+    o1gchykd-pretrain:
+      slurm_id: 0
+      description: "Space JEPA previous"
+    # vvmprn2j-pretrain:
+    #   slurm_id: 0
+    #   description: "Space JEPA longer training lr=1e-4"
+    # g3mqvfl0-pretrain:
+    #   slurm_id: 0
+    #   description: "Space JEPA longer training lr=7e-5"
+    # f41lnpxo-pretrain:
+    #   slurm_id: 0
+    #   description: "Space JEPA longer training lr=5e-5"
+    # tbyrqf7k-pretrain:
+    #   slurm_id: 0
+    #   description: "Space JEPA longer training lr=3e-5"
+    # fydspoa2-pretrain:
+    #   slurm_id: 0
+    #   description: "Space JEPA longer training lr=1e-5"
+    c9bgfa31-pretrain:
+      slurm_id: 0
+      description: "Space JEPA fix register fix reduction"
+    fgtc6md2-pretrain:
+      slurm_id: 0
+      description: "Space JEPA ERA5 + GEO H512"
+    b2iq8rvw-pretrain:
+      slurm_id: 0
+      description: "Space JEPA ERA5 + GEO H512 (no near IR channels)"
