@@ -344,7 +344,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             initargs=(fname_zarr,),
         ) as pool:
             samples_written = 0
-            
+
             processed_samples = []
 
             for batch_idx in range(n_batches):
