@@ -2,7 +2,7 @@
 # NB. global options apply to all run_ids 
 
 #global_plotting_options:
-#  regions: ["europe", "global"]
+#  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 #  animation_format: "gif" #options: "mp4", "gif"
 #  dpi_val : 300
@@ -36,7 +36,8 @@ evaluation:
         psd_method: "sht"                    # "sht" (SHT-based) or "fft" (regrid FFT)
         psd_regrid_resolution: 1.0           # degrees, only for fft method
         grid_type: "octahedral"              # "octahedral" (default), "regular", "reduced".
-  regions: ["global", "nhem"]
+  metrics  : ["rmse", "mae"]
+  # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
   summary_plots : true
   ratio_plots : false
   heat_maps : false
@@ -54,6 +55,7 @@ evaluation:
 
 default_streams:
   ERA5:
+    regions: ["global"]
     channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
     evaluation:
       forecast_step: "all"
@@ -69,6 +71,7 @@ default_streams:
       plot_histograms: true
       plot_animations: true
   CERRA:
+    regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"] #, "blah"]
     evaluation:
       forecast_step: "all"

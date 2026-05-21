@@ -100,13 +100,14 @@ class LossPhysical(LossModuleBase):
         decay_factor = list(timestep_weight_config.values())[0]["decay_factor"]
         return weights_timestep_fct(len_forecast_steps, decay_factor)
 
-    def _get_location_weights(self, stream_info, target_coords):
+    def _get_location_weights(self, stream_info, target_coords, substep_masks):
         location_weight_type = stream_info.get("location_weight", None)
         if location_weight_type is None:
-            return None
+            return [None for _ in substep_masks]
+
+        target_coords = target_coords.to(self.device, non_blocking=True)
         weights_locations_fct = getattr(loss_fns, location_weight_type)
-        weights_locations = weights_locations_fct(target_coords)
-        weights_locations = weights_locations.to(device=self.device, non_blocking=True)
+        weights_locations = [weights_locations_fct(target_coords[mask]) for mask in substep_masks]
 
         return weights_locations
 
@@ -132,7 +133,7 @@ class LossPhysical(LossModuleBase):
         pred: torch.Tensor,
         substep_masks: list[torch.Tensor],
         weights_channels: torch.Tensor,
-        weights_locations: torch.Tensor,
+        weights_locations: list[torch.Tensor],
     ):
         """
         Compute loss for given loss function
@@ -142,11 +143,15 @@ class LossPhysical(LossModuleBase):
         losses_chs = torch.zeros(target.shape[-1], device=target.device, dtype=torch.float32)
 
         ctr_substeps = 0
-        for mask_t in substep_masks:
-            assert mask_t.sum() == len(weights_locations) if weights_locations is not None else True
+        for i_t, mask_t in enumerate(substep_masks):
+            assert (
+                mask_t.sum() == len(weights_locations[i_t])
+                if weights_locations[i_t] is not None
+                else True
+            )
 
             loss, loss_chs = loss_fct(
-                target[mask_t], pred[:, mask_t], weights_channels, weights_locations
+                target[mask_t], pred[:, mask_t], weights_channels, weights_locations[i_t]
             )
 
             # accumulate loss
@@ -261,9 +266,16 @@ class LossPhysical(LossModuleBase):
                     assert len(target_idx) == 1
                     target_idx = target_idx[0]
 
+                    # current target data
+                    target = targets_batch[target_idx]
+                    target_times = targets_times_batch[target_idx]
+
+                    # get masks for sub-time steps
+                    substep_masks = self._get_substep_masks(stream_info, timestep_idx, target_times)
+
                     # get weights for locations
                     weights_locations = self._get_location_weights(
-                        stream_info, targets_coords_batch[target_idx]
+                        stream_info, targets_coords_batch[target_idx], substep_masks
                     )
 
                     # loss_st_corr: loss for give source-target correspondence
@@ -273,9 +285,6 @@ class LossPhysical(LossModuleBase):
                         # skip is loss is not computed for this sample
                         if loss_fct_name not in pred_params.global_params["loss"]:
                             continue
-
-                        target = targets_batch[target_idx]
-                        target_times = targets_times_batch[target_idx]
 
                         # spoofed inputs are masked in the output calculations
                         is_spoof = targets_is_spoof[target_idx]
@@ -291,11 +300,6 @@ class LossPhysical(LossModuleBase):
                         # expected shape of pred is [ensemble_size, num_samples, num_channels].
                         pred = pred.reshape([pred.shape[0], *target.shape])
                         assert pred.shape[1] > 0
-
-                        # get masks for sub-time steps
-                        substep_masks = self._get_substep_masks(
-                            stream_info, timestep_idx, target_times
-                        )
 
                         losses_all[stream_name][str(timestep_idx)][loss_fct_name] = defaultdict(
                             dict
