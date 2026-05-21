@@ -25,7 +25,7 @@ dependencies = [
     ]
 
 [project.optional-dependencies]
-zonal = [
+fft = [
     "scitools-iris>=3.11",
     "cf-units",
 ]

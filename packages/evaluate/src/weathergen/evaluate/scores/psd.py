@@ -13,10 +13,14 @@ Provides two PSD computation paths:
 
 - **Path A – SHT-based PSD** (``method="sht"``):
   Spherical Harmonic Transform on unstructured grids (octahedral, reduced
-  Gaussian, regular lat-lon).  Ported from ``spectral_transforms.py`` to pure
-  numpy using Legendre helpers from ``spectral_helpers.py``.
+  Gaussian, regular lat-lon).  Ported from anemoi.models ``spectral_transforms.py`` to pure
+  numpy using Legendre helpers from anemoi.models ``spectral_helpers.py``.
+  [anemoi.models.spectral_transforms] 
+  https://github.com/ecmwf/anemoi-core/blob/main/models/src/anemoi/models/layers/spectral_transforms.py
+  [anemoi.models.spectral_helpers] 
+  https://github.com/ecmwf/anemoi-core/blob/main/models/src/anemoi/models/layers/spectral_helpers.py
 
-- **Path B – Zonal FFT PSD** (``method="zonal"``):
+- **Path B – FFT PSD** (``method="fft"``):
   1-D zonal FFT along the longitude dimension on a regular lat-lon grid.
   Absorbs the functions previously in ``example_extras/power_spectra/psd_calc.py``.
 """
@@ -25,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import numpy as np
+from scipy.interpolate import griddata
 
 _logger = logging.getLogger(__name__)
 
@@ -108,7 +113,7 @@ class SphericalHarmonicTransform:
         # Pre-multiply by quadrature weights  → shape (m, l, lat)
         self.weight = np.einsum("mlk,k->mlk", pct, weight)
 
-    # -- internal FFT helpers -----------------------------------------------
+    # internal FFT helpers
 
     def _rfft_regular(self, x: np.ndarray) -> np.ndarray:
         """Batched real FFT for a *regular* grid.
@@ -145,7 +150,7 @@ class SphericalHarmonicTransform:
             )
         return out
 
-    # -- transform ---------------------------------------------------
+    # transform 
 
     def transform(self, x: np.ndarray) -> np.ndarray:
         """Compute the SHT.
@@ -271,89 +276,80 @@ def sht_psd(
 
 
 # ---------------------------------------------------------------------------
-# Zonal FFT PSD (absorbed from psd_calc.py)
+# FFT PSD (absorbed from psd_calc.py)
 # ---------------------------------------------------------------------------
 
 
-class ZonalPSD:
-    """Zonal power spectral density via 1-D FFT along the longitude dimension.
+def _fft_psd_calc(ht: np.ndarray) -> np.ndarray:
+    """Return the PSD for positive non-zero frequencies of an even-length signal.
 
-    This class absorbs the functionality previously in
-    ``example_extras/power_spectra/psd_calc.py``.
+    Assumes *ht* has an even number of points.
+
+    Parameters
+    ----------
+    ht : np.ndarray
+        1-D real-valued signal (one latitude ring).
+
+    Returns
+    -------
+    np.ndarray
+        PSD for positive frequencies, length ``n // 2``.
     """
-
-    @staticmethod
-    def psd_1d(ht: np.ndarray) -> np.ndarray:
-        """Return the PSD for positive non-zero frequencies of an even-length signal.
-
-        Parameters
-        ----------
-        ht : np.ndarray
-            1-D real-valued signal (one latitude ring).
-
-        Returns
-        -------
-        np.ndarray
-            PSD for positive frequencies, length ``n // 2``.
-        """
-        n = len(ht)
-        hf = np.fft.rfft(ht, norm="forward")
-        power = np.abs(hf[1 : round(n / 2 + 1)]) ** 2
-        power *= 2.0  # compensate for positive frequencies only
-        return power
-
-    @staticmethod
-    def positive_frequencies(npoints: int, spacing_deg: float = 1.0) -> np.ndarray:
-        """Return the positive frequencies for a signal of *npoints* evenly spaced points.
-
-        Parameters
-        ----------
-        npoints : int
-            Number of equally-spaced longitude points.
-        spacing_deg : float
-            Grid spacing in degrees.  Default is ``360 / npoints``.
-
-        Returns
-        -------
-        np.ndarray
-            Positive frequencies, length ``npoints // 2``.
-        """
-        freq = np.fft.fftfreq(npoints, d=spacing_deg)
-        return np.abs(freq[1 : round(npoints / 2 + 1)])
-
-    @classmethod
-    def compute(
-        cls,
-        field_2d: np.ndarray,
-    ) -> np.ndarray:
-        """Compute the zonal PSD averaged over all latitude rows.
-
-        Parameters
-        ----------
-        field_2d : np.ndarray
-            2-D array of shape ``(nlat, nlon)``.
-
-        Returns
-        -------
-        np.ndarray
-            PSD of shape ``(nlon // 2,)``.
-        """
-        nlat, nlon = field_2d.shape
-        psd_accum = np.zeros(nlon // 2)
-        for row in field_2d:
-            psd_accum += cls.psd_1d(row)
-        psd_accum /= nlat
-        return psd_accum
+    n = len(ht)
+    hf = np.fft.rfft(ht, norm="forward")
+    power = np.abs(hf[1 : round(n / 2 + 1)]) ** 2
+    power *= 2.0  # compensate for positive frequencies only
+    return power
 
 
-def zonal_psd(
+def _cubepsd(field_2d: np.ndarray) -> np.ndarray:
+    """Compute PSD averaged over all latitude rows.
+
+    Parameters
+    ----------
+    field_2d : np.ndarray
+        2-D array of shape ``(nlat, nlon)``.
+
+    Returns
+    -------
+    np.ndarray
+        PSD of shape ``(nlon // 2,)``.
+    """
+    nlat, nlon = field_2d.shape
+    field_psd = np.zeros(nlon // 2)
+    for row in field_2d:
+        field_psd += _fft_psd_calc(row)
+    field_psd /= nlat
+    return field_psd
+
+
+def _calcposfreq(npoints: int, spacing_deg: float = 1.0) -> np.ndarray:
+    """Return the positive frequencies for a signal of *npoints* evenly spaced points.
+
+    Parameters
+    ----------
+    npoints : int
+        Number of equally-spaced longitude points.
+    spacing_deg : float
+        Grid spacing in degrees.
+
+    Returns
+    -------
+    np.ndarray
+        Positive frequencies, length ``npoints // 2``.
+    """
+    freq = np.fft.fftfreq(npoints, d=spacing_deg)
+    return np.abs(freq[1 : round(npoints / 2 + 1)])
+
+
+def fft_psd(
     data: np.ndarray,
     lats: np.ndarray,
     lons: np.ndarray,
     lat_range: tuple[float, float] = (-60.0, 60.0),
     regrid_resolution: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute zonal PSD using 1-D FFT along the longitude dimension.
+    """Compute PSD using 1-D FFT along the longitude dimension.
 
     For unstructured grids (where lats/lons are per-point coordinates rather
     than regular axis arrays), the data is first regridded to a regular lat-lon
@@ -380,7 +376,6 @@ def zonal_psd(
         Power spectral density averaged over samples and latitude rows,
         shape ``(nfreq,)``.
     """
-    from scipy.interpolate import griddata
 
     # Ensure 2-D: (n_samples, n_points)
     if data.ndim == 1:
@@ -424,13 +419,12 @@ def zonal_psd(
     # Compute PSD per sample and average
     psds = []
     for s in range(data_3d.shape[0]):
-        psds.append(ZonalPSD.compute(data_3d[s]))
-    psd = np.mean(psds, axis=0)
+        psds.append(_cubepsd(data_3d[s]))
+    psd_result = np.mean(psds, axis=0)
 
     spacing = 360.0 / nlon_sub if nlon_sub > 0 else regrid_resolution
-    frequencies = ZonalPSD.positive_frequencies(nlon_sub, spacing_deg=spacing)
-
-    return frequencies, psd
+    frequencies = _calcposfreq(nlon_sub, spacing_deg=spacing)
+    return frequencies, psd_result
 
 
 # ---------------------------------------------------------------------------
@@ -454,17 +448,17 @@ def compute_psd_for_field(
     Parameters
     ----------
     data : np.ndarray
-        Spatial field.  Shape depends on the method (see ``sht_psd`` / ``zonal_psd``).
+        Spatial field.  Shape depends on the method (see ``sht_psd`` / ``fft_psd``).
     method : str
-        ``"sht"`` for SHT-based PSD, ``"zonal"`` for zonal FFT PSD.
+        ``"sht"`` for SHT-based PSD, ``"fft"`` for FFT PSD.
     nlat : int | None
         Number of latitudes (required for SHT method).
     lats, lons : np.ndarray | None
-        Latitude / longitude coordinate arrays (required for zonal method).
+        Latitude / longitude coordinate arrays (required for fft method).
     lat_range : tuple[float, float]
-        Latitude bounds for the zonal method.
+        Latitude bounds for the fft method.
     regrid_resolution : float
-        Grid spacing in degrees for the zonal method.
+        Grid spacing in degrees for the fft method.
     sht_truncation : int | None
         Spectral truncation for SHT.
     grid_type : str
@@ -473,7 +467,7 @@ def compute_psd_for_field(
     Returns
     -------
     x_values : np.ndarray
-        Wavenumbers (SHT) or positive frequencies (zonal).
+        Wavenumbers (SHT) or positive frequencies (fft).
     psd : np.ndarray
         Power spectral density.
     """
@@ -486,10 +480,10 @@ def compute_psd_for_field(
             truncation=sht_truncation,
             grid_type=grid_type,
         )
-    elif method == "zonal":
+    elif method == "fft":
         if lats is None or lons is None:
-            raise ValueError("lats and lons are required for method='zonal'")
-        return zonal_psd(
+            raise ValueError("lats and lons are required for method='fft'")
+        return fft_psd(
             data=data,
             lats=lats,
             lons=lons,
@@ -497,7 +491,7 @@ def compute_psd_for_field(
             regrid_resolution=regrid_resolution,
         )
     else:
-        raise ValueError(f"Unknown PSD method: {method!r}. Use 'sht' or 'zonal'.")
+        raise ValueError(f"Unknown PSD method: {method!r}. Use 'sht' or 'fft'.")
 
 
 def compute_psd_score(
@@ -530,13 +524,13 @@ def compute_psd_score(
     n_points : int
         Original number of spatial points (before NaN masking).
     psd_method : str
-        ``"sht"`` or ``"zonal"``.
+        ``"sht"`` or ``"fft"``.
     psd_regrid_resolution : float
-        Grid spacing for zonal method.
+        Grid spacing for fft method.
     psd_sht_truncation : int | None
         Spectral truncation for SHT.
     lat_range : tuple[float, float]
-        Latitude bounds for zonal method.
+        Latitude bounds for fft method.
 
     Returns
     -------
@@ -568,8 +562,7 @@ def compute_psd_score(
             expected_pts = None  # cannot validate
         actual_pts = gt.shape[-1]
         if expected_pts is not None and actual_pts != expected_pts:
-            import logging
-            logging.getLogger(__name__).warning(
+            _logger.warning(
                 f"PSD (SHT): grid point mismatch ({actual_pts} vs expected {expected_pts} "
                 f"for grid_type={grid_type!r}, nlat={nlat_valid}). SHT scores are only "
                 f"available for the full (global/unmasked) grid. Skipping this region."
@@ -588,8 +581,7 @@ def compute_psd_score(
             sht_truncation=psd_sht_truncation, grid_type=grid_type,
         )
     except Exception:
-        import logging
-        logging.getLogger(__name__).exception("PSD computation failed, returning NaN.")
+        _logger.exception("PSD computation failed, returning NaN.")
         return np.nan, {}
 
     # Scalar summary: mean squared error of log10 PSD

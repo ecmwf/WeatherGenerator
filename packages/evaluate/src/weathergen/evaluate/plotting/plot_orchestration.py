@@ -480,11 +480,10 @@ def _plot_all_samples(
 ) -> None:
     """Plot histograms across all samples for a single fstep.
 
-    Unlike per-sample plots, these aggregate all samples together.
+    Unlike per-sample histograms, these aggregate all samples together.
     The output filename uses 'global' instead of a sample id and omits the timestep.
     """
-    has_work = (plot_histograms is True or plot_histograms == "across-samples")
-    if not has_work:
+    if not (plot_histograms is True or plot_histograms == "across-samples"):
         return
 
     matplotlib.use("Agg")
@@ -498,15 +497,14 @@ def _plot_all_samples(
         preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
         preds_name = "_".join(filter(None, ["preds", preds_tag]))
 
-        if plot_histograms is True or plot_histograms == "across-samples":
-            plotter.create_histograms(
-                tars,
-                preds_ens,
-                plot_chs,
-                data_selection,
-                preds_name,
-                ranges=maps_config,
-            )
+        plotter.create_histograms(
+            tars,
+            preds_ens,
+            plot_chs,
+            data_selection,
+            preds_name,
+            ranges=maps_config,
+        )
 
     plotter.clean_data_selection()
 
@@ -791,8 +789,13 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
     for region in regions:
         for metric in metrics:
-            if eval_opt.get("summary_plots", False) and metric != "psd":
-                plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+            if eval_opt.get("summary_plots", False):
+                if metric == "psd":
+                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                elif metric == "qq_analysis":
+                    quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
+                else:
+                    plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("ratio_plots", False):
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("heat_maps", False):
@@ -801,7 +804,4 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
-            if metric == "qq_analysis":
-                quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
-            if metric == "psd":
-                psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                
