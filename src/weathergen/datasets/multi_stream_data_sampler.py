@@ -484,7 +484,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         output_tokens: list,
         output_mask,
         input_mask,
-        input_base_idx: TIndex = None,
     ) -> StreamData:
         """
         Return one batch of data
@@ -500,10 +499,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             output_mask : mask for output/prediction/target
             input_mask : mask for network input (can be source or target)
-            input_base_idx: Override time index for the input section's time-window
-                lookup. When None, falls back to base_idx. Pass a shifted index
-                (e.g. base_idx + output_offset) together with future source data
-                to make source_tokens_cells encode a future timestep.
 
         Returns:
             StreamData with source and targets masked according to view_meta
@@ -520,7 +515,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         stream_data = self._build_stream_data_input(
             modes,
             stream_data,
-            input_base_idx if input_base_idx is not None else base_idx,
+            base_idx,
             stream_info,
             num_steps_input,
             input_data,

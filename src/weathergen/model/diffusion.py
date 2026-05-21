@@ -83,8 +83,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
         self._fixed_noise_level: float | None = None
-        self._pending_target_tokens: torch.Tensor | None = None
-        self._last_noise_level_rn: float | None = None
 
         self._noise = None
 
@@ -194,8 +192,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = tokens          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
         if self.training:
-            self._last_noise_level_rn = meta_info["ERA5"].params["noise_level_rn"]
-            eta = torch.tensor([self._last_noise_level_rn], device=tokens.device)
+            eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
         else:
             # During validation, use fixed noise level (default: 0.0 = mean of noise distribution)
             noise_level = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0

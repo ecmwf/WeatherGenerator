@@ -96,6 +96,7 @@ class LossLatentDiffusion(LossModuleBase):
 
         pred_tokens_all = [pl["latent_state"].z_pre_norm for pl in preds.latent if pl.get("latent_state") is not None]
         target_tokens_all = [latent["diffusion_latent"] for latent in targets.latent if latent.get("diffusion_latent") is not None]
+        assert len(pred_tokens_all) == len(target_tokens_all), "Mismatch in number of forecast steps between predictions and targets."
 
         eta = torch.tensor(
             [targets.aux_outputs["noise_level_rn"]], device=self.device, dtype=torch.float32

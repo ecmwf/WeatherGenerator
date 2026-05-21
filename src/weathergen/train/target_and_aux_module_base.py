@@ -69,9 +69,6 @@ class TargetAndAuxModuleBase:
     def reset(self):
         pass
 
-    def pre_compute(self, istep, source_batch, target_batch, model_params, model, **kwargs) -> None:
-        pass
-
     def update_state_pre_backward(self, istep, batch, model, **kwargs) -> None:
         pass
 

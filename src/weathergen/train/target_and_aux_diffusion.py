@@ -21,7 +21,6 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
 
         self.is_model_sharded = is_model_sharded
         self._fixed_noise_level: float | None = None
-        self._pending_tokens: torch.Tensor | None = None
         # Build a name → param map once
         self.src_params = dict(self.encoder.named_parameters())
 
@@ -48,9 +47,6 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         if self.is_model_sharded:
             self.encoder.reshard()
 
-    def pre_compute(self, istep, source_batch, target_batch, model_params, model, **kwargs) -> None:
-        pass
-
     def compute(
         self,
         istep: int,
@@ -63,15 +59,17 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         # During validation (model in eval mode), use fixed noise level
         # so that sigma = exp(eta * p_std + p_mean) is deterministic
         if model.training:
-            noise_level_rn = model.forecast_engine._last_noise_level_rn
+            noise_level_rn = (
+                batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
+            )  # TODO: adjust for multiple streams
         else:
             noise_level_rn = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0
 
-        # Encode X_t (the diffusion target) directly with the frozen encoder.
-        # batch here is the target batch, which contains X_t for offset=0.
+        # TODO: check if there are scenarios where the encoder needs to be set to eval
         with torch.no_grad():
-            self.encoder.encoder.eval()
-            tokens, _ = self.encoder.encoder(model_params=model_params, batch=batch)
+            self.encoder.encoder.eval()  # NOTE: might be redundant
+            tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
+        # NOTE: must not set to train afterwards unless it was already in train
 
         output_idxs = batch.get_output_idxs()
         assert len(output_idxs) > 0
