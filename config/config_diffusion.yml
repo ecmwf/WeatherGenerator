@@ -186,7 +186,7 @@ training_config:
   training_mode: ["masking","student_teacher"]
 
   num_mini_epochs: 128
-  samples_per_mini_epoch: 128
+  samples_per_mini_epoch: 4096
   shuffle: True
  
   start_date: 1979-01-01T00:00
@@ -244,6 +244,15 @@ training_config:
       }
     }
 
+  target_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      masking_strategy_config: {diffusion_rn: True},
+      num_steps_input: 1,
+      num_samples: 1,
+      }
+    }
+
   forecast :
       time_step: 06:00:00
       num_steps: 1
@@ -282,7 +291,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: False
+  validate_before_training: True
 
 
 # test config; full test config is merge of validation and test config
