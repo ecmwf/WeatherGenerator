@@ -180,6 +180,97 @@ class SphericalHarmonicTransform:
         return rl + 1j * im
 
 
+class InverseSphericalHarmonicTransform:
+    """Inverse Spherical Harmonic Transform in pure numpy.
+
+    Reconstructs a spatial field from spectral coefficients (l, m).
+    Mirrors the ``InverseSphericalHarmonicTransform`` from ``spectral_helpers.py``
+    in anemoi.models but operates on numpy arrays.
+
+    Parameters
+    ----------
+    lons_per_lat : list[int]
+        Number of longitude points on each latitude ring (pole to pole).
+    truncation : int
+        Maximum total wavenumber.
+    """
+
+    def __init__(self, lons_per_lat: list[int], truncation: int) -> None:
+        self.lons_per_lat = lons_per_lat
+        self.nlat = len(lons_per_lat)
+        self.truncation = truncation
+        self.n_grid_points = sum(lons_per_lat)
+        self._is_regular = len(set(lons_per_lat)) == 1
+
+        # Gaussian latitudes (no quadrature weights needed for inverse)
+        theta, _ = _legendre_gauss_weights(self.nlat)
+        theta = np.flip(np.arccos(theta))
+
+        # Associated Legendre polynomials with inverse=True
+        self.pct = _legpoly(truncation, truncation, np.cos(theta), inverse=True)
+
+    def _irfft_regular(self, x: np.ndarray) -> np.ndarray:
+        """Inverse FFT for a regular grid.
+
+        Parameters
+        ----------
+        x : np.ndarray, complex, shape ``(..., nlat, M)``
+
+        Returns
+        -------
+        np.ndarray, real, shape ``(..., grid)``
+        """
+        nlon = self.lons_per_lat[0]
+        spatial = np.fft.irfft(x, n=nlon, norm="forward")  # (..., nlat, nlon)
+        return spatial.reshape(*spatial.shape[:-2], self.n_grid_points)
+
+    def _irfft_reduced(self, x: np.ndarray) -> np.ndarray:
+        """Per-ring inverse FFT for a reduced grid.
+
+        Parameters
+        ----------
+        x : np.ndarray, complex, shape ``(..., nlat, M)``
+
+        Returns
+        -------
+        np.ndarray, real, shape ``(..., grid)``
+        """
+        lead_shape = x.shape[:-2]
+        out = np.zeros((*lead_shape, self.n_grid_points), dtype=np.float64)
+        offset = 0
+        for i, nlon in enumerate(self.lons_per_lat):
+            ring = np.fft.irfft(x[..., i, :], n=nlon, norm="forward")
+            out[..., offset : offset + nlon] = ring
+            offset += nlon
+        return out
+
+    def transform(self, coeffs: np.ndarray) -> np.ndarray:
+        """Compute the inverse SHT.
+
+        Parameters
+        ----------
+        coeffs : np.ndarray, complex, shape ``(..., L, M)``
+
+        Returns
+        -------
+        np.ndarray, real, shape ``(..., grid)``
+        """
+        # Inverse Legendre transform: (..., l, m) × (m, l, k) → (..., k, m)
+        real_part = coeffs.real
+        imag_part = coeffs.imag
+
+        rl = np.einsum("...lm,mlk->...km", real_part, self.pct)
+        im = np.einsum("...lm,mlk->...km", imag_part, self.pct)
+
+        x_fourier = rl + 1j * im  # (..., nlat, M)
+
+        # Inverse FFT per ring
+        if self._is_regular:
+            return self._irfft_regular(x_fourier)
+        else:
+            return self._irfft_reduced(x_fourier)
+
+
 # ---------------------------------------------------------------------------
 # Grid helpers for building lons_per_lat
 # ---------------------------------------------------------------------------
