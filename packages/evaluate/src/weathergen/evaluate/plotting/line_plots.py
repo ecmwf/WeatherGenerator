@@ -678,6 +678,8 @@ class LinePlots:
         psd_datasets: list[dict],
         labels: list[str],
         tag: str = "",
+        variable: str = "",
+        forecast_step: str = "",
     ) -> None:
         """Create a PSD summary plot overlaying multiple runs.
 
@@ -722,7 +724,12 @@ class LinePlots:
             )
         ax_spec.set_ylabel("Power")
         psd_method = psd_datasets[0].get("psd_method", "sht")
-        ax_spec.set_title(f"PSD summary (psd_{psd_method})")
+        title_parts = [f"PSD ({psd_method})"]
+        if variable:
+            title_parts.append(variable)
+        if forecast_step:
+            title_parts.append(f"step {forecast_step}")
+        ax_spec.set_title(" – ".join(title_parts))
         ax_spec.legend(frameon=False, fontsize=7)
         ax_spec.grid(True, which="both", ls="--", alpha=0.4)
 

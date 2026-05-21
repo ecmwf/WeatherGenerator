@@ -832,7 +832,10 @@ def psd_plot_metric_region(
                         middle=[run_id],
                         suffix=[stream, ch, f"fstep{fstep}"],
                     )
-                    plotter.psd_plot(psd_datasets, [label], tag=name)
+                    plotter.psd_plot(
+                        psd_datasets, [label], tag=name,
+                        variable=ch, forecast_step=str(fstep),
+                    )
 
 
 def create_filename(
