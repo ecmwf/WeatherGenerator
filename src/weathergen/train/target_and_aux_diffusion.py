@@ -49,21 +49,7 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
             self.encoder.reshard()
 
     def pre_compute(self, istep, source_batch, target_batch, model_params, model, **kwargs) -> None:
-        """
-        Encode the target batch (whose source_tokens_cells holds X_{t+1} in
-        diffusion_forecast mode) before model.forward() so that training_forward
-        can noise X_{t+1} and condition on X_t.
-
-        Stores encoded tokens in:
-          - self._pending_tokens   → reused by compute() to skip a second encoder pass
-          - source_batch.samples[0].meta_info["ERA5"].params["diffusion_target_tokens"]
-            → flows to DiffusionForecastEngine.training_forward via model.forward's meta_info
-        """
-        with torch.no_grad():
-            self.encoder.encoder.eval()
-            tokens, _ = self.encoder.encoder(model_params=model_params, batch=target_batch)
-        self._pending_tokens = tokens
-        source_batch.samples[0].meta_info["ERA5"].params["diffusion_target_tokens"] = tokens
+        pass
 
     def compute(
         self,
@@ -76,23 +62,16 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
     ) -> tuple[Any, Any]:
         # During validation (model in eval mode), use fixed noise level
         # so that sigma = exp(eta * p_std + p_mean) is deterministic
-
         if model.training:
-            noise_level_rn = (
-                batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
-            )  # TODO: adjust for multiple streams
+            noise_level_rn = model.forecast_engine._last_noise_level_rn
         else:
             noise_level_rn = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0
 
-        # Reuse tokens from pre_compute when available (avoids a second encoder pass).
-        # Falls back to encoding the batch directly (e.g. during validation).
-        if self._pending_tokens is not None:
-            tokens = self._pending_tokens
-            self._pending_tokens = None
-        else:
-            with torch.no_grad():
-                self.encoder.encoder.eval()  # NOTE: might be redundant
-                tokens, _ = self.encoder.encoder(model_params=model_params, batch=batch)
+        # Encode X_t (the diffusion target) directly with the frozen encoder.
+        # batch here is the target batch, which contains X_t for offset=0.
+        with torch.no_grad():
+            self.encoder.encoder.eval()
+            tokens, _ = self.encoder.encoder(model_params=model_params, batch=batch)
 
         output_idxs = batch.get_output_idxs()
         assert len(output_idxs) > 0

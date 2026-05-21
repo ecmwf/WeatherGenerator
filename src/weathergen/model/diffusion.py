@@ -64,7 +64,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"forecast.offset must be 0 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got offset={_offset})"
         )
-        assert self.conditioning != "forecast" or self.conditioning_type == "cross_attn", (
+        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn"}, (
             f"fe_diffusion_model_conditioning_type must be 'cross_attn' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
             f"(got '{self.conditioning_type}')"
@@ -83,6 +83,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
         self._fixed_noise_level: float | None = None
+        self._pending_target_tokens: torch.Tensor | None = None
+        self._last_noise_level_rn: float | None = None
 
         self._noise = None
 
@@ -178,20 +180,22 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self.cur_token = tokens.detach()
 
+        # y is always the target to denoise (set by DiffusionLatentTargetEncoder.pre_compute)
+        y = meta_info["ERA5"].params.get("diffusion_target_tokens")
+        assert y is not None, (
+            "diffusion_target_tokens not found in meta_info — "
+            "DiffusionLatentTargetEncoder.pre_compute must be called before training_forward"
+        )
+
         c = None
         if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
-            y = meta_info["ERA5"].params.get("diffusion_target_tokens")
         elif self.cf.fe_diffusion_model_conditioning == "forecast":
-            y = meta_info["ERA5"].params.get("diffusion_target_tokens")
-            c = tokens          # X_t as conditioning
-        else:
-            # Unconditional: denoise the current tokens as an autoencoder
-            y = tokens
-            c = None
+            c = tokens          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
         if self.training:
-            eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
+            self._last_noise_level_rn = meta_info["ERA5"].params["noise_level_rn"]
+            eta = torch.tensor([self._last_noise_level_rn], device=tokens.device)
         else:
             # During validation, use fixed noise level (default: 0.0 = mean of noise distribution)
             noise_level = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0

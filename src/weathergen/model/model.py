@@ -728,8 +728,16 @@ class Model(torch.nn.Module):
 
         # recover batch dimension and separate input_steps
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
-        # collapse along input step dimension
-        tokens = tokens.reshape(shape).sum(axis=1)
+        tokens_multi = tokens.reshape(shape)
+
+        if self.cf.get("fe_diffusion_model", False):
+            # X_t (last step) is the diffusion denoising target; X_{t-1} is the conditioning context.
+            tokens_xt = tokens_multi[:, -1]
+            batch.samples[0].meta_info["ERA5"].params["diffusion_target_tokens"] = tokens_xt
+            self.forecast_engine._pending_target_tokens = tokens_xt
+            tokens = tokens_multi[:, -2]
+        else:
+            tokens = tokens_multi.sum(axis=1)
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)

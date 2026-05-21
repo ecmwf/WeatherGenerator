@@ -650,12 +650,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if "student_teacher" in mode or "latent_loss" in mode:
             source_select += ["network_input"]
             target_select += ["network_input"]
-        if "diffusion_forecast" in mode:
-            # Like student_teacher but target samples encode X_{t+1} instead of X_t.
-            # _build_stream_data is called with output_data as input so source_tokens_cells
-            # holds the future state; DiffusionLatentTargetEncoder then encodes X_{t+1}.
-            source_select += ["network_input", "target_coords"]
-            target_select += ["network_input"]
         # remove duplicates
         source_select, target_select = list(set(source_select)), list(set(target_select))
         if len(source_select) == 0 or len(target_select) == 0:
@@ -718,46 +712,19 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             for tidx, target_mask in enumerate(target_masks.masks):
                 # depending on the mode, the the streamdata obj to have the target mask applied to
                 # the inputs. Hence the target mask is also the source mask here.
-                if "diffusion_forecast" in mode:
-                    # Shift the input window forward by output_offset steps so that
-                    # source_tokens_cells encodes X_{t+1} rather than X_t.
-                    # Collect X_{t+1} as SOURCE (not reusing output_data which uses target
-                    # channels/normalization — source and target channel sets differ).
-                    step_delta = (self.time_step * self.output_offset) // self.step_timedelta
-                    future_input_data = [
-                        collect_datasources(stream_ds, idx + step_delta, "source", self.rng)
-                    ]
-                    future_input_tokens = self.tokenizer.get_tokens_windows(
-                        stream_info, future_input_data, True
-                    )
-                    sdata = self._build_stream_data(
-                        target_select,
-                        idx,
-                        num_forecast_steps,
-                        stream_info,
-                        1,
-                        future_input_data,
-                        output_data,
-                        future_input_tokens,
-                        output_tokens,
-                        output_mask=target_mask,
-                        input_mask=target_mask,
-                        input_base_idx=idx + step_delta,
-                    )
-                else:
-                    sdata = self._build_stream_data(
-                        target_select,
-                        idx,
-                        num_forecast_steps,
-                        stream_info,
-                        target_masks.metadata[tidx].params.get("num_steps_input", 1),
-                        input_data,
-                        output_data,
-                        input_tokens,
-                        output_tokens,
-                        output_mask=target_mask,
-                        input_mask=target_mask,
-                    )
+                sdata = self._build_stream_data(
+                    target_select,
+                    idx,
+                    num_forecast_steps,
+                    stream_info,
+                    target_masks.metadata[tidx].params.get("num_steps_input", 1),
+                    input_data,
+                    output_data,
+                    input_tokens,
+                    output_tokens,
+                    output_mask=target_mask,
+                    input_mask=target_mask,
+                )
                 target_metadata = target_masks.metadata[tidx]
 
                 # Get first target step's times (using self.output_offset as the first output step index)
