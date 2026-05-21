@@ -1,18 +1,39 @@
 
 train:
   plot:
+    r8vzykrm:
+      slurm_id: 387093
+      description: "bug-fix non-cond-branch, with sigma_data=0.63"
+    nol9pfdg:
+      slurm_id: 387094
+      description: "bug-fix cond-branch w/o cond, with sigma_data=0.63"
+    # imqzsbte:
+    #   slurm_id: 387095
+    #   description: "bug-fix non-cond"
+    f8nd1c60:
+      slurm_id: 387097
+      description: "bug-fix cond-branch w/ cond"
+    # ux8yjktb:
+    #   slurm_id: 387095
+    #   description: "bug-fix cond-branch w/ non-cond"
+    # xxkmgsne:
+    #   slurm_id: 0
+    #   description: "bug-fix cond-branch w/ non-cond, lr_max=5e-6"
+    # jwexz9y4:
+    #   slurm_id: 0
+    #   description: "bug-fix cond-branch w/ non-cond, lr_max=2.5e-6"
     u7etjsm0:
       slurm_id: 385058
-      description: "ERA5, lr_start=1e-6, lr_max=1e-5"
+      description: "old ERA5, lr_start=1e-6, lr_max=1e-5"
     mot8sfay:
       slurm_id: 385060
-      description: "ERA5, lr_start=1e-6, lr_max=7e-6"
-    zhon45xy:
-      slurm_id: 385064
-      description: "conditioning w/ ERA5, lr_start=1e-6, lr_max=1e-5"
-    yimje7g3:
-      slurm_id: 385062
-      description: "conditioning w/ ERA5, lr_start=1e-6, lr_max=7e-6"
+      description: "old ERA5, lr_start=1e-6, lr_max=7e-6"
+    # zhon45xy:
+    #   slurm_id: 385064
+    #   description: "conditioning w/ ERA5, lr_start=1e-6, lr_max=1e-5"
+    # yimje7g3:
+    #   slurm_id: 385062
+    #   description: "conditioning w/ ERA5, lr_start=1e-6, lr_max=7e-6"
     # bpeh160r:
     #   slurm_id: 381190
     #   description: "single samples, lr_start=1e-6, lr_max=1e-6"

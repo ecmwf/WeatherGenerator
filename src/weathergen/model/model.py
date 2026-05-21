@@ -387,7 +387,13 @@ class Model(torch.nn.Module):
         # Initialize forecasting engine: standard or diffusion-wrapped
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
-            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            if cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
+                assert cf.diffusion_conditioning_embed_dim is not None, (
+                    "Diffusion conditioning embedding dimension must be specified when using diffusion model conditioning"
+                )
+                self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells, dim_aux=self.cf.diffusion_conditioning_embed_dim)
+            else:
+                self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
             if cf.get("fe_diffusion_model", False):
                 self.forecast_engine = DiffusionForecastEngine(
                     cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
@@ -722,8 +728,18 @@ class Model(torch.nn.Module):
 
         # recover batch dimension and separate input_steps
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
-        # collapse along input step dimension
-        tokens = tokens.reshape(shape).sum(axis=1)
+        # Reshape tokens to [B, T, ...]
+        tokens = tokens.reshape(shape)
+
+        if self.cf.get("fe_diffusion_model", False):
+            tokens = tokens.reshape(shape)
+            conditioning_tokens = tokens[:, -2]  # TODO: enable longer history for conditioning
+            # X_t (last step) is the diffusion denoising target; X_{t-1} is the conditioning context.
+            batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = conditioning_tokens
+            # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
+            tokens = tokens[:, -1]
+        else:
+            tokens = tokens.sum(axis=1)
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)

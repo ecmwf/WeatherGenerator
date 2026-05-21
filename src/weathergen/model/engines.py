@@ -17,6 +17,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.attention import (
+    MultiCrossAttentionHead,
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
     MultiSelfAttentionHead,
@@ -113,6 +114,13 @@ class EmbeddingEngine(torch.nn.Module):
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
+        # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
+        max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
+        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+            "max number of tokens per cell for positional encoding exceeded."
+        )
+        " Increase ae_local_max_tokens_per_cell in config."
+
         if batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
             tokens_all = torch.cat(x_embeds)
@@ -121,10 +129,6 @@ class EmbeddingEngine(torch.nn.Module):
             scatter_idxs = self.get_scatter_idxs_vectorized(batch)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-            # if the assert is hit, MAX_NUMBER_TOKENS_LOCAL_PER_CELL needs to be increased
-            assert (
-                batch.tokens_lens.flatten(0, 2).sum(0).max() < MAX_NUMBER_TOKENS_LOCAL_PER_CELL
-            ), "max number of tokens per cell for positional encoding exceeded"
             # actual scatter operation and apply per cell positional encoding
             tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
 
@@ -132,7 +136,7 @@ class EmbeddingEngine(torch.nn.Module):
         tokens_all = tokens_all + pe_embed[pe_idxs]
 
         return tokens_all
-
+    
     def get_pe_idxs_vectorized(self, batch):
         """
         Compute per cell indices into positional encoding
@@ -586,6 +590,7 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.fe_diffusion_model,
+                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                         )
                     )
                 else:
@@ -606,6 +611,25 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.fe_diffusion_model,
+                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
+                        )
+                    )
+                # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
+                if self.cf.get("fe_diffusion_model_conditioning_type") == "cross_attn":
+                    self.fe_blocks.append(
+                        MultiCrossAttentionHead(
+                            dim_embed_q=self.cf.ae_global_dim_embed,
+                            dim_embed_kv=self.cf.ae_global_dim_embed,
+                            num_heads=self.cf.fe_num_heads,
+                            dropout_rate=self.cf.fe_dropout_rate,
+                            with_residual=True,
+                            with_qk_lnorm=self.cf.fe_with_qk_lnorm,
+                            with_flash=self.cf.with_flash_attention,
+                            norm_type=self.cf.norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
+                            norm_eps=self.cf.norm_eps,
+                            attention_dtype=get_dtype(self.cf.attention_dtype),
+                            is_dit=self.cf.fe_diffusion_model,
                         )
                     )
                 # Add MLP block
@@ -621,6 +645,7 @@ class ForecastingEngine(torch.nn.Module):
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         is_dit=self.cf.fe_diffusion_model,
+                        dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -644,7 +669,7 @@ class ForecastingEngine(torch.nn.Module):
         fstep: int,
         meta_info: SampleMetaData = None,
         noise_emb: torch.Tensor = None,
-        ada_ln_aux: torch.Tensor = None,
+        conditioning: torch.Tensor = None,
         coords: torch.Tensor = None,
     ) -> torch.Tensor:
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
@@ -667,17 +692,25 @@ class ForecastingEngine(torch.nn.Module):
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
+                elif isinstance(block, MultiCrossAttentionHead):
+                    assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                    tokens = checkpoint(block, tokens, conditioning, noise_emb, use_reentrant=False)
                 else:
-                    assert ada_ln_aux is None, (
-                        "ada_ln_aux should not be provided when diffusion model conditioning is disabled"
-                    )
-                    tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
+                        assert conditioning is not None, "conditioning must be provided for diffusion model conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, conditioning, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    else:
+                        assert conditioning is None, "conditioning should not be provided when diffusion model conditioning is disabled"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
-                    tokens = checkpoint(block, tokens, coords, ada_ln_aux, use_reentrant=False)
+                    tokens = checkpoint(block, tokens, coords, conditioning, use_reentrant=False)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
 

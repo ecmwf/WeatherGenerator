@@ -656,6 +656,7 @@ class Trainer(TrainerBase):
                             dtype=self.mixed_precision_dtype,
                             enabled=cf.with_mixed_precision,
                         ):
+
                             if self.ema_model is None:
                                 preds = self.model(
                                     self.model_params,

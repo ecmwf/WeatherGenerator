@@ -28,7 +28,7 @@
 import torch
 import torch.nn as nn
 
-from weathergen.model.norms import AdaLayerNorm, RMSNorm, SwiGLU
+from weathergen.model.norms import AdaLNZero, AdaLayerNorm, RMSNorm, SwiGLU
 
 
 class NamedLinear(torch.nn.Module):
@@ -62,6 +62,7 @@ class MLP(torch.nn.Module):
         mlp_type="mlp",
         name: str | None = None,
         is_dit=False,
+        dit_is_cond=False,
     ):
         """Constructor"""
 
@@ -75,6 +76,7 @@ class MLP(torch.nn.Module):
         self.with_residual = with_residual
         self.with_aux = dim_aux is not None
         self.is_dit = is_dit
+        self.dit_is_cond = dit_is_cond
         self.mlp_type = mlp_type.lower()
         dim_hidden = int(dim_in * hidden_factor)
 
@@ -90,9 +92,11 @@ class MLP(torch.nn.Module):
         norm = torch.nn.LayerNorm if norm_type == "LayerNorm" else RMSNorm
 
         if is_dit:
-            assert dim_aux is None, "conditioning not yet implemented for DIT attention"
+            if dit_is_cond:
+                assert dim_aux is not None, "For DIT, need to provide dim_aux for ada layer norm"
             assert with_residual, "DIT attention should always have residual connection"
-            self.lnorm = norm(dim_in, eps=norm_eps)
+            self.lnorm = AdaLNZero(dim_in, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_in, eps=norm_eps)
+            self.noise_conditioning = LinearNormConditioning(dim_in)
             self.noise_conditioning = LinearNormConditioning(dim_in)
         elif dim_aux is not None:
             self.lnorm = AdaLayerNorm(dim_in, dim_aux, norm_eps=norm_eps)
@@ -134,11 +138,25 @@ class MLP(torch.nn.Module):
             elif len(args) > 2:
                 ada_ln_aux = args[-1]
         else:
-            assert len(args) == 3, "DIT gets 3 args (no conditioning implemented yet)"
-            noise_emb = args[-1]
-            x = self.lnorm(x)
+            if self.dit_is_cond:
+                assert len(args) == 4, "DIT with cond gets 4 args"
+                ada_ln_aux = args[-1]
+                noise_emb = args[-2]
+            else:
+                assert len(args) == 3, "DIT without cond gets 3 args"
+                noise_emb = args[-1]
+
+
+        if self.is_dit:
+            if self.dit_is_cond:
+                assert ada_ln_aux is not None, "Need auxiliary input for conditional DIT"
+                x, cond_gate = self.lnorm(x, ada_ln_aux)
+            else:
+                x = self.lnorm(x)
+                cond_gate = 1
             assert noise_emb is not None, "Need noise embedding for noise conditioning in DIT"
-            x, gate = self.noise_conditioning(x, noise_emb)
+            x, noise_gate = self.noise_conditioning(x, noise_emb)
+            gate = cond_gate * noise_gate
 
         for layer in self.layers:
             if isinstance(layer, AdaLayerNorm):

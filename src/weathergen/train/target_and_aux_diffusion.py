@@ -58,7 +58,6 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
     ) -> tuple[Any, Any]:
         # During validation (model in eval mode), use fixed noise level
         # so that sigma = exp(eta * p_std + p_mean) is deterministic
-
         if model.training:
             noise_level_rn = (
                 batch.samples[0].meta_info["ERA5"].params["noise_level_rn"]
@@ -70,6 +69,9 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         with torch.no_grad():
             self.encoder.encoder.eval()  # NOTE: might be redundant
             tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
+            shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+            tokens_multi = tokens.reshape(shape)
+            tokens = tokens_multi[:, -1]
         # NOTE: must not set to train afterwards unless it was already in train
 
         output_idxs = batch.get_output_idxs()
