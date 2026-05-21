@@ -25,15 +25,15 @@ from weathergen.prefect_dags.cmd_runners import *
 #     consumer_key_path="~/.ssh/cscs_consumer_key",
 #     consumer_secret_path="~/.ssh/cscs_consumer_secret",
 # )
-# ctx = EcmwfSshContext(
-#     host="hpc-login",
-# )
+ctx = EcmwfSshContext(
+    host="hpc-login",
+)
 # ctx = EcmwfEcaccessContext(
 #     cert_path="~/.ecaccess_cert.crt",
 # )
-ctx = CinecaSshContext(
-    hpc="leonardo",
-    user="thunter0"
+# ctx = CinecaSshContext(
+#     hpc="leonardo",
+#     user="thunter0"
 )
 
 
@@ -65,7 +65,7 @@ def sleep_and_print(sleep_sec: int, pwd: str) -> SlurmJobResult:
     try:
         res = sbatch(
             ctx,
-            job_name=f"prefect_test_{sleep_sec}s",
+            job_name=f"prefect_test_{sleep_sec}s_2",
             command=[
                 "python3",
                 "-c",

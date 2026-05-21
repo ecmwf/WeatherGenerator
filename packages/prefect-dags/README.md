@@ -21,6 +21,16 @@ This package wraps Prefect's task/flow primitives so that:
 - A `rerun_token` makes interrupted flows resumable: cached task results replay, in-flight Slurm jobs are *not* re-submitted.
 - A single Prefect deployment can supervise hundreds of concurrent Slurm jobs across multiple HPCs without overwhelming any controller (smart polling).
 
+## Two layered interfaces
+
+The package is split into two independent layers; use whichever fits your stack.
+
+1. **Low-level — `weathergen.prefect_dags.cmd_runners`** — a Prefect-free abstraction over HPC communication. One small protocol (`CommandRunner.run(Command, logger) -> Result[CommandResult]`) and one context dataclass per center (`LocalContext`, `GenericContext`, `EcmwfSshContext`, `EcmwfEcaccessContext`, `CinecaSshContext`, `CscsFirecrestContext`). The async dispatcher `run_cmd(ctx, cmd, logger)` picks the right runner. This is the layer that solves the "how do I run a command on this HPC" problem and depends only on `paramiko` / `httpx` / `pyfirecrest` — no Prefect, no caching, no SLURM logic. Drop it into any orchestration framework, or use it directly from a script. See the contexts table below for the per-HPC matrix.
+
+2. **High-level — `weathergen.prefect_dags`** — Prefect-based Slurm orchestration built on top of layer (1). Adds `@flow` / `@task` decorators, `sbatch` / `sbatch_try` / `sbatch_submit` for SLURM job submission with monitoring, a leased per-HPC `sacct` poller, transactional submission caching, and `rerun_token`-driven resumability. Use this layer when you want resumable multi-job workflows with a UI; use only layer (1) when you just need to talk to an HPC.
+
+The layers are independent in one direction: the Prefect layer imports from `cmd_runners`, but `cmd_runners` knows nothing about Prefect or SLURM. Adding a new HPC means writing one runner + one context in layer (1); the SLURM/Prefect layer picks it up for free.
+
 ## Quick start
 
 You can try this package without installing anything on your machine. 
@@ -73,7 +83,34 @@ weathergen-prefect-dags = { path = "../prefect-dags", editable = true }
 
 ## API surface
 
-All public symbols are importable from `weathergen.prefect_dags`:
+### Low-level: HPC communication (`weathergen.prefect_dags.cmd_runners`)
+
+Prefect-free. This is the layer to import if you just need to run commands on an HPC from arbitrary Python code.
+
+| Symbol | What it does |
+| --- | --- |
+| `Command(command, working_directory=..., env_vars=...)` | Plain dataclass describing a command. |
+| `CommandResult` | `{ stdout, stderr, return_code }`. |
+| `CommandRunner` | Protocol: `run(Command, logger) -> Result[CommandResult]`. One implementation per HPC family. |
+| `run_cmd(ctx, cmd, logger)` | Async dispatcher — picks the right runner for `ctx` and awaits its result. |
+| `get_command_runner(ctx)` | Sync factory if you'd rather hold the runner yourself. |
+| `slurm_account(ctx)` | Returns the SLURM account configured on the context, or `None`. |
+| `LocalContext`, `GenericContext`, `EcmwfSshContext`, `EcmwfEcaccessContext`, `CinecaSshContext`, `CscsFirecrestContext` | One context dataclass per HPC family — see the contexts table below. |
+
+HPC contexts:
+
+| Context | Connection | Typical use |
+| --- | --- | --- |
+| `LocalContext()` | Local shell | Development, CI. |
+| `GenericContext(host=...)` | Plain SSH | Any cluster reachable via passwordless SSH. |
+| `EcmwfSshContext(host=...)` | ECMWF SSH | ECMWF HPC2020. |
+| `EcmwfEcaccessContext(cert_path=...)` | ECaccess SOAP (cert auth) | ECMWF without an interactive SSH session. |
+| `CinecaSshContext(hpc=..., user=...)` | step-ca SSH cert | CINECA Leonardo. |
+| `CscsFirecrestContext(hpc=..., consumer_key_path=..., consumer_secret_path=..., account=...)` | FirecREST v2 (OAuth2) | CSCS santis / clariden / alps. Survives well beyond an SSH session. |
+
+### High-level: Prefect orchestration (`weathergen.prefect_dags`)
+
+All public symbols importable from the top-level package. Built on the low-level runners above.
 
 | Symbol | What it does |
 | --- | --- |
@@ -86,15 +123,6 @@ All public symbols are importable from `weathergen.prefect_dags`:
 | `sbatch_submit(...)` | Submit a Slurm job without waiting. Returns `SlurmSubmissionResult`. |
 | `SlurmJobResult` | `{ job_id, status, submission }` for a completed job. |
 | `get_run_logger()` | Prefect-aware logger inside tasks. |
-
-HPC contexts (from `weathergen.prefect_dags.cmd_runners`):
-
-| Context | Connection | Typical use |
-| --- | --- | --- |
-| `LocalContext()` | Local shell | Development, CI. |
-| `GenericContext(host=...)` | Plain SSH | Any cluster reachable via passwordless SSH. |
-| `EcmwfSshContext(host=...)` | ECMWF SSH | ECMWF HPC2020. |
-| `CscsFirecrestContext(hpc=..., consumer_key_path=..., consumer_secret_path=..., account=...)` | FirecREST v2 (OAuth2) | CSCS santis / clariden / alps. Survives well beyond an SSH session. |
 
 ## Resuming an interrupted flow
 

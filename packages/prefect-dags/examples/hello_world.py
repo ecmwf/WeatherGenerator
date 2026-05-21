@@ -37,4 +37,4 @@ def hello_world(rerun_token=None):
 
 
 if __name__ == "__main__":
-    hello_world()
+    hello_world(rerun_token='flo12885ad9')
