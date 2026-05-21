@@ -344,6 +344,8 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             initargs=(fname_zarr,),
         ) as pool:
             samples_written = 0
+            
+            processed_samples = []
 
             for batch_idx in range(n_batches):
                 batch_start = batch_idx * batch_size
@@ -377,8 +379,6 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                     desc=f"  Batch {batch_idx + 1}/{n_batches}",
                 )
 
-                processed_samples = []
-
                 for sample, _fstep, data in pool.imap_unordered(
                     get_data_worker, batch_tasks, chunksize=1
                 ):
@@ -403,9 +403,6 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                         del sample_results[sample]
                         batch_written += 1
 
-                # Only save here if need to merge samples, otherwise saved in process_sample
-                if processed_samples[0] is not None:
-                    parser.save(processed_samples)
                 pbar.close()
 
                 samples_written += batch_written
@@ -418,5 +415,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
                 # Free any remaining refs before next batch.
                 del sample_results
+
+            # Only save here if need to merge samples, otherwise saved in process_sample
+            if processed_samples[0] is not None:
+                parser.save(processed_samples)
 
         _logger.info(f"Export complete. Wrote {samples_written}/{len(samples)} samples.")
