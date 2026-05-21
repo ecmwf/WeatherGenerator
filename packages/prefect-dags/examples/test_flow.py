@@ -12,8 +12,12 @@
 # # When developing locally, swap the source above for the line below:
 # weathergen-prefect-dags = { path = "../", editable = true }
 # ///
+import json
+import shlex
+
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task, sbatch_try
 from weathergen.prefect_dags.cmd_runners import *
+from weathergen.prefect_dags.result import is_err
 # ctx: CmdContext = LocalContext()
 # ctx: CmdContext = EcmwfSshContext(
 #     host="santis",
@@ -34,13 +38,13 @@ ctx = EcmwfSshContext(
 # ctx = CinecaSshContext(
 #     hpc="leonardo",
 #     user="thunter0"
-)
+# )
 
 
 @task
-def get_pwd() -> str:
+def get_home() -> str:
     # ECMWF appends many other lines to the output, so we need to get the last one:
-    res = run(ctx, command=["pwd"])
+    res = run(ctx, command="echo $HOME")
     assert res.stdout, "No output from pwd command"
     last_line = res.stdout.strip().split("\n")[-1]
     print(f"last line of pwd output: '{last_line}'")
@@ -60,38 +64,31 @@ def sleep_and_print(sleep_sec: int, pwd: str) -> SlurmJobResult:
         ],
         time_limit="00:01:00",
         working_directory=pwd,
+        fetch_output=True,
     )
     print(f"sbatch_try result: {res1}")
-    try:
-        res = sbatch(
-            ctx,
-            job_name=f"prefect_test_{sleep_sec}s_2",
-            command=[
-                "python3",
-                "-c",
-                f"import time; time.sleep({sleep_sec}); print('hello')",
-            ],
-            time_limit="00:01:00",
-            working_directory=pwd,
-        )
-        print(f"result: {res}, type: {type(res)}")
-    except Exception as e:
-        print(f"sbatch failed with error: {e}")
-        raise e
-    # assert sleep_sec < 6, "xxx"
-    return res
+    assert not is_err(res1)
+    if res1.status == "COMPLETED":
+        print(f"Job succeeded as expected")
+        return res1
+    if res1.status == "TIMEOUT":
+        print(f"Job timed out as expected")
+        # TODO: continue with a 2nd job that runs the same command.
+        return res1
+    assert False, f"Job failed with unexpected status: {res1.status}"
+
 
 
 @flow(log_prints=True)
 def test_run_cmd_flow(
     rerun_token=None,
 ):
-    # Get pwd on HPC
-    pwd = get_pwd()
-    print(f"Current working directory: {pwd}")
-    sleep_times = [1900]
+    # Get home directory on HPC
+    home = get_home()
+    print(f"Home directory: {home}")
+    sleep_times = [1]
     # Submit all my jobs
-    jobs = [sleep_and_print.submit(sleep_sec, pwd) for sleep_sec in sleep_times]
+    jobs = [sleep_and_print.submit(sleep_sec, home) for sleep_sec in sleep_times]
     # Wait for all the jobs to complete and print the results:
     for job in jobs:
         res = job.result()

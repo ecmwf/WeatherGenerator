@@ -31,6 +31,7 @@ def hello_world(rerun_token=None):
         # You may need to adapt to your HPC, see test_flow.py on an example.
         working_directory="/tmp",
         time_limit="00:01:00",
+        fetch_output=True,
     )
     print(f"Slurm job finished: {slurm_result.status}")
     print(f"Slurm job object: {slurm_result}")

@@ -49,6 +49,7 @@ from weathergen.prefect_dags.cmd_runners import CmdContext, CommandRunner, get_c
 from weathergen.prefect_dags.prefect_logging import get_run_logger
 from weathergen.prefect_dags.prefect_wrapper import task
 from weathergen.prefect_dags.result import OpError, Result, is_err
+from weathergen.prefect_dags.run import get_head_tail_logs
 from weathergen.prefect_dags.slurm import (
     SlurmJob,
     SlurmJobId,
@@ -124,10 +125,15 @@ def sbatch(
     time_limit: str | None = None,
     slurm_options: dict[str, str] | None = None,
     account: str | Literal["auto"] | None = "auto",
+    job: SlurmJob | None = None,
+    fetch_output: bool = False,
     _accept_failure: bool = False,  # Internal, non-documented.
 ) -> SlurmJobResult:
     """
     Submits a slurm job and await its completion, returning the final state.
+
+    job: if provided, the other parameters are ignored and the job is submitted as-is.
+
 
     Keyword arguments mirror `SlurmJob` — see that dataclass for the meaning
     of each field. `ctx` is the command-runner context (local / SSH / etc.).
@@ -140,19 +146,20 @@ def sbatch(
     If you want more control over error handling or the final state of the
     job, use `sbatch_try` instead — it returns a Result.
     """
-    job = SlurmJob(
-        job_name=job_name,
-        stdout=stdout,
-        stderr=stderr,
-        script_path=script_path,
-        command=command,
-        working_directory=working_directory,
-        submission_directory=submission_directory,
-        time_limit=time_limit,
-        slurm_options=slurm_options,
-        account=account,
-    )
-    res = run_coro_as_sync(_sbatch_try(job, ctx))
+    if job is None:
+        job = SlurmJob(
+            job_name=job_name,
+            stdout=stdout,
+            stderr=stderr,
+            script_path=script_path,
+            command=command,
+            working_directory=working_directory,
+            submission_directory=submission_directory,
+            time_limit=time_limit,
+            slurm_options=slurm_options,
+            account=account,
+        )
+    res = run_coro_as_sync(_sbatch_try(job, ctx, fetch_output))
     if isinstance(res, OpError):
         # Re-raise the original exception so the type and traceback are
         # preserved (e.g. FileNotFoundError on a missing script_path).
@@ -166,7 +173,7 @@ def sbatch(
 def sbatch_try(
     ctx: CmdContext,
     *,
-    job_name: str,
+    job_name: str | None = None,
     stdout: str | Path | None = None,
     stderr: str | Path | None = None,
     script_path: str | Path | None = None,
@@ -176,9 +183,14 @@ def sbatch_try(
     time_limit: str | None = None,
     slurm_options: dict[str, str] | None = None,
     account: str | Literal["auto"] | None = "auto",
+    # library-specific parameters
+    job: SlurmJob | None = None,
+    fetch_output: bool = False,
 ) -> Result[SlurmJobResult]:
     """
     Same as `sbatch`, but returns a Result instead of throwing on failure.
+
+    job: if provided, the other parameters are ignored and the job is submitted as-is.
 
     The signature mirrors `sbatch`. A non-successful terminal Slurm state (TIMEOUT,
     FAILED, CANCELLED, ...) becomes a successful return value here — inspect
@@ -189,9 +201,10 @@ def sbatch_try(
     # rather than to `_sbatch_try` directly: if we returned an OpError from
     # a Prefect task, Prefect would persist it as the task's result and
     # replay the cached failure on every rerun with the same `rerun_token`.
-    try:
-        return sbatch(
-            ctx,
+    if job is None:
+        if job_name is None:
+            return OpError(err=ValueError("Either 'job' or 'job_name' must be provided"))
+        job = SlurmJob(
             job_name=job_name,
             stdout=stdout,
             stderr=stderr,
@@ -202,8 +215,10 @@ def sbatch_try(
             time_limit=time_limit,
             slurm_options=slurm_options,
             account=account,
-            _accept_failure=True,
         )
+    try:
+        return sbatch(ctx, job=job, job_name=job.job_name, _accept_failure=True, fetch_output=fetch_output)
+
     except Exception as e:
         return OpError(err=e)
 
@@ -298,6 +313,7 @@ _LOCK_ADAPTER = TypeAdapter(_SlurmJobMonitoringLock)
 async def _sbatch_try(
     job: SlurmJob,
     context: CmdContext,
+    fetch_output: bool,
 ) -> Result[SlurmJobResult]:
     """
     Implementation of sbatch_try.
@@ -330,17 +346,20 @@ async def _sbatch_try(
     await _set_status(runner.hpc, job_id, "PENDING")
     # Surface the submission details in the Prefect UI as a markdown artifact.
     # Artifacts render directly on the task run page.
+    artifact_key = f"slurm-submission-{_artifact_key_part(job.job_name)}-{_artifact_key_part(job_id)}"
+    artifact_description = f"slurm job {job_id} on {runner.hpc}"
+    submission_md = (
+        f"## SLURM submission\n\n"
+        f"- **Job ID:** `{job_id}`\n"
+        f"- **HPC:** `{runner.hpc}`\n"
+        f"- **Job name:** `{job.job_name}`\n"
+        f"- **stdout:** `{sub_res.stdout}`\n"
+        f"- **stderr:** `{sub_res.stderr}`\n"
+    )
     await acreate_markdown_artifact(
-        key=f"slurm-submission-{_artifact_key_part(job.job_name)}-{_artifact_key_part(job_id)}",
-        markdown=(
-            f"## SLURM submission\n\n"
-            f"- **Job ID:** `{job_id}`\n"
-            f"- **HPC:** `{runner.hpc}`\n"
-            f"- **Job name:** `{job.job_name}`\n"
-            f"- **stdout:** `{sub_res.stdout}`\n"
-            f"- **stderr:** `{sub_res.stderr}`\n"
-        ),
-        description=f"slurm job {job_id} on {runner.hpc}",
+        key=artifact_key,
+        markdown=submission_md,
+        description=artifact_description,
     )
 
     # Now await completion of the job.
@@ -350,10 +369,45 @@ async def _sbatch_try(
     if isinstance(state, OpError):
         return state
 
+    if fetch_output:
+        # Fetch head and tail of stdout and stderr for debugging purposes.
+        output = get_head_tail_logs(
+            ctx=context,
+            stdout_path=str(sub_res.stdout),
+            stderr_path=str(sub_res.stderr) if sub_res.stderr else None,
+        )
+        logger.info(f"Fetched head/tail logs for job {job_id} on hpc {runner.hpc}: {output}")
+        # Re-create the artifact with the same key: Prefect supersedes the previous
+        # version, so the task-run page shows the submission info plus the captured
+        # output as a single artifact.
+        await acreate_markdown_artifact(
+            key=artifact_key,
+            markdown=submission_md + "\n" + _format_output_section(output),
+            description=artifact_description,
+        )
+
     return SlurmJobResult(
         job_id=job_id,
         status=state,
         submission=sub_res,
+    )
+
+
+def _format_output_section(output: dict) -> str:
+    # Use 4-backtick fences so log content containing ``` doesn't break the block.
+    def section(title: str, body: str | None) -> str:
+        if body is None:
+            return f"### {title}\n\n_(not available)_\n\n"
+        if body == "":
+            return f"### {title}\n\n_(empty)_\n\n"
+        return f"### {title}\n\n````\n{body}\n````\n\n"
+
+    return (
+        "## SLURM job output\n\n"
+        + section("stdout (head)", output.get("head_out"))
+        + section("stdout (tail)", output.get("tail_out"))
+        + section("stderr (head)", output.get("head_err"))
+        + section("stderr (tail)", output.get("tail_err"))
     )
 
 
