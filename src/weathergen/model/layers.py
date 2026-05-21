@@ -134,9 +134,22 @@ class MLP(torch.nn.Module):
             elif len(args) > 2:
                 ada_ln_aux = args[-1]
         else:
-            assert len(args) == 3, "DIT gets 3 args (no conditioning implemented yet)"
-            noise_emb = args[-1]
-            x = self.lnorm(x)
+            if self.dit_is_cond:
+                assert len(args) == 4, "DIT with cond gets 4 args"
+                ada_ln_aux = args[-1]
+                noise_emb = args[-2]
+            else:
+                assert len(args) == 3, "DIT without cond gets 3 args"
+                noise_emb = args[-1]
+
+
+        if self.is_dit:
+            if self.dit_is_cond:
+                assert ada_ln_aux is not None, "Need auxiliary input for conditional DIT"
+                x, cond_gate = self.lnorm(x, ada_ln_aux)
+            else:
+                x = self.lnorm(x)
+                cond_gate = 1
             assert noise_emb is not None, "Need noise embedding for noise conditioning in DIT"
             x, gate = self.noise_conditioning(x, noise_emb)
 
