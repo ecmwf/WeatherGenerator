@@ -15,9 +15,9 @@ Provides two PSD computation paths:
   Spherical Harmonic Transform on unstructured grids (octahedral, reduced
   Gaussian, regular lat-lon).  Ported from anemoi.models ``spectral_transforms.py`` to pure
   numpy using Legendre helpers from anemoi.models ``spectral_helpers.py``.
-  [anemoi.models.spectral_transforms] 
+  [anemoi.models.spectral_transforms]
   https://github.com/ecmwf/anemoi-core/blob/main/models/src/anemoi/models/layers/spectral_transforms.py
-  [anemoi.models.spectral_helpers] 
+  [anemoi.models.spectral_helpers]
   https://github.com/ecmwf/anemoi-core/blob/main/models/src/anemoi/models/layers/spectral_helpers.py
 
 - **Path B – FFT PSD** (``method="fft"``):
@@ -28,6 +28,7 @@ Provides two PSD computation paths:
 from __future__ import annotations
 
 import logging
+
 import numpy as np
 from scipy.interpolate import griddata
 
@@ -39,7 +40,9 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+def _legendre_gauss_weights(
+    n: int, a: float = -1.0, b: float = 1.0
+) -> tuple[np.typing.NDArray, np.typing.NDArray]:
     """Return Legendre-Gauss nodes and weights on ``[a, b]``."""
     xlg, wlg = np.polynomial.legendre.leggauss(n)
     xlg = (b - a) * 0.5 * xlg + (b + a) * 0.5
@@ -47,7 +50,9 @@ def _legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> tuple[np
     return xlg, wlg
 
 
-def _legpoly(mmax: int, lmax: int, x: np.ndarray, inverse: bool = False) -> np.ndarray:
+def _legpoly(
+    mmax: int, lmax: int, x: np.typing.NDArray, inverse: bool = False
+) -> np.typing.NDArray:
     """Compute associated Legendre polynomials.
 
     Returns shape ``(mmax+1, lmax+1, len(x))``.
@@ -92,9 +97,7 @@ class SphericalHarmonicTransform:
         self.lons_per_lat = lons_per_lat
         self.nlat = len(lons_per_lat)
         self.truncation = truncation
-        assert 0 < truncation <= self.nlat, (
-            f"Truncation {truncation} must be in (0, {self.nlat}]"
-        )
+        assert 0 < truncation <= self.nlat, f"Truncation {truncation} must be in (0, {self.nlat}]"
         self.n_grid_points = sum(lons_per_lat)
 
         # Offsets into the flattened grid for each latitude ring
@@ -115,53 +118,51 @@ class SphericalHarmonicTransform:
 
     # internal FFT helpers
 
-    def _rfft_regular(self, x: np.ndarray) -> np.ndarray:
+    def _rfft_regular(self, x: np.typing.NDArray) -> np.typing.NDArray:
         """Batched real FFT for a *regular* grid.
 
         Parameters
         ----------
-        x : np.ndarray, shape ``(..., grid)``
+        x : np.typing.NDArray, shape ``(..., grid)``
 
         Returns
         -------
-        np.ndarray, complex, shape ``(..., nlat, nlon//2+1)``
+        np.typing.NDArray, complex, shape ``(..., nlat, nlon//2+1)``
         """
         nlon = self.lons_per_lat[0]
         return np.fft.rfft(x.reshape(*x.shape[:-1], self.nlat, nlon), norm="forward")
 
-    def _rfft_reduced(self, x: np.ndarray) -> np.ndarray:
+    def _rfft_reduced(self, x: np.typing.NDArray) -> np.typing.NDArray:
         """Per-ring real FFT for a *reduced* (variable-resolution) grid.
 
         Parameters
         ----------
-        x : np.ndarray, shape ``(..., grid)``
+        x : np.typing.NDArray, shape ``(..., grid)``
 
         Returns
         -------
-        np.ndarray, complex, shape ``(..., nlat, max_nlon//2+1)``
+        np.typing.NDArray, complex, shape ``(..., nlat, max_nlon//2+1)``
         """
         max_nlon = max(self.lons_per_lat)
         out_shape = (*x.shape[:-1], self.nlat, max_nlon // 2 + 1)
         out = np.zeros(out_shape, dtype=np.complex128)
 
-        for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat)):
-            out[..., i, : nlon // 2 + 1] = np.fft.rfft(
-                x[..., slon : slon + nlon], norm="forward"
-            )
+        for i, (slon, nlon) in enumerate(zip(self.slon, self.lons_per_lat, strict=False)):
+            out[..., i, : nlon // 2 + 1] = np.fft.rfft(x[..., slon : slon + nlon], norm="forward")
         return out
 
-    # transform 
+    # transform
 
-    def transform(self, x: np.ndarray) -> np.ndarray:
+    def transform(self, x: np.typing.NDArray) -> np.typing.NDArray:
         """Compute the SHT.
 
         Parameters
         ----------
-        x : np.ndarray, real, shape ``(..., grid)``
+        x : np.typing.NDArray, real, shape ``(..., grid)``
 
         Returns
         -------
-        np.ndarray, complex, shape ``(..., L, M)`` where
+        np.typing.NDArray, complex, shape ``(..., L, M)`` where
         ``L = M = truncation + 1``.
         """
         if self._is_regular:
@@ -209,31 +210,31 @@ class InverseSphericalHarmonicTransform:
         # Associated Legendre polynomials with inverse=True
         self.pct = _legpoly(truncation, truncation, np.cos(theta), inverse=True)
 
-    def _irfft_regular(self, x: np.ndarray) -> np.ndarray:
+    def _irfft_regular(self, x: np.typing.NDArray) -> np.typing.NDArray:
         """Inverse FFT for a regular grid.
 
         Parameters
         ----------
-        x : np.ndarray, complex, shape ``(..., nlat, M)``
+        x : np.typing.NDArray, complex, shape ``(..., nlat, M)``
 
         Returns
         -------
-        np.ndarray, real, shape ``(..., grid)``
+        np.typing.NDArray, real, shape ``(..., grid)``
         """
         nlon = self.lons_per_lat[0]
         spatial = np.fft.irfft(x, n=nlon, norm="forward")  # (..., nlat, nlon)
         return spatial.reshape(*spatial.shape[:-2], self.n_grid_points)
 
-    def _irfft_reduced(self, x: np.ndarray) -> np.ndarray:
+    def _irfft_reduced(self, x: np.typing.NDArray) -> np.typing.NDArray:
         """Per-ring inverse FFT for a reduced grid.
 
         Parameters
         ----------
-        x : np.ndarray, complex, shape ``(..., nlat, M)``
+        x : np.typing.NDArray, complex, shape ``(..., nlat, M)``
 
         Returns
         -------
-        np.ndarray, real, shape ``(..., grid)``
+        np.typing.NDArray, real, shape ``(..., grid)``
         """
         lead_shape = x.shape[:-2]
         out = np.zeros((*lead_shape, self.n_grid_points), dtype=np.float64)
@@ -244,16 +245,16 @@ class InverseSphericalHarmonicTransform:
             offset += nlon
         return out
 
-    def transform(self, coeffs: np.ndarray) -> np.ndarray:
+    def transform(self, coeffs: np.typing.NDArray) -> np.typing.NDArray:
         """Compute the inverse SHT.
 
         Parameters
         ----------
-        coeffs : np.ndarray, complex, shape ``(..., L, M)``
+        coeffs : np.typing.NDArray, complex, shape ``(..., L, M)``
 
         Returns
         -------
-        np.ndarray, real, shape ``(..., grid)``
+        np.typing.NDArray, real, shape ``(..., grid)``
         """
         # Inverse Legendre transform: (..., l, m) × (m, l, k) → (..., k, m)
         real_part = coeffs.real
@@ -293,11 +294,11 @@ def _regular_lons_per_lat(nlat: int) -> list[int]:
 
 
 def sht_psd(
-    data: np.ndarray,
+    data: np.typing.NDArray,
     nlat: int,
     truncation: int | None = None,
     grid_type: str = "octahedral",
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.typing.NDArray, np.typing.NDArray]:
     """Compute PSD via Spherical Harmonic Transform.
 
     1. Forward SHT: spatial → spectral coefficients ``(l, m)``.
@@ -305,7 +306,7 @@ def sht_psd(
 
     Parameters
     ----------
-    data : np.ndarray
+    data : np.typing.NDArray
         Spatial field with shape ``(n_points,)`` or ``(n_samples, n_points)``.
     nlat : int
         Number of latitudes in the grid.
@@ -316,9 +317,9 @@ def sht_psd(
 
     Returns
     -------
-    wavenumbers : np.ndarray, shape ``(L,)``
+    wavenumbers : np.typing.NDArray, shape ``(L,)``
         Total wavenumber indices ``0, 1, …, L-1``.
-    psd : np.ndarray, shape ``(L,)``
+    psd : np.typing.NDArray, shape ``(L,)``
         Power spectral density averaged over samples.
     """
     if data.ndim == 1:
@@ -360,8 +361,8 @@ def sht_psd(
     psd_per_sample = np.sum(np.abs(coeffs) ** 2, axis=-1)  # (n_samples, L)
     psd = psd_per_sample.mean(axis=0)
 
-    L = psd.shape[0]
-    wavenumbers = np.arange(L, dtype=np.float64)
+    n_wavenumbers = psd.shape[0]
+    wavenumbers = np.arange(n_wavenumbers, dtype=np.float64)
 
     return wavenumbers, psd
 
@@ -371,19 +372,19 @@ def sht_psd(
 # ---------------------------------------------------------------------------
 
 
-def _fft_psd_calc(ht: np.ndarray) -> np.ndarray:
+def _fft_psd_calc(ht: np.typing.NDArray) -> np.typing.NDArray:
     """Return the PSD for positive non-zero frequencies of an even-length signal.
 
     Assumes *ht* has an even number of points.
 
     Parameters
     ----------
-    ht : np.ndarray
+    ht : np.typing.NDArray
         1-D real-valued signal (one latitude ring).
 
     Returns
     -------
-    np.ndarray
+    np.typing.NDArray
         PSD for positive frequencies, length ``n // 2``.
     """
     n = len(ht)
@@ -393,17 +394,17 @@ def _fft_psd_calc(ht: np.ndarray) -> np.ndarray:
     return power
 
 
-def _cubepsd(field_2d: np.ndarray) -> np.ndarray:
+def _cubepsd(field_2d: np.typing.NDArray) -> np.typing.NDArray:
     """Compute PSD averaged over all latitude rows.
 
     Parameters
     ----------
-    field_2d : np.ndarray
+    field_2d : np.typing.NDArray
         2-D array of shape ``(nlat, nlon)``.
 
     Returns
     -------
-    np.ndarray
+    np.typing.NDArray
         PSD of shape ``(nlon // 2,)``.
     """
     nlat, nlon = field_2d.shape
@@ -414,7 +415,7 @@ def _cubepsd(field_2d: np.ndarray) -> np.ndarray:
     return field_psd
 
 
-def _calcposfreq(npoints: int, spacing_deg: float = 1.0) -> np.ndarray:
+def _calcposfreq(npoints: int, spacing_deg: float = 1.0) -> np.typing.NDArray:
     """Return the positive frequencies for a signal of *npoints* evenly spaced points.
 
     Parameters
@@ -426,7 +427,7 @@ def _calcposfreq(npoints: int, spacing_deg: float = 1.0) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    np.typing.NDArray
         Positive frequencies, length ``npoints // 2``.
     """
     freq = np.fft.fftfreq(npoints, d=spacing_deg)
@@ -434,12 +435,12 @@ def _calcposfreq(npoints: int, spacing_deg: float = 1.0) -> np.ndarray:
 
 
 def fft_psd(
-    data: np.ndarray,
-    lats: np.ndarray,
-    lons: np.ndarray,
+    data: np.typing.NDArray,
+    lats: np.typing.NDArray,
+    lons: np.typing.NDArray,
     lat_range: tuple[float, float] = (-60.0, 60.0),
     regrid_resolution: float = 1.0,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.typing.NDArray, np.typing.NDArray]:
     """Compute PSD using 1-D FFT along the longitude dimension.
 
     For unstructured grids (where lats/lons are per-point coordinates rather
@@ -448,11 +449,11 @@ def fft_psd(
 
     Parameters
     ----------
-    data : np.ndarray
+    data : np.typing.NDArray
         Field values.  Shape ``(n_samples, n_points)`` or ``(n_points,)``.
-    lats : np.ndarray
+    lats : np.typing.NDArray
         Latitude values. Either per-point (length ``n_points``) or axis (length ``nlat``).
-    lons : np.ndarray
+    lons : np.typing.NDArray
         Longitude values. Either per-point (length ``n_points``) or axis (length ``nlon``).
     lat_range : tuple[float, float]
         Latitude bounds to restrict the computation to.
@@ -461,9 +462,9 @@ def fft_psd(
 
     Returns
     -------
-    frequencies : np.ndarray
+    frequencies : np.typing.NDArray
         Positive frequencies in cycles per degree, shape ``(nfreq,)``.
-    psd : np.ndarray
+    psd : np.typing.NDArray
         Power spectral density averaged over samples and latitude rows,
         shape ``(nfreq,)``.
     """
@@ -477,7 +478,7 @@ def fft_psd(
     # Determine if the grid is regular or unstructured
     unique_lats = np.unique(lats)
     unique_lons = np.unique(lons)
-    is_regular = (len(unique_lats) * len(unique_lons) == n_points)
+    is_regular = len(unique_lats) * len(unique_lons) == n_points
 
     if is_regular and len(lats) == len(unique_lats):
         # lats/lons are axis arrays for a regular grid
@@ -524,27 +525,27 @@ def fft_psd(
 
 
 def compute_psd_for_field(
-    data: np.ndarray,
+    data: np.typing.NDArray,
     method: str = "sht",
     nlat: int | None = None,
-    lats: np.ndarray | None = None,
-    lons: np.ndarray | None = None,
+    lats: np.typing.NDArray | None = None,
+    lons: np.typing.NDArray | None = None,
     lat_range: tuple[float, float] = (-60.0, 60.0),
     regrid_resolution: float = 1.0,
     sht_truncation: int | None = None,
     grid_type: str = "octahedral",
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.typing.NDArray, np.typing.NDArray]:
     """Compute PSD using the selected method.
 
     Parameters
     ----------
-    data : np.ndarray
+    data : np.typing.NDArray
         Spatial field.  Shape depends on the method (see ``sht_psd`` / ``fft_psd``).
     method : str
         ``"sht"`` for SHT-based PSD, ``"fft"`` for FFT PSD.
     nlat : int | None
         Number of latitudes (required for SHT method).
-    lats, lons : np.ndarray | None
+    lats, lons : np.typing.NDArray | None
         Latitude / longitude coordinate arrays (required for fft method).
     lat_range : tuple[float, float]
         Latitude bounds for the fft method.
@@ -557,9 +558,9 @@ def compute_psd_for_field(
 
     Returns
     -------
-    x_values : np.ndarray
+    x_values : np.typing.NDArray
         Wavenumbers (SHT) or positive frequencies (fft).
-    psd : np.ndarray
+    psd : np.typing.NDArray
         Power spectral density.
     """
     if method == "sht":
@@ -586,10 +587,10 @@ def compute_psd_for_field(
 
 
 def compute_psd_score(
-    gt: np.ndarray,
-    p: np.ndarray,
-    lats: np.ndarray | None,
-    lons: np.ndarray | None,
+    gt: np.typing.NDArray,
+    p: np.typing.NDArray,
+    lats: np.typing.NDArray | None,
+    lons: np.typing.NDArray | None,
     nlat: int | None,
     n_points: int,
     psd_method: str = "sht",
@@ -606,9 +607,9 @@ def compute_psd_score(
 
     Parameters
     ----------
-    gt, p : np.ndarray
+    gt, p : np.typing.NDArray
         Ground truth and prediction arrays of shape ``(n_samples, n_points)``.
-    lats, lons : np.ndarray | None
+    lats, lons : np.typing.NDArray | None
         Latitude / longitude arrays of length ``n_points`` (or None).
     nlat : int | None
         Number of latitudes (for SHT fallback).
@@ -633,7 +634,6 @@ def compute_psd_score(
     """
     # Handle NaN grid points (e.g. from regional masking).
     valid_mask = ~np.isnan(gt).all(axis=0)
-    n_valid = valid_mask.sum()
     gt = gt[:, valid_mask]
     p = p[:, valid_mask]
 
@@ -662,14 +662,26 @@ def compute_psd_score(
 
     try:
         freq_gt, psd_gt = compute_psd_for_field(
-            data=gt, method=psd_method, nlat=nlat_valid, lats=lats_valid, lons=lons_valid,
-            lat_range=lat_range, regrid_resolution=psd_regrid_resolution,
-            sht_truncation=psd_sht_truncation, grid_type=grid_type,
+            data=gt,
+            method=psd_method,
+            nlat=nlat_valid,
+            lats=lats_valid,
+            lons=lons_valid,
+            lat_range=lat_range,
+            regrid_resolution=psd_regrid_resolution,
+            sht_truncation=psd_sht_truncation,
+            grid_type=grid_type,
         )
         freq_p, psd_p = compute_psd_for_field(
-            data=p, method=psd_method, nlat=nlat_valid, lats=lats_valid, lons=lons_valid,
-            lat_range=lat_range, regrid_resolution=psd_regrid_resolution,
-            sht_truncation=psd_sht_truncation, grid_type=grid_type,
+            data=p,
+            method=psd_method,
+            nlat=nlat_valid,
+            lats=lats_valid,
+            lons=lons_valid,
+            lat_range=lat_range,
+            regrid_resolution=psd_regrid_resolution,
+            sht_truncation=psd_sht_truncation,
+            grid_type=grid_type,
         )
     except Exception:
         _logger.exception("PSD computation failed, returning NaN.")

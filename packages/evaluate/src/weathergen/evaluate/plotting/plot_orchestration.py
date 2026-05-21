@@ -804,4 +804,3 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
-                

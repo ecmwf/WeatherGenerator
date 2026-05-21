@@ -1842,7 +1842,8 @@ class Scores:
             Latitude range (min, max) to include in PSD calculation. Default is (-60,
             60) degrees.
         grid_type: str
-            Type of grid for PSD calculation. Options: 'octahedral', 'regular'. Default is 'octahedral'.
+            Type of grid for PSD calculation. Options: 'octahedral', 'regular'.
+            Default is 'octahedral'.
 
         Returns
         -------
@@ -1867,14 +1868,17 @@ class Scores:
         nlat, lats, lons = self._get_psd_grid_info(gt, spatial_dim)
 
         if psd_method == "fft" and (lats is None or lons is None):
-            raise ValueError(
-                f"PSD method 'fft' requires lat/lon coords on '{spatial_dim}'."
-            )
+            raise ValueError(f"PSD method 'fft' requires lat/lon coords on '{spatial_dim}'.")
 
         psd_kwargs = dict(
-            lats=lats, lons=lons, nlat=nlat, n_points=n_points,
-            psd_method=psd_method, psd_regrid_resolution=psd_regrid_resolution,
-            psd_sht_truncation=psd_sht_truncation, lat_range=lat_range,
+            lats=lats,
+            lons=lons,
+            nlat=nlat,
+            n_points=n_points,
+            psd_method=psd_method,
+            psd_regrid_resolution=psd_regrid_resolution,
+            psd_sht_truncation=psd_sht_truncation,
+            lat_range=lat_range,
             grid_type=grid_type,
         )
 
@@ -1896,7 +1900,7 @@ class Scores:
         all_attrs: dict = {}
 
         for idx in np.ndindex(*shape):
-            sel = dict(zip(preserve_dims, idx))
+            sel = dict(zip(preserve_dims, idx, strict=False))
             gt_slice = gt.isel(**sel)
             p_slice = p.isel(**sel)
             gt_np, p_np = self._stack_for_psd(gt_slice, p_slice, spatial_dim, n_points)
@@ -1905,8 +1909,7 @@ class Scores:
             score_values[idx] = slice_score
 
             key = "_".join(
-                str(gt.coords[d].values[i]) if d in gt.coords else str(i)
-                for d, i in sel.items()
+                str(gt.coords[d].values[i]) if d in gt.coords else str(i) for d, i in sel.items()
             )
             for k, v in slice_attrs.items():
                 all_attrs[f"{key}/{k}"] = v
@@ -1921,10 +1924,10 @@ class Scores:
     @staticmethod
     def _get_psd_grid_info(
         gt: xr.DataArray, spatial_dim: str
-    ) -> tuple[int | None, np.ndarray | None, np.ndarray | None]:
+    ) -> tuple[int | None, np.typing.NDArray | None, np.typing.NDArray | None]:
         """
         Extract nlat, lats, lons from ground-truth coords.
-        
+
         Parameters
         ----------
         gt: xr.DataArray
@@ -1935,28 +1938,26 @@ class Scores:
         -------
         nlat: int | None
             Number of latitude points, or None if lat/lon coords are not found.
-        lats: np.ndarray | None
+        lats: np.typing.NDArray | None
             Latitude values, or None if lat/lon coords are not found.
-        lons: np.ndarray | None
+        lons: np.typing.NDArray | None
             Longitude values, or None if lat/lon coords are not found.
-        
+
         """
         if "lat" in gt.coords and "lon" in gt.coords:
             if gt.coords["lat"].dims == (spatial_dim,) and gt.coords["lon"].dims == (spatial_dim,):
                 lats = gt.coords["lat"].values
                 lons = gt.coords["lon"].values
                 return len(np.unique(lats)), lats, lons
-        raise ValueError(
-            f"PSD requires lat/lon coords on spatial dimension '{spatial_dim}'."
-        )
+        raise ValueError(f"PSD requires lat/lon coords on spatial dimension '{spatial_dim}'.")
 
     @staticmethod
     def _stack_for_psd(
         gt: xr.DataArray, p: xr.DataArray, spatial_dim: str, n_points: int
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
         """
         Reshape data to (n_batch, n_points) for PSD computation.
-        
+
         Parameters
         ----------
         gt: xr.DataArray
@@ -1969,10 +1970,10 @@ class Scores:
             Number of points along the spatial dimension.
         Returns
         -------
-        gt_np: np.ndarray
+        gt_np: np.typing.NDArray
             Reshaped ground truth data of shape (n_batch, n_points).
-        p_np: np.ndarray
-            Reshaped forecast data of shape (n_batch, n_points).    
+        p_np: np.typing.NDArray
+            Reshaped forecast data of shape (n_batch, n_points).
         """
         non_spatial = [d for d in gt.dims if d != spatial_dim]
         if non_spatial:

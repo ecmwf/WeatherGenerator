@@ -702,7 +702,9 @@ class LinePlots:
         tar_psd = np.asarray(psd_datasets[0]["psd_target"])
 
         fig, (ax_spec, ax_ratio) = plt.subplots(
-            2, 1, figsize=self.fig_size or (10, 8),
+            2,
+            1,
+            figsize=self.fig_size or (10, 8),
             gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
         )
 
@@ -714,7 +716,9 @@ class LinePlots:
             ax_spec.loglog(
                 np.asarray(ds["frequencies"]),
                 np.asarray(ds["psd_prediction"]),
-                color=c, lw=1.5, label=label,
+                color=c,
+                lw=1.5,
+                label=label,
             )
         ax_spec.set_ylabel("Power")
         psd_method = psd_datasets[0].get("psd_method", "sht")
