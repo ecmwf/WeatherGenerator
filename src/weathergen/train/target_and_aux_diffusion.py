@@ -69,6 +69,9 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
         with torch.no_grad():
             self.encoder.encoder.eval()  # NOTE: might be redundant
             tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
+            shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+            tokens_multi = tokens.reshape(shape)
+            tokens = tokens_multi[:, -1]
         # NOTE: must not set to train afterwards unless it was already in train
 
         output_idxs = batch.get_output_idxs()

@@ -59,10 +59,15 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"fe_diffusion_model_conditioning is '{self.conditioning}' "
             f"(got '{self.conditioning_type}')"
         )
-        _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)
+        _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)        
         assert self.conditioning not in _date_time_modes or _offset == 0, (
             f"forecast.offset must be 0 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got offset={_offset})"
+        )
+        _input_num_steps = self.cf.get("training_config", {}).get("model_input", {}).get("forecasting", {}).get("num_steps_input", 0)
+        assert self.conditioning != "forecast" or _input_num_steps == 2, (
+            f"forecast.input_num_steps must be 2 when fe_diffusion_model_conditioning is "
+            f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
         )
         assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn"}, (
             f"fe_diffusion_model_conditioning_type must be 'cross_attn' when "
@@ -179,7 +184,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.cur_token = tokens.detach()
 
         # y is always the target to denoise (set by DiffusionLatentTargetEncoder.pre_compute)
-        y = meta_info["ERA5"].params.get("diffusion_target_tokens")
+        y = tokens
         assert y is not None, (
             "diffusion_target_tokens not found in meta_info — "
             "DiffusionLatentTargetEncoder.pre_compute must be called before training_forward"
@@ -189,7 +194,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
         elif self.cf.fe_diffusion_model_conditioning == "forecast":
-            c = tokens          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
+            c = meta_info["ERA5"].params["conditioning_tokens"]          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
         if self.training:
             eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
@@ -229,17 +234,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         noise_emb = self.noise_embedder(c_noise)
 
         # Precondition input and feed through network
-        x = self.preconditioner.precondition(x, c)  # currently does nothing
         if self.conditioning in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
 
-        # "ada_ln":  pass conditioning through ada_ln_aux into DiT AdaLN blocks.
-        # "cross_attn": pass conditioning as KV into cross-attention blocks in ForecastingEngine.
         net_input = c_in * x
-        ada_ln_aux = c if self.conditioning_type == "ada_ln" else None
-        x_kv = c if self.conditioning_type == "cross_attn" else None
+
         return c_skip * x + c_out * self.net(
-            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, ada_ln_aux=ada_ln_aux, x_kv=x_kv
+            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
         )  # Eq. (7) in EDM paper
 
     def inference_forward(

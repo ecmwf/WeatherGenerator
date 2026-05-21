@@ -666,9 +666,8 @@ class ForecastingEngine(torch.nn.Module):
         fstep: int,
         meta_info: SampleMetaData = None,
         noise_emb: torch.Tensor = None,
-        ada_ln_aux: torch.Tensor = None,
+        conditioning: torch.Tensor = None,
         coords: torch.Tensor = None,
-        x_kv: torch.Tensor = None,
     ) -> torch.Tensor:
         # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
         # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
@@ -691,21 +690,24 @@ class ForecastingEngine(torch.nn.Module):
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 elif isinstance(block, MultiCrossAttentionHead):
-                    assert x_kv is not None, "x_kv (e.g. enc(X_t)) must be provided for cross_attn conditioning"
-                    tokens = checkpoint(block, tokens, x_kv, noise_emb, use_reentrant=False)
+                    assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                    tokens = checkpoint(block, tokens, conditioning, noise_emb, use_reentrant=False)
                 else:
                     if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
-                        assert ada_ln_aux is not None, "ada_ln_aux must be provided for diffusion model conditioning"
-                        tokens = checkpoint(block, tokens, coords, noise_emb, ada_ln_aux, use_reentrant=False)
+                        assert conditioning is not None, "conditioning must be provided for diffusion model conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, conditioning, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     else:
-                        assert ada_ln_aux is None, "ada_ln_aux should not be provided when diffusion model conditioning is disabled"
+                        assert conditioning is None, "conditioning should not be provided when diffusion model conditioning is disabled"
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
-                    tokens = checkpoint(block, tokens, coords, ada_ln_aux, use_reentrant=False)
+                    tokens = checkpoint(block, tokens, coords, conditioning, use_reentrant=False)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
 

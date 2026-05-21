@@ -656,26 +656,16 @@ class Trainer(TrainerBase):
                             dtype=self.mixed_precision_dtype,
                             enabled=cf.with_mixed_precision,
                         ):
-                            source_samples = batch.get_source_samples()
-                            for loss_name, target_aux in self.target_and_aux_calculators_val.items():
-                                target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
-                                target_aux.pre_compute(
-                                    self.cf.general.istep,
-                                    source_samples,
-                                    batch.get_target_samples(target_idxs),
-                                    self.model_params,
-                                    self.model,
-                                )
 
                             if self.ema_model is None:
                                 preds = self.model(
                                     self.model_params,
-                                    source_samples,
+                                    batch.get_source_samples(),
                                 )
                             else:
                                 preds = self.ema_model.forward_eval(
                                     self.model_params,
-                                    source_samples,
+                                    batch.get_source_samples(),
                                 )
 
                             targets_and_auxs = {}
