@@ -518,7 +518,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 offset += len(local)
         return self._rank_sample_map
 
-    def _merge_fsteps(all_das: dict) -> dict:
+    def _merge_fsteps(self, all_das: dict) -> dict:
         """Merge lists of DataArrays for each forecast step across ranks.
         Concatenates along the sample dimension and re-indexes to global samples.
         """
@@ -621,8 +621,8 @@ class WeatherGenZarrReader(WeatherGenReader):
         # Concatenate across ranks along sample dimension and re-index
         global_sample_coords = np.array(sorted(requested_globals))
 
-        merged_targets = _merge_fsteps(all_targets)
-        merged_predictions = _merge_fsteps(all_predictions)
+        merged_targets = self._merge_fsteps(all_targets)
+        merged_predictions = self._merge_fsteps(all_predictions)
 
         ranks_skipped = len(self.rank_files) - ranks_loaded
         _logger.info(
