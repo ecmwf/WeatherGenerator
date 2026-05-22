@@ -116,7 +116,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
 
 
 def hpy_splits(
-    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool
+    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
 ) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
     """Compute healpix cell for each data point and splitting information per cell;
        when the token_size is exceeded then splitting based on lat is used;
@@ -145,7 +145,7 @@ def hpy_splits(
 
     # helper variables to split according to cells
     # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
-    offset = 1 if pad_tokens else 0
+    offset = (1 if pad_tokens else 0) + offset_step
     int32 = torch.int32
     idxs_ord = [
         list(
@@ -172,11 +172,12 @@ def tokenize_space(
     token_size,
     hl,
     pad_tokens=True,
+    offset_step=0,
 ):
     """Process one window into tokens"""
 
     # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens = hpy_splits(rdata.coords, hl, token_size, pad_tokens)
+    idxs_ord, idxs_ord_lens = hpy_splits(rdata.coords, hl, token_size, pad_tokens, offset_step)
 
     return idxs_ord, idxs_ord_lens
 
@@ -195,6 +196,7 @@ def tokenize_spacetime(
     idxs_cells = [[] for _ in range(num_healpix_cells)]
     idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
 
+    offset_step = 0
     t_unique = np.unique(rdata.datetimes)
     for _, t in enumerate(t_unique):
         # data for current time step
@@ -202,11 +204,12 @@ def tokenize_spacetime(
         rdata_cur = IOReaderData(
             rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
         )
-        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens)
+        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
 
         # collect data for all time steps
         idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
         idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
+        offset_step += mask.sum()
 
     return idxs_cells, idxs_cells_lens
 

@@ -203,6 +203,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             kwargs = {
                 "tw_handler": self.time_window_handler,
                 "stream_info": stream_info,
+                "stage": self._stage,
             }
             dataset: type[AnyDataReader] | None = None
             match stream_info["type"]:
@@ -247,15 +248,15 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
-                stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
-                stream_info["target_channel_weights"] = (
-                    ds.target_channel_weights
-                    if ds.target_channel_weights is not None
-                    else [1.0 for _ in ds.target_channels]
-                )
-
                 streams_datasets[stream_info["name"]] += [ds]
+
+            stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
+            stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+            stream_info["target_channel_weights"] = (
+                ds.target_channel_weights
+                if ds.target_channel_weights is not None
+                else [1.0 for _ in ds.target_channels]
+            )
 
         return streams_datasets
 
