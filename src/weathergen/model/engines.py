@@ -7,7 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 import dataclasses
+import logging
 import math
+from typing import Callable
 
 import torch
 import torch.nn as nn
@@ -1222,6 +1224,290 @@ class LatentPredictionHeadMLP(nn.Module):
             outputs.append(self.blocks(x.patch_tokens))
 
         return torch.cat(outputs, dim=1)
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class DiffusionPrediction:
+    """Deferred diffusion prediction returned by LatentPredictionHeadDiffusion during training.
+
+    The predictor head cannot denoise during the student forward pass because teacher targets
+    are not yet available. This object carries the student conditioning and a reference to the
+    denoising method so the loss module can complete the prediction.
+    """
+
+    conditioning: torch.Tensor  # (B, N, D_inner) projected student tokens
+    denoise_and_loss: Callable  # (teacher_target, mask) -> (loss, info_dict)
+
+
+class LatentPredictionHeadDiffusion(nn.Module):
+    """Diffusion-based JEPA predictor head.
+
+    Instead of directly predicting teacher targets, this head learns a conditional denoising
+    model: given student latents as conditioning, it denoises noised teacher targets.
+
+    Training: returns a ``DiffusionPrediction`` (deferred — loss module completes denoising).
+    Inference: runs iterative EDM sampling from pure noise, returns a tensor.
+    """
+
+    def __init__(
+        self,
+        cf: Config,
+        name: str,
+        in_dim: int,
+        loss_conf,
+        use_class_token: bool,
+        use_patch_token: bool,
+    ):
+        super().__init__()
+        self.name = name
+        self.global_cf = cf
+        self.use_class_token = use_class_token
+        self.use_patch_token = use_patch_token
+
+        # Dimensions
+        self.out_dim = loss_conf["out_dim"]
+        intermediate_dim = loss_conf["intermediate_dim"]
+        num_blocks = loss_conf["num_blocks"]
+        num_heads = loss_conf["num_heads"]
+        dropout_rate = loss_conf["dropout_rate"]
+        with_qk_lnorm = loss_conf["with_qk_lnorm"]
+
+        # EDM parameters (from loss_conf, with fallbacks to global config)
+        self.sigma_data = loss_conf.get("sigma_data", cf.get("sigma_data", 1.0))
+        self.sigma_min = loss_conf.get("sigma_min", cf.get("sigma_min", 0.002))
+        self.sigma_max = loss_conf.get("sigma_max", cf.get("sigma_max", 80.0))
+        self.p_mean = loss_conf.get("p_mean", cf.get("p_mean", -1.2))
+        self.p_std = loss_conf.get("p_std", cf.get("p_std", 1.2))
+        self.rho = loss_conf.get("rho", cf.get("rho", 7))
+        self.num_inference_steps = loss_conf.get("num_inference_steps", 20)
+        freq_embed_dim = loss_conf.get("frequency_embedding_dim", 256)
+
+        # Noise embedder (reuses the same architecture as DiffusionForecastEngine)
+        noise_embed_dim = intermediate_dim
+        self.noise_embedder = nn.Sequential(
+            nn.Linear(freq_embed_dim, noise_embed_dim),
+            nn.SiLU(),
+            nn.Linear(noise_embed_dim, noise_embed_dim),
+        )
+        self.freq_embed_dim = freq_embed_dim
+
+        # Conditioning projection: student tokens -> intermediate_dim
+        self.cond_proj = nn.Linear(in_dim, intermediate_dim, bias=False)
+
+        # Target projection: target/noised tokens -> intermediate_dim
+        self.target_proj = nn.Linear(self.out_dim, intermediate_dim, bias=False)
+
+        # Denoising transformer blocks (with DiT-style noise conditioning)
+        self.blocks = nn.ModuleList()
+        for _ in range(num_blocks):
+            self.blocks.append(
+                MultiSelfAttentionHead(
+                    intermediate_dim,
+                    num_heads=num_heads,
+                    dropout_rate=dropout_rate,
+                    with_qk_lnorm=with_qk_lnorm,
+                    with_flash=cf.with_flash_attention,
+                    use_xsa=cf.get("use_xsa", False),
+                    norm_type=cf.norm_type,
+                    qk_norm_type=cf.get("qk_norm_type", cf.norm_type),
+                    dim_aux=noise_embed_dim,
+                    norm_eps=cf.norm_eps,
+                    attention_dtype=get_dtype(cf.attention_dtype),
+                    is_dit=True,
+                )
+            )
+            self.blocks.append(
+                MLP(
+                    intermediate_dim,
+                    intermediate_dim,
+                    hidden_factor=4,
+                    with_residual=True,
+                    dropout_rate=dropout_rate,
+                    mlp_type=loss_conf.get("mlp_type", cf.get("mlp_type", "mlp")),
+                    norm_type=cf.norm_type,
+                    dim_aux=noise_embed_dim,
+                    norm_eps=cf.mlp_norm_eps,
+                    is_dit=True,
+                )
+            )
+
+        # Output projection: intermediate_dim -> out_dim
+        self.out_proj = nn.Linear(intermediate_dim, self.out_dim, bias=False)
+
+        # Initialize output projection to near-zero for stable start
+        nn.init.normal_(self.out_proj.weight, mean=0, std=0.001)
+
+    def _timestep_embedding(self, t: torch.Tensor) -> torch.Tensor:
+        """Sinusoidal positional embedding for noise level."""
+        half = self.freq_embed_dim // 2
+        freqs = torch.exp(
+            -math.log(10000) * torch.arange(half, device=t.device, dtype=torch.float32) / half
+        )
+        args = t.float().unsqueeze(-1) * freqs.unsqueeze(0)
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        if self.freq_embed_dim % 2:
+            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+        return embedding
+
+    def _embed_noise(self, sigma: torch.Tensor) -> torch.Tensor:
+        """Embed noise level sigma into a conditioning vector."""
+        c_noise = sigma.log() / 4
+        t_freq = self._timestep_embedding(c_noise)
+        return self.noise_embedder(t_freq)
+
+    def _edm_precondition(
+        self,
+        x_noised: torch.Tensor,
+        cond: torch.Tensor,
+        sigma: torch.Tensor,
+    ) -> torch.Tensor:
+        """EDM-preconditioned denoising: D(x; sigma) = c_skip*x + c_out*F(c_in*x, cond; sigma)."""
+        c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
+        c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
+        c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
+
+        noise_emb = self._embed_noise(sigma)  # (B, D_noise)
+
+        # Project and concatenate: [cond_tokens ; noised_target_tokens]
+        target_scaled = self.target_proj(c_in * x_noised)  # (B, N, D_inner)
+        combined = torch.cat([cond, target_scaled], dim=1)  # (B, 2N, D_inner)
+
+        for block in self.blocks:
+            combined = checkpoint(block, combined, None, noise_emb, use_reentrant=False)
+
+        # Slice out the target portion (second half)
+        n_target = x_noised.shape[1]
+        f_out = combined[:, -n_target:]
+        f_out = self.out_proj(f_out)  # (B, N, out_dim)
+
+        return c_skip * x_noised + c_out * f_out
+
+    def _training_denoise_and_loss(
+        self,
+        cond: torch.Tensor,
+        teacher_target: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict]:
+        """Called by the loss module. Noises teacher target, denoises, computes masked loss.
+
+        Args:
+            cond: Student conditioning (B, N, D_inner) from forward().
+            teacher_target: Clean teacher patch tokens (B, N, D_target).
+            mask: Boolean mask (B, N) — True where loss should be computed.
+
+        Returns:
+            loss: Scalar loss value.
+            info: Dict with diagnostic values.
+        """
+        b = teacher_target.shape[0]
+        device = teacher_target.device
+
+        # Sample sigma from log-normal: ln(sigma) ~ N(p_mean, p_std^2)
+        eta = torch.randn(b, device=device)
+        sigma = (eta * self.p_std + self.p_mean).exp()  # (B,)
+
+        # Add noise
+        noise = torch.randn_like(teacher_target)
+        x_noised = teacher_target + sigma.view(b, 1, 1) * noise
+
+        # Denoise
+        denoised = self._edm_precondition(x_noised, cond, sigma)
+
+        # EDM loss weight: lambda(sigma) = (sigma^2 + sigma_data^2) / (sigma * sigma_data)^2
+        loss_weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2  # (B,)
+
+        # Per-token MSE, then mask
+        per_token_mse = (denoised - teacher_target).pow(2).mean(dim=-1)  # (B, N)
+        mask_f = mask.to(per_token_mse.dtype)
+        token_counts = mask_f.sum(dim=-1).clamp(min=1.0)  # (B,)
+
+        # Per-sample masked loss, weighted by noise level
+        per_sample_loss = (per_token_mse * mask_f).sum(dim=-1) / token_counts  # (B,)
+        weighted_loss = (loss_weight * per_sample_loss)  # (B,)
+
+        # Mean over samples with at least one masked token
+        valid = token_counts > 0
+        loss = weighted_loss[valid].mean() if valid.any() else weighted_loss.sum() * 0.0
+
+        info = {
+            "sigma_mean": sigma.mean().item(),
+            "sigma_std": sigma.std().item(),
+            "loss_weight_mean": loss_weight.mean().item(),
+        }
+        return loss, info
+
+    def forward(self, x: LatentState) -> DiffusionPrediction | torch.Tensor:
+        """Forward pass.
+
+        Training: returns DiffusionPrediction (deferred denoising).
+        Inference: returns denoised tensor via iterative sampling.
+        """
+        # Extract and project student tokens
+        tokens = []
+        if self.use_class_token:
+            tokens.append(x.class_token)
+        if self.use_patch_token:
+            tokens.append(x.patch_tokens)
+        student_tokens = torch.cat(tokens, dim=1)
+        cond = self.cond_proj(student_tokens)  # (B, N, D_inner)
+
+        if self.training:
+            return DiffusionPrediction(
+                conditioning=cond,
+                denoise_and_loss=lambda target, mask: self._training_denoise_and_loss(
+                    cond, target, mask
+                ),
+            )
+
+        return self._inference_forward(cond)
+
+    @torch.no_grad()
+    def _inference_forward(self, cond: torch.Tensor) -> torch.Tensor:
+        """Iterative EDM sampling from pure noise, conditioned on student latents."""
+        b, n_cond, _ = cond.shape
+        device = cond.device
+        num_steps = self.num_inference_steps
+
+        # Training-aligned sigma bounds (same logic as DiffusionForecastEngine)
+        sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
+        sigma_max_eff = min(self.sigma_max, sigma_max_train)
+        sigma_min_eff = max(self.sigma_min, self.sigma_data * 0.01)
+
+        # Time step discretization (EDM Eq. 5)
+        step_indices = torch.arange(num_steps, dtype=torch.float64, device=device)
+        t_steps = (
+            sigma_max_eff ** (1 / self.rho)
+            + step_indices
+            / (num_steps - 1)
+            * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
+        ) ** self.rho
+        t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])
+
+        # Start from scaled noise
+        x = torch.randn(b, n_cond, self.out_dim, device=device) * t_steps[0].float()
+
+        for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:], strict=False)):
+            sigma = torch.full((b,), t_cur.item(), device=device)
+            sigma_next = t_next.item()
+
+            # Euler step
+            denoised = self._edm_precondition(x, cond, sigma)
+            d_cur = (x - denoised) / t_cur.float()
+            x_next = x + (t_next - t_cur).float() * d_cur
+
+            # 2nd order correction (Heun's method)
+            if i < num_steps - 1:
+                sigma_n = torch.full((b,), sigma_next, device=device)
+                denoised_next = self._edm_precondition(x_next, cond, sigma_n)
+                d_prime = (x_next - denoised_next) / t_next.float()
+                x_next = x + (t_next - t_cur).float() * (0.5 * d_cur + 0.5 * d_prime)
+
+            x = x_next
+
+        return x
 
 
 class EfficientBilinear(torch.nn.Module):

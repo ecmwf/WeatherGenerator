@@ -605,7 +605,6 @@ class MultiSelfAttentionHead(torch.nn.Module):
         use_xsa=False,
         rope_mode="none",
         is_dit=False,  # should only be True for diffusion model
-        use_xsa=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 

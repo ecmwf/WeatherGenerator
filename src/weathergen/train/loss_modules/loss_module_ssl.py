@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from omegaconf import DictConfig
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
+from weathergen.model.engines import DiffusionPrediction
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import Stage
 
@@ -123,6 +124,20 @@ class LossLatentSSLStudentTeacher(LossModuleBase):
             if name not in levels_by_name:
                 continue
             for level_idx, (level_w, s_data, t_data) in enumerate(levels_by_name[name]):
+
+                # Diffusion predictor head: s_data is a list of DiffusionPrediction objects.
+                # Bypass standard gather/loss and use the head's own denoise-and-loss method.
+                if _is_diffusion_prediction(s_data):
+                    loss_value, diffusion_info = _diffusion_jepa_loss(
+                        s_data, t_data, output_info, target_info, target2source_matching_idxs
+                    )
+                    suffix = f"_L{level_idx}" if has_deep_ssl else ""
+                    loss = loss + level_w * weight * loss_value
+                    losses_all[f"{name}{suffix}"] = loss_value.item()
+                    for k, v in diffusion_info.items():
+                        losses_all[f"{name}_diff_{k}{suffix}"] = v
+                    continue
+
                 preds_for_loss = self.gather_preds_for_loss(
                     name, s_data, output_info, target2source_matching_idxs
                 )
@@ -406,3 +421,66 @@ def get_loss_function_ssl(name):
         raise NotImplementedError(
             f"{name} is not an implemented loss for the LossLatentSSLStudentTeacher"
         )
+
+
+def _is_diffusion_prediction(s_data) -> bool:
+    """Check if student data contains DiffusionPrediction objects (from a diffusion head)."""
+    if isinstance(s_data, list):
+        return len(s_data) > 0 and isinstance(s_data[0], DiffusionPrediction)
+    return isinstance(s_data, DiffusionPrediction)
+
+
+def _diffusion_jepa_loss(
+    s_data, t_data, output_info, target_info, target2source_matching_idxs
+) -> tuple[torch.Tensor, dict]:
+    """Compute diffusion denoising loss for JEPA.
+
+    Gathers the student DiffusionPrediction objects and teacher targets, builds the JEPA mask
+    (teacher-visible AND student-masked), then calls the denoising network to compute loss.
+    """
+    # Gather student DiffusionPrediction objects that participate in JEPA
+    diff_preds = [
+        p for p, info in zip(s_data, output_info, strict=False)
+        if "JEPA" in info.global_params["loss"]
+    ]
+    # Gather teacher targets and masks
+    teacher_patches = torch.stack(
+        [p for p, info in zip(t_data, target_info, strict=True) if "JEPA" in info.global_params["loss"]],
+        dim=0,
+    )
+    student_masks = torch.stack(
+        [info.mask for info in output_info if "JEPA" in info.global_params["loss"]],
+        dim=0,
+    )
+    teacher_masks = torch.stack(
+        [info.mask for info in target_info if "JEPA" in info.global_params["loss"]],
+        dim=0,
+    )
+
+    # JEPA mask: positions the teacher sees but the student doesn't
+    jepa_mask = torch.logical_and(teacher_masks, torch.logical_not(student_masks))
+
+    # Accumulate loss across samples in the batch
+    total_loss = torch.tensor(0.0, device=teacher_patches.device, requires_grad=True)
+    agg_info: dict[str, float] = {}
+    count = 0
+
+    for i, diff_pred in enumerate(diff_preds):
+        # Each DiffusionPrediction has its own conditioning slice
+        target_i = teacher_patches[i : i + 1]  # (1, N, D)
+        mask_i = jepa_mask[i]  # (N,)
+
+        if mask_i.sum() == 0:
+            continue
+
+        loss_i, info_i = diff_pred.denoise_and_loss(target_i, mask_i.unsqueeze(0))
+        total_loss = total_loss + loss_i
+        count += 1
+        for k, v in info_i.items():
+            agg_info[k] = agg_info.get(k, 0.0) + v
+
+    if count > 0:
+        total_loss = total_loss / count
+        agg_info = {k: v / count for k, v in agg_info.items()}
+
+    return total_loss, agg_info

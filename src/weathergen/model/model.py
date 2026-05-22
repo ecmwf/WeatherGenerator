@@ -31,6 +31,7 @@ from weathergen.model.engines import (
     EnsPredictionHead,
     ForecastingEngine,
     IdentityEngine,
+    LatentPredictionHeadDiffusion,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
@@ -436,6 +437,15 @@ class Model(torch.nn.Module):
                 use_class_token=use_class_token,
                 use_patch_token=use_patch_token,
             )
+        elif loss_cfg["head"].lower() == "diffusion":
+            return LatentPredictionHeadDiffusion(
+                global_cfg,
+                name,
+                global_cfg.ae_global_dim_embed,
+                loss_cfg,
+                use_class_token=use_class_token,
+                use_patch_token=use_patch_token,
+            )
         elif loss_cfg["head"].lower() == "identity":
             return LatentPredictionHeadIdentity()
         else:
@@ -698,6 +708,8 @@ class Model(torch.nn.Module):
             return head.blocks.layers[-1].out_features
         elif isinstance(head, LatentPredictionHeadTransformer):
             return head.blocks[-1].out_features
+        elif isinstance(head, LatentPredictionHeadDiffusion):
+            return head.out_dim
         elif isinstance(head, LatentPredictionHeadIdentity):
             return -1  # identity head: projection is also identity
         else:
