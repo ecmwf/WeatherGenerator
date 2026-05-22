@@ -15,13 +15,40 @@ train:
     # rji4dzs6-pretrain:
     #   slurm_id: 0
     #   description: "JEPA sf ema=400000 wider predictor"
-    zw5n2aq0-finetune-forecast:
-      slurm_id: 0
-      description: "JEPA space self-flow swiglu+xsa"
+    # zw5n2aq0-finetune-forecast:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow swiglu+xsa"
     k47tobdl-finetune-forecast:
       slurm_id: 0
       description: "JEPA space self-flow swiglu+xsa higher lr 1e-4"
-    scfiudy4-finetune-forecast:
+    k47tobdl-ft32-lpyi0gq3:
       slurm_id: 0
-      description: "JEPA space self-flow swiglu+xsa lower lr 1e-5"
+      description: "Pretrain JEPA k47tobdl epoch 32, 5e-5 noise"
+    # scfiudy4-finetune-forecast:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow swiglu+xsa lower lr 1e-5"
+    sj0kxavt-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space (2 nodes) corrected"
+    yhpai5q3-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space (2 nodes) corrected adapt schedule"
+    h76d98up-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space self-flow with cooldown"
+    u5i3ncj0-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space self-flow t_max=0.7"
+    fx6d8p57-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space self-flow t_max=0.5"
+    e9xmiela-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space self-flow t_max=0.9, noise_rate=0.5"
+    g4u9dbj7-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space self-flow t_max=0.9, noise_rate=0.1"
+    irjkvnd2-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space self-flow with reconstruction"
 

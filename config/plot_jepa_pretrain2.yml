@@ -15,13 +15,47 @@ train:
     # rji4dzs6-pretrain:
     #   slurm_id: 0
     #   description: "JEPA sf ema=400000 wider predictor"
-    zw5n2aq0-pretrain:
+    # zw5n2aq0-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow swiglu+xsa"
+    # k47tobdl-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow swiglu+xsa higher lr 1e-4"
+    # scfiudy4-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow swiglu+xsa lower lr 1e-5"
+    # e8bd7ejo-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space (2 nodes) self-flow swiglu+xsa lower lr 1e-4"
+    # sj0kxavt-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space (2 nodes) corrected"
+    # yhpai5q3-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space (2 nodes) corrected adapt schedule"
+    # h76d98up-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow with cooldown"
+    # u5i3ncj0-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow t_max=0.7"
+    # fx6d8p57-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow t_max=0.5"
+    # e9xmiela-pretrain:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow t_max=0.9, noise_rate=0.5"
+    g4u9dbj7-pretrain:
       slurm_id: 0
-      description: "JEPA space self-flow swiglu+xsa"
-    k47tobdl-pretrain:
+      description: "JEPA space self-flow t_max=0.9, noise_rate=0.1"
+    irjkvnd2-pretrain:
       slurm_id: 0
-      description: "JEPA space self-flow swiglu+xsa higher lr 1e-4"
-    scfiudy4-pretrain:
+      description: "JEPA space self-flow with recon."
+    c1qjdf6y-pretrain:
       slurm_id: 0
-      description: "JEPA space self-flow swiglu+xsa lower lr 1e-5"
+      description: "JEPA space self-flow spherical RoPE"
+    su47jhd2-pretrain:
+      slurm_id: 0
+      description: "JEPA space self-flow spherical RoPE cosine schedule"
+
 

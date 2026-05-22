@@ -1,0 +1,15 @@
+train:
+  plot:
+    k47tobdl-ft16-7wzgqg8q:
+      slurm_id: 0
+      description: "JEPA 5e-5 noise epoch 16"
+    k47tobdl-ft32-lpyi0gq3:
+      slurm_id: 0
+      description: "JEPA 5e-5 noise epoch 32"
+    k47tobdl-ft48-lrkiqfqq:
+      slurm_id: 0
+      description: "JEPA 5e-5 noise epoch 48"
+    k47tobdl-ft64-2st7t16o:
+      slurm_id: 0
+      description: "JEPA 5e-5 noise epoch 64"
+    

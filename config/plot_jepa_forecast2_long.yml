@@ -1,0 +1,15 @@
+train:
+  plot:
+    zw5n2aq0-finetune-forecast-long:
+      slurm_id: 0
+      description: "JEPA space self-flow swiglu+xsa"
+    k47tobdl-finetune-forecast-long:
+      slurm_id: 0
+      description: "JEPA space self-flow swiglu+xsa higher lr 1e-4"
+    # scfiudy4-finetune-forecast-long:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow swiglu+xsa lower lr 1e-5"
+    yhpai5q3-finetune-forecast-long:
+      slurm_id: 0
+      description: "JEPA space correct adapted schedule"
+

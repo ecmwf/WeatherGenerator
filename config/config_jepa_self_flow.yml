@@ -27,7 +27,7 @@ ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 5
-ae_global_num_heads: 32
+ae_global_num_heads: 16
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 # TODO: switching to < 1 triggers triton-related issues.
@@ -38,7 +38,7 @@ ae_global_mlp_hidden_factor: 4
 ae_global_trailing_layer_norm: False
 
 ae_aggregation_num_blocks: 5
-ae_aggregation_num_heads: 32
+ae_aggregation_num_heads: 16
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
 ae_aggregation_att_dense_rate: 1.0
@@ -67,10 +67,10 @@ with_step_conditioning: True # False
 
 healpix_level: 5
 # Generalized RoPE selector.
-rope_mode: 2d  # one of: none, 2d, spherical
+rope_mode: spherical  # one of: none, 2d, spherical
 # Optional spherical harmonic band for spherical RoPE. If null, the model picks one
 # conservative shared band that fits all spherical-RoPE attention modules.
-rope_spherical_band: null
+rope_spherical_band: 23
 mlp_type: swiglu
 use_xsa: True
 
@@ -225,17 +225,17 @@ training_config:
       eps : 2e-08
 
   losses : {
-    "physical": {
-        type: LossPhysical,
-        weight: 0.5,
-        loss_fcts: {
-          "mse": {
-            weight: 1.0,
-            target_source_correspondence: { 0 : { 0 : "identity"} },
-          },
-        },
-        target_and_aux_calc: "Physical",
-    },
+    # "physical": {
+    #     type: LossPhysical,
+    #     weight: 0.5,
+    #     loss_fcts: {
+    #       "mse": {
+    #         weight: 1.0,
+    #         target_source_correspondence: { 0 : { 0 : "identity"} },
+    #       },
+    #     },
+    #     target_and_aux_calc: "Physical",
+    # },
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,

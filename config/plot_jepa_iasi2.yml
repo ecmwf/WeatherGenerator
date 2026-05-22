@@ -15,12 +15,19 @@ train:
     # rji4dzs6-pretrain:
     #   slurm_id: 0
     #   description: "JEPA sf ema=400000 wider predictor"
-    zw5n2aq0-finetune:
-      slurm_id: 0
-      description: "JEPA space self-flow swiglu+xsa"
+    # zw5n2aq0-finetune:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow swiglu+xsa"
     k47tobdl-finetune:
       slurm_id: 0
       description: "JEPA space self-flow swiglu+xsa higher lr 1e-4"
-    scfiudy4-finetune:
+    # scfiudy4-finetune:
+    #   slurm_id: 0
+    #   description: "JEPA space self-flow swiglu+xsa lower lr 1e-5"
+    e8bd7ejo-finetune:
       slurm_id: 0
-      description: "JEPA space self-flow swiglu+xsa lower lr 1e-5"
+      description: "Pretrain JEPA 2 nodes"
+    sj0kxavt-finetune:
+      slurm_id: 0
+      description: "Pretrain JEPA 2 nodes correct self flow"
+
