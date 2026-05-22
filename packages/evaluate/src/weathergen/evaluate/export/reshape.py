@@ -544,8 +544,7 @@ class Regridder:
         regrid_ds = xr.Dataset(regrid_vars)
         regrid_ds = self.add_attrs(regrid_ds)
         regrid_ds = regrid_ds.transpose(
-            "valid_time", "pressure", "latitude", "longitude", "mem", ...,
-            missing_dims="ignore"
+            "valid_time", "pressure", "latitude", "longitude", "mem", ..., missing_dims="ignore"
         )
         return regrid_ds
 

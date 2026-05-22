@@ -69,22 +69,16 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
         else:
             data_dims = ["ipoint", "channel", "mem"]
 
-    
     data_coords = {
-            "ipoint": np.arange(npoints),
-            "channel": channels,
-            "forecast_step": fstep,
-            "valid_time": ("ipoint", times_arr),
-            "lat": ("ipoint", coords_arr[:, 0]),
-            "lon": ("ipoint", coords_arr[:, 1]),
-        }
+        "ipoint": np.arange(npoints),
+        "channel": channels,
+        "forecast_step": fstep,
+        "valid_time": ("ipoint", times_arr),
+        "lat": ("ipoint", coords_arr[:, 0]),
+        "lon": ("ipoint", coords_arr[:, 1]),
+    }
 
-
-    da_result = xr.DataArray(
-        data_arr,
-        dims=data_dims,
-        coords=data_coords
-    )
+    da_result = xr.DataArray(data_arr, dims=data_dims, coords=data_coords)
 
     return (sample, fstep, da_result)
 
