@@ -137,6 +137,8 @@ class EncoderModule(torch.nn.Module):
             cf, self.num_healpix_cells, tap_global_layers=tap_global_layers
         )
 
+        self.ln = torch.nn.LayerNorm(cf.ae_global_dim_embed, elementwise_affine=False)
+
     def forward(self, model_params, batch):
         """
         Encoder forward
@@ -165,6 +167,8 @@ class EncoderModule(torch.nn.Module):
             use_reentrant=False,
         )
         intermediates.extend(global_intermediates)
+
+        tokens_global = self.ln(tokens_global)
 
         return tokens_global, posteriors, intermediates
 
@@ -395,3 +399,6 @@ class EncoderModule(torch.nn.Module):
         ).flatten(1, 2)
 
         return tokens_global, posteriors
+
+    def reset_parameters(self):
+        return

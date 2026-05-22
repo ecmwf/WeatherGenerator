@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 512
+ae_local_dim_embed: 2048
 ae_local_num_blocks: 0
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -25,7 +25,7 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_global_dim_embed: 512
+ae_global_dim_embed: 2048
 ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
@@ -67,13 +67,11 @@ fe_diffusion_model: False
 
 healpix_level: 5
 
-# Generalized RoPE selector.
-rope_mode: none  # one of: none, 2d, spherical
-# Optional spherical harmonic band for spherical RoPE. If null, the model picks one
-# conservative shared band that fits all spherical-RoPE attention modules.
-rope_spherical_band: null
+rope_2D: True
 mlp_type: swiglu
 use_xsa: True
+# mlp_type: mlp
+# use_xsa: False
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -98,7 +96,7 @@ qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting/"
+streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
 streams: ???
 
 # type of zarr_store
@@ -144,7 +142,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 196
+  num_mini_epochs: 64
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -191,7 +189,7 @@ training_config:
     }
 
   forecast :
-      # time_step: 01:00:00
+      time_step: 06:00:00
       offset: 1
       num_steps: 3
       policy: "fixed"
@@ -210,7 +208,7 @@ validation_config:
   validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
-    ema_halflife_in_thousands: 600
+    ema_halflife_in_thousands: 1e-3
 
   # parameters for validation samples that are written to disk
   output : {

@@ -38,17 +38,18 @@ class MaskData:
         return len(self.masks)
 
     def add_mask(self, mask, params, cfg, losses, idx, correspondence, relationship):
+        global_params = {
+            "idx": idx,
+            "correspondence": correspondence,
+            "loss": losses,
+            "relationship": relationship,
+        }
         self.masks += [mask]
         self.metadata += [
             SampleMetaData(
                 params={**cfg, **params},
                 mask=mask,
-                global_params={
-                    "idx": idx,
-                    "correspondence": correspondence,
-                    "loss": losses,
-                    "relationship": relationship,
-                },
+                global_params=global_params,
             )
         ]
 

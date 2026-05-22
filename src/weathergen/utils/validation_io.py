@@ -21,7 +21,15 @@ _logger = logging.getLogger(__name__)
 
 
 def write_output(
-    cf, val_cfg, batch_size, mini_epoch, batch_idx, dn_data, batch, model_output, target_aux_out
+    cf,
+    val_cfg,
+    batch_size,
+    mini_epoch,
+    batch_idx,
+    dn_data,
+    batch,
+    model_output,
+    target_aux_out,
 ):
     """
     Interface for writing model output
@@ -42,6 +50,15 @@ def write_output(
 
     timestep_idxs = [0] if len(batch.get_output_idxs()) == 0 else batch.get_output_idxs()
     forecast_offset = timestep_idxs[0]
+
+    # Diffusion inference inflates the model output's fstep dimension to one entry per
+    # ODE denoising step (the trajectory). The batch only has the original physical
+    # forecast indices, so synthesize a contiguous run of indices starting at the
+    # original first index to cover every entry in model_output / target_aux_out.
+    n_pred_steps = len(model_output.physical)
+    if n_pred_steps > len(timestep_idxs):
+        timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
+
     targets_lens = []
 
     # TODO Maybe stopping at forecast_steps explained #1657
@@ -56,6 +73,7 @@ def write_output(
 
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
+
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 preds = model_output.get_physical_prediction(t_idx, sname)
                 # handle forcing streams or if sample is empty
@@ -180,3 +198,8 @@ def write_output(
     with zarrio_writer(config.get_path_results(cf, mini_epoch)) as zio:
         for subset in data.items():
             zio.write_zarr(subset)
+
+    # Free arrays no longer needed after zarr writing
+    del targets_all, targets_lens, sources, data
+
+    del targets_times_all

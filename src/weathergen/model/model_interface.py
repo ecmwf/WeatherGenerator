@@ -72,6 +72,7 @@ def init_model_and_shard(
             find_unused_parameters=cf.get("ddp_find_unused_parameters", True),
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
+            static_graph=cf.get("ddp_static_graph", True),
         )
 
     elif with_ddp and with_fsdp:
@@ -107,7 +108,15 @@ def init_model_and_shard(
             if isinstance(module, modules_to_shard):
                 fully_shard(module, **fsdp_kwargs)
 
-        for module in model.forecast_engine.fe_blocks.modules():
+        if cf.fe_diffusion_model:
+            model_fe_blocks = model.forecast_engine.net.fe_blocks
+        else:
+            model_fe_blocks = model.forecast_engine.fe_blocks
+        for module in model_fe_blocks.modules():
+            if isinstance(module, modules_to_shard):
+                fully_shard(module, **fsdp_kwargs)
+
+        for module in model.latent_heads.modules():
             if isinstance(module, modules_to_shard):
                 # reshard_after_forward=False keeps FE parameters unsharded
                 # during the multi-step rollout loop.
@@ -201,11 +210,29 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
 
     is_model_sharded = cf.with_ddp and cf.with_fsdp
     if is_model_sharded:
+        # model_has_prefix_module = list(model.state_dict().keys())[0].split(".")[0] == "module"
+        # params_has_prefix_module = list(params.keys())[0].split(".")[0] == "module"
+        # if model_has_prefix_module and not params_has_prefix_module:
+        #     # add "module." prefix
+        #     params_temp = {}
+        #     for k in params.keys():
+        #         params_temp["module." + k] = params[k]
+        #     params = params_temp
+        # elif not model_has_prefix_module and params_has_prefix_module:
+        #     # remove "module." prefix
+        #     params_temp = {}
+        #     for k in params.keys():
+        #         params_temp[k.replace("module.", "")] = params[k]
+        #     params = params_temp
+
         meta_sharded_sd = model.state_dict()
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
-            if sharded_meta_param is None:
+            if (
+                sharded_meta_param is None
+                or type(sharded_meta_param) is not torch.distributed.tensor.DTensor
+            ):
                 logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
                 continue
             sharded_tensor = distribute_tensor(

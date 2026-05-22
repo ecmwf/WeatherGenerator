@@ -669,13 +669,18 @@ def plot_data(
         )
 
         for sample in plot_samples:
+            # Pre-slice to this sample before serializing for the worker, to avoid
+            # sending the full per-fstep DataArray (all samples) to each loky process.
+            tars_s = tars.sel(sample=sample)
+            preds_s = preds.sel(sample=sample)
+            bias_s = bias_data.sel(sample=sample) if bias_data is not None else None
             tasks.append(
                 {
                     "plotter_cfg": plotter_cfg,
                     "output_basedir": output_dir,
-                    "tars": tars,
-                    "preds": preds,
-                    "bias_data": bias_data,
+                    "tars": tars_s,
+                    "preds": preds_s,
+                    "bias_data": bias_s,
                     "sample": sample,
                     "fstep": fstep,
                     "stream": stream,

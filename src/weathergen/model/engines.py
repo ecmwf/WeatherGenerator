@@ -6,7 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
 import dataclasses
 import math
 
@@ -16,6 +15,7 @@ from omegaconf import OmegaConf
 from torch.utils.checkpoint import checkpoint
 
 from weathergen.common.config import Config
+from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.attention import (
     MultiCrossAttentionHeadVarlen,
     MultiCrossAttentionHeadVarlenSlicedQ,
@@ -600,6 +600,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             rope_mode=rope_mode,
+                            is_dit=self.cf.fe_diffusion_model,
                         )
                     )
                 else:
@@ -619,6 +620,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             rope_mode=rope_mode,
+                            is_dit=self.cf.fe_diffusion_model,
                         )
                     )
                 # Add MLP block
@@ -626,12 +628,14 @@ class ForecastingEngine(torch.nn.Module):
                     MLP(
                         self.cf.ae_global_dim_embed,
                         self.cf.ae_global_dim_embed,
+                        num_layers=2,
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
                         mlp_type=self.cf.get("mlp_type", "mlp"),
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
+                        is_dit=self.cf.fe_diffusion_model,
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -649,20 +653,48 @@ class ForecastingEngine(torch.nn.Module):
         for block in self.fe_blocks:
             block.apply(init_weights_final)
 
-    def forward(self, tokens, fstep, coords=None):
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        fstep: int,
+        meta_info: SampleMetaData = None,
+        noise_emb: torch.Tensor = None,
+        ada_ln_aux: torch.Tensor = None,
+        coords: torch.Tensor = None,
+    ) -> torch.Tensor:
+        # aux_info is forecast step, if not disabled with cf.forecast_with_step_conditioning
+        # aux_info = torch.tensor([fstep], dtype=torch.float32, device="cuda")
         if self.training:
             # Impute noise to the latent state
             noise_std = self.cf.get("fe_impute_latent_noise_std", 0.0)
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-        aux_info = None
-        for _b_idx, block in enumerate(self.fe_blocks):
-            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
-                tokens = checkpoint(block, tokens, use_reentrant=False)
-            else:
-                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
-        return tokens
+        # predict residual to last time step if requested
+        forecast_residual = self.cf.get("forecast_residual", False)
+        if forecast_residual:
+            tokens_in = tokens
+
+        if self.cf.fe_diffusion_model:
+            assert noise_emb is not None, (
+                "noise_emb must be provided for diffusion model conditioning"
+            )
+            for block in self.fe_blocks:
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = checkpoint(block, tokens, use_reentrant=False)
+                else:
+                    assert ada_ln_aux is None, (
+                        "ada_ln_aux should not be provided when diffusion model conditioning is disabled"
+                    )
+                    tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+        else:
+            for block in self.fe_blocks:
+                if isinstance(block, torch.nn.LayerNorm):
+                    tokens = checkpoint(block, tokens, use_reentrant=False)
+                else:
+                    tokens = checkpoint(block, tokens, coords, ada_ln_aux, use_reentrant=False)
+
+        return tokens if not forecast_residual else (tokens_in + tokens)
 
 
 class EnsPredictionHead(torch.nn.Module):
