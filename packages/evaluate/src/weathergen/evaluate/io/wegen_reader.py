@@ -518,6 +518,18 @@ class WeatherGenZarrReader(WeatherGenReader):
                 offset += len(local)
         return self._rank_sample_map
 
+    def _merge_fsteps(all_das: dict) -> dict:
+        """Merge lists of DataArrays for each forecast step across ranks.
+        Concatenates along the sample dimension and re-indexes to global samples.
+        """
+        merged = {}
+        for fstep, das in all_das.items():
+            combined = xr.concat(das, dim="sample") if len(das) > 1 else das[0]
+            merged[fstep] = combined.assign_coords(
+                sample=global_sample_coords[: len(combined.sample)]
+                    )
+        return merged
+
     def get_data(
         self,
         stream: str,
@@ -607,28 +619,16 @@ class WeatherGenZarrReader(WeatherGenReader):
             ranks_loaded += 1
 
         # Concatenate across ranks along sample dimension and re-index
-        # Use the sorted requested global sample indices as coordinates so that
-        # downstream scoring code can index by the same sample IDs it requested.
         global_sample_coords = np.array(sorted(requested_globals))
 
-        merged_targets = {}
-        for fstep, das in all_targets.items():
-            merged = xr.concat(das, dim="sample") if len(das) > 1 else das[0]
-            merged = merged.assign_coords(sample=global_sample_coords[: len(merged.sample)])
-            merged_targets[fstep] = merged
+        merged_targets = _merge_fsteps(all_targets)
+        merged_predictions = _merge_fsteps(all_predictions)
 
-        merged_predictions = {}
-        for fstep, das in all_predictions.items():
-            merged = xr.concat(das, dim="sample") if len(das) > 1 else das[0]
-            merged = merged.assign_coords(sample=global_sample_coords[: len(merged.sample)])
-            merged_predictions[fstep] = merged
-
-        total_samples = len(global_sample_coords)
         ranks_skipped = len(self.rank_files) - ranks_loaded
         _logger.info(
             f"RUN {self.run_id}: Multi-rank load complete. "
-            f"{total_samples} total samples × {len(merged_targets)} forecast steps "
-            f"loaded from {ranks_loaded}/{len(self.rank_files)} rank file(s) "
+            f"{len(global_sample_coords)} samples × {len(merged_targets)} fsteps "
+            f"from {ranks_loaded}/{len(self.rank_files)} ranks "
             f"({ranks_skipped} skipped)."
         )
         return ReaderOutput(target=merged_targets, prediction=merged_predictions)
