@@ -237,6 +237,11 @@ class DataReaderObs(DataReaderBase):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
+        if idx >= len(self.indices_start) or idx >= len(self.indices_end):
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
         start_row = self.indices_start[idx]
         end_row = self.indices_end[idx]
 
