@@ -52,12 +52,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-<<<<<<< HEAD
         use_xsa=False,
         rope_mode="none",
-=======
-        with_2d_rope=False,
->>>>>>> origin/develop
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -66,15 +62,11 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
         self.with_residual = with_residual
-<<<<<<< HEAD
         self.use_xsa = use_xsa
         self.rope_mode = rope_mode
         self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
         if self.rope_post_mod_qk_lnorm:
             assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
-=======
-        self.with_2d_rope = with_2d_rope
->>>>>>> origin/develop
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -258,11 +250,7 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-<<<<<<< HEAD
         use_xsa=False,
-=======
-        with_2d_rope=False,
->>>>>>> origin/develop
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -270,15 +258,11 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
         self.with_residual = with_residual
-<<<<<<< HEAD
         self.use_xsa = use_xsa
         self.rope_mode = rope_mode
         self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
         if self.rope_post_mod_qk_lnorm:
             assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
-=======
-        self.with_2d_rope = with_2d_rope
->>>>>>> origin/develop
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -588,12 +572,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-<<<<<<< HEAD
         use_xsa=False,
         rope_mode="none",
-=======
-        with_2d_rope=False,
->>>>>>> origin/develop
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -602,15 +582,11 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.softcap = softcap
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
-<<<<<<< HEAD
         self.use_xsa = use_xsa
         self.rope_mode = rope_mode
         self.rope_post_mod_qk_lnorm = rope_mode == "spherical"
         if self.rope_post_mod_qk_lnorm:
             assert with_qk_lnorm, "rope_post_mod_qk_lnorm=True requires with_qk_lnorm=True"
-=======
-        self.with_2d_rope = with_2d_rope
->>>>>>> origin/develop
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
