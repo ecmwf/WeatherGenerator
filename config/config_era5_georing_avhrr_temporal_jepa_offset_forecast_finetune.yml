@@ -1,7 +1,6 @@
-# Temporal JEPA over operational analysis, SYNOP/surface observations,
-# polar-orbiting observations, and geostationary observations.
-# Student sees a spatially masked input window at t; EMA teacher sees the unmasked input window at
-# t + teacher_time_offset.
+# Forecast finetuning after temporal JEPA over operational analysis, SYNOP/surface observations,
+# polar-orbiting observations, and geostationary observations. This keeps the pretraining
+# architecture checkpoint-compatible, but switches training to physical forecast prediction.
 
 embed_orientation: "channels"
 embed_unembed_mode: "block"
@@ -22,8 +21,6 @@ ae_adapter_embed: 128
 ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
-
-ae_local_max_tokens_per_cell: 256
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 2
@@ -79,13 +76,13 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
-freeze_modules: ""
+freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
 load_chkpt: {}
 norm_type: "LayerNorm"
 qk_norm_type: "RMSNorm"
 zarr_store: "zip"
 
-streams_directory: "./config/streams/era5_georing_avhrr_temporal_jepa/"
+streams_directory: "./config/streams/era5_georing_avhrr_temporal_jepa_forecast_finetune/"
 streams: ???
 
 general:
@@ -93,7 +90,7 @@ general:
   rank: ???
   world_size: ???
   multiprocessing_method: "fork"
-  desc: "temporal_jepa_era5_georing_avhrr"
+  desc: "temporal_jepa_forecast_finetune_era5_synop"
   run_id: ???
   run_history: []
 
@@ -101,9 +98,9 @@ train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
-  log_grad_norms: True
+  log_grad_norms: False
   collapse_monitoring:
-    enabled: true
+    enabled: false
     compute_frequency: 100
     log_frequency: 100
     metrics:
@@ -133,16 +130,15 @@ data_loading:
   memory_pinning: True
 
 training_config:
-  training_mode: ["student_teacher"]
-  teacher_time_offset: 1
-  num_mini_epochs: 48
+  training_mode: ["masking"]
+  teacher_time_offset: 0
+  num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 2017-01-01T00:00
+  start_date: 2017-01-01T21:00
   end_date: 2021-12-31T00:00
 
-  # With a 6h step, teacher_time_offset: 1 means the teacher receives the next 6h window.
   time_window_step: 06:00:00
   time_window_len: 06:00:00
 
@@ -168,49 +164,22 @@ training_config:
 
   losses:
     physical:
-      enabled: false
-      type: LossPhysical
-      loss_fcts:
-        mse: {}
-    student-teacher:
       enabled: true
-      type: LossLatentSSLStudentTeacher
+      type: LossPhysical
       weight: 1.0
       loss_fcts:
-        JEPA:
+        mse:
           weight: 1.0
-          loss_extra_args:
-            temporal: true
-          out_dim: 2048
-          head: mlp
-          num_layers: 2
-          hidden_factor: 2
           target_source_correspondence:
             0:
               0: "independent"
-      target_and_aux_calc:
-        EMATeacher:
-          ema_ramp_up_ratio: null
-          ema_halflife_in_thousands: 800000
-          model_param_overrides:
-            training_config:
-              losses:
-                student-teacher:
-                  loss_fcts:
-                    JEPA:
-                      head: identity
+      target_and_aux_calc: "Physical"
+    student-teacher:
+      enabled: false
+      type: Disabled
 
   model_input:
     forecasting:
-      masking_strategy: random
-      num_samples: 1
-      num_steps_input: 1
-      masking_strategy_config:
-        rate: 1.0
-        rate_sampling: false
-
-  target_input:
-    temporal_teacher:
       masking_strategy: forecast
       num_samples: 1
       num_steps_input: 1
@@ -218,11 +187,20 @@ training_config:
         rate: 1.0
         rate_sampling: false
 
+  target_input:
+    target:
+      masking_strategy: random
+      num_samples: 1
+      num_steps_input: 1
+      masking_strategy_config:
+        rate: 1.0
+        rate_sampling: false
+
   forecast:
-    time_step: 00:00:00
-    offset: 0
-    num_steps: 0
-    policy: null
+    time_step: 06:00:00
+    offset: 1
+    num_steps: 3
+    policy: "fixed"
 
 validation_config:
   samples_per_mini_epoch: 256
@@ -242,7 +220,7 @@ validation_config:
 wgtags:
   org: null
   issue: null
-  exp: temporal_jepa_georing
+  exp: temporal_jepa_fcst
   grid: georing_avhrr_synop
-  teacher_offset: 6h
-  masking: per_stream_static
+  downstream: era5_synop
+  masking: random_inputs

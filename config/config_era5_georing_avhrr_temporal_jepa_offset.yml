@@ -139,7 +139,7 @@ training_config:
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 2017-01-01T00:00
+  start_date: 2017-01-01T21:00
   end_date: 2021-12-31T00:00
 
   # With a 6h step, teacher_time_offset: 1 means the teacher receives the next 6h window.
