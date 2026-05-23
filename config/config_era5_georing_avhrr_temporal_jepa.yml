@@ -61,8 +61,7 @@ forecast_att_dense_rate: 1.0
 with_step_conditioning: True
 
 healpix_level: 5
-rope_mode: none
-rope_spherical_band: null
+rope_2D: True
 
 with_mixed_precision: True
 with_flash_attention: True
