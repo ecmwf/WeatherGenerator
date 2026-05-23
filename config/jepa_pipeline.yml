@@ -19,7 +19,14 @@ stages:
     stage: train
     config_files:
       - ./config/config_era5_georing_avhrr_temporal_jepa.yml
-    chain_jobs: 2
+    chain_jobs: 3
+    nodes: 2
+
+  - name: multiptofst
+    stage: train
+    config_files:
+      - ./config/config_era5_georing_avhrr_temporal_jepa_offset.yml
+    chain_jobs: 3
     nodes: 2
 
   - name: operpretrain
@@ -27,7 +34,7 @@ stages:
     config_files:
       - ./config/config_era5_georing_avhrr_temporal_jepa.yml
       - ./config/config_oper_analysis_temporal_jepa.yml
-    chain_jobs: 2
+    chain_jobs: 3
     nodes: 2
 
   - name: multifcst
@@ -35,6 +42,14 @@ stages:
     from_run_id: STAGE.multipretrain
     config_files:
       - ./config/config_era5_georing_avhrr_temporal_jepa_forecast_finetune.yml
+    chain_jobs: 3
+    nodes: 2
+
+  - name: multifcstofst
+    stage: train
+    from_run_id: STAGE.multiptofst
+    config_files:
+      - ./config/config_era5_georing_avhrr_temporal_jepa_offset_forecast_finetune.yml
     chain_jobs: 3
     nodes: 2
 
