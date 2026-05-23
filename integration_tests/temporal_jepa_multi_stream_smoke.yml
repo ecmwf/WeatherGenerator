@@ -1,0 +1,109 @@
+streams_directory: "./integration_tests/streams_temporal_jepa_multi/"
+run_path: "./results"
+model_path: "./models"
+
+with_fsdp: False
+compile_model: False
+
+data_loading:
+  num_workers: 0
+  repeat_data_in_mini_epoch: False
+  memory_pinning: False
+
+train_logging:
+  terminal: 1
+  metrics: 1
+  checkpoint: 100
+  collapse_monitoring:
+    enabled: false
+
+training_config:
+  training_mode: ["student_teacher"]
+  teacher_time_offset: 1
+  num_mini_epochs: 1
+  samples_per_mini_epoch: 4
+  shuffle: True
+  start_date: 2014-01-01T00:00
+  end_date: 2014-01-05T00:00
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
+  learning_rate_scheduling:
+    lr_start: 1e-6
+    lr_max: 1e-5
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 1
+    num_steps_cooldown: 1
+    policy_warmup: "linear"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  losses:
+    physical:
+      enabled: false
+      type: LossPhysical
+      loss_fcts:
+        mse: {}
+    student-teacher:
+      enabled: true
+      type: LossLatentSSLStudentTeacher
+      weight: 1.0
+      loss_fcts:
+        JEPA:
+          weight: 1.0
+          loss_extra_args:
+            temporal: true
+          out_dim: 512
+          head: mlp
+          num_layers: 2
+          hidden_factor: 1
+          target_source_correspondence:
+            0:
+              0: "independent"
+      target_and_aux_calc:
+        EMATeacher:
+          ema_ramp_up_ratio: null
+          ema_halflife_in_thousands: 800000
+          model_param_overrides:
+            training_config:
+              losses:
+                student-teacher:
+                  loss_fcts:
+                    JEPA:
+                      head: identity
+
+  model_input:
+    forecasting:
+      masking_strategy: random
+      num_samples: 1
+      num_steps_input: 1
+      masking_strategy_config:
+        rate: 0.75
+        rate_sampling: false
+
+  target_input:
+    temporal_teacher:
+      masking_strategy: forecast
+      num_samples: 1
+      num_steps_input: 1
+      masking_strategy_config:
+        rate: 1.0
+        rate_sampling: false
+
+  forecast:
+    time_step: 00:00:00
+    num_steps: 0
+    policy: null
+    offset: 0
+
+validation_config:
+  samples_per_mini_epoch: 2
+  shuffle: False
+  start_date: 2014-01-05T00:00
+  end_date: 2014-01-06T00:00
+  validate_with_ema:
+    enabled: false
+  output:
+    num_samples: 0

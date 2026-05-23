@@ -1,0 +1,14 @@
+# Overlay for config_era5_georing_avhrr_temporal_jepa_forecast_finetune.yml.
+# Baseline: forecast-finetune the oper-analysis JEPA model to ERA5 only.
+
+streams_directory: "./config/streams/oper_analysis_temporal_jepa_forecast_finetune/"
+streams: ???
+
+general:
+  desc: "temporal_jepa_oper_analysis_era5_forecast_finetune"
+
+wgtags:
+  exp: temporal_jepa_fcst
+  grid: oper_analysis
+  downstream: era5
+  masking: random_inputs

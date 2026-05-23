@@ -1,6 +1,4 @@
-# ERA5 input stream for temporal JEPA.
-# This mirrors era5_georing_avhrr_forecast_random_inputs/era5.yml, but is not marked
-# forcing so the teacher metadata mask remains populated for SSL targets.
+# Operational-analysis stream for the oper-only temporal JEPA baseline.
 
 ERA5_in:
   type: anemoi

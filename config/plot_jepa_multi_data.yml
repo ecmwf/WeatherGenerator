@@ -1,0 +1,20 @@
+# Plot config for different forecast runs
+train:
+  plot:    
+    
+    # new ones with 2016 start date, 6h time window
+    kgbv6dl9:
+      slurm_id: 0      
+      description: "36 hour teacher, kgbv6dl9, 6h time window"
+
+    w3z8p7gv:
+      slurm_id: 0      
+      description: "6 hour teacher, w3z8p7gv, 6h time window, rate sampling"
+
+    zs3zktno:
+      slurm_id: 0      
+      description: "6 hour teacher, zs3zktno, 6h time window, no rate sampling"
+
+    gp6g041d:
+      slurm_id: 0      
+      description: "6 hour teacher, gp6g041d, 1h time window step, rate sampling"

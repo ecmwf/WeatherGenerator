@@ -1,0 +1,33 @@
+NPPATMS:
+  type: obs
+  stream_id: 1
+  filenames: ['observations-ea-ofb-0001-2012-2023-npp-atms-radiances-v2.zarr']
+  loss_weight: 1.0
+  token_size: 64
+  max_num_targets: -1
+  masking_override:
+    model_input:
+      masking_strategy: random
+      masking_strategy_config:
+        rate: 0.65
+        rate_sampling: false
+    target_input:
+      masking_strategy: forecast
+      masking_strategy_config:
+        rate: 1.0
+        rate_sampling: false
+  embed:
+    net: transformer
+    num_tokens: 1
+    num_heads: 2
+    dim_embed: 32
+    num_blocks: 2
+  embed_target_coords:
+    net: linear
+    dim_embed: 32
+  target_readout:
+    num_layers: 2
+    num_heads: 4
+  pred_head:
+    ens_size: 1
+    num_layers: 1

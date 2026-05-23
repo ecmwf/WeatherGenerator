@@ -1,0 +1,31 @@
+# SYNOP/surface observation input stream. Kept forcing for the ERA5-only baseline.
+
+SurfaceCombined:
+  type: obs
+  stream_id: 2
+  filenames: ['observations-ea-ofb-0001-1979-2025-combined-surface-v3.zarr']
+  loss_weight: 1.0
+  forcing: True
+  masking_override:
+    model_input:
+      masking_strategy: random
+      masking_strategy_config:
+        rate: 0.6
+  token_size: 128
+  tokenize_spacetime: True
+  max_num_targets: -1
+  embed:
+    net: transformer
+    num_tokens: 1
+    num_heads: 4
+    dim_embed: 128
+    num_blocks: 2
+  embed_target_coords:
+    net: linear
+    dim_embed: 128
+  target_readout:
+    num_layers: 2
+    num_heads: 4
+  pred_head:
+    ens_size: 1
+    num_layers: 1

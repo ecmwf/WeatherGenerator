@@ -1,0 +1,14 @@
+# Overlay for config_era5_georing_avhrr_temporal_jepa.yml.
+# Baseline: temporal JEPA using only operational analysis as the input/teacher stream.
+
+streams_directory: "./config/streams/oper_analysis_temporal_jepa/"
+streams: ???
+
+general:
+  desc: "temporal_jepa_oper_analysis"
+
+wgtags:
+  exp: temporal_jepa_oper
+  grid: oper_analysis
+  teacher_offset: 6h
+  masking: oper_static

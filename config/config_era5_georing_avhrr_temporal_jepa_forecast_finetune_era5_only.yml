@@ -1,0 +1,14 @@
+# Overlay for config_era5_georing_avhrr_temporal_jepa_forecast_finetune.yml.
+# Baseline: temporal JEPA with all datasets, but forecast-finetune ERA5 only.
+
+streams_directory: "./config/streams/era5_georing_avhrr_temporal_jepa_forecast_finetune_era5_only/"
+streams: ???
+
+general:
+  desc: "temporal_jepa_forecast_finetune_era5_only"
+
+wgtags:
+  exp: temporal_jepa_fcst
+  grid: georing_avhrr_synop
+  downstream: era5
+  masking: random_inputs
