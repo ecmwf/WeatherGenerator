@@ -766,10 +766,12 @@ class Model(torch.nn.Module):
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
-                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                if self.forecast_engine is not None:
+                    tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
-            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            if self.forecast_engine is not None:
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)

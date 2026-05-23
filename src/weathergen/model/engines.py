@@ -32,6 +32,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
+
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
@@ -478,7 +479,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.tap_global_layers = tap_global_layers
-        rope_mode = get_rope_mode(self.cf)
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
