@@ -759,19 +759,6 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-<<<<<<< HEAD
-        # reshape intermediates the same way as tokens
-        for i, inter in enumerate(intermediates):
-            intermediates[i] = inter.reshape(shape).sum(axis=1)
-
-        rope_data = (
-            model_params.rope_spherical_coeffs.unbind(dim=-1)
-            if model_params.rope_spherical_coeffs is not None
-            else model_params.rope_coords
-        )
-
-=======
->>>>>>> origin/develop
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
         # roll-out in latent space, iterate and generate output over requested output steps
@@ -782,12 +769,7 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
-<<<<<<< HEAD
-            if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=rope_data)
-=======
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
->>>>>>> origin/develop
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
