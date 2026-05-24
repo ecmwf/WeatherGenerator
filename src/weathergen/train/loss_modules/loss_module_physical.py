@@ -200,6 +200,7 @@ class LossPhysical(LossModuleBase):
 
         # gradient loss
         loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+        graph_anchor = None
         # counter for non-empty targets
         ctr_streams = 0
 
@@ -238,6 +239,9 @@ class LossPhysical(LossModuleBase):
                 if not preds_batch:
                     # skip to next timestep if preds of current timestep are empty
                     continue
+
+                if graph_anchor is None:
+                    graph_anchor = preds_batch[0]
 
                 targets_batch = target_cur[stream_name]["target"]
                 targets_coords_batch = target_cur[stream_name]["target_coords"]
@@ -339,11 +343,13 @@ class LossPhysical(LossModuleBase):
 
         # normalize by all targets and forecast steps that were non-empty
         # (with each having an expected loss of 1 for an uninitalized neural net)
-        if loss == 0.0:
+        if ctr_streams == 0:
             _logger.warning(
                 "Loss is 0.0, likely incorrect configuration. Check stream"
                 " support time and training configuration."
             )
+            if graph_anchor is not None:
+                loss = graph_anchor.sum() * 0.0
         loss = loss / ctr_streams if ctr_streams > 0 else loss
 
         def _nested_dict():

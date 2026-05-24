@@ -93,7 +93,7 @@ general:
   rank: ???
   world_size: ???
   multiprocessing_method: "fork"
-  desc: "temporal_jepa_era5_georing_avhrr"
+  desc: "temporal_jepa_era5_georing_avhrr2"
   run_id: ???
   run_history: []
 
@@ -242,7 +242,7 @@ validation_config:
 wgtags:
   org: null
   issue: null
-  exp: temporal_jepa_georing
+  exp: temporal_jepa_georing2
   grid: georing_avhrr_synop
   teacher_offset: 6h
   masking: per_stream_static

@@ -5,7 +5,7 @@ streams_directory: "./config/streams/era5_georing_avhrr_temporal_jepa_forecast_f
 streams: ???
 
 general:
-  desc: "temporal_jepa_forecast_finetune_era5_only"
+  desc: "temporal_jepa_forecast_finetune_era5_only2"
 
 wgtags:
   exp: temporal_jepa_fcst

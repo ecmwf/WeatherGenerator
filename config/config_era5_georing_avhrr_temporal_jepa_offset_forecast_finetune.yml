@@ -90,7 +90,7 @@ general:
   rank: ???
   world_size: ???
   multiprocessing_method: "fork"
-  desc: "temporal_jepa_forecast_finetune_era5_synop"
+  desc: "temporal_jepa_forecast_finetune_era5_synop2"
   run_id: ???
   run_history: []
 

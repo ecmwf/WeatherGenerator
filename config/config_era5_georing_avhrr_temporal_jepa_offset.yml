@@ -93,7 +93,7 @@ general:
   rank: ???
   world_size: ???
   multiprocessing_method: "fork"
-  desc: "temporal_jepa_era5_georing_avhrr"
+  desc: "temporal_jepa_era5_georing_avhrr2"
   run_id: ???
   run_history: []
 

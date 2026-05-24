@@ -5,7 +5,7 @@ streams_directory: "./config/streams/oper_analysis_temporal_jepa/"
 streams: ???
 
 general:
-  desc: "temporal_jepa_oper_analysis"
+  desc: "temporal_jepa_oper_analysis2"
 
 wgtags:
   exp: temporal_jepa_oper
