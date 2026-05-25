@@ -16,7 +16,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-# Third-party
 import mlflow
 from mlflow.client import MlflowClient
 from omegaconf import DictConfig, OmegaConf, open_dict
@@ -25,6 +24,13 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from weathergen.common.logger import init_loggers
 from weathergen.common.paths import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
+from weathergen.metrics.mlflow_utils import (
+    MlFlowUpload,
+    get_or_create_mlflow_parent_run,
+    log_scores,
+    setup_mlflow,
+)
+
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
@@ -43,12 +49,6 @@ from weathergen.evaluate.scores.score_orchestration import (
     metric_list_to_json,
 )
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
-from weathergen.metrics.mlflow_utils import (
-    MlFlowUpload,
-    get_or_create_mlflow_parent_run,
-    log_scores,
-    setup_mlflow,
-)
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
@@ -276,6 +276,7 @@ def _process_stream(
             regions_to_compute,
             metrics_to_compute,
             output_data=output_data,
+            global_plotting_options=global_plotting_opts,
         )
 
     return run_id, stream, scores_dict
