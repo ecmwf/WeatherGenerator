@@ -59,6 +59,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"fe_diffusion_model_conditioning is '{self.conditioning}' "
             f"(got '{self.conditioning_type}')"
         )
+        _ada_ln = self.conditioning_type == "ada_ln"
+        assert self.cf.get("diffusion_conditioning_embed_dim", None) is not None or not _ada_ln, (
+            f"diffusion_conditioning_embed_dim must be set when "
+            f"fe_diffusion_model_conditioning_type is 'ada_ln'"
+        )
         _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)        
         assert self.conditioning not in _date_time_modes or _offset == 0, (
             f"forecast.offset must be 0 when fe_diffusion_model_conditioning is "
@@ -275,8 +280,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.cf.get("fe_diffusion_model_conditioning", None) in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
         elif self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
-            # cur_token = enc(X_t) stored in forward() before routing to inference_forward
-            c = self.cur_token
+            c = meta_info["ERA5"].params["conditioning_tokens"]
 
 
         # Sample pure noise (assuming single batch element for now)
