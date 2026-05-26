@@ -165,10 +165,6 @@ class NetcdfParser(CfParser):
         if "pressure_level" in reshaped_dataset.coords:
             reshaped_dataset = reshaped_dataset.sortby("pressure_level")
 
-        if "mem" in reshaped_dataset.dims:
-            reshaped_dataset = reshaped_dataset.assign_coords(
-                mem=np.arange(reshaped_dataset.sizes["mem"])
-            )
         if grid_type == "regular":
             # Use original reshape logic for regular grids
             # This is safe for regular grids
@@ -478,8 +474,6 @@ class NetcdfParser(CfParser):
                     f"Coordinate '{coord}' will be skipped for "
                     f"variable '{var_cfg.get('var', 'unknown')}'."
                 )
-        if "mem" in ds.coords:
-            coords["mem"] = ("mem", ds.mem.values)
         return coords
 
     def _add_grid_attrs(self, ds: xr.Dataset, grid_info: dict | None = None) -> xr.Dataset:
