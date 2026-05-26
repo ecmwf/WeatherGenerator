@@ -60,6 +60,8 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
+fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
+fe_diffusion_model_conditioning_type: "cross_attn" # options: "cross_attn", "ada_ln"
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -124,11 +126,25 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedd
 # load_chkpt: {'run_id': 'mal6u4gc', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 64 epochs, diffusion-full-pipeline
 # load_chkpt: {'run_id': 'zrpncqb0', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 196 epochs, diffusion-full-pipeline
 # load_chkpt: {'run_id': 'm6fs8wvj', 'epoch': -1}  # multi-var d512 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
-# load_chkpt: {'run_id': 'cgxt9imf', 'epoch': -1}  # diffusion model to fine-tune decoder, p_mean=0.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
-# load_chkpt: {'run_id': 'wo5mf2z4', 'epoch': -1}  # diffusion model to fine-tune decoder, p_mean=1.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'cgxt9imf', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=0.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'wo5mf2z4', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=1.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
 # load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
 # load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
-load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'riyz96d4', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=0.5, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'bokn5d2w', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=1.5, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'uwyv1zdh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.0, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'dvslhdp3', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.5, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'mtlfdgvh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=3.0, based on l3rxe29i backbone
+# load_chkpt: {'run_id': 'p6cxplfd', 'epoch': -1}  # d2048 hl5, p_mean=-2.5, forecasting
+# load_chkpt: {'run_id': 'c2y0srpq', 'epoch': -1}  # d2048 hl5, p_mean=-2.0, forecasting
+# load_chkpt: {'run_id': 'c0zk6oli', 'epoch': -1}  # d2048 hl5, p_mean=-1.5, forecasting
+# load_chkpt: {'run_id': 'wt2leaf4', 'epoch': -1}  # d2048 hl5, p_mean=-1.2, forecasting
+# load_chkpt: {'run_id': 'iq5p8ujf', 'epoch': -1}  # d2048 hl5, p_mean=-0.5, forecasting
+# load_chkpt: {'run_id': 'u2r8b4z6', 'epoch': -1}  # d2048 hl5, p_mean=0.5, forecasting
+load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
+# load_chkpt: {'run_id': 'i3y5fhda', 'epoch': -1}  # d2048 hl5, p_mean=2.5, forecasting
+# load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
 
 
 norm_type: "LayerNorm"
@@ -242,7 +258,17 @@ training_config:
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
       masking_strategy_config: {diffusion_rn: True},
-      num_samples: 1
+      num_steps_input: 2,
+      num_samples: 1,
+      }
+    }
+
+  target_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      masking_strategy_config: {diffusion_rn: True},
+      num_steps_input: 1,
+      num_samples: 1,
       }
     }
 

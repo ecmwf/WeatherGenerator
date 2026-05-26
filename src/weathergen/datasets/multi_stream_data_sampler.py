@@ -97,7 +97,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.streams = cf.streams
         self.rank = cf.rank
         self.world_size = cf.world_size
-        self.diffusion_model_conditioning = cf.fe_diffusion_model_conditioning
+        self.diffusion_model_conditioning = cf.get("fe_diffusion_model_conditioning", None)
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # initialise healpic

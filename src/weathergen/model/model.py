@@ -731,7 +731,7 @@ class Model(torch.nn.Module):
         # Reshape tokens to [B, T, ...]
         tokens = tokens.reshape(shape)
 
-        if self.cf.get("fe_diffusion_model", False):
+        if self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
             tokens = tokens.reshape(shape)
             conditioning_tokens = tokens[:, -2]  # TODO: enable longer history for conditioning
             # X_t (last step) is the diffusion denoising target; X_{t-1} is the conditioning context.
@@ -792,6 +792,11 @@ class Model(torch.nn.Module):
                         model_params, step, toks, batch, output, out_step=i
                     )
                 continue
+            
+            # # In diffusion inference mode, the final denoised tokens are returned.
+            # tokens = tokens[-1]
+            # # Feed the denoised output back as conditioning for the next autoregressive step.
+            # batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)

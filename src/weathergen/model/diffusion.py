@@ -50,7 +50,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.noise_embedder = NoiseEmbedder(
             embedding_dim=self.embedding_dim, frequency_embedding_dim=self.frequency_embedding_dim
         )
-        self.conditioning = self.cf.fe_diffusion_model_conditioning
+        self.conditioning = self.cf.get("fe_diffusion_model_conditioning", None)
         self.conditioning_type = self.cf.get("fe_diffusion_model_conditioning_type", None)
 
         _date_time_modes = {"date_time", "date", "time"}
@@ -191,9 +191,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
 
         c = None
-        if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
+        if self.cf.get("fe_diffusion_model_conditioning", None) in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
-        elif self.cf.fe_diffusion_model_conditioning == "forecast":
+        elif self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
             c = meta_info["ERA5"].params["conditioning_tokens"]          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
         if self.training:
@@ -234,7 +234,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         noise_emb = self.noise_embedder(c_noise)
 
         # Precondition input and feed through network
-        if self.conditioning in ["date_time", "date", "time"]:
+        if self.cf.get("fe_diffusion_model_conditioning", None) in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
 
         net_input = c_in * x
@@ -268,9 +268,9 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Extract conditioning (mirrors training_forward).
         c = None
-        if self.cf.fe_diffusion_model_conditioning in ["date_time", "date", "time"]:
+        if self.cf.get("fe_diffusion_model_conditioning", None) in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
-        elif self.cf.fe_diffusion_model_conditioning == "forecast":
+        elif self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
             # cur_token = enc(X_t) stored in forward() before routing to inference_forward
             c = self.cur_token
 

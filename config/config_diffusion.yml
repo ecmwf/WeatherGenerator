@@ -105,10 +105,10 @@ latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
 
-# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 # freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*fe.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 # freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
-freeze_modules: ""
+# freeze_modules: ""
 # load_chkpt: {'run_id': 't0bdz7qn', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.7
 # load_chkpt: {'run_id': 'dcl584vo', 'epoch': -1}  # z500 d2048 hl5, sigma_data=159.08
 # load_chkpt: {'run_id': 'tvkicam9', 'epoch': -1}  # z500 d2048 hl3 enc-lnorm, sigma_data=1.0
@@ -126,11 +126,19 @@ freeze_modules: ""
 # load_chkpt: {'run_id': 'y1gu5md8', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, diffusion-full-pipeline
 # load_chkpt: {'run_id': 'mal6u4gc', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 64 epochs, diffusion-full-pipeline
 # load_chkpt: {'run_id': 'zrpncqb0', 'epoch': -1}  # multi-var d512 hl5, sigma_dqta=1.0, geoinfos 196 epochs, diffusion-full-pipeline
-load_chkpt: {'run_id': 'm6fs8wvj', 'epoch': -1}  # multi-var d512 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'm6fs8wvj', 'epoch': -1}  # multi-var d512 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
 # load_chkpt: {'run_id': 'cgxt9imf', 'epoch': -1}  # diffusion model to fine-tune decoder, p_mean=0.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
 # load_chkpt: {'run_id': 'wo5mf2z4', 'epoch': -1}  # diffusion model to fine-tune decoder, p_mean=1.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
 # load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
 # load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
+# load_chkpt: {'run_id': 'j74tn8le', 'epoch': -1}  # forecasting d512 hl5, diffusion-full-pipeline, p_mean=-1.5, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'j7lr0jws', 'epoch': -1}  # forecasting d512 hl5, diffusion-full-pipeline, p_mean=-1.2, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'cbras2el', 'epoch': -1}  # forecasting d512 hl5, diffusion-full-pipeline, p_mean=-0.5, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'kn3124hp', 'epoch': -1}  # forecasting d512 hl5, diffusion-full-pipeline, p_mean=0.0, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'qqbu9852', 'epoch': -1}  # forecasting d512 hl5, diffusion-full-pipeline, p_mean=0.5, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'vqsh3yrl', 'epoch': -1}  # forecasting d512 hl5, diffusion-full-pipeline, p_mean=1.0, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'xl8h7vbt', 'epoch': -1}  # forecasting d512 hl5, diffusion-full-pipeline, p_mean=1.5, based on m6fs8wvj backbone
+# load_chkpt: {'run_id': 'p9m2jwvc', 'epoch': -1}  # forecasting d512 hl5, diffusion-full-pipeline, p_mean=2.0, based on m6fs8wvj backbone
 
 
 norm_type: "LayerNorm"

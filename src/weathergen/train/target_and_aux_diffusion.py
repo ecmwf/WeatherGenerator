@@ -71,16 +71,18 @@ class DiffusionLatentTargetEncoder(TargetAndAuxModuleBase):
             tokens, posteriors = self.encoder.encoder(model_params=model_params, batch=batch)
             shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
             tokens_multi = tokens.reshape(shape)
-            tokens = tokens_multi[:, -1]
         # NOTE: must not set to train afterwards unless it was already in train
 
         output_idxs = batch.get_output_idxs()
         assert len(output_idxs) > 0
 
-        target_aux_output = TargetAuxOutput(batch.get_output_len(), output_idxs)
-
-        # TODO: currently hard-coding 0
-        target_aux_output.add_latent_target(0, "diffusion_latent", tokens)
+        # The encoder produces a single target latent (tokens_multi[:, -1]) regardless of
+        # how many forecast steps are requested.  Initialise with a single slot so that
+        # _expand_targets_to_match_preds (in trainer.py) replicates the target across all
+        # forecast steps automatically — both for T-step autoregressive rollouts and for the
+        # single-step ODE-trajectory case.
+        target_aux_output = TargetAuxOutput(1, [0])
+        target_aux_output.add_latent_target(0, "diffusion_latent", tokens_multi[:, -1])
 
         # TODO: write function in TargetAuxOutput class
         target_aux_output.aux_outputs = {"noise_level_rn": noise_level_rn}
