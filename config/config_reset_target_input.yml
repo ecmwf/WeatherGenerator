@@ -1,0 +1,3 @@
+# Reset inherited target-input branches before switching from temporal JEPA to physical finetuning.
+training_config:
+  target_input: null

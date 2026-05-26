@@ -11,7 +11,7 @@ METOP_ABC_AVHRR_IASI:
     model_input:
       masking_strategy: random
       masking_strategy_config:
-        rate: 0.9
+        rate: 0.6
   token_size: 512
   embed:
     net: transformer

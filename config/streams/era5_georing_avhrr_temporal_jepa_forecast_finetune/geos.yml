@@ -11,7 +11,7 @@ METEOSAT_SEVIRI_IR:
     model_input:
       masking_strategy: random
       masking_strategy_config:
-        rate: 0.8
+        rate: 0.5
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
@@ -42,7 +42,7 @@ GOES_ABI_IR:
     model_input:
       masking_strategy: random
       masking_strategy_config:
-        rate: 0.8
+        rate: 0.5
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
@@ -73,7 +73,7 @@ HIMAWARI_AHI_IR:
     model_input:
       masking_strategy: random
       masking_strategy_config:
-        rate: 0.8
+        rate: 0.5
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
@@ -104,7 +104,7 @@ GOES_ABI_VIS:
     model_input:
       masking_strategy: random
       masking_strategy_config:
-        rate: 0.8
+        rate: 0.5
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
@@ -135,7 +135,7 @@ HIMAWARI_AHI_VIS:
     model_input:
       masking_strategy: random
       masking_strategy_config:
-        rate: 0.8
+        rate: 0.5
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144

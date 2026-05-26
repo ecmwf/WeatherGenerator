@@ -23,7 +23,7 @@ ae_adapter_with_qk_lnorm: True
 ae_adapter_with_residual: True
 ae_adapter_dropout_rate: 0.1
 
-ae_local_max_tokens_per_cell: 256
+ae_local_max_tokens_per_cell: 512
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 2
@@ -93,7 +93,7 @@ general:
   rank: ???
   world_size: ???
   multiprocessing_method: "fork"
-  desc: "temporal_jepa_era5_georing_avhrr2"
+  desc: "temporal_jepa_era5_georing_avhrr_phase_offset2"
   run_id: ???
   run_history: []
 
@@ -103,7 +103,7 @@ train_logging:
   checkpoint: 250
   log_grad_norms: True
   collapse_monitoring:
-    enabled: true
+    enabled: false
     compute_frequency: 100
     log_frequency: 100
     metrics:
@@ -127,10 +127,12 @@ train_logging:
         enabled: true
 
 data_loading:
-  num_workers: 12
+  num_workers: 10
   rng_seed: ???
   repeat_data_in_mini_epoch: False
   memory_pinning: True
+  prefetch_factor: 1
+  persistent_workers: False
 
 training_config:
   training_mode: ["student_teacher"]
@@ -140,7 +142,7 @@ training_config:
   shuffle: True
 
   start_date: 2017-01-01T21:00
-  end_date: 2021-12-31T00:00
+  end_date: 2022-12-31T00:00
 
   # With a 6h step, teacher_time_offset: 1 means the teacher receives the next 6h window.
   time_window_step: 06:00:00
@@ -227,8 +229,8 @@ training_config:
 validation_config:
   samples_per_mini_epoch: 256
   shuffle: False
-  start_date: 2022-10-01T00:00
-  end_date: 2022-12-31T00:00
+  start_date: 2023-01-01T00:00
+  end_date: 2023-12-31T00:00
   validate_with_ema:
     enabled: false
     ema_ramp_up_ratio: 0.09
@@ -245,4 +247,5 @@ wgtags:
   exp: temporal_jepa_georing
   grid: georing_avhrr_synop
   teacher_offset: 6h
+  phase_offset: 21h
   masking: per_stream_static

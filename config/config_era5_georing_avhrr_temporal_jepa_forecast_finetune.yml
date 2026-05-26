@@ -32,6 +32,8 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
+ae_local_max_tokens_per_cell: 512
+
 ae_aggregation_num_blocks: 8
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
@@ -124,7 +126,7 @@ train_logging:
         enabled: true
 
 data_loading:
-  num_workers: 12
+  num_workers: 10
   rng_seed: ???
   repeat_data_in_mini_epoch: False
   memory_pinning: True
@@ -137,7 +139,7 @@ training_config:
   shuffle: True
 
   start_date: 2017-01-01T00:00
-  end_date: 2021-12-31T00:00
+  end_date: 2022-12-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -199,14 +201,14 @@ training_config:
   forecast:
     time_step: 06:00:00
     offset: 1
-    num_steps: 3
+    num_steps: 2
     policy: "fixed"
 
 validation_config:
   samples_per_mini_epoch: 256
   shuffle: False
-  start_date: 2022-10-01T00:00
-  end_date: 2022-12-31T00:00
+  start_date: 2023-01-01T00:00
+  end_date: 2023-12-31T00:00
   validate_with_ema:
     enabled: false
     ema_ramp_up_ratio: 0.09

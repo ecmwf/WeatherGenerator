@@ -12,7 +12,7 @@
 # `parallelize` and `stages`; use CLI flags such as --results-dir, --register, --account,
 # and --cleanup-scripts when launching.
 
-parallelize: true
+parallelize: false
 
 stages:
   - name: multipretrain

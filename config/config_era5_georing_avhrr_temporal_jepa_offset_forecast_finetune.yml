@@ -32,6 +32,8 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
+ae_local_max_tokens_per_cell: 512
+
 ae_aggregation_num_blocks: 8
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
@@ -90,7 +92,7 @@ general:
   rank: ???
   world_size: ???
   multiprocessing_method: "fork"
-  desc: "temporal_jepa_forecast_finetune_era5_synop2"
+  desc: "temporal_jepa_forecast_finetune_era5_synop_phase_offset2"
   run_id: ???
   run_history: []
 
@@ -124,10 +126,12 @@ train_logging:
         enabled: true
 
 data_loading:
-  num_workers: 12
+  num_workers: 6
   rng_seed: ???
   repeat_data_in_mini_epoch: False
   memory_pinning: True
+  prefetch_factor: 1
+  persistent_workers: False
 
 training_config:
   training_mode: ["masking"]
@@ -137,7 +141,7 @@ training_config:
   shuffle: True
 
   start_date: 2017-01-01T21:00
-  end_date: 2021-12-31T00:00
+  end_date: 2022-12-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -199,14 +203,14 @@ training_config:
   forecast:
     time_step: 06:00:00
     offset: 1
-    num_steps: 3
+    num_steps: 2
     policy: "fixed"
 
 validation_config:
   samples_per_mini_epoch: 256
   shuffle: False
-  start_date: 2022-10-01T00:00
-  end_date: 2022-12-31T00:00
+  start_date: 2023-01-01T00:00
+  end_date: 2023-12-31T00:00
   validate_with_ema:
     enabled: false
     ema_ramp_up_ratio: 0.09
@@ -223,4 +227,5 @@ wgtags:
   exp: temporal_jepa_fcst
   grid: georing_avhrr_synop
   downstream: era5_synop
+  phase_offset: 21h
   masking: random_inputs
