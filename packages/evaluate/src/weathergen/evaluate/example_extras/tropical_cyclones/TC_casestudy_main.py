@@ -1,3 +1,42 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "scikit-image>=0.26.0",
+#   "scikit-learn>=1.8.0",
+#   "xarray",
+#   "tqdm",
+#   "cartopy",
+#   "omegaconf",
+#   "netcdf4"
+# ]
+# ///
+
+"""
+This script tracks tropical cyclones in forecast and target
+for a single sample, then looks for the tracks corresponding
+to a user-selected storm of interest and produces diagnostic
+plots for that storm, including the track error, simulated pressure 
+and wind speed.
+
+The tracking functionality is also intended for future use in
+systematical evaluation of all tropical cyclones in the prediction. 
+
+Before running, export 10u, 10v and msl to netcdf, regridded
+to 1°x1° as follows:
+uv run export --run-id <INFERENCE_ID> --stream ERA5 \
+--output-dir <OUTDIR> --format netcdf --regrid-degree 1 \
+--regrid-type regular_ll \
+--channel 10u 10v msl
+and again with --type target for the target. In TC_config.yml, set inpath to 
+<OUTDIR> where the regridded data is.  Make sure that
+the timesteps specificed in TC_config.yml are within the simulation. 
+
+Then run this script via 
+uv run TC_casestuy_main.py
+
+All parameters including the strom of interest are set in the config.
+"""
+
 from functools import cached_property
 from pathlib import Path
 

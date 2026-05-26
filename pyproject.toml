@@ -27,9 +27,7 @@ dependencies = [
  "anemoi-datasets",
  "weathergen-common",
  "weathergen-evaluate",
- "weathergen-readers-extra",
- "scikit-image>=0.26.0",
- "scikit-learn>=1.8.0",
+ "weathergen-readers-extra"
 ]
 
 
