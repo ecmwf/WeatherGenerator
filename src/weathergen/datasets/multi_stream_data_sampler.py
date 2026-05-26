@@ -257,6 +257,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 if ds.target_channel_weights is not None
                 else [1.0 for _ in ds.target_channels]
             )
+            stream_info["geoinfo_channels"] = ds.geoinfo_channels
 
         return streams_datasets
 
@@ -414,6 +415,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
 
                 # collect data for stream
+                # since we directly take rdata to set sources_raw,
+                # any masking done by the tokenizer will not be show up in the output
+                # => Should sources be masked or unmasked in output?
                 stream_data.add_source(step, rdata, source_cells_lens, source_cells)
 
         return stream_data
@@ -458,16 +462,18 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
-                (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
+                (masked_rdata, idxs_inv) = self.tokenizer.get_target_values(
                     stream_info,
                     rdata,
                     token_data,
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_values(
-                    timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
+                assert masked_rdata.geoinfos.shape[1] == len(stream_info["geoinfo_channels"]), (
+                    f"Cannot match geoinfo data shape: {masked_rdata.geoinfos.shape}"
+                    + f"to channel names: {stream_info['geoinfo_channels']}."
                 )
+                stream_data.add_target_values(timestep_idx, masked_rdata, idxs_inv)
 
         return stream_data
 
@@ -652,6 +658,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         num_output_steps = self._get_output_length(num_forecast_steps)
         batch = ModelBatch(
+            self.time_window_handler.window(idx),
+            idx,
             self.streams,
             num_source_samples,
             num_target_samples,

@@ -10,15 +10,26 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 
+import numpy as np
 import torch
 
+from weathergen.common.io import ItemKey
+from weathergen.datasets.batch import BatchSamples
 from weathergen.model.engines import LatentState
 
 type StreamName = str
 
 
 @dataclasses.dataclass
+class PhysicalTarget:
+    data: np.typing.NDArray[np.float32]
+    coords: np.typing.NDArray[np.float32]
+    datetimes: np.typing.NDArray[np.datetime64]
+    geoinfos: np.typing.NDArray[np.datetime64]
+
+
 class TargetAuxOutput:
     """
     A dataclass to encapsulate the TargetAndAuxCalculator output and give a clear API.
@@ -37,7 +48,7 @@ class TargetAuxOutput:
         self.aux_outputs = {}
 
     def add_physical_target(
-        self, timestep_idx: int, stream_name: StreamName, pred: torch.Tensor
+        self, timestep_idx: int, stream_name: StreamName, pred: dict[str, torch.Tensor]
     ) -> None:
         self.physical[timestep_idx][stream_name] = pred
 
@@ -57,6 +68,49 @@ class TargetAuxOutput:
                 assert sample_idx < len(pred), "Invalid sample index."
                 pred = pred[sample_idx]
         return pred
+
+    def get_physical_target_normalized(
+        self, key: ItemKey, normalizer: typing.Callable
+    ) -> PhysicalTarget:
+        try:
+            stream_targets = self.physical[key.forecast_step][key.stream]
+        except (KeyError, IndexError) as e:
+            msg = f"Cannot find physical target data for key: {key}"
+            raise ValueError(msg) from e
+
+        if not stream_targets["is_spoof"][key.sample]:
+            # is it a performance issue if I dont convert/move the entire tensor at once?
+            coords = (
+                stream_targets["target_coords"][key.sample].to(torch.float32).detach().cpu().numpy()
+            )
+            times = stream_targets["target_times"][key.sample]
+            geoinfos = (
+                stream_targets["target_geoinfos"][key.sample]
+                .to(torch.float32)
+                .detach()
+                .cpu()
+                .numpy()
+            )
+            data = stream_targets["target"][key.sample].to(torch.float32).detach().cpu().numpy()
+            data = normalizer(key.stream, data)
+
+        else:  # => empty/missing target
+            coords = np.empty([0, *stream_targets["target_coords"][key.sample].shape[1:]])
+            target_times = stream_targets["target_times"][key.sample]
+            times = np.empty([0, *target_times.shape[1:]], dtype=target_times.dtype)
+            data = np.empty([0, *stream_targets["target"][key.sample].shape[1:]])
+            geoinfos = np.empty([0, *stream_targets["target_geoinfos"][key.sample].shape])
+
+        if len(coords) == 0:  # TODO can this be removed?
+            coords = np.zeros((0, 2), dtype=np.float32)
+        assert len(coords.shape) == 2 and coords.shape[1] == 2, (
+            "invalid shape for coordinate buffer."
+        )
+        assert data.shape[0] == coords.shape[0] == times.shape[0] == geoinfos.shape[0], (
+            "buffer shapes should align."
+        )
+
+        return PhysicalTarget(data, coords, times, geoinfos)
 
     def get_latent_target(self, timestep_idx: int):
         return self.latent[timestep_idx]
@@ -95,7 +149,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
     def update_state_post_opt_step(self, istep, batch, model, **kwargs):
         return
 
-    def compute(self, bidx, batch, model_params, model) -> TargetAuxOutput:
+    def compute(self, bidx: int, batch: BatchSamples, model_params, model) -> TargetAuxOutput:
         # TODO: properly retrieve/define these
         stream_names = [k for k, _ in batch.samples[0].streams_data.items()]
         output_idxs = batch.get_output_idxs()
@@ -108,12 +162,13 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
         for stream_name in stream_names:
             # collect targets for all forecast steps
             for step in output_idxs:
-                targets_cur, target_times_cur, target_coords_cur, meta_data = [], [], [], []
-                is_spoof, idxs_inv = [], []
+                targets_cur, target_times_cur, target_coords_cur, target_geoinfos = [], [], [], []
+                meta_data, is_spoof, idxs_inv = [], [], []
                 for sample in batch.samples:
                     targets_cur += [sample.streams_data[stream_name].target_tokens[step]]
                     target_times_cur += [sample.streams_data[stream_name].target_times_raw[step]]
                     target_coords_cur += [sample.streams_data[stream_name].target_coords_raw[step]]
+                    target_geoinfos += [sample.streams_data[stream_name].target_geoinfos[step]]
                     idxs_inv += [sample.streams_data[stream_name].idxs_inv[step]]
                     meta_data += [sample.meta_info]
                     is_spoof += [sample.streams_data[stream_name].is_spoof(step)]
@@ -122,6 +177,7 @@ class PhysicalTargetAndAux(TargetAndAuxModuleBase):
                     "target": targets_cur,
                     "target_times": target_times_cur,
                     "target_coords": target_coords_cur,
+                    "target_geoinfos": target_geoinfos,
                     "target_metda_data": meta_data,
                     "is_spoof": is_spoof,
                     "idxs_inv": idxs_inv,

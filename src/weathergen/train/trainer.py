@@ -46,14 +46,15 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
+from weathergen.utils.output import Writer
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
-from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
 # cfg_keys_to_filter = ["losses", "model_input", "target_input"]
+PHYSICAL_LOSS_KEY = "physical"
 
 
 class Trainer(TrainerBase):
@@ -66,7 +67,7 @@ class Trainer(TrainerBase):
         self.data_loader_validation: torch.utils.data.DataLoader | None = None
         self.dataset: MultiStreamDataSampler | None = None
         self.dataset_val: MultiStreamDataSampler | None = None
-        self.device: torch.device = None
+        self.device: torch.device | None = None
         self.ema_model = None
         self.grad_scaler: torch.amp.GradScaler | None = None
         self.last_grad_norm = None
@@ -570,9 +571,10 @@ class Trainer(TrainerBase):
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
-            ) as pbar:
+            with (
+                tqdm.tqdm(total=len(self.data_loader_validation), disable=self.cf.with_ddp) as pbar,
+                Writer(mode_cfg, cf.streams, config.get_path_results(cf, mini_epoch)) as writer,
+            ):
                 for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
                         # pin memory for faster CPU-GPU transfer
@@ -621,17 +623,23 @@ class Trainer(TrainerBase):
                             if mode_cfg.get("output", {}).get("normalized_samples", False)
                             else self.dataset_val.denormalize_target_channels
                         )
-                        # write output
-                        write_output(
-                            self.cf,
-                            mode_cfg,
-                            batch_size,
-                            mini_epoch,
-                            bidx,
-                            denormalize_data_fct,
+                        physical_targets_all = [
+                            targets
+                            for loss_name, targets in targets_and_auxs.items()
+                            if loss_name == PHYSICAL_LOSS_KEY
+                        ]
+                        try:
+                            # targets for all physical outputs should be the same
+                            targets = physical_targets_all[0]
+                        except IndexError as e:
+                            raise ValueError(
+                                f"No physical outputs under key {PHYSICAL_LOSS_KEY} configured"
+                            ) from e
+                        writer.write_batch(
                             batch,
+                            targets,
                             preds,
-                            targets_and_auxs,
+                            denormalize_data_fct,
                         )
 
                     pbar.update(batch_size)

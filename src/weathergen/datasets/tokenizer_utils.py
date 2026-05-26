@@ -349,11 +349,14 @@ def tokenize_apply_mask_target(
     idxs_data = torch.cat(idxs_data)
 
     # apply mask
-    datetimes = rdata.datetimes[idxs_data]
-    datetimes_enc = enc_time(datetimes, time_win)
-    geoinfos = rdata.geoinfos[idxs_data]
-    coords = rdata.coords[idxs_data]
-    data = rdata.data[idxs_data]
+    masked_rdata = IOReaderData(
+        rdata.coords[idxs_data],
+        rdata.geoinfos[idxs_data],
+        rdata.data[idxs_data],
+        rdata.datetimes[idxs_data],
+        rdata.is_spoof,
+    )
+    datetimes_enc = enc_time(masked_rdata.datetimes, time_win)
 
     if mask_channels is not None:
         assert False, "to be implemented"
@@ -374,8 +377,8 @@ def tokenize_apply_mask_target(
             stream_id,
             hl,
             masked_points_per_cell,
-            coords,
-            geoinfos,
+            masked_rdata.coords,
+            masked_rdata.geoinfos,
             datetimes_enc,
             hpy_verts_rots,
             hpy_verts_local,
@@ -385,7 +388,7 @@ def tokenize_apply_mask_target(
     else:
         coords_local = torch.tensor([])
 
-    return data, datetimes, coords, coords_local, masked_points_per_cell
+    return masked_rdata, coords_local, masked_points_per_cell
 
 
 def get_source_coords_local(
