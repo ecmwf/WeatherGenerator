@@ -127,9 +127,18 @@ class DataReaderMesh(DataReaderTimestep):
 
         data_start_time = np.datetime64(ds_time_values[0], "ns")
         if len(ds_time_values) > 1:
-            period = np.datetime64(ds_time_values[1], "ns") - data_start_time
+            native_period = np.datetime64(ds_time_values[1], "ns") - data_start_time
         else:
-            period = np.timedelta64(24, "h")
+            native_period = np.timedelta64(24, "h")
+
+        self.native_period = native_period
+
+        if "frequency" in stream_info:
+            from weathergen.readers_extra.data_reader_grep import _str_to_timedelta
+
+            period = _str_to_timedelta(stream_info["frequency"])
+        else:
+            period = native_period
 
         data_end_time = np.datetime64(ds_time_values[-1], "ns")
 
@@ -272,16 +281,25 @@ class DataReaderMesh(DataReaderTimestep):
         if dtr.end < self.data_start_time or dtr.start > self.data_end_time:
             return (np.array([], dtype=np.int64), dtr)
 
-        delta_start = dtr.start - self.data_start_time
-        start_idx = int(delta_start / self.period)
+        start_idx = np.searchsorted(self._time_values_cached, dtr.start, side="left")
+        end_idx = np.searchsorted(self._time_values_cached, dtr.end - t_epsilon, side="right") - 1
 
-        delta_end = dtr.end - self.data_start_time - t_epsilon
-        end_idx = int(delta_end / self.period)
+        stride = 1
+        if self.period > self.native_period:
+            stride = int(self.period / self.native_period)
 
-        start_idx = max(0, start_idx)
-        end_idx = min(len(self._time_values_cached) - 1, end_idx)
+        if start_idx > end_idx:
+            # Persistent: find last before window
+            last_before = start_idx - 1
+            if last_before >= 0:
+                return (np.array([last_before], dtype=np.int64), dtr)
+            else:
+                return (np.array([], dtype=np.int64), dtr)
 
-        return (np.arange(start_idx, end_idx + 1, dtype=np.int64), dtr)
+        # Generate indices and then subsample by stride
+        idxs = np.arange(start_idx, end_idx + 1, dtype=np.int64)[::stride]
+
+        return (idxs, dtr)
 
     @override
     def get_source(self, idx: TIndex) -> ReaderData:
@@ -301,6 +319,12 @@ class DataReaderMesh(DataReaderTimestep):
         channel_indices = [self.available_channels.index(c) for c in channels]
         start_t, end_t = t_idxs[0], t_idxs[-1] + 1
         n_steps = len(t_idxs)
+
+        stride = 1
+        if self.period > self.native_period:
+            stride = int(self.period / self.native_period)
+            # extend end_t to cover the final step when striding
+            end_t = t_idxs[-1] + stride
 
         spatial_indices_ref = self.spatial_indices_src if is_source else self.spatial_indices_trg
         coords_ref = self.coords_src if is_source else self.coords_trg
@@ -405,6 +429,7 @@ class DataReaderMesh(DataReaderTimestep):
                 channel_indices,
                 start_t,
                 end_t,
+                stride,
                 n_steps,
                 slice(disk_start, disk_stop),
                 rel_indices,
@@ -416,6 +441,7 @@ class DataReaderMesh(DataReaderTimestep):
                 channel_indices,
                 start_t,
                 end_t,
+                stride,
                 n_steps,
                 final_disk_indices,
                 None,
@@ -427,7 +453,7 @@ class DataReaderMesh(DataReaderTimestep):
                 data_block[np.abs(data_block) > 1e10] = np.nan
 
         coords_flat = np.tile(patch_coords_base, (n_steps, 1))
-        dt_values = self._time_values_cached[start_t:end_t]
+        dt_values = self._time_values_cached[start_t:end_t:stride]
         dt_flat = np.repeat(dt_values, patch_coords_base.shape[0])
 
         if data_block.size > 0:
@@ -458,7 +484,7 @@ class DataReaderMesh(DataReaderTimestep):
         return rdata
 
     def _load_block_from_ds(
-        self, ds, arr_cache, indices, start_t, end_t, n_steps, disk_indices, rel_indices
+        self, ds, arr_cache, indices, start_t, end_t, stride, n_steps, disk_indices, rel_indices
     ) -> np.typing.NDArray:
         if rel_indices is not None:
             num_points = len(rel_indices)
@@ -494,7 +520,7 @@ class DataReaderMesh(DataReaderTimestep):
 
                 # 2. Slice Time (keeps memory small before we flatten)
                 if "time" in dims:
-                    sliced = sliced[start_t:end_t]
+                    sliced = sliced[start_t:end_t:stride]
 
                 # 3. Compute the block into memory
                 chunk = sliced.compute().astype(np.float32)
