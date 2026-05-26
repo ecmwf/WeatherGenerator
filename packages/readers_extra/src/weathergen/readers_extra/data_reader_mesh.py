@@ -6,7 +6,6 @@ from typing import override
 import dask
 import fsspec
 import numpy as np
-from weathergen.train.utils import Stage
 import torch
 import xarray as xr
 from numpy.typing import NDArray
@@ -18,6 +17,7 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
 )
+from weathergen.train.utils import Stage
 
 logging.getLogger("fsspec").setLevel(logging.WARNING)
 logging.getLogger("fsspec.implementations.reference").setLevel(logging.WARNING)
@@ -42,7 +42,8 @@ class DataReaderMesh(DataReaderTimestep):
         self,
         tw_handler: TimeWindowHandler,
         filename: Path,
-        stream_info: dict, stage: Stage | None = None,
+        stream_info: dict,
+        stage: Stage | None = None,
     ) -> None:
         self.filename_source = Path(filename)
         if "target_file" in stream_info:
@@ -343,7 +344,7 @@ class DataReaderMesh(DataReaderTimestep):
             else:
                 total_points = len(spatial_indices_ref)
                 indices_local = np.arange(0, total_points, self.sampling_step)
-            
+
             patch_coords_base = coords_ref[indices_local]
             final_disk_indices = spatial_indices_ref[indices_local]
             use_contiguous_read = False
