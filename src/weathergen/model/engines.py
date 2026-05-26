@@ -589,7 +589,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.get("fe_diffusion_model", False)
+                            is_dit=self.cf.get("fe_diffusion_model", False),
                             dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                         )
                     )
