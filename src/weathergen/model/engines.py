@@ -96,6 +96,9 @@ class EmbeddingEngine(torch.nn.Module):
                 for sample in batch.get_samples():
                     sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
 
+            if all(s is None for s in sdata):
+                continue
+
             sdata = torch.cat(sdata).to(tokens_all.dtype)
             # skip empty stream
             if sdata.numel() == 0:
@@ -106,26 +109,96 @@ class EmbeddingEngine(torch.nn.Module):
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
-        # computer scatter index across batch items and input steps
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten()
-        repeat = torch.repeat_interleave
-        scatter_idxs = repeat(
-            torch.ones(len(tok_counts), dtype=torch.int64, device=tok_counts.device), tok_counts
+        # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
+        max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
+        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+            "max number of tokens per cell for positional encoding exceeded."
         )
-        scatter_idxs = scatter_idxs.cumsum(0) - 1
-        # scatter index must exist for each element and not just per row
-        scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+        " Increase ae_local_max_tokens_per_cell in config."
 
-        # per cell indices into positional encoding
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
-        rows = torch.arange( tok_counts.max(), device=tok_counts.device).unsqueeze(0)
-        rows = rows.expand(tok_counts.shape[0], -1)
-        pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
-        
-        # actual scatter operation
-        tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds) + pe_embed[pe_idxs])
+        if batch.tokens_lens.shape[2] == 1:
+            # trivial with one stream
+            tokens_all = torch.cat(x_embeds)
+
+        else:
+            scatter_idxs = self.get_scatter_idxs_vectorized(batch)
+            scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
+
+            # actual scatter operation and apply per cell positional encoding
+            tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
+
+        pe_idxs = self.get_pe_idxs_vectorized(batch)
+        tokens_all = tokens_all + pe_embed[pe_idxs]
 
         return tokens_all
+
+    def get_pe_idxs_vectorized(self, batch):
+        """
+        Compute per cell indices into positional encoding
+        """
+
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).sum(0).flatten()
+        rows = torch.arange(tok_counts.max(), device=tok_counts.device).unsqueeze(0)
+        rows = rows.expand(tok_counts.shape[0], -1)
+        pe_idxs = rows[rows < tok_counts.unsqueeze(1)]
+
+        return pe_idxs
+
+    def get_scatter_idxs(self, batch):
+        """
+        Compute reordering index so that tokens from different streams but same cell are
+        continguous
+
+        Simple version (reference implementation)
+        """
+
+        dev = batch.get_device()
+        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
+        # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+
+        scatter_idxs = []
+        for i in range(len(tok_counts)):
+            for j in range(tok_counts.shape[1]):
+                if tok_counts[i, j] == 0:
+                    continue
+                # offset from preceding cells
+                offset = tok_counts[:, :j].flatten().sum()
+                # offset from preceding streams in cells
+                offset += tok_counts[:i, j].sum()
+                # scatter idxs is offset and idxs for all tokens in cell for current stream
+                scatter_idxs += [offset[i, j] + torch.arange(tok_counts[i, j], device=dev)]
+
+        scatter_idxs = torch.cat(scatter_idxs).to(torch.int64)
+
+        return scatter_idxs
+
+    def get_scatter_idxs_vectorized(self, batch):
+        """
+        Compute reordering index so that tokens from different streams but same cell are
+        continguous
+
+        Vectorized version
+        """
+
+        dev = batch.get_device()
+        # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
+        # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
+        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+
+        # partial sums for per cell offsets
+        pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)
+        offset = torch.cat([pad, tok_counts.cumsum(0)])[:-1]
+        offset[:, 1:] += tok_counts.sum(0).cumsum(0)[:-1]
+
+        ranges = torch.arange(tok_counts.max(), device=dev).repeat((tok_counts.numel(), 1))
+        idxs = (offset.flatten() + ranges.transpose(1, 0)).transpose(1, 0)
+        # select idxs[i][:ranges[i]] for each i; vectorized version
+        col_indices = torch.arange(idxs.shape[1], device=dev).unsqueeze(0)
+        valid_mask = col_indices < tok_counts.flatten().unsqueeze(1)
+        scatter_idxs = idxs[valid_mask].to(torch.int64)
+
+        return scatter_idxs
 
 
 class LocalAssimilationEngine(torch.nn.Module):
@@ -150,7 +223,7 @@ class LocalAssimilationEngine(torch.nn.Module):
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
-                    qk_norm_type=self.cf.qk_norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
@@ -197,7 +270,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                 dropout_rate=self.cf.ae_adapter_dropout_rate,
                 with_flash=self.cf.with_flash_attention,
                 norm_type=self.cf.norm_type,
-                qk_norm_type=self.cf.qk_norm_type,
+                qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                 norm_eps=self.cf.norm_eps,
                 attention_dtype=get_dtype(self.cf.attention_dtype),
             )
@@ -227,7 +300,7 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_adapter_dropout_rate,
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
-                    qk_norm_type=self.cf.qk_norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
                     attention_dtype=get_dtype(self.cf.attention_dtype),
                 )
@@ -334,7 +407,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -352,7 +425,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                     )
@@ -410,7 +483,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -427,7 +500,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
                         with_2d_rope=self.cf.get("rope_2D", False),
@@ -454,6 +527,17 @@ class GlobalAssimilationEngine(torch.nn.Module):
         aux_info = None
         for block in self.ae_global_blocks:
             tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+        return tokens
+
+
+class IdentityEngine(torch.nn.Module):
+    """Identity engine that passes tokens through unchanged."""
+
+    def __init__(self):
+        super().__init__()
+        self.fe_blocks = torch.nn.ModuleList()
+
+    def forward(self, tokens, *args, **kwargs):
         return tokens
 
 
@@ -485,7 +569,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            qk_norm_type=self.cf.qk_norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
@@ -503,7 +587,7 @@ class ForecastingEngine(torch.nn.Module):
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
                             norm_type=self.cf.norm_type,
-                            qk_norm_type=self.cf.qk_norm_type,
+                            qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
@@ -653,7 +737,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
-                    qk_norm_type=self.cf.qk_norm_type,
+                    qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     softcap=self.softcap,
                     dim_aux=self.dim_coord_in,
                     norm_eps=self.cf.norm_eps,
@@ -671,7 +755,7 @@ class TargetPredictionEngineClassic(nn.Module):
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
                         norm_type=self.cf.norm_type,
-                        qk_norm_type=self.cf.qk_norm_type,
+                        qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         dim_aux=self.dim_coord_in,
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),

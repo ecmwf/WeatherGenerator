@@ -29,6 +29,7 @@ DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 MAX_FILENAME_LEN = 255
 LEGEND_FONT_SIZE = "x-small"
 _LEGEND_MAX_LABEL_LEN = 80
+PLOT_DPI_VALUE = 150
 
 
 def _add_legend(
@@ -251,7 +252,7 @@ def plot_lr(
     """
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
-    _fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
     linestyle = "-"
 
@@ -310,7 +311,7 @@ def plot_loss_avg(
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
-    _fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
@@ -405,7 +406,7 @@ def plot_loss_per_stream(
     for err in errs:
         for channel in channels:
             for stream_name in stream_names:
-                _fig = plt.figure(figsize=(10, 7), dpi=300)
+                _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
                 legend_strs = []
                 min_val = np.finfo(np.float32).max
@@ -489,6 +490,10 @@ def plot_loss_per_stream(
 
                 plt.grid(True, which="both", ls="-")
 
+                plt.yscale("log")
+                if x_scale_log:
+                    plt.xscale("log")
+
                 if y_lim is not None:
                     plt.ylim(y_lim)
                 else:
@@ -496,9 +501,6 @@ def plot_loss_per_stream(
                 if x_lim is not None:
                     plt.xlim(x_lim)
 
-                plt.yscale("log")
-                if x_scale_log:
-                    plt.xscale("log")
                 plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
@@ -577,7 +579,7 @@ def plot_loss_per_run(
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
 
-    _fig = plt.figure(figsize=(10, 7), dpi=300)
+    _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
     legend_strs = []
     for mode in modes:

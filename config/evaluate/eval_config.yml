@@ -2,11 +2,16 @@
 # NB. global options apply to all run_ids 
 
 #global_plotting_options:
-#  regions: ["europe", "global"]
+#  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+#  animation_format: "gif" #options: "mp4", "gif"
 #  dpi_val : 300
 #  fps: 2
+#  n_bins: 50 #number of bins for histograms. 
+#  log_x: true #use log scale for x axis in histograms. 
+#  log_y: true #use log scale for y axis in histograms. 
 #  ERA5:
+#    use_datashader: false
 #    marker_size: 2
 #    scale_marker_size: 1
 #    marker: "o"
@@ -20,9 +25,12 @@
 #      vmin: -40
 #      vmax: 40
 
+
+# max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
+
 evaluation:
   metrics  : ["rmse", "mae"]
-  regions: ["global", "nhem"]
+  # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
   summary_plots : true
   ratio_plots : false
   heat_maps : false
@@ -40,6 +48,7 @@ evaluation:
 
 default_streams:
   ERA5:
+    regions: ["global"]
     channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
     evaluation:
       forecast_step: "all"
@@ -55,6 +64,7 @@ default_streams:
       plot_histograms: true
       plot_animations: true
   CERRA:
+    regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"] #, "blah"]
     evaluation:
       forecast_step: "all"
@@ -86,6 +96,7 @@ run_ids :
 
   jjc9ym62:
     label: "2 steps window"
+    color: "magenta" #optional: if not specified, the color is automatically assigned by the plotting module
     results_base_dir : "./results/"
     epoch: 1 #optional: if not specified epoch 0 (in inference it is always 0) is used
     rank: 2 #optional: if not specified rank 0 is used
@@ -119,6 +130,7 @@ run_ids :
       - c9cg8ql3
     merge_metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
     label: "Merged Results"
+    color: "green" #optional
     results_base_dir : "./results/"
     streams:
       ERA5:
