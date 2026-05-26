@@ -746,7 +746,6 @@ class Model(torch.nn.Module):
 
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
-
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
@@ -791,12 +790,12 @@ class Model(torch.nn.Module):
                     output = self.predict_latent(
                         model_params, step, toks, batch, output, out_step=i
                     )
+                # Feed the final denoised state back as conditioning for the next step.
+                # Pass tokens[-1] forward so inference diagnostics have a reference point;
+                # inference_forward always starts from pure noise regardless.
+                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens[-1]
+                tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
                 continue
-            
-            # # In diffusion inference mode, the final denoised tokens are returned.
-            # tokens = tokens[-1]
-            # # Feed the denoised output back as conditioning for the next autoregressive step.
-            # batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
