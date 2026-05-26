@@ -200,9 +200,9 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
 
         c = None
-        if self.cf.get("fe_diffusion_model_conditioning", None) in ["date_time", "date", "time"]:
+        if self.conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
-        elif self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
+        elif self.conditioning == "forecast":
             c = meta_info["ERA5"].params["conditioning_tokens"]          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
         if self.training:
@@ -243,7 +243,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         noise_emb = self.noise_embedder(c_noise)
 
         # Precondition input and feed through network
-        if self.cf.get("fe_diffusion_model_conditioning", None) in ["date_time", "date", "time"]:
+        if self.conditioning in ["date_time", "date", "time"]:
             c = self.datetime_embedder(c).to(x.device)
 
         net_input = c_in * x
@@ -277,9 +277,9 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Extract conditioning (mirrors training_forward).
         c = None
-        if self.cf.get("fe_diffusion_model_conditioning", None) in ["date_time", "date", "time"]:
+        if self.conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
-        elif self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
+        elif self.conditioning == "forecast":
             c = meta_info["ERA5"].params["conditioning_tokens"]
 
 
