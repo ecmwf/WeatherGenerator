@@ -555,6 +555,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             input_mask,
         )
 
+        # Student-teacher mode only needs network inputs. Skipping output handling
+        # avoids a second round of unused data reads and tokenization per stream.
+        if "target_coords" not in modes and "target_values" not in modes:
+            return stream_data
+
         stream_data = self._build_stream_data_output(
             modes,
             stream_data,
@@ -568,7 +573,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
+    def _get_data_windows(
+        self,
+        base_idx,
+        num_forecast_steps,
+        num_steps_input_max,
+        stream_ds,
+        collect_output=True,
+    ):
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
@@ -595,6 +607,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 rdata.is_spoof = True
 
             input_data += [rdata]
+
+        if not collect_output:
+            return (input_data, [])
 
         # target data: collect for all forecast steps
         output_data = []
@@ -681,6 +696,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         if len(source_select) == 0 or len(target_select) == 0:
             raise NotImplementedError(f"Unsupported training mode {mode}.")
 
+        needs_output_windows = any(
+            output_mode in source_select or output_mode in target_select
+            for output_mode in ("target_coords", "target_values")
+        )
+
         num_output_steps = self._get_output_length(num_forecast_steps)
         batch = ModelBatch(
             self.streams,
@@ -707,14 +727,22 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # in source and target channels; overlap in one window when self.output_offset=0
             i_max = input_steps.max().item()
             (input_data, output_data) = self._get_data_windows(
-                idx, num_forecast_steps, i_max, stream_ds
+                idx,
+                num_forecast_steps,
+                i_max,
+                stream_ds,
+                collect_output=needs_output_windows,
             )
 
             # When teacher_time_offset > 0, load a separate set of data windows
             # shifted forward in time for the teacher (target) samples.
             if self.teacher_time_offset > 0:
                 (input_data_target, output_data_target) = self._get_data_windows(
-                    idx + self.teacher_time_offset, num_forecast_steps, i_max, stream_ds
+                    idx + self.teacher_time_offset,
+                    num_forecast_steps,
+                    i_max,
+                    stream_ds,
+                    collect_output=needs_output_windows,
                 )
             else:
                 input_data_target = input_data
@@ -723,13 +751,19 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # tokenize windows
             # *_tokens = [ (cells_idx, cells_idx_lens), ... ] with length = #time_steps
             input_tokens = self.tokenizer.get_tokens_windows(stream_info, input_data, True)
-            output_tokens = self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+            output_tokens = (
+                self.tokenizer.get_tokens_windows(stream_info, output_data, False)
+                if needs_output_windows
+                else []
+            )
             if self.teacher_time_offset > 0:
                 input_tokens_target = self.tokenizer.get_tokens_windows(
                     stream_info, input_data_target, True
                 )
-                output_tokens_target = self.tokenizer.get_tokens_windows(
-                    stream_info, output_data_target, False
+                output_tokens_target = (
+                    self.tokenizer.get_tokens_windows(stream_info, output_data_target, False)
+                    if needs_output_windows
+                    else []
                 )
             else:
                 input_tokens_target = input_tokens

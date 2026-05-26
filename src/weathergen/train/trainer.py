@@ -214,6 +214,8 @@ class Trainer(TrainerBase):
             "pin_memory": cf.data_loading.get("memory_pinning", False),
             "persistent_workers": cf.data_loading.get("persistent_workers", False),
         }
+        if loader_num_workers > 0 and "prefetch_factor" in cf.data_loading:
+            loader_params["prefetch_factor"] = cf.data_loading.prefetch_factor
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset, **loader_params, sampler=None
         )
@@ -258,12 +260,19 @@ class Trainer(TrainerBase):
         self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
         self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
 
+        loader_num_workers = cf.data_loading.num_workers
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
             "shuffle": False,
-            "num_workers": cf.data_loading.num_workers,
+            "num_workers": loader_num_workers,
         }
+        if loader_num_workers > 0:
+            loader_params["persistent_workers"] = cf.data_loading.get(
+                "persistent_workers", False
+            )
+            if "prefetch_factor" in cf.data_loading:
+                loader_params["prefetch_factor"] = cf.data_loading.prefetch_factor
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
