@@ -133,11 +133,7 @@ class EncoderModule(torch.nn.Module):
         tokens_global = checkpoint(
             self.ae_global_engine,
             tokens_global,
-            coords=(
-                model_params.rope_spherical_coeffs.unbind(dim=-1)
-                if model_params.rope_spherical_coeffs is not None
-                else model_params.rope_coords
-            ),
+            coords=model_params.rope_coords,
             use_reentrant=False,
         )
 
@@ -225,8 +221,6 @@ class EncoderModule(torch.nn.Module):
         tokens_global_register_class,
         tokens_lens,
         rope_cell_coords=None,
-        rope_cell_coeffs=None,
-        rope_extra_coeffs=None,
     ):
         """
         Aggregation engine on the global latents of unmasked cells
@@ -257,19 +251,8 @@ class EncoderModule(torch.nn.Module):
         )
 
         # Build packed coords matching the interleaved token order
-        num_extra = self.num_class_tokens + self.num_register_tokens
-        if rope_cell_coeffs is not None:
-            extra_real, extra_imag = rope_extra_coeffs.unbind(dim=-1)
-            cell_real, cell_imag = rope_cell_coeffs.unbind(dim=-1)
-            packed_real = []
-            packed_imag = []
-            for mask_b in cell_mask.flatten(0, 1):
-                packed_real.append(extra_real)
-                packed_imag.append(extra_imag)
-                packed_real.append(cell_real[mask_b])
-                packed_imag.append(cell_imag[mask_b])
-            packed_coords = (torch.cat(packed_real, dim=0), torch.cat(packed_imag, dim=0))
-        elif rope_cell_coords is not None:
+        if rope_cell_coords is not None:
+            num_extra = self.num_class_tokens + self.num_register_tokens
             zero_coords = torch.zeros(
                 num_extra, 2, device=rope_cell_coords.device, dtype=rope_cell_coords.dtype
             )
@@ -333,8 +316,6 @@ class EncoderModule(torch.nn.Module):
             tokens_global_register_class,
             batch.tokens_lens,
             rope_cell_coords=model_params.rope_cell_coords,
-            rope_cell_coeffs=model_params.rope_spherical_cell_coeffs,
-            rope_extra_coeffs=model_params.rope_spherical_extra_coeffs,
         )
 
         # final processing
