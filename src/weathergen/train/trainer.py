@@ -816,12 +816,17 @@ class Trainer(TrainerBase):
 
                 for key, value in losses_all.items():
                     if key.endswith("avg"):
+                        val = np.nan if np.isnan(value).all() else f"{np.nanmean(value):0.4E}"
                         logger.info(
-                            f"{key} : {np.nanmean(value):0.4E} \t",
+                            f"{key} : {val} \t",
                         )
                 logger.info("\n")
 
             self.t_start = time.time()
+
+            loss_calculator.loss_hist = []
+            loss_calculator.losses_unweighted_hist = []
+            loss_calculator.stddev_unweighted_hist = []
 
     def _log_collapse_metrics(self, stage: Stage) -> None:
         """
