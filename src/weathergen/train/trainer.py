@@ -824,10 +824,6 @@ class Trainer(TrainerBase):
 
             self.t_start = time.time()
 
-            loss_calculator.loss_hist = []
-            loss_calculator.losses_unweighted_hist = []
-            loss_calculator.stddev_unweighted_hist = []
-
     def _log_collapse_metrics(self, stage: Stage) -> None:
         """
         Log cached collapse monitoring metrics.
