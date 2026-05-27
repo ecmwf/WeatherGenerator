@@ -137,9 +137,14 @@ data_loading:
 training_config:
   training_mode: ["student_teacher"]
   teacher_time_offset: 1
-  num_mini_epochs: 48
+  num_mini_epochs: 40
   samples_per_mini_epoch: 4096
   shuffle: True
+
+  context_loss:
+    enabled: true
+    weight: 1.0
+    warmup_steps: 0
 
   start_date: 2017-01-01T00:00
   end_date: 2022-12-31T00:00
@@ -182,7 +187,7 @@ training_config:
         JEPA:
           weight: 1.0
           loss_extra_args:
-            temporal: true
+            temporal: false
           out_dim: 2048
           head: mlp
           num_layers: 2
