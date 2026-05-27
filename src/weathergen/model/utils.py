@@ -48,8 +48,6 @@ def apply_fct_to_blocks(model, blocks, fct):
             logger.info(f"Applied function {fct.__name__} to block {name}")
         else:
             logger.info(f"Did not apply function {fct.__name__} to block {name}")
-    
-    breakpoint()
 
 
 class ActivationFactory:
