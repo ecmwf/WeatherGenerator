@@ -143,7 +143,8 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'wt2leaf4', 'epoch': -1}  # d2048 hl5, p_mean=-1.2, forecasting
 # load_chkpt: {'run_id': 'iq5p8ujf', 'epoch': -1}  # d2048 hl5, p_mean=-0.5, forecasting
 # load_chkpt: {'run_id': 'u2r8b4z6', 'epoch': -1}  # d2048 hl5, p_mean=0.5, forecasting
-load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
+# load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
+load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting (deterministic, precursor to ug7huxi2)
 # load_chkpt: {'run_id': 'i3y5fhda', 'epoch': -1}  # d2048 hl5, p_mean=2.5, forecasting
 # load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
 
