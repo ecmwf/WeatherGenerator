@@ -355,7 +355,7 @@ def tokenize_apply_mask_target(
     idxs_data = torch.cat(idxs_data)
 
     # apply mask
-    datetimes = rdata.datetimes[idxs_data]
+    datetimes = np.atleast_1d(rdata.datetimes[idxs_data])
     datetimes_enc = enc_time(datetimes, time_win)
     geoinfos = rdata.geoinfos[idxs_data]
     coords = rdata.coords[idxs_data]
