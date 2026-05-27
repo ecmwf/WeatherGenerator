@@ -902,13 +902,23 @@ class Model(torch.nn.Module):
                     assert pred.shape[0] == M * P
                     pred = pred.reshape(M, P, pred.shape[-1])
                 else:
-                    tc_tokens_out = self.target_token_engines[stream_name](
-                        latent=tokens_nbors,
-                        output=tc_tokens_in,
-                        latent_lens=tokens_nbors_lens,
-                        output_lens=tcs_lens_in,
-                        coordinates=t_coords.repeat(M, 1),    # [M*P, coord_dim]
-                    )
+                    # Process each member independently to avoid exceeding the CUDA grid
+                    # dimension limit (gridDim.y/z max = 65535).  Batching all M members
+                    # together gives M*B*H groups; with M=10 and H=12288 this is 122880 > 65535.
+                    kv_per_member = B * H * 9 * Q
+                    # Lens for a single member: [0, 9, 9, ..., 9] with B*H+1 entries
+                    tokens_nbors_lens_single = tokens_nbors_lens[: B * H + 1]
+                    tc_tokens_outs = []
+                    for m in range(M):
+                        tc_tokens_out_m = self.target_token_engines[stream_name](
+                            latent=tokens_nbors[m * kv_per_member : (m + 1) * kv_per_member],
+                            output=tc_tokens,
+                            latent_lens=tokens_nbors_lens_single,
+                            output_lens=tcs_lens,
+                            coordinates=t_coords,
+                        )
+                        tc_tokens_outs.append(tc_tokens_out_m)
+                    tc_tokens_out = torch.cat(tc_tokens_outs, dim=0)  # [M*P, embed_dim]
                     pred = self.pred_heads[stream_name](tc_tokens_out)
                     # pred: [E, M*P, C]
                     # The M blocks in dim-1 are contiguous (repeat(M,1) ordering), so we can

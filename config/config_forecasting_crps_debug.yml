@@ -85,7 +85,7 @@ latent_noise_deterministic_latents: True
 
 # Latent Gaussian perturbation for probabilistic forecasting (CRPS training)
 # Set num_members > 1 to enable; use kernel_crps loss.
-latent_perturbation_num_members: 5    # 0 / 1 = disabled; >1 = number of ensemble members
+latent_perturbation_num_members: 10    # 0 / 1 = disabled; >1 = number of ensemble members
 latent_perturbation_sigma_init: 0.05  # initial noise standard deviation
 latent_perturbation_sigma_learnable: True  # true = nn.Parameter; false = fixed buffer
 
@@ -177,7 +177,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        loss_fcts: {"mse": null, "kernel_crps": { }, },
+        loss_fcts: {"mse": null, "kernel_crps": {}, },
         },
     }
   
