@@ -184,8 +184,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             logger.warning(
                 f"samples_per_mini_epoch={epoch_len} is too small for "
                 f"world_size={self.world_size} and batch_size={self.batch_size}. "
-                f"In particular, samples_per_mini_epoch has to be equal to or larger than"
-                f"world_size*batch_size to ensure that each rank can produce at least one batch. "
+                f"samples_per_mini_epoch has to be equal to or larger than"
+                f"world_size*batch_size to ensure that each rank can produce at least one sample. "
                 f"Automatically increasing to {min_samples}."
             )
             epoch_len = min_samples
