@@ -24,6 +24,13 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from weathergen.common.logger import init_loggers
 from weathergen.common.paths import _REPO_ROOT
 from weathergen.common.platform_env import get_platform_env
+from weathergen.metrics.mlflow_utils import (
+    MlFlowUpload,
+    get_or_create_mlflow_parent_run,
+    log_scores,
+    setup_mlflow,
+)
+
 from weathergen.evaluate.io.csv_reader import CsvReader
 from weathergen.evaluate.io.merge_reader import WeatherGenMergeReader
 from weathergen.evaluate.io.wegen_reader import (
@@ -33,8 +40,8 @@ from weathergen.evaluate.io.wegen_reader import (
 )
 from weathergen.evaluate.plotting.plot_orchestration import (
     plot_data,
-    plot_score_maps_per_stream,
     plot_summary,
+    run_score_map_pipeline,
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.scores.score_orchestration import (
@@ -42,12 +49,6 @@ from weathergen.evaluate.scores.score_orchestration import (
     metric_list_to_json,
 )
 from weathergen.evaluate.utils.dict_utils import merge, parse_metric_params, triple_nested_dict
-from weathergen.metrics.mlflow_utils import (
-    MlFlowUpload,
-    get_or_create_mlflow_parent_run,
-    log_scores,
-    setup_mlflow,
-)
 
 _DEFAULT_PLOT_DIR = _REPO_ROOT / "plots"
 
@@ -186,6 +187,7 @@ def _process_stream(
     regions: list[str],
     metrics: dict[str, object],
     plot_score_maps: bool,
+    plot_score_animations: bool,
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
     """
     Worker function for a single stream of a single run.
@@ -209,6 +211,8 @@ def _process_stream(
         Dict of metrics to be processed and their parameters.
     plot_score_maps:
         Bool to define if the score maps need to be plotted or not.
+    plot_score_animations:
+        Bool to define if the score animations need to be plotted or not.
     """
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
@@ -269,13 +273,14 @@ def _process_stream(
     scores_dict = merge(stream_loaded_scores, stream_computed_scores)
 
     if score_maps:
-        plot_score_maps_per_stream(
+        run_score_map_pipeline(
             reader,
             stream,
             regions_to_compute,
             metrics_to_compute,
             output_data=output_data,
             global_plotting_options=global_plotting_opts,
+            plot_score_animations=plot_score_animations,
         )
 
     return run_id, stream, scores_dict
@@ -299,6 +304,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
     plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
+    plot_score_animations = cfg.evaluation.get("plot_score_animations", False)
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})
     max_workers = cfg.get("max_workers")  # global hard cap for parallel workers
@@ -330,6 +336,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     "regions": regions,
                     "metrics": metrics,
                     "plot_score_maps": plot_score_maps,
+                    "plot_score_animations": plot_score_animations,
                 }
             )
 
