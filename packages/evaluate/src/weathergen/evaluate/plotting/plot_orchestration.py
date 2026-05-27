@@ -25,6 +25,7 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.bar_plots import BarPlots
 from weathergen.evaluate.plotting.line_plots import LinePlots
+from weathergen.evaluate.plotting.plot_orchestration_utils import _compute_ranges, _compute_scores
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     heat_maps_metric_region,
@@ -36,11 +37,8 @@ from weathergen.evaluate.plotting.plot_utils import (
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
-from weathergen.evaluate.scores.score import VerifiedData, get_score
-from weathergen.evaluate.scores.score_orchestration import get_next_fstep_data
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology
-from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
 
@@ -49,113 +47,14 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _compute_scores_for_fstep(
-    region: str,
-    fstep: int,
-    metric_names: list[str],
-    metric_params: list,
-    score_data: VerifiedData,
-    preds_r: xr.DataArray,
-) -> tuple[str, int, list, xr.DataArray, list[str]]:
-    """Compute scores for a single (region, fstep) pair (parallelisable worker).
-
-    Returns ``(region, fstep, score_results, preds_r, metric_names)``.
-    """
-    score_results: list[xr.DataArray | None] = [
-        get_score(score_data, m, agg_dims="sample", parameters=p)
-        for m, p in zip(metric_names, metric_params, strict=False)
-    ]
-    return region, fstep, score_results, preds_r, metric_names
-
-
-def _compute_scores_and_ranges(
-    regions: list[str],
-    metrics_dict: dict,
-    fsteps: list,
-    da_preds: dict,
-    da_tars: dict,
-    aligned_clim_data: dict | None,
-    n_workers: int | None = None,
-) -> tuple[dict, dict]:
-    """Compute scores for all (region, fstep) pairs and accumulate per-channel colour ranges.
-
-    Score computation is parallelised across (region, fstep) pairs; range accumulation
-    is done sequentially once all results are available.
-
-    Returns
-    -------
-    computed : dict[tuple, tuple]
-        ``{(region, fstep): (score_results, preds_r, metric_names)}``
-    score_ranges_dict : dict
-        ``{metric: {region: {channel: {'vmin': float, 'vmax': float}}}}``
-    """
-    # Build one task per (region, fstep) with pre-applied region masking.
-    tasks = []
-    for region in regions:
-        bbox = RegionBoundingBox.from_region_name(region)
-        metrics = metrics_dict[region]
-        metric_names = list(metrics.keys())
-        metric_params = list(metrics.values())
-        for fstep in fsteps:
-            tars_fs = da_tars[fstep]
-            preds_fs = da_preds[fstep]
-            preds_next, tars_next = get_next_fstep_data(fstep, da_preds, da_tars, fsteps)
-            climatology = aligned_clim_data[fstep] if aligned_clim_data else None
-            tars_r, preds_r, tars_next_r, preds_next_r = [
-                bbox.apply_mask(x) if x is not None else None
-                for x in (tars_fs, preds_fs, tars_next, preds_next)
-            ]
-            tasks.append(
-                dict(
-                    region=region,
-                    fstep=fstep,
-                    metric_names=metric_names,
-                    metric_params=metric_params,
-                    score_data=VerifiedData(
-                        preds_r, tars_r, preds_next_r, tars_next_r, climatology
-                    ),
-                    preds_r=preds_r,
-                )
-            )
-
-    # Compute scores in parallel across (region, fstep) pairs.
-    calls = [delayed(_compute_scores_for_fstep)(**t) for t in tasks]
-    raw_results = dispatch_parallel(
-        calls, n_workers=n_workers, backend="loky", desc="Score computation"
-    )
-
-    # Accumulate per-channel colour ranges from the completed results.
-    computed: dict[tuple, tuple] = {}
-    score_ranges_dict: dict = {}
-    for region, fstep, score_results, preds_r, metric_names in raw_results:
-        computed[(region, fstep)] = (score_results, preds_r, metric_names)
-        for metric, result in zip(metric_names, score_results, strict=False):
-            if result is None:
-                continue
-            score_ranges_dict.setdefault(metric, {}).setdefault(region, {})
-            for ch in result.coords["channel"].values:
-                vals = result.sel(channel=ch).values.flatten()
-                vals = vals[~np.isnan(vals)]
-                if vals.size == 0:
-                    continue
-                ch_key = str(ch)
-                vmin, vmax = float(vals.min()), float(vals.max())
-                prev = score_ranges_dict[metric][region].get(ch_key)
-                score_ranges_dict[metric][region][ch_key] = {
-                    "vmin": min(prev["vmin"], vmin) if prev else vmin,
-                    "vmax": max(prev["vmax"], vmax) if prev else vmax,
-                }
-
-    return computed, score_ranges_dict
-
-
-def plot_score_maps_per_stream(
+def run_score_map_pipeline(
     reader: Reader,
     stream: str,
     regions: list[str],
     metrics_dict: dict,
     output_data: "ReaderOutput | None" = None,
     global_plotting_options: dict | None = None,
+    plot_score_animations: bool = False,
 ) -> None:
     """Plot spatial score maps for all regions and forecast steps.
 
@@ -173,6 +72,8 @@ def plot_score_maps_per_stream(
         Pre-loaded data; when provided ``reader.get_data()`` is skipped.
     global_plotting_options : dict | None
         Global plotting options. These can be passed to the plotter and can be used to set options.
+    plot_score_animations : bool
+        Whether to build animations of score maps across forecast steps.
     """
     if not reader.is_gridded_data(stream):
         _logger.debug(f"RUN {reader.run_id} - {stream}: Skipping score maps (non-gridded data).")
@@ -220,7 +121,7 @@ def plot_score_maps_per_stream(
     output_basedir = str(reader.runplot_dir)
     run_id = reader.run_id
 
-    _computed, score_ranges_dict = _compute_scores_and_ranges(
+    _computed, raw_results = _compute_scores(
         regions,
         metrics_dict,
         fsteps,
@@ -229,10 +130,12 @@ def plot_score_maps_per_stream(
         aligned_clim_data,
         n_workers=n_plot_workers,
     )
+
+    score_ranges_dict = _compute_ranges(raw_results)
+
     fstep_tasks: list[dict] = []
     for region in regions:
         for fstep in fsteps:
-            score_results, preds_r, metric_names = _computed[(region, fstep)]
             fstep_tasks.append(
                 {
                     "plotter_cfg": plotter_cfg,
@@ -241,9 +144,7 @@ def plot_score_maps_per_stream(
                     "map_dir": str(map_dir),
                     "stream": stream,
                     "region": region,
-                    "preds": preds_r,
-                    "score_results": score_results,
-                    "metric_names": metric_names,
+                    "computed": _computed[(region, fstep)],
                     "fstep": fstep,
                     "run_id": run_id,
                 }
@@ -259,29 +160,19 @@ def plot_score_maps_per_stream(
     dispatch_parallel(calls, n_workers=n_plot_workers, backend="loky", desc=f"Score maps {stream}")
 
     # Derive variables and ens_values from the computed results.
-    all_metrics = list(score_ranges_dict.keys())
-    all_variables = sorted(
-        {
-            ch
-            for metric_dict in score_ranges_dict.values()
-            for region_dict in metric_dict.values()
-            for ch in region_dict
-        }
-    )
-    first_preds = next(iter(_computed.values()))[1]  # preds_r
-    ens_values = list(first_preds.coords["ens"].values) if "ens" in first_preds.dims else [None]
-    _dispatch_score_map_animations(
-        map_dir=map_dir,
-        plotter_cfg=plotter_cfg,
-        run_id=run_id,
-        stream=stream,
-        metrics=all_metrics,
-        regions=regions,
-        variables=all_variables,
-        ens_values=ens_values,
-        fsteps=fsteps,
-        n_workers=n_plot_workers,
-    )
+    if plot_score_animations:
+        _dispatch_score_map_animations(
+            map_dir=map_dir,
+            plotter_cfg=plotter_cfg,
+            run_id=run_id,
+            stream=stream,
+            metrics=list(dict.fromkeys(m for metrics in metrics_dict.values() for m in metrics)),
+            regions=regions,
+            variables=channels,
+            ens_values=list(ensemble) if ensemble else [None],
+            fsteps=fsteps,
+            n_workers=n_plot_workers,
+        )
 
 
 def _plot_score_maps_per_stream(
@@ -291,13 +182,13 @@ def _plot_score_maps_per_stream(
     map_dir: str,
     stream: str,
     region: str,
-    preds: xr.DataArray,
-    score_results: list,
-    metric_names: list[str],
+    computed: tuple[list, xr.DataArray, list[str]],
     fstep: int,
     run_id: str = "",
 ) -> None:
     """Plot 2D score maps for all metrics/channels for one (region, fstep)."""
+
+    score_results, preds, metric_names = computed
     valid = [(m, r) for m, r in zip(metric_names, score_results, strict=False) if r is not None]
     if not valid:
         return
@@ -323,9 +214,7 @@ def _plot_score_maps_per_stream(
     plot_tasks: list[dict] = []
     for metric in plot_metrics.coords["metric"].values:
         for ens_val in ens_values:
-            tag = f"score_maps_{metric}_fstep_{fstep}" + (
-                f"_ens_{ens_val}" if ens_val is not None else ""
-            )
+            tag = "score_maps" + (f"_ens_{ens_val}" if ens_val is not None else "") + f"_{metric}"
             for channel in plot_metrics.coords["channel"].values:
                 sel = {"metric": metric, "channel": channel}
                 if ens_val is not None:
@@ -345,6 +234,7 @@ def _plot_score_maps_per_stream(
                         "map_dir": str(map_dir),
                         "channel": str(channel),
                         "region": region,
+                        "fstep": fstep,
                         "tag": tag,
                         "title": title,
                     }
@@ -363,12 +253,14 @@ def _scatter_plot_single(
     map_dir: str,
     channel: str,
     region: str,
+    fstep: int,
     tag: str,
     title: str,
 ) -> None:
     """Plot a single score-map scatter plot (picklable for loky workers)."""
     matplotlib.use("Agg")
     plotter = Plotter(plotter_cfg, Path(output_basedir), stream)
+    plotter.update_data_selection({"sample": None, "stream": stream, "forecast_step": fstep})
     plotter.scatter_plot(
         data, Path(map_dir), channel, region, tag=tag, map_kwargs=scores_cfg, title=title
     )
@@ -414,45 +306,32 @@ def _build_single_animation(
     if not output_dir.is_dir():
         return []
 
-    if score_animation:
-        # Deterministic lookup: fstep is embedded in the full tag.
-        # tag = "score_maps_{metric}", sa = ens_val | None, var = channel.
-        image_paths: list[str] = []
-        for fstep in sorted(fsteps):
-            full_tag = f"{tag}_fstep_{fstep}"
-            if sa is not None:
-                full_tag += f"_ens_{sa}"
-            fname = f"map_{run_id}_{full_tag}_{stream}_{region}_{var}.{image_format}"
-            path = output_dir / fname
-            if path.exists():
-                image_paths.append(str(path))
-        if len(image_paths) < 2:
-            return []
-        ens_part = f"_ens_{sa}" if sa is not None else ""
-        anim_name = f"animation_{run_id}_{tag}{ens_part}_{stream}_{region}_{var}.{animation_format}"
-        out_path = str(output_dir / anim_name)
-    else:
-        # Directory scan: fstep is the zero-padded final element of the filename stem.
-        region_part = region if region else ""
+    region_part = region if region else ""
+    if sa is not None:
         head = "_".join(filter(None, [prefix, run_id, tag, str(sa)]))
-        tail = "_".join(filter(None, [stream, region_part, var]))
-        suffix = f".{image_format}"
-        fstep_strs = {str(f).zfill(3) for f in fsteps}
-        image_paths = sorted(
-            str(f)
-            for f in output_dir.iterdir()
-            if f.name.startswith(head + "_")
-            and f.name.endswith(suffix)
-            and f"_{tail}_" in f.name
-            and f.stem.rsplit("_", 1)[-1] in fstep_strs
-        )
-        if not image_paths:
-            return []
+    else:
+        head = "_".join(filter(None, [prefix, run_id, tag]))
+    tail = "_".join(filter(None, [stream, region_part, var]))
+    suffix = f".{image_format}"
+    fstep_strs = {str(f).zfill(3) for f in fsteps}
+    image_paths = sorted(
+        str(f)
+        for f in output_dir.iterdir()
+        if f.name.startswith(head + "_")
+        and f.name.endswith(suffix)
+        and f"_{tail}_" in f.name
+        and f.stem.rsplit("_", 1)[-1] in fstep_strs
+    )
+    if not image_paths:
+        return []
+    if sa is not None:
         anim_parts = ["animation", run_id, tag, str(sa), stream]
-        if region:
-            anim_parts.append(region)
-        anim_parts.append(var)
-        out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
+    else:
+        anim_parts = ["animation", run_id, tag, stream]
+    if region:
+        anim_parts.append(region)
+    anim_parts.append(var)
+    out_path = f"{output_dir / '_'.join(filter(None, anim_parts))}.{animation_format}"
 
     if animation_format.lower() == "mp4":
         frames = [imageio.imread(p) for p in image_paths]
@@ -564,11 +443,11 @@ def _dispatch_score_map_animations(
         dict(
             output_dir=map_dir,
             run_id=run_id,
-            tag=f"score_maps_{metric}",
+            tag="score_maps" + (f"_ens_{ens_val}" if ens_val is not None else "") + f"_{metric}",
             stream=stream,
             region=region,
             var=var,
-            sa=ens_val,
+            sa=None,
             fsteps=list(fsteps),
             image_format=plotter_cfg["image_format"],
             animation_format=plotter_cfg["animation_format"],
