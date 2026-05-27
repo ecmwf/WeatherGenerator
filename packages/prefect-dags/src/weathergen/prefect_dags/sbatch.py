@@ -217,7 +217,9 @@ def sbatch_try(
             account=account,
         )
     try:
-        return sbatch(ctx, job=job, job_name=job.job_name, _accept_failure=True, fetch_output=fetch_output)
+        return sbatch(
+            ctx, job=job, job_name=job.job_name, _accept_failure=True, fetch_output=fetch_output
+        )
 
     except Exception as e:
         return OpError(err=e)
@@ -346,7 +348,9 @@ async def _sbatch_try(
     await _set_status(runner.hpc, job_id, "PENDING")
     # Surface the submission details in the Prefect UI as a markdown artifact.
     # Artifacts render directly on the task run page.
-    artifact_key = f"slurm-submission-{_artifact_key_part(job.job_name)}-{_artifact_key_part(job_id)}"
+    artifact_key = (
+        f"slurm-submission-{_artifact_key_part(job.job_name)}-{_artifact_key_part(job_id)}"
+    )
     artifact_description = f"slurm job {job_id} on {runner.hpc}"
     submission_md = (
         f"## SLURM submission\n\n"

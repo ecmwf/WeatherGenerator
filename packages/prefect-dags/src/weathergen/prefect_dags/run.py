@@ -2,10 +2,9 @@
 High level interface to running commands on an HPC.
 """
 
-from pathlib import Path
 import json
 import shlex
-
+from pathlib import Path
 
 from prefect.utilities.asyncutils import run_coro_as_sync
 
@@ -42,6 +41,7 @@ def run_try(
     """
     return run_coro_as_sync(_run_try_async(context, command, working_directory, env_vars))
 
+
 _MAX_OUTPUT_BYTES = 100_000
 _MAX_OUTPUT_LINES = 100
 
@@ -68,7 +68,8 @@ def get_head_tail_logs(ctx: CmdContext, stdout_path: str, stderr_path: str | Non
     )
     if stderr_path is None:
         cmd = (
-            prelude + out_extract
+            prelude
+            + out_extract
             + f'printf \'{header}{{"head_out":"%s","tail_out":"%s","head_err":null,"tail_err":null}}\\n\''
             + ' "$ho" "$to"'
         )
@@ -79,7 +80,9 @@ def get_head_tail_logs(ctx: CmdContext, stdout_path: str, stderr_path: str | Non
             f'te=$(tail -n "$MAX_LINES" {stderr_q} 2>/dev/null | tail -c "$MAX_BYTES" | {escape_awk}); '
         )
         cmd = (
-            prelude + out_extract + err_extract
+            prelude
+            + out_extract
+            + err_extract
             + f'printf \'{header}{{"head_out":"%s","tail_out":"%s","head_err":"%s","tail_err":"%s"}}\\n\''
             + ' "$ho" "$to" "$he" "$te"'
         )
@@ -88,9 +91,8 @@ def get_head_tail_logs(ctx: CmdContext, stdout_path: str, stderr_path: str | Non
     # Parse the line using json (expect a single line with this header)
     for line in res.stdout.splitlines():
         if line.startswith(header):
-            return json.loads(line[len(header):])
+            return json.loads(line[len(header) :])
     raise ValueError(f"Could not find '{header}' line in output: {res.stdout!r}")
-
 
 
 async def _run_async(

@@ -2,10 +2,10 @@ include:
   - remote: 'https://gitlab.com/cscs-ci/recipes/-/raw/master/templates/v2/.ci-ext.yml'
 
 stages:
-  - test-single
+  - test
 
 test_job:
-  stage: test-single
+  stage: test
   extends: .uenv-runner-santis-gh200
   image: prgenv-gnu/25.6:v2
   script: |
@@ -21,9 +21,12 @@ test_job:
       --branch "$PRIVATE_REPO_BRANCH" \
       https://oauth2:${PRIVATE_REPO_TOKEN}@gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private.git
 
+    echo "Sync"
     ./scripts/actions.sh sync
+    echo "Create links and run tests"
     ./scripts/actions.sh create-links
-    ./scripts/actions.sh integration-test-single
+    echo "Run tests"
+    ./scripts/actions.sh integration-test${STAGE_TYPE:-}
   variables:
     SLURM_JOB_NUM_NODES: 1
     WITH_UENV_VIEW: 'modules'

@@ -20,16 +20,20 @@ ctx = EcmwfSshContext(
 
 @flow(log_prints=True)
 def hello_world(rerun_token=None):
+    # The command to run on the HPC:
     command = "echo 'hello world'"
-    # Run a command on the HPC:
+
+    # Run a command interactively:
     cmd_result = run(ctx, command=command)
     print(f"Command result: {cmd_result.stdout.strip()}")
+
+    # Run a command on the HPC using sbatch:
     slurm_result = sbatch(
         ctx,
         job_name="hello_world_job",
         command=command,
         # You may need to adapt to your HPC, see test_flow.py on an example.
-        working_directory="/tmp",
+        working_directory="/home/ecm8774",
         time_limit="00:01:00",
         fetch_output=True,
     )
@@ -38,4 +42,4 @@ def hello_world(rerun_token=None):
 
 
 if __name__ == "__main__":
-    hello_world(rerun_token='flo12885ad9')
+    hello_world(rerun_token="my_experiment")

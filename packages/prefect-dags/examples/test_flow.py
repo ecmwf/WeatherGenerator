@@ -12,12 +12,11 @@
 # # When developing locally, swap the source above for the line below:
 # weathergen-prefect-dags = { path = "../", editable = true }
 # ///
-import json
-import shlex
 
-from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task, sbatch_try
+from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch_try, task
 from weathergen.prefect_dags.cmd_runners import *
 from weathergen.prefect_dags.result import is_err
+
 # ctx: CmdContext = LocalContext()
 # ctx: CmdContext = EcmwfSshContext(
 #     host="santis",
@@ -43,9 +42,9 @@ ctx = EcmwfSshContext(
 
 @task
 def get_home() -> str:
-    # ECMWF appends many other lines to the output, so we need to get the last one:
     res = run(ctx, command="echo $HOME")
     assert res.stdout, "No output from pwd command"
+    # ECMWF appends many other lines to the output, so we need to get the last one:
     last_line = res.stdout.strip().split("\n")[-1]
     print(f"last line of pwd output: '{last_line}'")
     return last_line
@@ -69,14 +68,13 @@ def sleep_and_print(sleep_sec: int, pwd: str) -> SlurmJobResult:
     print(f"sbatch_try result: {res1}")
     assert not is_err(res1)
     if res1.status == "COMPLETED":
-        print(f"Job succeeded as expected")
+        print("Job succeeded as expected")
         return res1
     if res1.status == "TIMEOUT":
-        print(f"Job timed out as expected")
+        print("Job timed out as expected")
         # TODO: continue with a 2nd job that runs the same command.
         return res1
     assert False, f"Job failed with unexpected status: {res1.status}"
-
 
 
 @flow(log_prints=True)
@@ -96,9 +94,4 @@ def test_run_cmd_flow(
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--rerun-token", default=None)
-    args = parser.parse_args()
-    test_run_cmd_flow(rerun_token=args.rerun_token)
+    test_run_cmd_flow()
