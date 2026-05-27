@@ -44,13 +44,13 @@ stages:
     command: train-continue
     from: pretrain-cooldown
     config: ./config/config_jepa_multi_data_ft_forecast.yml
-    chain: 3
+    chain: 4
     nodes: 2
 
-  # Stage 3: Forecasting finetuning (unfreezes encoder)
-  - name: finetune-forecast-2
-    command: train-continue
-    from: finetune-forecast
-    config: ./config/config_jepa_multi_data_ft_forecast_unfreeze_encoder.yml
-    chain: 2
-    nodes: 2
+  # # Stage 3: Forecasting finetuning (unfreezes encoder)
+  # - name: finetune-forecast-2
+  #   command: train-continue
+  #   from: finetune-forecast
+  #   config: ./config/config_jepa_multi_data_ft_forecast_unfreeze_encoder.yml
+  #   chain: 2
+  #   nodes: 2

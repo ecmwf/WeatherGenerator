@@ -82,6 +82,7 @@ data_loading :
   num_workers: 8
   rng_seed: ???
   repeat_data_in_mini_epoch : False
+  # persistent_workers: True
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.

@@ -256,6 +256,7 @@ class Trainer(TrainerBase):
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
+
         # inference validation set
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
@@ -282,6 +283,7 @@ class Trainer(TrainerBase):
             "num_workers": cf.data_loading.num_workers,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
+        # loader_params["num_workers"]=  0
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
