@@ -774,7 +774,7 @@ class Model(torch.nn.Module):
                 continue
 
             if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=rope_data)
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)

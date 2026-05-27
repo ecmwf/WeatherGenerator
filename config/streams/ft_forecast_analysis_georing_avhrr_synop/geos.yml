@@ -110,7 +110,8 @@ HIMAWARI_AHI_VIS:
   type: obs
   stream_id: 14
   filenames: ['observations-file-2015-2022-himawari8-VIS-o256-v1.zarr', 'observations-file-2022-2024-himawari9-VIS-o256-v1.zarr']
-  geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'noise_time']
+  geoinfo_channels: ['zenith', 'noise_time']
+  # geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'noise_time']
   forcing: True
   loss_weight: 1.0
   token_size: 1024

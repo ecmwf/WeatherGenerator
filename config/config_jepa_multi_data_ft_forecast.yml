@@ -63,7 +63,7 @@ general:
   # run_path, 
   # path_shared_
 
-  multiprocessing_method: "fork"
+  multiprocessing_method: "spawn" # "fork"
 
   desc: ""
   run_id: ???
@@ -82,7 +82,7 @@ data_loading :
   num_workers: 8
   rng_seed: ???
   repeat_data_in_mini_epoch : False
-  # persistent_workers: True
+  persistent_workers: True
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
@@ -106,7 +106,7 @@ training_config:
   deep_ssl:
     enabled: false
 
-  num_mini_epochs: 24
+  num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -118,7 +118,7 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 1e-4
+    lr_max: 8e-5
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256

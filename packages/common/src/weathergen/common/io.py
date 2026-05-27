@@ -182,6 +182,9 @@ class IOReaderData:
             assert other.geoinfos.shape[0] == n_datapoints, "number of datapoints do not match"
             assert other.datetimes.shape[0] == n_datapoints, "number of datapoints do not match"
 
+            if n_datapoints == 0:
+                continue
+
             coords = np.concatenate([coords, other.coords])
             geoinfos = np.concatenate([geoinfos, other.geoinfos])
             data = np.concatenate([data, other.data])
