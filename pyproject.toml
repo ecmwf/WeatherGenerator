@@ -12,7 +12,6 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
  'numpy~=2.2',
  'astropy_healpix~=1.1.2',
- 'healpy>=1.19,<2',
  'zarr~=3.1.3',
  'pandas~=2.2',
  'tqdm',
@@ -274,3 +273,4 @@ members = [
 # Explicitly not depending on 'packages/dashboard' : this causes issues when deploying
 # the streamlit dashboard.
 ]
+
