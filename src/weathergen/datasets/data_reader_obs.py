@@ -136,6 +136,20 @@ class DataReaderObs(DataReaderBase):
 
         return last_sample
 
+    def _resize_sample_indices(self, expected_num_samples: int) -> None:
+        def _resize(values: np.ndarray) -> np.ndarray:
+            if len(values) >= expected_num_samples:
+                return values[:expected_num_samples]
+
+            fill_value = values[-1] if len(values) > 0 else 0
+            return np.append(
+                values,
+                np.full(expected_num_samples - len(values), fill_value, dtype=values.dtype),
+            )
+
+        self.indices_start = _resize(self.indices_start)
+        self.indices_end = _resize(self.indices_end)
+
     def _setup_sample_index(self) -> None:
         """
         Dataset is divided into samples;
@@ -208,6 +222,12 @@ class DataReaderObs(DataReaderBase):
         # If end (yyyymmddhhmm) is not a multiple of len_hrs
         # truncate the last sample so that it doesn't go beyond the requested dataset end date
         self.indices_end = np.minimum(self.indices_end, self.hrly_index[end_range_1])
+
+        expected_num_samples = max(
+            (diff_in_hours_end - diff_in_hours_start + step_hrs - 1) // step_hrs,
+            0,
+        )
+        self._resize_sample_indices(expected_num_samples)
 
     def _load_properties(self) -> None:
         self.properties = {}
