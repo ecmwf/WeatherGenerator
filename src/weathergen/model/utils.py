@@ -23,15 +23,11 @@ def get_num_parameters(block):
 
 
 def freeze_weights(block):
-    if hasattr(block, "name"):
-        logger.info(f"Freeze block {block.name}")
     for p in block.parameters():
         p.requires_grad = False
 
 
 def set_to_eval(block):
-    if hasattr(block, "name"):
-        logger.info(f"Set block {block.name} to eval mode")
     block.eval()
 
 
@@ -47,8 +43,13 @@ def apply_fct_to_blocks(model, blocks, fct):
     for name, module in model.named_modules():
         name = module.name if hasattr(module, "name") else name
         # avoid the whole model element which has name ''
-        if (re.fullmatch(blocks, name) is not None) and (name != ""):
+        if ((re.fullmatch(blocks, name) is not None) and (name != "")):
             fct(module)
+            logger.info(f"Applied function {fct.__name__} to block {name}")
+        else:
+            logger.info(f"Did not apply function {fct.__name__} to block {name}")
+    
+    breakpoint()
 
 
 class ActivationFactory:

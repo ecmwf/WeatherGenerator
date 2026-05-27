@@ -60,8 +60,9 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
-fe_diffusion_model_conditioning: None # options: "date_time", "time", "forecast"
-fe_diffusion_model_conditioning_type: None # options: "cross_attn", "ada_ln"
+fe_diffusion_model_conditioning: "time" # options: "date_time", "time", "forecast"
+fe_diffusion_model_conditioning_type: "ada_ln" # options: "cross_attn", "ada_ln"
+diffusion_conditioning_embed_dim: 32 # only used if fe_diffusion_model_conditioning_type is "ada_ln"
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
@@ -190,7 +191,7 @@ data_loading :
 
   num_workers: 12
   rng_seed: ???
-  repeat_data_in_mini_epoch : False
+  repeat_data_in_mini_epoch : True
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
@@ -208,8 +209,8 @@ training_config:
   samples_per_mini_epoch: 4096
   shuffle: True
  
-  start_date: 1979-01-01T00:00
-  end_date: 2022-12-31T18:00
+  start_date: 2022-08-01T00:00
+  end_date: 2022-08-31T18:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -290,8 +291,8 @@ validation_config:
   samples_per_mini_epoch: 256
   shuffle: True
 
-  start_date: 2023-10-01T00:00
-  end_date: 2023-12-31T18:00
+  start_date: 2023-08-01T00:00
+  end_date: 2023-08-31T18:00
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
