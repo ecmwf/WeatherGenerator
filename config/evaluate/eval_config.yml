@@ -5,6 +5,8 @@
 #  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 #  animation_format: "gif" #options: "mp4", "gif"
+#  log_colorbar: true
+
 #  dpi_val : 300
 #  fps: 2
 #  n_bins: 50 #number of bins for histograms. 
@@ -36,7 +38,8 @@ evaluation:
   heat_maps : false
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
-  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation
+  plot_score_animations: false #plot animations of score maps across forecast steps. it slows down score computation
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
