@@ -9,10 +9,46 @@
 
 """Score orchestration: per-fstep scoring, stream aggregation, and JSON output."""
 
+import datetime
 import json
 import logging
+import math
 
 import numpy as np
+
+
+def _json_default(obj):
+    """Fallback JSON serialiser for types not handled by the stdlib encoder."""
+    if isinstance(obj, (datetime.datetime, datetime.date)):
+        return obj.isoformat()
+    if isinstance(obj, datetime.timedelta):
+        return obj.total_seconds()
+    if isinstance(obj, np.datetime64):
+        return str(obj)
+    if isinstance(obj, np.timedelta64):
+        return str(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+def _sanitize_json(obj):
+    """Recursively replace NaN/±Inf with None so the output is valid JSON.
+
+    Python's json.dump writes NaN/Inf as bare tokens that its own json.load
+    cannot read back (the C decoder rejects them).
+    """
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json(v) for v in obj]
+    return obj
 import xarray as xr
 from joblib import delayed
 
@@ -106,19 +142,33 @@ def _score_single_fstep(
         if score.attrs:
             metric_attrs[(int(fstep), metric_name)] = score.attrs.copy()
 
-    combined = xr.concat(
-        valid_scores,
-        dim="metric",
-        coords="minimal",
-        combine_attrs="drop_conflicts",
-    )
-    combined = combined.assign_coords(metric=valid_metric_names)
-    combined = combined.compute()
+    # Separate scores with extra dimensions (e.g. rank_bin from rank_histogram)
+    # from standard scores that fit in the fixed-shape metric_stream.
+    _STANDARD_DIMS = frozenset({"sample", "channel", "ens"})
+    std_scores, std_names = [], []
+    extra_dim_scores: dict[str, xr.DataArray] = {}
+    for metric_name, score in zip(valid_metric_names, valid_scores, strict=False):
+        if set(score.dims) - _STANDARD_DIMS:
+            extra_dim_scores[metric_name] = score.compute()
+        else:
+            std_scores.append(score)
+            std_names.append(metric_name)
 
-    for coord in ["channel", "sample", "ens"]:
-        combined = scalar_coord_to_dim(combined, coord)
+    if std_scores:
+        combined = xr.concat(
+            std_scores,
+            dim="metric",
+            coords="minimal",
+            combine_attrs="drop_conflicts",
+        )
+        combined = combined.assign_coords(metric=std_names)
+        combined = combined.compute()
+        for coord in ["channel", "sample", "ens"]:
+            combined = scalar_coord_to_dim(combined, coord)
+    else:
+        combined = None
 
-    return fstep, combined, metric_attrs
+    return fstep, combined, extra_dim_scores, metric_attrs
 
 
 def calc_scores_per_stream(
@@ -310,7 +360,7 @@ def compute_scores_for_region(
     )
 
     all_metric_attrs: dict = {}
-    for _, _, fstep_attrs in fstep_results:
+    for _, _, _, fstep_attrs in fstep_results:
         all_metric_attrs.update(fstep_attrs)
 
     return fstep_results, all_metric_attrs
@@ -353,16 +403,24 @@ def store_metrics_for_region(
     da_preds : dict
         Prediction dict (used only to check for ``lead_time`` coord).
     """
+    # Determine which metrics have extra dimensions (e.g. rank_bin) from the results.
+    # These cannot be stored in the fixed-shape metric_stream.
+    extra_dim_metric_names: set[str] = set()
+    for _, _, extra_dim_dict, _ in fstep_results:
+        extra_dim_metric_names.update(extra_dim_dict.keys())
+    std_metrics = {k: v for k, v in metrics.items() if k not in extra_dim_metric_names}
+    extra_dim_metrics = {k: v for k, v in metrics.items() if k in extra_dim_metric_names}
+
     metric_stream = xr.DataArray(
         np.full(
-            (len(samples), len(fsteps), len(channels), len(metrics), len(ensemble)),
+            (len(samples), len(fsteps), len(channels), len(std_metrics), len(ensemble)),
             np.nan,
         ),
         coords={
             "sample": samples,
             "forecast_step": fsteps,
             "channel": channels,
-            "metric": list(metrics.keys()),
+            "metric": list(std_metrics.keys()),
             "ens": ensemble,
         },
     )
@@ -372,7 +430,9 @@ def store_metrics_for_region(
             lead_time=("forecast_step", np.full(len(fsteps), -1, dtype=int))
         )
 
-    for fstep, combined_metrics, _fstep_attrs in fstep_results:
+    for fstep, combined_metrics, _extra_dim_dict, _fstep_attrs in fstep_results:
+        if combined_metrics is None:
+            continue
         criteria = {
             "forecast_step": int(fstep),
             "sample": combined_metrics.sample.values,
@@ -415,10 +475,28 @@ def store_metrics_for_region(
                 indexers = {dim: criteria[dim] for dim in coord_dims if dim in criteria}
                 metric_stream.coords[coord_name].loc[indexers] = combined_metrics.coords[coord_name]
 
+    # Build and store extra-dim metrics (e.g. rank_histogram with rank_bin dimension).
+    for metric_name, parameters in extra_dim_metrics.items():
+        fstep_das = []
+        fstep_ids = []
+        for fstep, _, extra_dim_dict, _ in fstep_results:
+            if metric_name not in extra_dim_dict:
+                continue
+            da = extra_dim_dict[metric_name]
+            for coord in ["channel", "sample", "ens"]:
+                da = scalar_coord_to_dim(da, coord)
+            fstep_das.append(da.expand_dims({"forecast_step": [fstep]}))
+            fstep_ids.append(fstep)
+        if fstep_das:
+            metric_da = xr.concat(fstep_das, dim="forecast_step")
+            local_scores.setdefault(metric_name, {}).setdefault(region, {}).setdefault(stream, {})[
+                run_id
+            ] = metric_da.assign_attrs(parameters)
+
     _logger.info(f"Scores for run {run_id} - {stream} calculated successfully.")
     _logger.debug(f"all_metric_attrs keys: {list(all_metric_attrs.keys())}")
 
-    for metric, parameters in metrics.items():
+    for metric, parameters in std_metrics.items():
         metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
         for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
             if stored_metric == metric and attrs:
@@ -483,7 +561,7 @@ def metric_list_to_json(
                     data_dict = {"scores": [metric_data_dict]}
 
                 with open(save_path, "w") as f:
-                    json.dump(data_dict, f, indent=4)
+                    json.dump(_sanitize_json(data_dict), f, indent=4, default=_json_default)
 
     _logger.info(
         f"Saved all results of inference run {reader.run_id} - mini_epoch {reader.mini_epoch:d} "

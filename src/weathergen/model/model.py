@@ -336,7 +336,7 @@ class Model(torch.nn.Module):
         self.num_register_tokens = cf.num_register_tokens
         self.latent_heads = None
         self.latent_pre_norm = None
-        self.latent_perturbation_log_sigma = None
+        self.register_buffer("latent_perturbation_log_sigma", None)
         # auxiliary tokens
         self.class_token_idxs = list(
             range(cf.num_register_tokens, cf.num_register_tokens + cf.num_class_tokens)
@@ -596,9 +596,9 @@ class Model(torch.nn.Module):
         num_mem = cf.get("latent_perturbation_num_members", 0)
         if num_mem > 1:
             if cf.get("latent_perturbation_sigma_learnable", True):
-                self.latent_perturbation_log_sigma = nn.Parameter(torch.zeros(()))
+                self.latent_perturbation_log_sigma = nn.Parameter(torch.zeros(1))
             else:
-                self.register_buffer("latent_perturbation_log_sigma", torch.zeros(()))
+                self.register_buffer("latent_perturbation_log_sigma", torch.zeros(1))
         return self
 
     def reset_parameters(self):
@@ -787,23 +787,22 @@ class Model(torch.nn.Module):
         if not self.pred_heads:
             return output
 
-        # ── ① Strip aux tokens ─────────────────────────────────────────────
+        # ── Strip aux tokens ─────────────────────────────────────────────
         # tokens: [B, num_aux + H*Q, D] → [B, H*Q, D]
         tokens = tokens[:, self.num_aux_tokens:]
 
         B = len(batch)
         H = self.num_healpix_cells
-        Q = self.cf.ae_local_num_queries   # 1 per default config; must stay 1 (see assert below)
+        Q = self.cf.ae_local_num_queries   # 1 per default config
         D = tokens.shape[-1]
         assert tokens.shape == (B, H * Q, D), f"unexpected token shape {tokens.shape}"
-        # tokens_nbors_lens uses fill_value=9 (one entry per neighbour cell), which is only
-        # correct when Q=1.  If Q>1 each neighbour contributes Q tokens and the value must
-        # change to 9*Q.
+        # tokens_nbors_lens uses fill_value=9 (one entry per neighbour cell), which is only correct when Q=1.  
+        # If Q>1 each neighbour contributes Q tokens and the value must change to 9*Q.
         assert Q == 1, "predict_decoders assumes ae_local_num_queries==1; update tokens_nbors_lens fill_value if Q>1"
 
         # ── ② Latent Gaussian perturbation ────────────────────────────────
-        # Sample M independent members by treating each as an extra batch element so the
-        # entire decoder forward pass runs exactly once, fully vectorised.
+        # Sample M independent members by treating each as an extra batch element 
+        # The entire decoder forward pass runs once, fully vectorised.
         # Layout convention (used throughout): M is the OUTER axis, B is the INNER axis.
         #   tokens_tiled[m*B + b]  belongs to member m, batch item b
         M = self.cf.get("latent_perturbation_num_members", 0)

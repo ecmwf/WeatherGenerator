@@ -161,6 +161,10 @@ def init_model_and_shard(
             model.to_empty(device="cuda")
             if with_fsdp:
                 model.reset_parameters()
+        else:
+            # Non-FSDP path: model weights are real tensors (not meta), but
+            # reset_parameters must still be called to apply sigma_init etc.
+            model.reset_parameters()
 
     # model params
     model_params = ModelParams(cf).create(cf)

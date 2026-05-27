@@ -256,11 +256,12 @@ class Scores:
             f = self.det_metrics_dict[score_name]
             _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
-            assert self.ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
-                "not found in prediction data. Skipping score calculation."
-            )
-            return None
+            if self._ens_dim not in data.prediction.dims:
+                _logger.warning(
+                    f"Probablistic score {score_name} chosen, but ensemble dimension "
+                    f"{self._ens_dim} not found in prediction data. Skipping score calculation."
+                )
+                return None
             f = self.prob_metrics_dict[score_name]
         else:
             raise ValueError(
@@ -1546,7 +1547,7 @@ class Scores:
                 )
         # preserve the other coordinates
         preserved_coords = {
-            c: obs_stacked[c].values
+            c: obs_stacked[c]
             for c in obs_stacked.coords
             if all(dim not in {self._ens_dim, "npoints"} for dim in obs_stacked[c].dims)
         }
@@ -1563,11 +1564,15 @@ class Scores:
         )
 
         # Reattach preserved coordinates by broadcasting
-        for coord_name, coord_values in preserved_coords.items():
+        for coord_name, coord_da in preserved_coords.items():
             # Only keep unique values along npoints if necessary
             if coord_name in rank_counts.coords:
                 continue
-            rank_counts = rank_counts.assign_coords({coord_name: coord_values})
+            # Skip coords whose dimensions are not a subset of rank_counts dimensions
+            if not all(dim in rank_counts.dims for dim in coord_da.dims):
+                continue
+            # Pass DataArray (not bare numpy array) so xarray uses correct dimension metadata
+            rank_counts = rank_counts.assign_coords({coord_name: coord_da})
 
         # provide normalized rank counts if desired
         if norm:

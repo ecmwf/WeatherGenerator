@@ -1,0 +1,18 @@
+evaluation:
+  metrics: ["rmse", "bias", "crps", "spread", "ssr", "rank_histogram"]
+  regions: ["global"]
+  summary_plots: true
+  plot_ensemble: "members"   # visualise individual members
+  summary_dir: "./plots/crps_epoch2/"
+
+default_streams:
+  ERA5:
+    channels: ["2t", "10u", "10v", "z_500", "t_850", "u_850", "v_850", "q_850"]  # a few key variables
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"      # required for all probabilistic metrics
+
+run_ids:
+  hoe9vsh1:
+    label: "CRPS epoch 2"

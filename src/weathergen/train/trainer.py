@@ -591,6 +591,17 @@ class Trainer(TrainerBase):
                         self.train_logger.log_metrics(
                             TRAIN, _metrics, step=self.cf.general.istep
                         )
+                        _gstr = (
+                            f", grad_norm={_metrics['latent_perturbation/log_sigma_grad_norm']:.6f}"
+                            if "latent_perturbation/log_sigma_grad_norm" in _metrics
+                            else ""
+                        )
+                        logger.info(
+                            f"[latent_perturbation] step={self.cf.general.istep}: "
+                            f"sigma={_metrics['latent_perturbation/sigma']:.6f}, "
+                            f"log_sigma={_metrics['latent_perturbation/log_sigma']:.4f}"
+                            f"{_gstr}"
+                        )
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
@@ -619,7 +630,8 @@ class Trainer(TrainerBase):
             ) as pbar:
                 # --- Point 5: accumulators for spread-skill ratio ---
                 _num_members = self.cf.get("latent_perturbation_num_members", 0)
-                _spread_skill_acc = {}  # stream_name -> {"spread_sum", "rmse_sum", "count"}\n\n                for bidx, batch in enumerate(dataset_val_iter):
+                _spread_skill_acc = {}  # stream_name -> {"spread_sum", "rmse_sum", "count"}              
+                for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
                         # pin memory for faster CPU-GPU transfer
                         batch = batch.pin_memory()
