@@ -181,7 +181,6 @@ def rotary_pos_emb_2d(q, k, coords, base=10000.0, unsqueeze_dim=1):
     cos, sin = rotary_embedding_2d(coords, q.shape[-1], base=base)
     return apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=unsqueeze_dim)
 
-
 # Spherical RoPE
 def _max_supported_spherical_band(dim_embed: int, num_heads: int) -> int:
     head_dim = dim_embed // num_heads
@@ -323,6 +322,7 @@ def build_spherical_rope_coeff_tensors(
         (packed_extra_real, packed_extra_imag),
         (packed_real, packed_imag),
     )
+
 
 
 @lru_cache(maxsize=32)
