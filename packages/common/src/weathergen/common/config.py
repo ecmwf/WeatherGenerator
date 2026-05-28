@@ -649,10 +649,7 @@ def load_streams(streams_directory: Path) -> Config:
         try:
             config = OmegaConf.load(config_file)
             for stream_name, stream_config in config.items():
-                # Stream config schema is {stream_name: stream_config}
-                # where stream_config itself is a dict containing the actual options.
-                # stream_name needs to be added to this dict since only stream_config
-                # will be further processed.
+                # include key in value to have bidirectional key <-> value mapping
                 stream_config.name = stream_name
                 if stream_name in streams:
                     msg = f"Duplicate stream name found: {stream_name}."
