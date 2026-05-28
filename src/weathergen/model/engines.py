@@ -589,7 +589,7 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.fe_diffusion_model,
+                            is_dit=self.cf.get("fe_diffusion_model", False),
                             dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                         )
                     )
@@ -610,12 +610,12 @@ class ForecastingEngine(torch.nn.Module):
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
-                            is_dit=self.cf.fe_diffusion_model,
+                            is_dit=self.cf.get("fe_diffusion_model", False),
                             dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                         )
                     )
                 # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
-                if self.cf.get("fe_diffusion_model_conditioning_type") == "cross_attn":
+                if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
                     self.fe_blocks.append(
                         MultiCrossAttentionHead(
                             dim_embed_q=self.cf.ae_global_dim_embed,
@@ -629,7 +629,7 @@ class ForecastingEngine(torch.nn.Module):
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            is_dit=self.cf.fe_diffusion_model,
+                            is_dit=self.cf.get("fe_diffusion_model", False),
                         )
                     )
                 # Add MLP block
@@ -644,7 +644,7 @@ class ForecastingEngine(torch.nn.Module):
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
-                        is_dit=self.cf.fe_diffusion_model,
+                        is_dit=self.cf.get("fe_diffusion_model", False),
                         dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
                     )
                 )
@@ -685,7 +685,7 @@ class ForecastingEngine(torch.nn.Module):
         if forecast_residual:
             tokens_in = tokens
 
-        if self.cf.fe_diffusion_model:
+        if self.cf.get("fe_diffusion_model", False):
             assert noise_emb is not None, (
                 "noise_emb must be provided for diffusion model conditioning"
             )
