@@ -312,6 +312,7 @@ def _apply_fixes(config: Config) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
+    config = _check_qk_norm_type(config)
     return config
 
 
@@ -334,6 +335,26 @@ def _check_datasets(config: Config) -> Config:
     return config
 
 
+def _check_logging(config: Config) -> Config:
+    """
+    Apply fixes to log frequency config.
+    """
+    config = config.copy()
+    if config.get("train_logging") is None:  # TODO remove this for next version
+        config.train_logging = OmegaConf.create(
+            {"checkpoint": 250, "terminal": 10, "metrics": config.train_logging.log_interval}
+        )
+
+    return config
+
+
+def _check_qk_norm_type(config: Config) -> Config:
+    """
+    Backfill qk_norm_type for configs saved before qk_norm_type was introduced.
+    """
+    config = config.copy()
+    if "qk_norm_type" not in config:
+        config.qk_norm_type = config.get("norm_type", "LayerNorm")
 def _check_time_interpolation(config: Config) -> Config:
     """
     convert 'value': '${resolver:time_value_str}' to 'time_value_str'.
@@ -376,6 +397,7 @@ def merge_configs(base_config: Config, update_config: Config):
 def load_merge_configs(
     private_home: Path | None = None,
     from_run_id: str | None = None,
+    run_id: str | None = None,
     mini_epoch: int | None = None,
     base: Path | Config | None = None,
     *overwrites: Path | dict | Config,
@@ -424,8 +446,16 @@ def load_merge_configs(
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
+
+    # In the case where we chain several finetuning jobs we don't want to reset the istep
+    # This case is detected by from_run_id being equal to run_id
+    istep = None
+    if from_run_id is not None and run_id is not None and from_run_id == run_id:
+        istep = base_config.general.istep
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
+    if istep is not None:
+        c.general.istep = istep
     assert isinstance(c, Config)
     c = _sanitize_time_keys(c)
 
