@@ -35,13 +35,17 @@ def encode_times_source(times, time_win) -> torch.tensor:
     dt = pd.to_datetime(times)
     dt_win = pd.to_datetime(time_win)
     dt_delta = dt - dt_win[0]
+    year = np.atleast_1d(dt.year)
+    dayofyear = np.atleast_1d(dt.dayofyear)
+    minutes = np.atleast_1d(dt.hour * 60 + dt.minute)
+    delta_seconds = np.atleast_1d(dt_delta.seconds)
     time_tensor = torch.cat(
         (
-            torch.tensor(dt.year, dtype=fp32).unsqueeze(1),
-            torch.tensor(dt.dayofyear, dtype=fp32).unsqueeze(1),
-            torch.tensor(dt.hour * 60 + dt.minute, dtype=fp32).unsqueeze(1),
-            torch.tensor(dt_delta.seconds, dtype=fp32).unsqueeze(1),
-            torch.tensor(dt_delta.seconds, dtype=fp32).unsqueeze(1),
+            torch.tensor(year, dtype=fp32).unsqueeze(1),
+            torch.tensor(dayofyear, dtype=fp32).unsqueeze(1),
+            torch.tensor(minutes, dtype=fp32).unsqueeze(1),
+            torch.tensor(delta_seconds, dtype=fp32).unsqueeze(1),
+            torch.tensor(delta_seconds, dtype=fp32).unsqueeze(1),
         ),
         1,
     )
@@ -65,7 +69,9 @@ def encode_times_target(times, time_win) -> torch.tensor:
     dt = pd.to_datetime(times)
     dt_win = pd.to_datetime(time_win)
     # for target only provide local time
-    dt_delta = torch.tensor((dt - dt_win[0]).seconds, dtype=torch.float32).unsqueeze(1)
+    dt_delta = torch.tensor(
+        np.atleast_1d((dt - dt_win[0]).seconds), dtype=torch.float32
+    ).unsqueeze(1)
     time_tensor = torch.cat(
         (
             dt_delta,
@@ -349,7 +355,7 @@ def tokenize_apply_mask_target(
     idxs_data = torch.cat(idxs_data)
 
     # apply mask
-    datetimes = rdata.datetimes[idxs_data]
+    datetimes = np.atleast_1d(rdata.datetimes[idxs_data])
     datetimes_enc = enc_time(datetimes, time_win)
     geoinfos = rdata.geoinfos[idxs_data]
     coords = rdata.coords[idxs_data]
