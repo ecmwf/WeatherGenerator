@@ -375,11 +375,11 @@ class DiffusionForecastEngine(torch.nn.Module):
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
             
-            # # Apply 2nd order correction.
-            # if i < num_steps - 1:
-            #     denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords)
-            #     d_prime = (x_next - denoised) / t_next
-            #     x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+            # Apply 2nd order correction.
+            if i < num_steps - 1:
+                denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords)
+                d_prime = (x_next - denoised) / t_next
+                x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
             # --- Record diagnostics ---
             with torch.no_grad():
