@@ -9,6 +9,7 @@
 
 import logging
 import pathlib
+import typing
 from collections.abc import Sequence
 
 import numpy as np
@@ -26,7 +27,7 @@ from weathergen.datasets.data_reader_base import (
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
-from weathergen.datasets.masking import Masker
+from weathergen.datasets.masking import MaskData, Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
@@ -551,7 +552,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
-    def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
+    def _get_data_windows(
+        self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds
+    ) -> tuple[list[IOReaderData], list[IOReaderData]]:
         """
         Collect all data needed for current stream to potentially amortize costs by
         generating multiple samples
@@ -607,7 +610,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
         Generate source and target masks for all streams.
         """
-        masks = {}
+
+        masks: dict[str, tuple[MaskData, MaskData, np.NDArray[np.int32]]] = {}
         for stream_info in self.streams:
             # Build source and target sample masks
             masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
@@ -615,7 +619,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 self.num_healpix_cells,
                 stream_info,
             )
-            # identical for all streams
+            # shape identical for all streams: #target/source config x num_samples
             num_target_samples = len(masks[stream_info["name"]][0])
             num_source_samples = len(masks[stream_info["name"]][1])
 
@@ -646,13 +650,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
 
         mode = self.mode_cfg.get("training_mode")
-        source_cfgs = self.mode_cfg.get("model_input")
-        target_cfgs = self.mode_cfg.get("target_input", {})
+        source_cfgs: typing.Mapping = self.mode_cfg.get("model_input")
+        target_cfgs: typing.Mapping = self.mode_cfg.get("target_input", {})
 
         # get/coordinate masks
         masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
 
-        source_select, target_select = [], []
+        # contain string flags
+        source_select: list[str] = []
+        target_select: list[str] = []
+
         if "masking" in mode:
             source_select += ["network_input", "target_coords"]
             target_select += ["target_values"]
@@ -677,6 +684,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         for stream_info, (stream_name, stream_ds) in zip(
             self.streams, self.streams_datasets.items(), strict=True
         ):
+            stream_info: Config
             (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
 
             # max number of input steps
@@ -700,7 +708,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             for sidx, source_mask in enumerate(source_masks.masks):
                 # Map each source to its target
-                tidx = source_to_target[sidx].item()
+                tidx: int = source_to_target[sidx].item()
                 sdata = self._build_stream_data(
                     source_select,
                     idx,
@@ -743,14 +751,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 ]
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
 
-        source_in_steps = input_steps.max().item()
+        source_in_steps: int = input_steps.max().item()
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
-        target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
+        target_in_steps: int = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
         return batch
 
-    def __iter__(self) -> ModelBatch:
+    def __iter__(self) -> typing.Generator[ModelBatch, typing.Any, typing.Any]:
         """
         Return one batch of data
 

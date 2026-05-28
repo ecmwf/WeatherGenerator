@@ -6,6 +6,8 @@ Provides clean separation between:
   - View metadata (spatial masks, strategies, relationships)
 """
 
+from __future__ import annotations  # allow forward references in typehints
+
 import copy
 from dataclasses import dataclass
 
@@ -27,13 +29,6 @@ class SampleMetaData:
 
 
 class Sample:
-    # keys: stream name, values: SampleMetaData
-    meta_info: dict[str | SampleMetaData]
-
-    # data for all streams
-    # keys: stream_name, values: StreamData
-    streams_data: dict[str, StreamData | None]
-
     def pin_memory(self):
         """Pin all tensors in this Sample to CPU pinned memory"""
 
@@ -53,10 +48,9 @@ class Sample:
 
         return self
 
-    def __init__(self, streams: dict) -> None:
-        self.meta_info = {}
-
-        self.streams_data = {}
+    def __init__(self, streams: list[Config]) -> None:
+        self.meta_info: dict[str, SampleMetaData] = {}
+        self.streams_data: dict[str, StreamData | None] = {}
         for stream_info in streams:
             self.streams_data[stream_info["name"]] = None
 
@@ -146,7 +140,7 @@ class BatchSamples:
     output_idxs: list[int]
     device: str | None
 
-    def __init__(self, streams: dict, num_samples: int, output_steps, output_idxs) -> None:
+    def __init__(self, streams: list[Config], num_samples: int, output_steps, output_idxs) -> None:
         self.samples = [Sample(streams) for _ in range(num_samples)]
         self.tokens_lens = None
         self.output_steps = output_steps
@@ -253,40 +247,50 @@ class BatchSamples:
 class ModelBatch:
     """
     Container for all data and metadata for one training batch.
+
+    The data an instance contains is associated with one particular inital sampling window.
+    From this initial data multiple forecast windows are derived by offsetting the initial window.
+    Multiple samples for one forecast window can be generated
+    by sampling differently masked versions of the data.
+    Note that `output_offset` is the difference in forecast steps
+    between corresponding source and target samples.
+    Source and target samples are in 1-to-1 correspondance for classical training modes
+    (e.g. MTM, forecasting), but can be more complex for strategies like student-teacher training.
+    This relationship is expressed in `source2target_matching_idxs`
+    and `target2source_matching_idxs`.
+
+    Attributes:
+        source_samples: inputs for model
+        target_samples: inputs for TargetAuxCalculator that determines targets.
+        source2target_matching_idxs: index of corresponding target indices.
+        target2source_matching_idxs: index of corresponding source indices.
+        output_idxs: Forecast step indices (including offset) for this batch.
+        device: device of the tensors in this batch.
     """
-
-    # source samples (for model)
-    source_samples: BatchSamples
-
-    # target samples (for TargetAuxCalculator)
-    target_samples: BatchSamples
-
-    # index of corresponding target (for source samples) or source (for target samples)
-    # these are in 1-to-1 corresponding for classical training modes (e.g. MTM, forecasting) but
-    # can be more complex for strategies like student-teacher training
-    source2target_matching_idxs: np.typing.NDArray[np.int32]
-    target2source_matching_idxs: np.typing.NDArray[np.int32]
-
-    # indices of valid outputs
-    output_idxs: list[int]
-
-    # device of the tensors in the batch
-    device: str | torch.device
 
     def __init__(
         self,
-        streams: dict,
+        streams: list[Config],
         num_source_samples: int,
         num_target_samples: int,
-        output_offset,
-        output_steps,
+        output_offset: int,
+        output_steps: int,
     ) -> None:
-        """ """
+        """
+        Initialize new ModelBatch.
+
+        Args:
+            streams: global StreamConfig.
+            num_source_samples: Number of differently masked source samples for one input window.
+            num_target_samples: Number of differently masked target samples for one input window.
+            output_offset: forecast offset for this batch.
+            output_steps: number of forecast steps for this batch.
+        """
 
         # define forecast indices
         self.output_offset = output_offset
         self.output_steps = output_steps
-        self.output_idxs = list(range(output_offset, output_steps))
+        self.output_idxs: list[int] = list(range(output_offset, output_steps))
 
         self.source_samples = BatchSamples(
             streams, num_source_samples, output_steps, self.output_idxs
@@ -295,10 +299,15 @@ class ModelBatch:
             streams, num_target_samples, output_steps, self.output_idxs
         )
 
-        self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
-        self.target2source_matching_idxs = [[] for _ in range(num_target_samples)]
+        self.source2target_matching_idxs: np.typing.NDArray[np.int32] = np.full(
+            num_source_samples, -1, dtype=np.int32
+        )
+        self.target2source_matching_idxs: np.typing.NDArray[np.int32] = [
+            [] for _ in range(num_target_samples)
+        ]
+        self.device: torch.device | None = None
 
-    def pin_memory(self):
+    def pin_memory(self) -> ModelBatch:
         """Pin all tensors in this batch to CPU pinned memory"""
 
         # pin source samples
@@ -309,15 +318,14 @@ class ModelBatch:
 
         return self
 
-    def to_device(self, device):  # -> ModelBatch
+    def to_device(self, device: str | torch.device) -> ModelBatch:
         """
         Move batch to device
         """
-
         self.source_samples.to_device(device)
         self.target_samples.to_device(device)
 
-        self.device = device
+        self.device = torch.device(device)
 
         return self
 

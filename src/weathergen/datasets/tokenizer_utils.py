@@ -1,3 +1,5 @@
+import typing
+
 import numpy as np
 import pandas as pd
 import torch
@@ -5,6 +7,7 @@ from astropy_healpix.healpy import ang2pix
 from torch import Tensor
 
 from weathergen.common.io import IOReaderData
+from weathergen.datasets.data_reader_base import NPDT64
 from weathergen.datasets.utils import (
     locs_to_cell_coords_ctrs,
     locs_to_ctr_coords,
@@ -123,7 +126,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
 
 def hpy_splits(
     coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
-) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
+) -> tuple[list[list[torch.Tensor | None]], list[list[int]]]:
     """Compute healpix cell for each data point and splitting information per cell;
        when the token_size is exceeded then splitting based on lat is used;
        tokens can be padded
@@ -174,11 +177,11 @@ def hpy_splits(
 
 
 def tokenize_space(
-    rdata,
-    token_size,
-    hl,
-    pad_tokens=True,
-    offset_step=0,
+    rdata: IOReaderData,
+    token_size: int,
+    hl: int,
+    pad_tokens: bool = True,
+    offset_step: int = 0
 ):
     """Process one window into tokens"""
 
@@ -189,7 +192,7 @@ def tokenize_space(
 
 
 def tokenize_spacetime(
-    rdata,
+    rdata: IOReaderData,
     token_size,
     hl,
     pad_tokens=True,
@@ -199,12 +202,13 @@ def tokenize_spacetime(
     """
 
     num_healpix_cells = 12 * 4**hl
-    idxs_cells = [[] for _ in range(num_healpix_cells)]
-    idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
+    idxs_cells: list[list[Tensor | None]] = [[] for _ in range(num_healpix_cells)]
+    idxs_cells_lens: list[list[int]] = [[] for _ in range(num_healpix_cells)]
 
     offset_step = 0
-    t_unique = np.unique(rdata.datetimes)
+    t_unique: typing.iterable[NPDT64] = np.unique(rdata.datetimes)
     for _, t in enumerate(t_unique):
+        t: NPDT64
         # data for current time step
         mask = t == rdata.datetimes
         rdata_cur = IOReaderData(
@@ -212,9 +216,13 @@ def tokenize_spacetime(
         )
         idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
 
-        # collect data for all time steps
-        idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
-        idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
+        # append tokens/n_tokens for current time step for each healpix cell to existing tokens
+        for cell_steps_tokens, cell_steps_tokens_cur, cell_steps_lens, cell_steps_lens_cur in zip(
+            idxs_cells, idxs_cur, idxs_cells_lens, idxs_cur_lens, strict=True
+        ):
+            cell_steps_tokens.extend(cell_steps_tokens_cur)
+            cell_steps_lens.extend(cell_steps_lens_cur)
+        
         offset_step += mask.sum()
 
     return idxs_cells, idxs_cells_lens
@@ -391,6 +399,7 @@ def tokenize_apply_mask_target(
     else:
         coords_local = torch.tensor([])
 
+    # geoinfos information is embedded into coords_local here
     return data, datetimes, coords, coords_local, masked_points_per_cell
 
 

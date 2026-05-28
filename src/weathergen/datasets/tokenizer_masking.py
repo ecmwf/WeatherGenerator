@@ -11,6 +11,7 @@
 import numpy as np
 import torch
 
+from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.datasets.masking import Masker
@@ -53,27 +54,36 @@ class TokenizerMasking(Tokenizer):
         self.masker.reset_rng(rng)
         self.rng = rng
 
-    def get_tokens_windows(self, stream_info, data, pad_tokens):
+    def get_tokens_windows(
+        self, stream_info: Config, data: list[IOReaderData], pad_tokens: bool
+    ) -> list[tuple[list[list[torch.Tensor | None]], list[list[int]]]]:
         """
         Tokenize data (to amortize over the different views that are generated)
 
         """
-
-        tok_spacetime = stream_info.get("tokenize_spacetime", False)
-        tok = tokenize_spacetime if tok_spacetime else tokenize_space
-        hl = self.healpix_level
-        token_size = stream_info["token_size"]
-
-        tokens = []
+        tokens: list[tuple[list[list[torch.Tensor | None]], list[list[int]]]] = []
+        do_tokenize_spacetime = stream_info.get("tokenize_spacetime", False)
         for rdata in data:
             # skip empty data
             if rdata.is_empty():
                 tokens += [(None, None)]
                 continue
             # tokenize data
-            idxs_cells, idxs_cells_lens = tok(
-                readerdata_to_torch(rdata), token_size, hl, pad_tokens
-            )
+            if do_tokenize_spacetime:
+                idxs_cells, idxs_cells_lens = tokenize_spacetime(
+                    readerdata_to_torch(rdata),
+                    stream_info["token_size"],
+                    self.healpix_level,
+                    pad_tokens,
+                )
+            else:
+                idxs_cells, idxs_cells_lens = tokenize_space(
+                    readerdata_to_torch(rdata),
+                    stream_info["token_size"],
+                    self.healpix_level,
+                    pad_tokens,
+                )
+
             tokens += [(idxs_cells, idxs_cells_lens)]
 
         return tokens
