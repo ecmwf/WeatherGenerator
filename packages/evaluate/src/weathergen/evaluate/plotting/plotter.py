@@ -888,7 +888,16 @@ class Plotter:
         if figsize is None and data.size >= 200_000:
             figsize = (15, 7)
 
-        proj = ccrs.Robinson() if regionname == "global" else ccrs.PlateCarree()
+        proj = ccrs.PlateCarree()
+        if regionname:
+            try:
+                # This uses the method already available in RegionBoundingBox
+                bbox = RegionBoundingBox.from_region_name(regionname)
+                proj = bbox.projection
+            except ValueError:
+                # If regionname isn't in the library, fall back to PlateCarree
+                _logger.warning(f"Region '{regionname}' not found in library, using PlateCarree.")
+                proj = ccrs.PlateCarree()
         fig = plt.figure(figsize=figsize, dpi=self.dpi_val)
         ax = fig.add_subplot(1, 1, 1, projection=proj)
         try:

@@ -177,6 +177,20 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         # streamlined calculation of length
         epoch_len = self.samples_per_mini_epoch
+
+        # ensure epoch_len is large enough to produce at least one batch per rank
+        min_samples = self.world_size * self.batch_size
+        if epoch_len < min_samples:
+            logger.warning(
+                f"samples_per_mini_epoch={epoch_len} is too small for "
+                f"world_size={self.world_size} and batch_size={self.batch_size}. "
+                f"samples_per_mini_epoch has to be equal to or larger than"
+                f"world_size*batch_size to ensure that each rank can produce at least one sample. "
+                f"Automatically increasing to {min_samples}."
+            )
+            epoch_len = min_samples
+            self.samples_per_mini_epoch = min_samples
+
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         self.len = ((epoch_len // self.world_size) // self.batch_size) * self.batch_size
 
