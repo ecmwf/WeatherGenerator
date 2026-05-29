@@ -37,7 +37,7 @@ case "$1" in
         exit 0
       fi
       # Otherwise, use the gpu extra
-      uv sync --all-packages --extra gpu --refresh --reinstall --link-mode=copy --verbose
+      uv sync --all-packages --extra gpu --refresh --reinstall --link-mode=copy
     )
     ;;
   lint)

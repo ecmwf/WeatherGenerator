@@ -17,8 +17,6 @@ dependencies = [
  'tqdm',
  'matplotlib',
  'packaging',
- 'wheel',
- 'setuptools',
  'psutil',
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
@@ -32,9 +30,12 @@ dependencies = [
  "pytest>=9.0.2",
  # older version have no precompiled linux-aarch64 cp312 wheel 
  "numcodecs>=0.16",
- # DEBUG
- "cfunits",
- "antlr4-python3-runtime",
+#  # DEBUG
+#  "cfunits",
+#  "antlr4-python3-runtime",
+ # This seems necessary for build isolation?
+ 'wheel',
+ 'setuptools',
 ]
 
 
@@ -169,12 +170,12 @@ enable = ["W0201", "W0141"]
 [tool.uv]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
 # Also, trying to resolve some permissions issue, see 44.
-# Another option is 'symlink': this can cause broken symlinks to appear but it is faster (no copy)
+# symlink: faster than copy (ex: torch), but leads to files being deleted
+# when the cache is in SCRATCH with a deletion policy.
 link-mode = "symlink"
 # This guarantees that the build is deterministic and will not be impacted 
 # by future releases of dependencies or sub-dependencies. 
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
-# TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
 exclude-newer = "2026-02-27T00:00:00Z"
 
 # The minimum version of uv required.
@@ -201,7 +202,7 @@ conflicts = [
 
 
 # These packages don't declare setuptools/wheel in build-system.requires, so
-# isolated PEP 517 builds fail with "No module named 'setuptools.build_meta'".
+# isolated builds fail with "No module named 'setuptools.build_meta'".
 # setuptools is pinned <76: with newer setuptools (>=82) the
 # `setuptools.build_meta:__legacy__` backend has been removed
 [tool.uv.extra-build-dependencies]
@@ -210,8 +211,6 @@ cfunits = ["setuptools<76", "wheel"]
 antlr4-python3-runtime = ["setuptools<76", "wheel"]
 # Cartopy  requires setuptools >= 77
 cartopy = ["setuptools<78", "wheel"]
-# numcodecs is forced to >=0.16 in [project].dependencies so wheels are used —
-# no source build needed, so no extra build deps required here.
 
 [[tool.uv.index]]
 name = "pytorch-cu126"

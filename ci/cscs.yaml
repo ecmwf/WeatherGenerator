@@ -23,8 +23,6 @@ test_job:
       https://oauth2:${PRIVATE_REPO_TOKEN}@gitlab.jsc.fz-juelich.de/esde/WeatherGenerator-private.git
 
     echo "Sync"
-    # DEBUG
-    ls .*
     ./scripts/actions.sh sync-safe
     echo "Create links and run tests"
     ./scripts/actions.sh create-links
