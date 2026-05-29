@@ -567,7 +567,10 @@ class Model(torch.nn.Module):
 
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
-        self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+        # Encoder output is normalized inside the encoder via `ae_global_trailing_layer_norm`, so
+        # the physical decoders and the SSL heads/teacher target consume the same normalized
+        # representation. Identity here avoids a redundant second norm.
+        self.latent_pre_norm = nn.Identity()
 
         ssl_losses_cfgs = [
             v
@@ -578,7 +581,7 @@ class Model(torch.nn.Module):
         # TODO: support multiple LossLatentSSLStudentTeacher terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
         for ssl_target_losses in ssl_losses_cfgs:
-            self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+            self.latent_pre_norm = nn.Identity()
             for loss, loss_conf in ssl_target_losses.loss_fcts.items():
                 if loss == "iBOT":
                     self.latent_heads[loss] = self._create_latent_pred_head(
@@ -797,6 +800,15 @@ class Model(torch.nn.Module):
 
         # safe latent prediction
         tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
+        noise_pre_predictor_std = self.cf.get("noise_pre_predictor_std", 0)
+        if noise_pre_predictor_std > 0 and self.training:
+            tokens_post_norm = (
+                tokens_post_norm
+                + torch.randn_like(tokens_post_norm)
+                * torch.norm(tokens_post_norm)
+                * noise_pre_predictor_std
+            )
+
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
         output.add_latent_prediction(step, "latent_state", latent_state)
 

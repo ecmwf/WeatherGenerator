@@ -543,7 +543,12 @@ class GlobalAssimilationEngine(torch.nn.Module):
         intermediates: list[torch.Tensor] = []
         logical_layer = 0
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+            # The optional trailing LayerNorm (ae_global_trailing_layer_norm) takes a single
+            # input, unlike the attention/MLP blocks which also receive coords/aux_info.
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                tokens = checkpoint(block, tokens, use_reentrant=False)
+            else:
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
             if isinstance(block, MLP):
                 if self.tap_global_layers and logical_layer in self.tap_global_layers:
                     intermediates.append(tokens)
@@ -1175,6 +1180,7 @@ class LatentPredictionHeadMLP(nn.Module):
             out_dim,
             num_layers,
             hidden_factor,
+            pre_layer_norm=False,
             mlp_type=loss_conf.get("mlp_type", default_mlp_type),
         )
 

@@ -35,7 +35,7 @@ ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 4
-ae_global_trailing_layer_norm: False
+ae_global_trailing_layer_norm: True
 
 ae_aggregation_num_blocks: 5
 ae_aggregation_num_heads: 32

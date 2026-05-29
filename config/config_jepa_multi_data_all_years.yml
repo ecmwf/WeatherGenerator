@@ -35,7 +35,7 @@ ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 4
-ae_global_trailing_layer_norm: False
+ae_global_trailing_layer_norm: True
 
 ae_aggregation_num_blocks: 5
 ae_aggregation_num_heads: 16
@@ -52,6 +52,9 @@ pred_dyadic_dims: False
 pred_mlp_adaln: True
 num_class_tokens: 0
 num_register_tokens: 64
+
+# noise before predictor in JEPA
+noise_pre_predictor_std: 5e-5
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
