@@ -118,8 +118,10 @@ class DataReaderAnemoiOperan(DataReaderAnemoi):
 
         # use latest available sample that is valid w.r.t the input data window
         datetimes_mask = [dt < dtr.end for dt in datetimes_offset]
-        t_idxs = [t_idxs[datetimes_mask][-1].item()]
-        assert len(t_idxs) == 1
+        if np.array(datetimes_mask).sum() == 0:
+            t_idxs = []
+        else:
+            t_idxs = [t_idxs[datetimes_mask][-1].item()]
 
         # _get from DataReaderAnemoi
 
