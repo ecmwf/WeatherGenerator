@@ -205,7 +205,7 @@ conflicts = [
 anemoi-datasets = ["setuptools<76", "wheel"]
 cfunits = ["setuptools<76", "wheel"]
 antlr4-python3-runtime = ["setuptools<76", "wheel"]
-cartopy = ["setuptools<76", "wheel"]
+cartopy = ["setuptools<78", "wheel"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
