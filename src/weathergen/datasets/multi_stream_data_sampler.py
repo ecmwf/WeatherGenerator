@@ -238,18 +238,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             if anemoi_config and stream_info["type"] == "anemoi":
                 # Convert OmegaConf DictConfig to dict
                 filename = dict(anemoi_config)
-                # Prepend datapath to each dataset
-                from anemoi.datasets import add_dataset_path
-
-                for path in cf.data_paths:
-                    add_dataset_path(path)
                 ds_type = stream_info["type"]
                 if is_root():
                     logger.info(
                         f"Opening dataset with type: {ds_type}"
                         + f" from stream config {stream_info['name']}.",
                     )
-                ds = dataset(filename=filename, **kwargs)
+                ds = dataset(filename=filename, data_paths=cf.data_paths, **kwargs)
                 streams_datasets[stream_info["name"]] += [ds]
             else:
                 for fname in stream_info["filenames"]:

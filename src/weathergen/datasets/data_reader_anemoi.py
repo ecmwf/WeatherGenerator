@@ -39,6 +39,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         filename: Path,
         stream_info: dict,
         stage: Stage,
+        data_paths: list[str] | None = None,
     ) -> None:
         """
         Construct data reader for anemoi dataset
@@ -49,11 +50,19 @@ class DataReaderAnemoi(DataReaderTimestep):
             filename (and path) of dataset
         stream_info :
             information about stream
+        data_paths :
+            list of paths to prepend to anemoi dataset search paths
 
         Returns
         -------
         None
         """
+        # Prepend data paths to anemoi dataset search paths
+        if data_paths:
+            from anemoi.datasets import add_dataset_path
+
+            for path in data_paths:
+                add_dataset_path(path)
 
         # open  dataset to peak that it is compatible with requested parameters
         ds0: Dataset = anemoi_datasets.open_dataset(filename)
