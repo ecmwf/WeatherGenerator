@@ -2,7 +2,7 @@
 # This mirrors era5_georing_avhrr_forecast_random_inputs/era5.yml, but is not marked
 # forcing so the teacher metadata mask remains populated for SSL targets.
 
-ERA5_in:
+ERA5:
   type: anemoi
   filenames: ['aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6.zarr']
   stream_id: 0
