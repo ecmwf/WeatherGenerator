@@ -54,7 +54,7 @@ num_class_tokens: 0
 num_register_tokens: 64
 
 # noise before predictor in JEPA
-noise_pre_predictor_std: 5e-5
+noise_pre_predictor_std: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
@@ -78,7 +78,7 @@ with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
 with_fsdp: False
-ddp_find_unused_parameters: False
+ddp_find_unused_parameters: True
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
