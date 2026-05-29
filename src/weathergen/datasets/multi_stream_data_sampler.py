@@ -177,6 +177,20 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         # streamlined calculation of length
         epoch_len = self.samples_per_mini_epoch
+
+        # ensure epoch_len is large enough to produce at least one batch per rank
+        min_samples = self.world_size * self.batch_size
+        if epoch_len < min_samples:
+            logger.warning(
+                f"samples_per_mini_epoch={epoch_len} is too small for "
+                f"world_size={self.world_size} and batch_size={self.batch_size}. "
+                f"samples_per_mini_epoch has to be equal to or larger than"
+                f"world_size*batch_size to ensure that each rank can produce at least one sample. "
+                f"Automatically increasing to {min_samples}."
+            )
+            epoch_len = min_samples
+            self.samples_per_mini_epoch = min_samples
+
         # adjust len to split loading across all workers and ensure it is multiple of batch_size
         self.len = ((epoch_len // self.world_size) // self.batch_size) * self.batch_size
 
@@ -203,6 +217,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             kwargs = {
                 "tw_handler": self.time_window_handler,
                 "stream_info": stream_info,
+                "stage": self._stage,
             }
             dataset: type[AnyDataReader] | None = None
             match stream_info["type"]:
@@ -247,15 +262,15 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
-                stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
-                stream_info["target_channel_weights"] = (
-                    ds.target_channel_weights
-                    if ds.target_channel_weights is not None
-                    else [1.0 for _ in ds.target_channels]
-                )
-
                 streams_datasets[stream_info["name"]] += [ds]
+
+            stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
+            stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+            stream_info["target_channel_weights"] = (
+                ds.target_channel_weights
+                if ds.target_channel_weights is not None
+                else [1.0 for _ in ds.target_channels]
+            )
 
         return streams_datasets
 
