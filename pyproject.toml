@@ -30,9 +30,6 @@ dependencies = [
  "pytest>=9.0.2",
  # older version have no precompiled linux-aarch64 cp312 wheel 
  "numcodecs>=0.16",
-#  # DEBUG
-#  "cfunits",
-#  "antlr4-python3-runtime",
  # This seems necessary for build isolation?
  'wheel',
  'setuptools',
