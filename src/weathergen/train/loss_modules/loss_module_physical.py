@@ -366,6 +366,7 @@ class LossPhysical(LossModuleBase):
                 for ch_n, output_step_dict in ch_dict.items():
                     if ch_n != "avg":
                         for _, v in output_step_dict.items():
+                            v = 0.0 if type(v) is float and np.isnan(v) else v
                             reordered_losses[stream_name][loss_fct_name]["avg"] += v
                             count += 1
                 reordered_losses[stream_name][loss_fct_name]["avg"] /= count

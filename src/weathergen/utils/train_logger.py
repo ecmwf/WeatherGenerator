@@ -109,15 +109,18 @@ class TrainLogger:
         metrics: dict[str, float] = dict(num_samples=samples)
 
         if stage == "train":
-            metrics["loss_avg_mean"] = np.nanmean(avg_loss)
+            val = np.nan if np.isnan(avg_loss).all() else np.nanmean(avg_loss)
+            metrics["loss_avg_mean"] = val
             metrics["learning_rate"] = lr
             metrics["num_samples"] = int(samples)
 
         for key, value in losses_all.items():
-            metrics[key] = np.nanmean(value)
+            val = np.nan if np.isnan(value).all() else np.nanmean(value)
+            metrics[key] = val
 
         for key, value in stddev_all.items():
-            metrics[key] = np.nanmean(value)
+            val = np.nan if np.isnan(value).all() else np.nanmean(value)
+            metrics[key] = val
 
         self.log_metrics(stage, metrics)
 
