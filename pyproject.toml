@@ -18,6 +18,7 @@ dependencies = [
  'matplotlib',
  'packaging',
  'wheel',
+ 'setuptools',
  'psutil',
  "polars~=1.25.2",
  "omegaconf~=2.3.0",
@@ -195,19 +196,23 @@ conflicts = [
   ],
 ]
 
+[tool.uv.extra-build-dependencies]
+anemoi-datasets = ["setuptools"]
+
+# These packages don't declare setuptools/wheel in build-system.requires, so
+# isolated builds fail with "No module named 'setuptools.build_meta'". Build
+# them in the project venv (which has setuptools + wheel as runtime deps).
+no-build-isolation-package = [
+  "anemoi-datasets",
+  "cfunits",
+  "antlr4-python3-runtime",
+]
+
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
-
-# anemoi-datasets (from the tjhunter fork) doesn't declare setuptools in its
-# build-system.requires, so PEP 517 isolated builds fail with "No module named
-# 'setuptools.build_meta'". Inject it here until upstream fixes it.
-[tool.uv.extra-build-dependencies]
-anemoi-datasets = ["setuptools", "wheel"]
-cfunits = ["setuptools", "wheel"]
-antlr4-python3-runtime = ["setuptools", "wheel"]
 
 [tool.pyrefly]
 project-includes = ["src/"]
