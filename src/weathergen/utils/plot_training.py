@@ -222,7 +222,10 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
     """
     # return col names from training (should be identical to validation)
     cf = config.load_run_config(run_id, None, model_path=model_path)
-    return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
+    return [
+        stream_name.replace(",", "").replace("/", "_").replace(" ", "_")
+        for stream_name in cf.streams.keys()
+    ]
 
 
 ####################################################################################################
@@ -833,8 +836,7 @@ def plot_train(args=None):
                     from_run_id=run_id,
                     mini_epoch=None,
                 )
-            for stream_info in cf.streams:
-                streams += [stream_info["name"]]
+            streams += list(cf.streams.keys())
         # ensure items are unique
         streams = list(set(streams))
         # remove "all" key that is a special flag and not an actual stream name

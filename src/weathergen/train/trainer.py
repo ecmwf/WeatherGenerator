@@ -816,8 +816,9 @@ class Trainer(TrainerBase):
 
                 for key, value in losses_all.items():
                     if key.endswith("avg"):
+                        val = np.nan if np.isnan(value).all() else f"{np.nanmean(value):0.4E}"
                         logger.info(
-                            f"{key} : {np.nanmean(value):0.4E} \t",
+                            f"{key} : {val} \t",
                         )
                 logger.info("\n")
 
