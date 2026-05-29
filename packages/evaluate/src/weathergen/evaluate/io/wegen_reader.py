@@ -131,14 +131,17 @@ class WeatherGenReader(Reader):
             )
             return None
 
-        clim_fn = next(
-            (
-                item.get("filenames")
-                for item in self.inference_cfg.get("streams", [])
-                if item.get("name") == stream
-            ),
-            None,
-        )
+        streams = self.inference_cfg.get("streams", {})
+        if isinstance(streams, list | oc.ListConfig):
+            streams = {s["name"]: s for s in streams}
+        streams = oc.OmegaConf.create(streams)
+        clim_fn = next(streams.get("filenames"), None)
+
+        try:
+            clim_fn = streams[stream].get("filenames")
+        except KeyError:
+            clim_fn = None
+
         if isinstance(clim_fn, oc.ListConfig) and len(clim_fn) == 1:
             climatology_partial_filename = clim_fn[0]
         else:
@@ -299,9 +302,15 @@ class WeatherGenReader(Reader):
         ------------
             The parameter value if found, otherwise the default.
         """
-        for stream in self.inference_cfg.get("streams", []):
-            if stream.get("name") == stream_name:
-                return stream.get(key, default)
+
+        streams = self.inference_cfg.get("streams", {})
+        if isinstance(streams, list | oc.ListConfig):
+            for stream in streams:
+                if stream.get("name") == stream_name:
+                    return stream.get(key, default)
+        else:
+            return streams.get(stream_name, {}).get(key, default)
+
         return default
 
 

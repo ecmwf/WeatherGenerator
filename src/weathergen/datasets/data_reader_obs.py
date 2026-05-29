@@ -75,8 +75,21 @@ class DataReaderObs(DataReaderBase):
 
         # determine idx for coords and geoinfos
         self.coords_idx = [self.colnames.index("lat"), self.colnames.index("lon")]
-        self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
-        self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
+
+        # geoinfo channels
+        sname = stream_info["name"]
+        if stream_info.get("geoinfo_channels") is not None:
+            self.geoinfo_idx, self.geoinfo_channels = [], []
+            for c in stream_info.get("geoinfo_channels"):
+                if c not in self.colnames:
+                    _logger.warning(f"{sname} : geoinfo {c} specified in config but not present.")
+                else:
+                    self.geoinfo_idx.append(self.colnames.index(c))
+                    self.geoinfo_channels.append(c)
+        else:
+            self.geoinfo_idx = list(range(self.coords_idx[-1] + 1, data_idx[0]))
+            self.geoinfo_channels = [self.colnames[i] for i in self.geoinfo_idx]
+        _logger.info(f"{stream_info['name']} geoinfos : {self.geoinfo_channels}")
 
         # load additional properties (mean, var)
         self._load_properties()
@@ -233,6 +246,11 @@ class DataReaderObs(DataReaderBase):
         """
 
         if len(channels_idx) == 0:
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+
+        if idx >= len(self.indices_start) or idx >= len(self.indices_end):
             return ReaderData.empty(
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
