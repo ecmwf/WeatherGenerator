@@ -15,6 +15,7 @@ test_job:
     echo "PRIVATE_REPO_BRANCH=$PRIVATE_REPO_BRANCH"
     export WEATHERGEN_PRIVATE_REPO_PATH="$PWD/WeatherGenerator-private"
     echo "WEATHERGEN_PRIVATE_REPO_PATH=$WEATHERGEN_PRIVATE_REPO_PATH"
+    echo "uv version: $(uv --version) path: $(which uv)"
 
     git clone \
       --depth 1 --single-branch \
