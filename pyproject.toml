@@ -198,16 +198,15 @@ conflicts = [
 
 
 # These packages don't declare setuptools/wheel in build-system.requires, so
-# isolated builds fail with "No module named 'setuptools.build_meta'". Build
-# them in the project venv (which has setuptools + wheel as runtime deps).
-no-build-isolation-package = [
-  "anemoi-datasets",
-  "cfunits",
-  "antlr4-python3-runtime",
-]
-
+# isolated PEP 517 builds fail with "No module named 'setuptools.build_meta'".
+# Inject the missing build deps into uv's isolated build environment.
+# NOTE: do NOT pair this with no-build-isolation-package for the same packages
+# — no-build-isolation wins and skips the injected build deps, then fails
+# because the project venv isn't populated yet at build time.
 [tool.uv.extra-build-dependencies]
 anemoi-datasets = ["setuptools", "wheel"]
+cfunits = ["setuptools", "wheel"]
+antlr4-python3-runtime = ["setuptools", "wheel"]
 
 
 [[tool.uv.index]]
