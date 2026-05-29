@@ -200,13 +200,16 @@ conflicts = [
 # These packages don't declare setuptools/wheel in build-system.requires, so
 # isolated PEP 517 builds fail with "No module named 'setuptools.build_meta'".
 # Inject the missing build deps into uv's isolated build environment.
+# setuptools is pinned <76: with newer setuptools (observed: 82.0.0) the
+# `setuptools.build_meta:__legacy__` backend isn't importable, which breaks
+# any sdist that has no pyproject.toml and relies on the legacy backend.
 # NOTE: do NOT pair this with no-build-isolation-package for the same packages
 # — no-build-isolation wins and skips the injected build deps, then fails
 # because the project venv isn't populated yet at build time.
 [tool.uv.extra-build-dependencies]
-anemoi-datasets = ["setuptools", "wheel"]
-cfunits = ["setuptools", "wheel"]
-antlr4-python3-runtime = ["setuptools", "wheel"]
+anemoi-datasets = ["setuptools<76", "wheel"]
+cfunits = ["setuptools<76", "wheel"]
+antlr4-python3-runtime = ["setuptools<76", "wheel"]
 
 
 [[tool.uv.index]]
