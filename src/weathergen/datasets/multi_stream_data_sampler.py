@@ -19,6 +19,7 @@ from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
+from weathergen.datasets.data_reader_anemoi_operan import DataReaderAnemoiOperan
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
@@ -33,7 +34,7 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import Stage, get_batch_size_from_config
+from weathergen.train.utils import TRAIN, Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
@@ -225,6 +226,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     dataset = DataReaderObs
                 case "anemoi":
                     dataset = DataReaderAnemoi
+                case "anemoi_operan":
+                    dataset = DataReaderAnemoiOperan
                 case "fesom":
                     dataset = DataReaderFesom
                 case type_name:
@@ -428,7 +431,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
 
                 # collect data for stream
-                stream_data.add_source(step, rdata, source_cells_lens, source_cells)
+                source_raw = None
+                if self._stage == TRAIN:
+                    del source_raw
+                    source_raw = None
+                stream_data.add_source(
+                    step, source_raw, source_cells_lens, source_cells, rdata.is_spoof
+                )
 
         return stream_data
 
@@ -479,6 +488,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
+
+                if self._stage == TRAIN:
+                    del idxs_inv
+                    idxs_inv = None
                 stream_data.add_target_values(
                     timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
                 )
