@@ -53,12 +53,12 @@ class Sample:
 
         return self
 
-    def __init__(self, streams: dict) -> None:
+    def __init__(self, stream_names: list[str]) -> None:
         self.meta_info = {}
 
         self.streams_data = {}
-        for stream_info in streams:
-            self.streams_data[stream_info["name"]] = None
+        for stream_name in stream_names:
+            self.streams_data[stream_name] = None
 
     def to_device(self, device) -> None:
         for key in self.meta_info.keys():
@@ -146,8 +146,10 @@ class BatchSamples:
     output_idxs: list[int]
     device: str | None
 
-    def __init__(self, streams: dict, num_samples: int, output_steps, output_idxs) -> None:
-        self.samples = [Sample(streams) for _ in range(num_samples)]
+    def __init__(
+        self, stream_names: list[str], num_samples: int, output_steps, output_idxs
+    ) -> None:
+        self.samples = [Sample(stream_names) for _ in range(num_samples)]
         self.tokens_lens = None
         self.output_steps = output_steps
         self.output_idxs = output_idxs
@@ -275,7 +277,7 @@ class ModelBatch:
 
     def __init__(
         self,
-        streams: dict,
+        stream_names: list[str],
         num_source_samples: int,
         num_target_samples: int,
         output_offset,
@@ -289,10 +291,10 @@ class ModelBatch:
         self.output_idxs = list(range(output_offset, output_steps))
 
         self.source_samples = BatchSamples(
-            streams, num_source_samples, output_steps, self.output_idxs
+            stream_names, num_source_samples, output_steps, self.output_idxs
         )
         self.target_samples = BatchSamples(
-            streams, num_target_samples, output_steps, self.output_idxs
+            stream_names, num_target_samples, output_steps, self.output_idxs
         )
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
