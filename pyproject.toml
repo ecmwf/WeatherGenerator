@@ -202,7 +202,7 @@ explicit = true
 # build-system.requires, so PEP 517 isolated builds fail with "No module named
 # 'setuptools.build_meta'". Inject it here until upstream fixes it.
 [tool.uv.extra-build-dependencies]
-anemoi-datasets = ["setuptools", "wheel", "setuptools.build_meta"]
+anemoi-datasets = ["setuptools", "wheel"]
 
 
 [tool.pyrefly]
