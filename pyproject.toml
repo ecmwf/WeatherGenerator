@@ -202,7 +202,7 @@ explicit = true
 # build-system.requires, so PEP 517 isolated builds fail with "No module named
 # 'setuptools.build_meta'". Inject it here until upstream fixes it.
 [tool.uv.extra-build-dependencies]
-anemoi-datasets = ["setuptools", "wheel"]
+anemoi-datasets = ["setuptools", "wheel", "setuptools.build_meta"]
 
 
 [tool.pyrefly]
@@ -263,8 +263,8 @@ torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
 # branch = "feature/any-zarr-version-in-pyproject/"
-# anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
-anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
+anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
+# anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
 
 [tool.pytest.ini_options]
 log_cli = true
