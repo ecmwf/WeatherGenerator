@@ -519,7 +519,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 offset += len(local)
         return self._rank_sample_map
 
-    def _merge_fsteps(self, all_das: dict, global_sample_coords: np.ndarray) -> dict:
+    def _merge_fsteps(self, all_das: dict, global_sample_coords) -> dict:
         """Merge lists of DataArrays for each forecast step across ranks.
         Concatenates along the sample dimension and re-indexes to global samples.
         """
