@@ -20,16 +20,24 @@ case "$1" in
     ;;
   sync-safe)
     (
+      # Creates a virtual environment, checking the integrity of the cache 
+      # and copying the files.
+      # This is slower (+ 60 seconds to the sync) but it is prevents issues with 
+      # corrupted cache. These issues happen when a shared filesystem such as LUSTRE
+      # is used along with symlinks and a SCRATCH deletion policy: some files from 
+      # cached packages may get deleted because they seem to not be touched enough.
       cd "$SCRIPT_DIR" || exit 1
       # --refresh --reinstall : LUSTRE may clean up some pieces of the cache.
       # This ensures basic integrity but it is too slow (adds 60 seconds to the sync) to do it on every sync. So we only do it on mac, where the cache is more likely to get corrupted.
+      # --link-mode=copy overrides the pyproject.toml setting (symlink) to fully
+      # detach installed files from the cache, so SCRATCH cleanups can't corrupt the venv.
       # If we are running on a mac, use the cpu extra
       if [[ "$(uname)" == "Darwin" ]]; then
-        uv sync --all-packages --extra cpu --refresh --reinstall
+        uv sync --all-packages --extra cpu --refresh --reinstall --link-mode=copy
         exit 0
       fi
       # Otherwise, use the gpu extra
-      uv sync --all-packages --extra gpu --refresh --reinstall
+      uv sync --all-packages --extra gpu --refresh --reinstall --link-mode=copy
     )
     ;;
   lint)
