@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import dataclasses
 import logging
 import pathlib
 from collections.abc import Sequence
@@ -85,6 +86,12 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
     return IOReaderData.combine(rdatas)
 
 
+@dataclasses.dataclass
+class _Stream:
+    info: Config
+    readers: list[DataReaderBase]
+
+
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
     def __init__(self, cf: Config, mode_cfg: dict, stage: Stage):
         super(MultiStreamDataSampler, self).__init__()
@@ -94,7 +101,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mini_epoch = 0
         self.mask_value = 0.0
-        self.streams = cf.streams
         self.rank = cf.rank
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
@@ -102,7 +108,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # initialise healpic
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
+        self.masker = Masker(cf.healpix_level, stage, cf.streams, self.mode_cfg)
         self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
@@ -206,13 +212,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return np.arange(perms_len)
 
-    def _init_stream_datasets(self, cf) -> dict[StreamName, list[AnyDataReader]]:
+    def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""
-        streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
-
-        for _, stream_info in enumerate(cf.streams):
+        streams_datasets: dict[StreamName, _Stream] = {}
+        for stream_name, stream_info in cf.streams.items():
             # list of sources for current stream
-            streams_datasets[stream_info["name"]] = []
+            streams_datasets[stream_name] = _Stream(stream_info, [])
 
             kwargs = {
                 "tw_handler": self.time_window_handler,
@@ -231,7 +236,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     dataset = get_extra_reader(type_name)
                     if dataset is None:
                         msg = f"Unsupported stream type {stream_info['type']}"
-                        f"for stream name '{stream_info['name']}'."
+                        f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
             for fname in stream_info["filenames"]:
@@ -246,7 +251,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     if not any(filename.exists() for filename in filenames):  # see above
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
-                            f"stream '{stream_info['name']}': {filenames}."
+                            f"stream '{stream_name}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
 
@@ -258,11 +263,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 if is_root():
                     logger.info(
                         f"Opening dataset with type: {ds_type}"
-                        + f" from stream config {stream_info['name']}.",
+                        + f" from stream config {stream_name}.",
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                streams_datasets[stream_info["name"]] += [ds]
+                streams_datasets[stream_name].readers += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
@@ -347,35 +352,35 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def get_sources_size(self):
         return [
             0
-            if ds[0].get_source_num_channels() == 0
-            else ds[0].get_source_num_channels()
-            + ds[0].get_geoinfo_size()
-            + ds[0].get_coords_size()
+            if ds.readers[0].get_source_num_channels() == 0
+            else ds.readers[0].get_source_num_channels()
+            + ds.readers[0].get_geoinfo_size()
+            + ds.readers[0].get_coords_size()
             + self.tokenizer.get_size_time_embedding()
-            for _, ds in self.streams_datasets.items()
+            for ds in self.streams_datasets.values()
         ]
 
     def get_sources_num_channels(self):
-        return [ds[0].get_source_num_channels() for _, ds in self.streams_datasets.items()]
+        return [ds.readers[0].get_source_num_channels() for ds in self.streams_datasets.values()]
 
     def get_targets_num_channels(self):
-        return [ds[0].get_target_num_channels() for _, ds in self.streams_datasets.items()]
+        return [ds.readers[0].get_target_num_channels() for ds in self.streams_datasets.values()]
 
     def get_targets_coords_size(self):
         # TODO: avoid hard coding magic values
         # +6 at the end for stream_id and time encoding
         return [
-            (ds[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
-            for _, ds in self.streams_datasets.items()
+            (ds.readers[0].get_geoinfo_size() + (5 * (3 * 5)) + 3 * 8) + 6
+            for ds in self.streams_datasets.values()
         ]
 
     def denormalize_source_channels(self, stream_name, data) -> torch.Tensor:
         # [0]: with multiple ds per stream we use the first one
-        return self.streams_datasets[stream_name][0].denormalize_source_channels(data)
+        return self.streams_datasets[stream_name].readers[0].denormalize_source_channels(data)
 
     def denormalize_target_channels(self, stream_name, data) -> torch.Tensor:
         # [0]: with multiple ds per stream we use the first one
-        return self.streams_datasets[stream_name][0].denormalize_target_channels(data)
+        return self.streams_datasets[stream_name].readers[0].denormalize_target_channels(data)
 
     def _build_stream_data_input(
         self,
@@ -608,16 +613,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         Generate source and target masks for all streams.
         """
         masks = {}
-        for stream_info in self.streams:
+        for stream_name, stream_data in self.streams_datasets.items():
+            stream_info = stream_data.info
             # Build source and target sample masks
-            masks[stream_info["name"]] = self.tokenizer.build_samples_for_stream(
+            masks[stream_name] = self.tokenizer.build_samples_for_stream(
                 training_mode,
                 self.num_healpix_cells,
                 stream_info,
             )
             # identical for all streams
-            num_target_samples = len(masks[stream_info["name"]][0])
-            num_source_samples = len(masks[stream_info["name"]][1])
+            num_target_samples = len(masks[stream_name][0])
+            num_source_samples = len(masks[stream_name][1])
 
         return masks, num_source_samples, num_target_samples
 
@@ -631,11 +637,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """
         Perform necessary pre-processing of model batch
         """
+        stream_names = list(self.streams_datasets.keys())
         batch.source_samples.tokens_lens = get_tokens_lens(
-            self.streams, batch.source_samples, source_input_steps
+            stream_names, batch.source_samples, source_input_steps
         )
         batch.target_samples.tokens_lens = get_tokens_lens(
-            self.streams, batch.target_samples, target_input_steps
+            stream_names, batch.target_samples, target_input_steps
         )
 
         return batch
@@ -666,7 +673,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         num_output_steps = self._get_output_length(num_forecast_steps)
         batch = ModelBatch(
-            self.streams,
+            list(self.streams_datasets.keys()),
             num_source_samples,
             num_target_samples,
             self.output_offset,
@@ -674,9 +681,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         )
 
         # for all streams
-        for stream_info, (stream_name, stream_ds) in zip(
-            self.streams, self.streams_datasets.items(), strict=True
-        ):
+        for stream_name, stream_data in self.streams_datasets.items():
+            stream_info, stream_ds = stream_data.info, stream_data.readers
             (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
 
             # max number of input steps

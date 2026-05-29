@@ -99,7 +99,7 @@ run_ids :
     color: "magenta" #optional: if not specified, the color is automatically assigned by the plotting module
     results_base_dir : "./results/"
     epoch: 1 #optional: if not specified epoch 0 (in inference it is always 0) is used
-    rank: 2 #optional: if not specified rank 0 is used
+    rank: "all" #optional: int, "all", or list of ints. Default: "all". Use "all" for multi-rank inference.
     streams:
       ERA5:
         channels: ["2t", "10u", "10v"] 
