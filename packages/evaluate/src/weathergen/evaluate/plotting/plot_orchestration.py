@@ -278,27 +278,25 @@ def _build_single_animation(
     stream: str,
     region: str | None,
     var: str,
-    sa: object,
+    sample: object,
     fsteps: list,
     image_format: str,
     animation_format: str,
     duration_ms: int,
     prefix: str = "map",
-    score_animation: bool = False,
 ) -> list[str]:
     """Build one animation for a single (region, sample/ens, variable) combination.
 
     All work is I/O + Pillow — no matplotlib state involved.
 
-    When ``score_animation=False`` (default) the function scans ``output_dir`` for
-    per-sample map/histogram frames whose filenames follow::
+    The function scans ``output_dir`` for per-sample map/histogram frames whose filenames follow:
 
-        {prefix}_{run_id}_{tag}_{sa}_{valid_time}_{stream}_{region}_{var}_{fstep:03d}
+        {prefix}_{run_id}_{tag}_{sample}_{valid_time}_{stream}_{region}_{var}_{fstep:03d}
 
     When ``score_animation=True`` filenames are constructed deterministically because
     the fstep is embedded in the tag (``score_maps_{metric}_fstep_{N}``) rather
     than being a zero-padded suffix.  Pass ``tag="score_maps_{metric}"`` and
-    ``sa`` as the ensemble value (or ``None`` for no ensemble).
+    ``sample`` as the ensemble value (or ``None`` for no ensemble).
 
     Returns the list of source frame paths assembled into the animation, or an
     empty list when no (or fewer than two for score maps) frames were found.
@@ -307,8 +305,8 @@ def _build_single_animation(
         return []
 
     region_part = region if region else ""
-    if sa is not None:
-        head = "_".join(filter(None, [prefix, run_id, tag, str(sa)]))
+    if sample is not None:
+        head = "_".join(filter(None, [prefix, run_id, tag, str(sample)]))
     else:
         head = "_".join(filter(None, [prefix, run_id, tag]))
     tail = "_".join(filter(None, [stream, region_part, var]))
@@ -324,8 +322,8 @@ def _build_single_animation(
     )
     if not image_paths:
         return []
-    if sa is not None:
-        anim_parts = ["animation", run_id, tag, str(sa), stream]
+    if sample is not None:
+        anim_parts = ["animation", run_id, tag, str(sample), stream]
     else:
         anim_parts = ["animation", run_id, tag, stream]
     if region:
@@ -395,7 +393,7 @@ def _dispatch_animations(
             "stream": plotter.stream,
             "region": region,
             "var": var,
-            "sa": sa,
+            "sample": sample,
             "fsteps": list(fsteps),
             "image_format": plotter.image_format,
             "animation_format": plotter.animation_format,
@@ -404,7 +402,7 @@ def _dispatch_animations(
         }
         for prefix, output_dir in prefixes
         for region in plotter.regions
-        for sa in samples
+        for sample in samples
         for var in variables
     ]
 
@@ -447,7 +445,7 @@ def _dispatch_score_map_animations(
             stream=stream,
             region=region,
             var=var,
-            sa=None,
+            sample=None,
             fsteps=list(fsteps),
             image_format=plotter_cfg["image_format"],
             animation_format=plotter_cfg["animation_format"],
