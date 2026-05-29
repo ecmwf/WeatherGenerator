@@ -198,6 +198,12 @@ name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
+# anemoi-datasets (from the tjhunter fork) doesn't declare setuptools in its
+# build-system.requires, so PEP 517 isolated builds fail with "No module named
+# 'setuptools.build_meta'". Inject it here until upstream fixes it.
+[tool.uv.extra-build-dependencies]
+anemoi-datasets = ["setuptools", "wheel"]
+
 
 [tool.pyrefly]
 project-includes = ["src/"]
