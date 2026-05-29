@@ -1,0 +1,60 @@
+#optional: if commented out all is taken care of by the default settings
+# NB. global options apply to all run_ids
+global_plotting_options:
+ regions: ["global"]
+#  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+#  animation_format: "gif" #options: "mp4", "gif"
+#  dpi_val : 300
+#  fps: 2
+#  ERA5:
+#    marker_size: 2
+#    scale_marker_size: 1
+#    marker: "o"
+#    alpha: 0.5
+#    add_healpix_grid: false
+#    healpix_nside: 4
+#    2t: 
+#      vmin: 250
+#      vmax: 300
+#    10u:
+#      vmin: -40
+#      vmax: 40
+
+# max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
+
+evaluation:
+  metrics: ["rmse", "mae"]
+  regions: ["global", "nhem"]
+  summary_plots : true
+  ratio_plots : false
+  heat_maps : false
+  summary_dir: "./plots/"
+  plot_ensemble: "members" #supported: false, "std", "minmax", "members"
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  print_summary: false #print out score values on screen. it can be verbose
+  log_scale: false
+  add_grid: false
+  score_cards: false
+  bar_plots: false
+
+
+default_streams:
+  ERA5:
+    channels: ["2t", "10u", "10v", "10ff", "q_1000"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
+    plotting:
+      sample: [0]
+      forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      plot_maps: true
+      plot_histograms: false
+      plot_animations: true
+      
+run_ids :
+  toqb9dv6:
+    label: "test offgrid regular"
+
+  thb1rpuj:
+    label: "test offgrid synop"

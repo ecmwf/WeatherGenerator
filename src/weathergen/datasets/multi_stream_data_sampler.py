@@ -23,6 +23,7 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
+from weathergen.datasets.data_reader_offgrid import DataReaderOffgrid
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
@@ -34,7 +35,7 @@ from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 
-type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
+type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs | DataReaderOffgrid
 type StreamName = str
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
+
+        # Setup for offgrid inference and evaluation
+        offgrid_eval = mode_cfg.get("offgrid_eval", {})
+        # Path to .npy file containing offgrid coordinates
+        self.offgrid_template = offgrid_eval.get("grid", None)
+        # Frequency defined by config (offgrid_eval.frequency) with fallback to time_window_step
+        self.offgrid_frequency = offgrid_eval.get("frequency", mode_cfg.time_window_step)
+
         for _, stream_info in enumerate(cf.streams):
             # list of sources for current stream
             self.streams_datasets[stream_info["name"]] = []
@@ -189,6 +198,17 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                         + f" from stream config {stream_info['name']}.",
                     )
                 ds = dataset(filename=filename, **kwargs)
+
+                # load offgrid dataset if specified
+                if self.offgrid_template is not None:
+                    filename = pathlib.Path(str(self.offgrid_template))
+                    ds = DataReaderOffgrid(
+                        tw_handler=self.time_window_handler,
+                        filename=filename,
+                        frequency=self.offgrid_frequency,
+                        stream_info=stream_info,
+                        ref_reader=ds,
+                    )
 
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
                 stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
