@@ -204,7 +204,8 @@ case "$1" in
   *)
     (
       # Automatically extract all options from the case statement
-      options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
+      # Uses sed -E (BSD/macOS-compatible) instead of grep -oP (GNU-only).
+      options=$(sed -nE 's/^[[:space:]]*([a-zA-Z][a-zA-Z0-9_-]*)\).*/\1/p' "$0" | tr '\n' '|' | sed 's/|$//')
       echo "Usage: $0 {$options}"
       exit 1
     )

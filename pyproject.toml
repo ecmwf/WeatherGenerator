@@ -263,7 +263,8 @@ torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
 # branch = "feature/any-zarr-version-in-pyproject/"
-anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
+# anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
+anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
 
 [tool.pytest.ini_options]
 log_cli = true
