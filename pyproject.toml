@@ -30,6 +30,8 @@ dependencies = [
  "weathergen-evaluate",
  "weathergen-readers-extra",
  "pytest>=9.0.2",
+ # older version have no precompiled linux-aarch64 cp312 wheel 
+ "numcodecs>=0.16",
  # DEBUG
  "cfunits",
  "antlr4-python3-runtime",
@@ -205,8 +207,10 @@ conflicts = [
 anemoi-datasets = ["setuptools<76", "wheel"]
 cfunits = ["setuptools<76", "wheel"]
 antlr4-python3-runtime = ["setuptools<76", "wheel"]
+# Cartopy  requires setuptools >= 77
 cartopy = ["setuptools<78", "wheel"]
-numcodecs = ["setuptools<78", "wheel"]
+# numcodecs is forced to >=0.16 in [project].dependencies so wheels are used —
+# no source build needed, so no extra build deps required here.
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
