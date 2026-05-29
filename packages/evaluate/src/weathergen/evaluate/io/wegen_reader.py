@@ -25,6 +25,7 @@ from weathergen.common.config import (
     load_run_config,
 )
 from weathergen.common.io import zarrio_reader
+
 from weathergen.evaluate.io.data.dataarray_builders import EnsembleSelect
 from weathergen.evaluate.io.data.io_orchestration import (
     _build_io_state,
@@ -518,7 +519,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 offset += len(local)
         return self._rank_sample_map
 
-    def _merge_fsteps(self, all_das: dict) -> dict:
+    def _merge_fsteps(self, all_das: dict, global_sample_coords: np.ndarray) -> dict:
         """Merge lists of DataArrays for each forecast step across ranks.
         Concatenates along the sample dimension and re-indexes to global samples.
         """
@@ -527,7 +528,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             combined = xr.concat(das, dim="sample") if len(das) > 1 else das[0]
             merged[fstep] = combined.assign_coords(
                 sample=global_sample_coords[: len(combined.sample)]
-                    )
+            )
         return merged
 
     def get_data(
@@ -621,8 +622,8 @@ class WeatherGenZarrReader(WeatherGenReader):
         # Concatenate across ranks along sample dimension and re-index
         global_sample_coords = np.array(sorted(requested_globals))
 
-        merged_targets = self._merge_fsteps(all_targets)
-        merged_predictions = self._merge_fsteps(all_predictions)
+        merged_targets = self._merge_fsteps(all_targets, global_sample_coords)
+        merged_predictions = self._merge_fsteps(all_predictions, global_sample_coords)
 
         ranks_skipped = len(self.rank_files) - ranks_loaded
         _logger.info(
