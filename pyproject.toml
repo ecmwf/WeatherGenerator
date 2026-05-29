@@ -196,8 +196,6 @@ conflicts = [
   ],
 ]
 
-[tool.uv.extra-build-dependencies]
-anemoi-datasets = ["setuptools"]
 
 # These packages don't declare setuptools/wheel in build-system.requires, so
 # isolated builds fail with "No module named 'setuptools.build_meta'". Build
@@ -207,6 +205,9 @@ no-build-isolation-package = [
   "cfunits",
   "antlr4-python3-runtime",
 ]
+
+[tool.uv.extra-build-dependencies]
+anemoi-datasets = ["setuptools", "wheel"]
 
 
 [[tool.uv.index]]
