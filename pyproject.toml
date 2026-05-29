@@ -203,7 +203,7 @@ explicit = true
 # 'setuptools.build_meta'". Inject it here until upstream fixes it.
 [tool.uv.extra-build-dependencies]
 anemoi-datasets = ["setuptools", "wheel"]
-
+cfunits = ["setuptools", "wheel"]
 
 [tool.pyrefly]
 project-includes = ["src/"]
