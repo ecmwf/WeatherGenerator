@@ -54,9 +54,9 @@ class EmbeddingEngine(torch.nn.Module):
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        self.streams = cf.streams
 
-        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
+        for i, (stream_name, si) in enumerate(self.streams.items()):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
@@ -95,7 +95,7 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
-        for stream_name in self.stream_names:
+        for stream_name in self.streams.keys():
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -396,7 +396,6 @@ class QueryAggregationEngine(torch.nn.Module):
         super(QueryAggregationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        rope_mode = get_rope_mode(self.cf)
 
         self.ae_aggregation_blocks = torch.nn.ModuleList()
 
@@ -417,7 +416,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        rope_mode=rope_mode,
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             else:
@@ -473,7 +472,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
         super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        rope_mode = get_rope_mode(self.cf)
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
@@ -494,7 +492,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        rope_mode=rope_mode,
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             else:
@@ -511,7 +509,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        rope_mode=rope_mode,
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             # MLP block
@@ -562,7 +560,6 @@ class ForecastingEngine(torch.nn.Module):
         super(ForecastingEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        rope_mode = get_rope_mode(self.cf)
         self.fe_blocks = torch.nn.ModuleList()
         self.rope_2D = cf.get("rope_2D", False)
         self.healpix_level = cf.get("fe_healpix_level") if cf.get("fe_healpix_level") is not None else cf.get("healpix_level")
@@ -635,7 +632,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            rope_mode=rope_mode,
+                            with_2d_rope=self.cf.get("rope_2D", False),
                         )
                     )
                 else:
@@ -653,7 +650,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            rope_mode=rope_mode,
+                            with_2d_rope=self.cf.get("rope_2D", False),
                         )
                     )
                 # Add MLP block
@@ -980,6 +977,7 @@ class TargetPredictionEngine(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
 
+        target_readout_num_heads = next(self.cf.streams.values())["target_readout"]["num_heads"]
         for ith, dim in enumerate(self.dims_embed[:-1]):
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
@@ -988,7 +986,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=False,
                         with_adanorm=False,
                         with_mlp=False,
@@ -1000,7 +998,7 @@ class TargetPredictionEngine(nn.Module):
                     SelfAttentionBlock(
                         dim=dim,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
                         dropout_rate=0.1,
@@ -1012,7 +1010,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=self.cf.ae_global_dim_embed,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=False,
                         with_mlp=True,
@@ -1026,7 +1024,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=True,
                         with_mlp=True,
@@ -1042,7 +1040,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_out=self.dims_embed[ith + 1],
                         dim_kv=dim_aux,
                         dim_aux=self.dim_coord_in,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,

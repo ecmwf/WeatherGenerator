@@ -16,9 +16,6 @@ import numpy as np
 import numpy.typing as npt
 import torch
 
-# Suppress verbose healpy transform messages during spherical RoPE coefficient precomputation.
-logging.getLogger("healpy").setLevel(logging.WARNING)
-
 
 ####################################################################################################
 def positional_encoding_harmonic(x):
