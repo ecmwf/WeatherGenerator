@@ -185,7 +185,7 @@ def format_cf(config: Config) -> str:
     for key, value in clean_cf.items():
         match key:
             case "streams":
-                for rt in value:
+                for rt in value.values():
                     for k, v in rt.items():
                         whitespace = "" if k == "reportypes" else "  "
                         stream.write(f"{whitespace}{k} : {v}")
@@ -281,6 +281,7 @@ def _apply_fixes(config: Config) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
+    config = _check_streams(config)
     return config
 
 
@@ -332,6 +333,18 @@ def _check_time_interpolation(config: Config) -> Config:
             if "forecast" in subconf:
                 _convert_interpolation(subconf.forecast, forecast_step_dt)
 
+    return config
+
+
+def _check_streams(config: Config) -> Config:
+    """Convert streams stored as list to dict/DictConfig."""
+    config = config.copy()
+    stream_conf = config.get("streams")
+    assert stream_conf
+    if isinstance(stream_conf, list | ListConfig):
+        stream_conf = OmegaConf.create({conf["name"]: conf for conf in stream_conf})
+
+    config["streams"] = stream_conf
     return config
 
 
@@ -566,7 +579,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
     return conf
 
 
-def load_streams(streams_directory: Path) -> list[Config]:
+def load_streams(streams_directory: Path) -> Config:
     """Load all stream configurations from a directory."""
     # TODO: might want to put this into config later instead of hardcoding it here...
     streams_history = {
@@ -605,10 +618,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         try:
             config = OmegaConf.load(config_file)
             for stream_name, stream_config in config.items():
-                # Stream config schema is {stream_name: stream_config}
-                # where stream_config itself is a dict containing the actual options.
-                # stream_name needs to be added to this dict since only stream_config
-                # will be further processed.
+                # include key in value to have bidirectional key <-> value mapping
                 stream_config.name = stream_name
                 if stream_name in streams:
                     msg = f"Duplicate stream name found: {stream_name}."
@@ -633,7 +643,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         if stream.get("frequency", None) is not None:
             stream = _patch_time("frequency", stream, _TIMEDELTA_TYPE_NAME)
 
-    return list(streams.values())
+    return OmegaConf.create(streams)
 
 
 def get_path_run(config: Config) -> Path:
