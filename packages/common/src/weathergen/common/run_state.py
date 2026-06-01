@@ -33,8 +33,8 @@ class RunState:
     rank: int
     local_rank: int
     # set/modified when loading additional RunState from file
-    with_ddp: bool
-    is_sharded: bool
+    with_ddp: bool | None = None
+    is_sharded: bool | None = None
     istep: int = 0
     world_size_original: int | None = None
     run_history: list[_HistoryItem] = dataclasses.field(default_factory=list)
@@ -74,7 +74,7 @@ class RunState:
         filename = model_path / self._get_file_name(run_id, mini_epoch)
 
         # TODO: remove after transition period
-        self._apply_fix(run_id, mini_epoch, filename)
+        self._apply_fix(run_id, mini_epoch, model_path)
 
         assert filename.is_file(), (
             f"Cannot load runstate for id: \
@@ -94,17 +94,20 @@ class RunState:
         self.run_history.append(_HistoryItem(run_id, runstate.istep))
 
     # TODO remove after transition period
-    def _apply_fix(self, run_id: str, mini_epoch: int, filename: Path):
+    def _apply_fix(self, run_id: str, mini_epoch: int, model_path: Path):
         """
         Best effort backward compatibility.
 
         Detect if previous run has not implemented yet config/runstate split.
         Create required runstate file.
         """
+
+        filename = model_path / self._get_file_name(run_id, mini_epoch)
+
         if not filename.is_file():
             _logger.info("Missing RunState, try to obtain RunState from config")
             try:
-                cf = config.load_run_config(run_id, mini_epoch)
+                cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
             except AssertionError:
                 _logger.warning(
                     f"Cannot find run config for (run_id, mini-epoch): ({run_id},{mini_epoch})"
@@ -115,7 +118,6 @@ class RunState:
                     world_size=cf.general.world_size,
                     rank=cf.general.rank,
                     local_rank=cf.general.local_rank,
-                    with_fsdp=cf.general.with_fsdp,
                     istep=cf.general.istep,
                     world_size_original=cf.general.world_size_original,
                     run_history=[
