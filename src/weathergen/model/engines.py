@@ -705,6 +705,9 @@ class ForecastingEngine(torch.nn.Module):
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
                         assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn_rev":
+                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn_rev conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "additive":
                         assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for additive conditioning"
                         tokens = tokens + conditioning

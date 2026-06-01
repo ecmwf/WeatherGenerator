@@ -78,8 +78,8 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"forecast.input_num_steps must be 1 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
         )
-        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive"}, (
-            f"fe_diffusion_model_conditioning_type must be 'cross_attn' or 'additive' when "
+        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev"}, (
+            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', or 'cross_attn_rev' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
             f"(got '{self.conditioning_type}')"
         )
