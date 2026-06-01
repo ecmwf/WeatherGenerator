@@ -7,129 +7,121 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
+import dataclasses
 from json import dumps, loads
 from logging import getLogger
 from pathlib import Path
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
-from weathergen.common.config import Config, get_path_model, get_path_run
-from weathergen.common.io import StoreType
-
-RunState = DictConfig
+import weathergen.common.config as config
 
 _logger = getLogger(__name__)
 
 
-def init_runstate() -> RunState:
-    startdict = {
-        "istep": 0,
-        "world_size": None,
-        "world_size_original": None,
-        "rank": None,
-        "local_rank": None,
-        "with_ddp": None,
-        "is_sharded": None,
-        "run_history": [],
-    }
-
-    runstate = OmegaConf.create(startdict)
-    assert isinstance(runstate, RunState)
-    return runstate
+@dataclasses.dataclass
+class _HistoryItem:
+    run_id: str
+    istep: int
 
 
-def _get_runstate_file_write_name(run_id: str, mini_epoch: int | None):
-    """Generate the filename for writing a run state file."""
-    if mini_epoch is None:
-        mini_epoch_str = ""
-    elif mini_epoch == -1:
-        mini_epoch_str = "_latest"
-    else:
-        mini_epoch_str = f"_chkpt{mini_epoch:05d}"
+@dataclasses.dataclass
+class RunState:
+    world_size: int
+    rank: int
+    local_rank: int
+    # set/modified when loading additional RunState from file
+    with_ddp: bool
+    is_sharded: bool
+    istep: int = 0
+    world_size_original: int | None = None
+    run_history: list[_HistoryItem] = dataclasses.field(default_factory=list)
 
-    return f"runstate_{run_id}{mini_epoch_str}.json"
-
-
-def save_runstate(runstate: RunState, config: Config, mini_epoch: int | None):
-    """
-    Save runstate
-    """
-
-    dirname = get_path_model(config)
-    dirname.mkdir(exist_ok=True, parents=True)
-
-    fname = _get_runstate_file_write_name(config.general.run_id, mini_epoch)
-
-    json_str = dumps(OmegaConf.to_container(runstate)) + "\n"
-
-    with (dirname / f"{fname}").open("w") as f:
-        f.write(json_str)
-
-
-def load_runstate(run_id: str, mini_epoch: int | None, model_path: str | None) -> RunState:
-    """
-    Load a state file from a given run_id and mini_epoch.
-    If run_id is a full path, loads it from the full path.
-
-    Args:
-        run_id: Run ID of the pretrained WeatherGenerator model
-        mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
-        model_path: Path to the model directory. If None, uses the model_path from private config.
-
-    Returns:
-        RunState object loaded from the specified run and mini_epoch.
-    """
-
-    # Loading path
-    if Path(run_id).exists():  # load from the full path if a full path is provided
-        fname = Path(run_id)
-        _logger.info(f"Loading run_state from provided full run_id path: {fname}")
-
-    else:
-        # Load model runstate here. In case model_path is not provided, get it from private conf
-        if model_path is None:
-            path = get_path_model(run_id=run_id)
+    @staticmethod
+    def _get_file_name(run_id: str, mini_epoch: int):
+        if mini_epoch == -1:
+            mini_epoch_str = "latest"
         else:
-            path = Path(model_path) / run_id
+            mini_epoch_str = f"chkpt{mini_epoch:05d}"
+        return f"runstate_{run_id}_{mini_epoch_str}.json"
 
-        runstate_path_with_epoch = path / _get_runstate_file_write_name(run_id, mini_epoch)
-        runstate_path_without_epoch = path / _get_runstate_file_write_name(run_id, None)
+    def save(self, run_id: str, mini_epoch: int):
+        """
+        Save runstate artifact as json in model directory.
 
-        if runstate_path_with_epoch.exists():
-            fname = runstate_path_with_epoch
-            _logger.info(f"Loading runstate from specified run_id and mini_epoch: {fname}")
-        elif runstate_path_without_epoch.exists():
-            fname = runstate_path_without_epoch
-            _logger.info(
-                f"Runstate for mini_epoch {mini_epoch} not found. "
-                f"Falling back to runstate without mini_epoch: {fname}"
-            )
+        The artifact is either suffixed with a particular mini-epoch or with '_latest'
+        """
+        model_path = config.get_path_model(run_id=run_id)
+        assert model_path.is_dir(), f"Missing model directory for runstate at: {model_path}"
 
-        else:
-            raise FileNotFoundError(
-                f"Could not find model runstate for run_id '{run_id}' "
-                f"(mini_epoch={mini_epoch}) in '{path}'. "
-                f"Tried: '{runstate_path_with_epoch.name}' and"
-                f"'{runstate_path_without_epoch.name}'. "
-                f"Please check run_id and mini_epoch."
-            )
+        runstate = OmegaConf.structured(self)
+        json_str = dumps(OmegaConf.to_container(runstate)) + "\n"
+        with open(model_path / self._get_file_name(run_id, mini_epoch), "w") as f:
+            f.write(json_str)
 
-    with fname.open() as f:
-        json_str = f.read()
+    def load(self, run_id: str, mini_epoch: int):
+        """
+        Load required information from previous run into current runstate.
 
-    runstate = OmegaConf.create(loads(json_str))
-    assert isinstance(runstate, RunState)
+        Loaded from previous run:
+          - optimization step counts
+          - run history (previous run gets added)
+          - world size of first ever run in history to consistently calculate mini-epochs.
+        """
+        model_path = config.get_path_model(run_id=run_id)
+        filename = model_path / self._get_file_name(run_id, mini_epoch)
 
-    return runstate
+        # TODO: remove after transition period
+        self._apply_fix(run_id, mini_epoch, filename)
 
+        assert filename.is_file(), (
+            f"Cannot load runstate for id: \
+            {run_id} and mini epoch: {mini_epoch}: file not found at {filename}"
+        )
 
-def get_path_results(runstate:RunState, config: Config, mini_epoch: int) -> Path:
-    """Get the path to validation results for a specific mini_epoch and rank."""
-    ext = StoreType(config.zarr_store).value  # validate extension
-    base_path = get_path_run(config)
-    fname = f"validation_chkpt{mini_epoch:05d}_rank{runstate.rank:04d}.{ext}"
+        with filename.open() as f:
+            json_str = f.read()
 
-    return base_path / fname
+        deserialized_runstate = OmegaConf.create(loads(json_str))
+        typed_runstate = OmegaConf.merge(OmegaConf.structured(RunState), deserialized_runstate)
+        runstate = OmegaConf.to_object(typed_runstate)
+        assert isinstance(runstate, RunState)  # for type checker
 
+        self.istep = runstate.istep
+        self.world_size_original = runstate.world_size_original
+        self.run_history.append(_HistoryItem(run_id, runstate.istep))
 
+    # TODO remove after transition period
+    def _apply_fix(self, run_id: str, mini_epoch: int, filename: Path):
+        """
+        Best effort backward compatibility.
+
+        Detect if previous run has not implemented yet config/runstate split.
+        Create required runstate file.
+        """
+        if not filename.is_file():
+            _logger.info("Missing RunState, try to obtain RunState from config")
+            try:
+                cf = config.load_run_config(run_id, mini_epoch)
+            except AssertionError:
+                _logger.warning(
+                    f"Cannot find run config for (run_id, mini-epoch): ({run_id},{mini_epoch})"
+                )
+
+            try:
+                runstate = RunState(
+                    world_size=cf.general.world_size,
+                    rank=cf.general.rank,
+                    local_rank=cf.general.local_rank,
+                    with_fsdp=cf.general.with_fsdp,
+                    istep=cf.general.istep,
+                    world_size_original=cf.general.world_size_original,
+                    run_history=[
+                        _HistoryItem(run_id, istep) for run_id, istep in cf.general.run_history
+                    ],
+                )
+                runstate.save(run_id, mini_epoch)
+            except AttributeError:
+                _logger.warning("Cannot construct RunState from config.")

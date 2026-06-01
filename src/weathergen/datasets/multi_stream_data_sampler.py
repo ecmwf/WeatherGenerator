@@ -17,7 +17,6 @@ from omegaconf import OmegaConf
 
 from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
-from weathergen.common.run_state import RunState
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
 from weathergen.datasets.data_reader_base import (
@@ -35,7 +34,7 @@ from weathergen.datasets.utils import (
 )
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
-from weathergen.utils.distributed import is_root
+from weathergen.utils.distributed import get_rank, get_world_size, is_root
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
 type StreamName = str
@@ -87,7 +86,7 @@ def collect_datasources(stream_datasets: list, idx: int, type: str, rng) -> IORe
 
 
 class MultiStreamDataSampler(torch.utils.data.IterableDataset):
-    def __init__(self, cf: Config, runstate: RunState, mode_cfg: dict, stage: Stage):
+    def __init__(self, cf: Config, mode_cfg: dict, stage: Stage):
         super(MultiStreamDataSampler, self).__init__()
 
         self.mode_cfg = mode_cfg
@@ -96,8 +95,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.mini_epoch = 0
         self.mask_value = 0.0
         self.streams = cf.streams
-        self.rank = runstate.rank
-        self.world_size = runstate.world_size
+        self.rank = get_rank()
+        self.world_size = get_world_size()
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # initialise healpic
