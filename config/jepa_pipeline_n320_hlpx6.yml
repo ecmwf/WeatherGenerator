@@ -27,14 +27,14 @@ stages:
     cleanup_scripts: yes
 
   # Stage 2: Masking-based finetuning (freezes encoder)
-  - name: finetune
-    stage: train
-    from_run_id: STAGE.pretrain
-    config_files:
-      - ./config/config_jepa_finetuning_n320_hlpx6.yml
-    chain_jobs: 2
-    nodes: 1
-    cleanup_scripts: yes
+  # - name: finetune
+  #   stage: train
+  #   from_run_id: STAGE.pretrain
+  #   config_files:
+  #     - ./config/config_jepa_finetuning_n320_hlpx6.yml
+  #   chain_jobs: 2
+  #   nodes: 1
+  #   cleanup_scripts: yes
 
   # Stage 3: Forecasting finetuning (freezes encoder)
   - name: finetunefc

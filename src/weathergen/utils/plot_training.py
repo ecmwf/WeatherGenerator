@@ -63,7 +63,7 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
         return False
 
     for k, v in run_id_dict.items():
-        if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
+        if not isinstance(k, str) or not isinstance(v, list) or len(v) < 2:
             raise argparse.ArgumentTypeError(
                 (
                     "Each key must be a string and",
@@ -92,6 +92,14 @@ def _read_str_config(yaml_str: str) -> dict:
     _check_run_id_dict(config_dict)
 
     return config_dict
+
+
+def _get_model_path(run_id, runs_ids, model_base_dir):
+    """Resolve model path for a run: per-run model_path takes priority over global model_base_dir."""
+    per_run = runs_ids[run_id][2] if len(runs_ids[run_id]) > 2 else None
+    if per_run:
+        return Path(per_run)
+    return model_base_dir
 
 
 ####################################################################################################
@@ -132,7 +140,8 @@ def _read_yaml_config(yaml_file_path):
     for k, v in config_dict_temp.items():
         assert isinstance(v["slurm_id"], int), "slurm_id has to be int."
         assert isinstance(v["description"], str), "description has to be str."
-        config_dict[k] = [v["slurm_id"], v["description"]]
+        model_path = v.get("model_path", None)
+        config_dict[k] = [v["slurm_id"], v["description"], model_path]
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
     _check_run_id_dict(config_dict)
@@ -823,9 +832,10 @@ def plot_train(args=None):
     if "all" in streams:
         for run_id in runs_ids:
             # Load config from given model_path if provided, otherwise use path from private config
-            if model_base_dir:
+            run_model_path = _get_model_path(run_id, runs_ids, model_base_dir)
+            if run_model_path:
                 cf = config.load_run_config(
-                    run_id=run_id, mini_epoch=None, model_path=model_base_dir
+                    run_id=run_id, mini_epoch=None, model_path=run_model_path
                 )
             else:
                 cf = config.load_merge_configs(
@@ -845,8 +855,9 @@ def plot_train(args=None):
     runs_data = []
     for run_id in runs_ids:
         try:
+            run_model_path = _get_model_path(run_id, runs_ids, model_base_dir)
             runs_data.append(
-                TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
+                TrainLogger.read(run_id, model_path=run_model_path, cols_patterns=streams)
             )
             valid_runs_ids[run_id] = runs_ids[run_id]
         except Exception as e:
@@ -931,7 +942,8 @@ def plot_train(args=None):
     # plot all cols for all run_ids
     for run_id, run_data in zip(runs_ids, runs_data, strict=False):
         try:
-            stream_names = get_stream_names(run_id, model_path=model_base_dir)
+            run_model_path = _get_model_path(run_id, runs_ids, model_base_dir)
+            stream_names = get_stream_names(run_id, model_path=run_model_path)
         except Exception as e:
             _logger.warning(f"Skipping run_id '{run_id}' (could not get stream names): {e}")
             continue

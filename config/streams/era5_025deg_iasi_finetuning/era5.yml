@@ -11,15 +11,15 @@ ERA5 :
   type : anemoi
   filenames : ['/capstor/store/cscs/swissai/weatherbench/aifs-ea-an-oper-0001-mars-n320-1979-2023-1h-v1-with-ERA51.zarr']
   stream_id : 0
-  source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp', 'z']
+  source_exclude : ['w_', 'skt', 'tcw', 'cp', 'tp']
   target : [ ] 
   forcing: True
-  geoinfo_channels : ['z', 'lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
+  geoinfo_channels : ['lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.
   location_weight : cosine_latitude
   token_size : 64
   tokenize_spacetime : True
-  max_num_targets: 8192 #16384 # 32768 #32768 # 131072 # 65536 # 32768 # 16384 # 8192
+  max_num_targets: 270000 #16384 # 32768 #32768 # 131072 # 65536 # 32768 # 16384 # 8192
   frequency: 06:00:00
   embed : 
     net : transformer
@@ -34,7 +34,7 @@ ERA5 :
     num_layers : 2
     num_heads : 4
   pred_head :
-    ens_size : 4
+    ens_size : 1
     num_layers : 1
   # channel_weights :
   #   q_50: 0.2

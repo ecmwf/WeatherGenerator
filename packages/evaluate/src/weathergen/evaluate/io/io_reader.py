@@ -16,6 +16,8 @@ from dataclasses import dataclass
 # Third-party
 import xarray as xr
 
+from weathergen.evaluate.utils.derived_channels import is_derivable_channel
+
 _logger = logging.getLogger(__name__)
 _logger.setLevel(logging.INFO)
 
@@ -238,12 +240,23 @@ class Reader(ABC):
                 if name == "ensemble" and "mean" in missing:
                     missing.remove("mean")
 
+                # Derivable channels (e.g. 10ff) will be computed later by
+                # DeriveChannels — keep them in the requested set.
+                if name == "channel":
+                    derivable = {ch for ch in missing if is_derivable_channel(ch)}
+                    if derivable:
+                        _logger.debug(
+                            f"Channels {derivable} not in source but recognised "
+                            f"as derivable – keeping them."
+                        )
+                    missing -= derivable
+
                 if missing:
                     _logger.info(
                         f"Requested {name}(s) {missing} is unavailable. "
                         f"Removing missing {name}(s) for {mode}."
                     )
-                    requested[name] = requested[name] & reader_data[name]
+                    requested[name] = requested[name] - missing
                     corrected = True
 
             # Must be a subset of available_data (if provided)

@@ -6,7 +6,6 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-
 ERA5 :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']

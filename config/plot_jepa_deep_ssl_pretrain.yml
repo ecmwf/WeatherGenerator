@@ -1,82 +1,53 @@
 train:
-  plot:
-    av6luhf2-pretrain:
-      slurm_id: 0
-      description: "N320"
- 
-    # lmx1mi02-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=2.423290e-05, ema=581786, mask=0.2258"
-    # a1f3czep-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.572634e-04, ema=316047, mask=0.6744"
-    # 2j4kg11h-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=2.136020e-05, ema=287299, mask=0.3698"
-    # b71lkrek-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.918856e-05, ema=427352, mask=0.5685"
-    # ncypceii-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=6.357724e-05, ema=767257, mask=0.5486"
-    # 9ra53elr-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=2.428988e-05, ema=292992, mask=0.5978"
-    # rlvdnd4c-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.223520e-05, ema=908362, mask=0.5065"
-    # cxiyigze-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.721862e-05, ema=520636, mask=0.4545"
-    # bdi0p17l-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.735844e-04, ema=659829, mask=0.5571"
-    # rg80td0n-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.935225e-04, ema=947960, mask=0.5951"
-    # qi1e34qe-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.202775e-05, ema=404733, mask=0.2690"
-    # vj7xh45i-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.684459e-04, ema=486214, mask=0.5974"
-    # bfl0b01w-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.329028e-04, ema=372347, mask=0.2394"
-    # g09nlhxx-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.741462e-05, ema=404834, mask=0.6536"
-    # v1fqfr4o-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=2.666699e-05, ema=801377, mask=0.6797"
-    # 5br1ug5f-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.240294e-04, ema=609724, mask=0.4857"
-    # 583ajes2-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=3.424891e-05, ema=562667, mask=0.3459"
-    # bsmgqvtw-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.966066e-04, ema=970614, mask=0.3829"
-    # w5gxdqkb-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.076520e-04, ema=243152, mask=0.4286"
-    # ethnns3t-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=6.984155e-05, ema=398228, mask=0.2304"
-    # c61whsnx-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=8.036260e-05, ema=937469, mask=0.2556"
-    # ikiiwjkr-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=1.162573e-04, ema=316273, mask=0.4833"
-    # ikkrdwqu-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=3.433802e-05, ema=802467, mask=0.6283"
-    # e79dlsnj-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=2.434826e-05, ema=986921, mask=0.6015"
-    # yyloqgzd-pretrain:
-    #   slurm_id: 0
-    #   description: "V JEPA 2.1 lr=3.544830e-05, ema=506672, mask=0.4758"
 
+#pretraining:
+  # plot:
+  #   qcx8kd41:
+  #     slurm_id: 0
+  #     description: "N320 - healpix level 6. With Z - 270k samples"
+  #   boxi2b73:
+  #     slurm_id: 0
+  #     description: "N320 - healpix level 5. With Z - 270k samples"
+
+  #iasi finetuning:
+  plot:
+    g75m3lzp:
+      slurm_id: 0
+      description: "N320 - healpix level 6. With Z - 270k samples"
+    h1y8l4k7 :
+      slurm_id: 0
+      description: "N320 - healpix level 5. With Z - 270k samples"
+    o2qmf3ne:
+      slurm_id: 0
+      description: "O96 - healpix level 5"
+     
+  #synop finetuning:
+  # plot:
+  #   wrxdsq6k:
+  #     slurm_id: 0
+  #     description: "N320 - healpix level 6"
+  #   zmz48o9k:
+  #     slurm_id: 0
+  #     description: "N320 - healpix level 5"
+  #   kcqd250z:
+  #     slurm_id: 0
+  #     description: "O96 - healpix level 5"
+  #   rhxqn6ai:
+  #     slurm_id: 0
+  #     description: "O96 - healpix level 5. diagnostic = True"
+  #   wak5hs2j:
+  #     slurm_id: 0
+  #     description: "O96 - healpix level 5. diagnostic = True, ERA5 forcing = True"
+
+  #forecast finetuning:
+  # plot:
+  #   iyn1gl86:
+  #     slurm_id: 0
+  #     description: "N320 - healpix level 6. With Z - 270k samples"
+  #   w3xop4ru:
+  #     slurm_id: 0
+  #     description: "N320 - healpix level 5. With Z - 270k samples"
+  #   mbr736x1:
+  #     slurm_id: 0
+  #     description: "O96 - healpix level 5 (with Z)"
+  
