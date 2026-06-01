@@ -757,8 +757,7 @@ class Model(torch.nn.Module):
                 tokens,
                 step,
                 meta_info=batch.samples[0].meta_info,
-                coords=model_params.rope_coords,
-                # num_steps=30
+                coords=model_params.rope_coords
             )
 
             # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a

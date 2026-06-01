@@ -55,7 +55,7 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 6
+fe_num_blocks: 12
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -133,7 +133,7 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'wo5mf2z4', 'epoch': -1}  # diffusion model d512 to fine-tune decoder, p_mean=1.5, SwiGLU+XSA+geoinfos, based on m6fs8wvj backbone
 # load_chkpt: {'run_id': 'zf6wnmpe', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.832
 # load_chkpt: {'run_id': 'mivw6jda', 'epoch': -1}  # multi-var d2048 hl5 enc-lnorm, sigma_data=1.0
-load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
+# load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # multi-var d2048 hl5, sigma_data=1.0, swiglu xsa geoinfos, diffusion-full-pipeline
 # load_chkpt: {'run_id': 'riyz96d4', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=0.5, based on l3rxe29i backbone
 # load_chkpt: {'run_id': 'bokn5d2w', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=1.5, based on l3rxe29i backbone
 # load_chkpt: {'run_id': 'uwyv1zdh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.0, based on l3rxe29i backbone
@@ -148,6 +148,7 @@ load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # multi-var d2048 hl5, sigma_da
 # load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
 # load_chkpt: {'run_id': 'i3y5fhda', 'epoch': -1}  # d2048 hl5, p_mean=2.5, forecasting
 # load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
+load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z
 
 
 norm_type: "LayerNorm"
