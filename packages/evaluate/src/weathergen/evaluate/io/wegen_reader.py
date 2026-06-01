@@ -25,6 +25,7 @@ from weathergen.common.config import (
     load_run_config,
 )
 from weathergen.common.io import zarrio_reader
+
 from weathergen.evaluate.io.data.dataarray_builders import EnsembleSelect
 from weathergen.evaluate.io.data.io_orchestration import (
     _build_io_state,
@@ -135,7 +136,6 @@ class WeatherGenReader(Reader):
         if isinstance(streams, list | oc.ListConfig):
             streams = {s["name"]: s for s in streams}
         streams = oc.OmegaConf.create(streams)
-        clim_fn = next(streams.get("filenames"), None)
 
         try:
             clim_fn = streams[stream].get("filenames")
