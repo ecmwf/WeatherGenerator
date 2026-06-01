@@ -135,7 +135,6 @@ class WeatherGenReader(Reader):
         if isinstance(streams, list | oc.ListConfig):
             streams = {s["name"]: s for s in streams}
         streams = oc.OmegaConf.create(streams)
-        clim_fn = next(streams.get("filenames"), None)
 
         try:
             clim_fn = streams[stream].get("filenames")
