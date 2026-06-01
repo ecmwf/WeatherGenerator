@@ -712,6 +712,9 @@ class ForecastingEngine(torch.nn.Module):
                         assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for additive conditioning"
                         tokens = tokens + conditioning
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate":
+                        # Conditioning already baked into tokens via sequence concat in DiffusionForecastEngine.denoise()
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     else:
                         assert conditioning is None, "conditioning should not be provided when diffusion model conditioning is disabled"
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)

@@ -78,8 +78,8 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"forecast.input_num_steps must be 1 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
         )
-        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev"}, (
-            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', or 'cross_attn_rev' when "
+        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev", "concatenate"}, (
+            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', or 'concatenate' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
             f"(got '{self.conditioning_type}')"
         )
@@ -247,6 +247,13 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = self.datetime_embedder(c).to(x.device)
 
         net_input = c_in * x
+
+        if self.conditioning_type == "concatenate":
+            # Concatenate conditioning tokens along sequence dim: (B, H, D) cat (B, H, D) -> (B, 2H, D)
+            combined = torch.cat([net_input, c], dim=1)
+            raw_out = self.net(combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None)
+            raw_out = raw_out[:, : x.shape[1], :]  # Slice back to (B, H, D)
+            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
 
         return c_skip * x + c_out * self.net(
             net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
