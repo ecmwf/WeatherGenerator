@@ -257,6 +257,14 @@ class DiffusionForecastEngine(torch.nn.Module):
             raw_out = raw_out[:, : x.shape[1], :]  # Slice back to (B, H, D)
             return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
 
+        if self.conditioning_type == "concatenate_hiddendim":
+            # Concatenate along hidden dim: (B, H, D) cat (B, H, D) -> (B, H, 2D)
+            # ForecastingEngine runs at 2D throughout and projects back to D via out_proj
+            combined = torch.cat([net_input, c], dim=2)
+            return c_skip * x + c_out * self.net(
+                combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
+            )  # Eq. (7) in EDM paper
+
         return c_skip * x + c_out * self.net(
             net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
         )  # Eq. (7) in EDM paper
