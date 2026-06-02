@@ -645,18 +645,23 @@ def _dispatch_timeseries_plots(
     stream: str,
     run_id: str,
     num_plot_workers: int,
+    ensemble: list,
 ) -> None:
-    """Build and dispatch timeseries plot tasks for all (channel, sample) pairs."""
+    """Build and dispatch timeseries plot tasks for all (channel, sample[, ens]) triples."""
     data_ts = Timeseries(da_preds, da_tars)
+    has_ens = any("ens" in v.dims for v in da_preds.values())
+    ens_members = ensemble if has_ens else [None]
     ts_tasks = [
         {
             "output_dir": output_dir,
             "channel": str(channel),
             "sample": sample,
             "stream": stream,
+            "ens": ens,
         }
         for channel in data_ts.get_channels()
         for sample in data_ts.get_samples()
+        for ens in ens_members
     ]
     calls = [delayed(data_ts.plot_single_timeseries)(**t) for t in ts_tasks]
     dispatch_parallel(
@@ -1000,6 +1005,7 @@ def plot_data(
             stream=stream,
             run_id=run_id,
             num_plot_workers=num_plot_workers,
+            ensemble=list(available_data.ensemble),
         )
 
     if plot_animations:

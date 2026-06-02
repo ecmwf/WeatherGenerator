@@ -84,15 +84,25 @@ class Timeseries:
         return da_tmp.sample.values
 
     def plot_single_timeseries(
-        self, output_dir: str, channel: str, sample: int | str, stream: str
+        self,
+        output_dir: str,
+        channel: str,
+        sample: int | str,
+        stream: str,
+        ens: str | int | None = None,
     ) -> None:
-        """Plot and save a timeseries figure for one (channel, sample) pair."""
+        """Plot and save a timeseries figure for one (channel, sample[, ens]) triple."""
         da_preds_slice, da_tars_slice = self.get_preds_tars_per_sample_channel(sample, channel)
+        has_ens = ens is not None and "ens" in da_preds_slice.dims and ens != "mean"
+        if has_ens:
+            da_preds_slice = da_preds_slice.sel(ens=ens)
         valid_times = self.get_valid_times_per_sample_channel(sample, channel)
+
+        pred_label = "Prediction" if not has_ens else f"Prediction (ens {ens})"
 
         matplotlib.use("Agg")
         fig, ax = plt.subplots(figsize=(15, 7))
-        ax.plot(valid_times, da_preds_slice.values, label="Prediction")
+        ax.plot(valid_times, da_preds_slice.values, label=pred_label)
         ax.plot(valid_times, da_tars_slice.values, label=stream, linestyle="--")
         fig.suptitle(
             f"Timeseries Average \u2013 {self.region_label()}",
@@ -110,10 +120,10 @@ class Timeseries:
         fig.autofmt_xdate()
         out_path = Path(output_dir) / "plots" / stream / "timeseries"
         out_path.mkdir(parents=True, exist_ok=True)
-        fig.savefig(
-            out_path / f"timeseries_{channel}_sample_{sample}.png",
-            bbox_inches="tight",
-        )
+        fname = f"timeseries_{channel}_sample_{sample}"
+        if has_ens:
+            fname += f"_ens_{ens}"
+        fig.savefig(out_path / f"{fname}.png", bbox_inches="tight")
         plt.close(fig)
 
     def region_label(self) -> str:
