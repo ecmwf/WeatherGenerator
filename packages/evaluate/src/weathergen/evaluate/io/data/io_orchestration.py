@@ -77,6 +77,7 @@ class IOState:
     lon: NDArray
     n_workers: int
     backend: str = "loky"
+    rank: str = "0000"
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +248,7 @@ def _build_io_state(
     ensemble: list[str],
     n_io_workers: int,
     ens_select: EnsembleSelect,
+    rank: str = "",
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -283,6 +285,7 @@ def _build_io_state(
         lat=lat,
         lon=lon,
         n_workers=n_io_workers,
+        rank=rank,
     )
 
 
@@ -459,7 +462,8 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
     ``n_samples × 1 × n_ipoints × n_channels × 4 bytes``.
     """
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: Loading {len(state.samples)} samples × "
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
+        f"Loading {len(state.samples)} samples × "
         f"{len(state.fsteps)} fsteps via zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
@@ -472,7 +476,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
 
     for fi, fs in enumerate(state.fsteps):
         _logger.info(
-            f"RUN {state.run_id} - {state.stream}: "
+            f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
             f"Reading fstep {fs} ({fi + 1}/{len(state.fsteps)})..."
         )
 
@@ -487,7 +491,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             is_gridded=state.is_gridded,
             n_workers=n_workers,
             backend=state.backend,
-            label=f"RUN {state.run_id} - {state.stream} fstep {fs}",
+            label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
@@ -525,7 +529,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
         get_reusable_executor().shutdown(wait=True)
 
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: I/O complete. "
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
     return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
@@ -546,7 +550,8 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     """
     n_total = len(state.samples) * len(state.fsteps)
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: Loading {len(state.samples)} samples × "
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
+        f"Loading {len(state.samples)} samples × "
         f"{len(state.fsteps)} fsteps = {n_total} items via ZipStore-parallel zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
@@ -569,7 +574,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         calls,
         n_workers=state.n_workers,
         backend=state.backend,
-        desc=f"RUN {state.run_id} - {state.stream} (ZipStore)",
+        desc=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} (ZipStore)",
         verbose=5,
     )
 
@@ -633,7 +638,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         get_reusable_executor().shutdown(wait=True)
 
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: ZipStore-parallel I/O complete. "
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: ZipStore-parallel I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
     return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)

@@ -12,7 +12,6 @@ import json
 import logging
 import math
 import time
-import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -146,100 +145,20 @@ class TrainLogger:
         run_id = cf.general.run_id
 
         result_dir_base = config.get_path_run(cf)
-        result_dir = result_dir_base / run_id
-        fname_log_train = result_dir / f"{run_id}_train_log.txt"
-        fname_log_val = result_dir / f"{run_id}_val_log.txt"
-
-        # training
 
         # define cols for training
-        cols_train = ["dtime", "samples", "mse", "lr"]
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
         cols1_patterns = ["loss_avg"] + cols_patterns
 
-        # read training log data
-        try:
-            with open(fname_log_train, "rb") as f:
-                log_train = np.loadtxt(f, delimiter=",")
-            log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
-        except (
-            TypeError,
-            AttributeError,
-            IndexError,
-            ZeroDivisionError,
-            ValueError,
-        ) as e:
-            _logger.warning(
-                (
-                    f"Warning: no training data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — "
-                    "possible format, dimension, or logic issue.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            _logger.error(
-                (
-                    f"Error: no training data loaded for run_id={run_id}",
-                    "File system error occurred while handling the log file.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except Exception:
-            _logger.error(
-                (
-                    f"Error: no training data loaded for run_id={run_id}",
-                    f"Due to exception with trace:\n{traceback.format_exc()}",
-                )
-            )
-            log_train = np.array([])
-
-        log_train_df = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
+        metrics_train = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
 
         # define cols for validation
-        cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
         cols2_patterns = ["loss_avg"] + cols_patterns
 
-        # read validation log data
-        try:
-            with open(fname_log_val, "rb") as f:
-                log_val = np.loadtxt(f, delimiter=",")
-            log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
-        except (
-            TypeError,
-            AttributeError,
-            IndexError,
-            ZeroDivisionError,
-            ValueError,
-        ) as e:
-            _logger.warning(
-                (
-                    f"Warning: no validation data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — "
-                    "possible format, dimension, or logic issue.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    "File system error occurred while handling the log file.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except Exception:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    f"Due to exception with trace:\n{traceback.format_exc()}",
-                )
-            )
-            log_val = np.array([])
-        metrics_val_df = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
+        metrics_val = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
 
-        return Metrics(run_id, "train", log_train_df, metrics_val_df, None)
+        return Metrics(run_id, "train", metrics_train, metrics_val, None)
 
 
 def read_metrics(
