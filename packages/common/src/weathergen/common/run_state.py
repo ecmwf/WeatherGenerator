@@ -106,12 +106,9 @@ class RunState:
 
         if not filename.is_file():
             _logger.info("Missing RunState, try to obtain RunState from config")
-            try:
-                cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
-            except AssertionError:
-                _logger.warning(
-                    f"Cannot find run config for (run_id, mini-epoch): ({run_id},{mini_epoch})"
-                )
+            _logger.info(f"config file: {filename}")
+
+            cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
 
             try:
                 runstate = RunState(
