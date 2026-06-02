@@ -344,6 +344,13 @@ class Model(torch.nn.Module):
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
         self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
 
+        self.sigma_head = nn.Sequential(
+            nn.LayerNorm(D),
+            nn.Linear(D, D),
+            nn.SiLU(),
+            nn.Linear(D, 1)
+        )
+
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
     ):
@@ -830,6 +837,15 @@ class Model(torch.nn.Module):
             logger.info(f"effective_sigma={sigma.item()}")
             eps = torch.randn(M, B, H * Q, D, device=tokens.device, dtype=tokens.dtype)
             tokens_tiled = (tokens.unsqueeze(0) + sigma * eps).reshape(M * B, H * Q, D)
+            latent_spread = (
+                tokens_tiled.reshape(M, B, H * Q, D)
+                .std(dim=0)
+                .mean()
+            )
+
+            logger.info(
+                f"latent_spread={latent_spread.item():.6f}"
+            )
         else:
             M = 1
             tokens_tiled = tokens
@@ -946,11 +962,21 @@ class Model(torch.nn.Module):
                     # split on M and permute: [E, M*P, C] → [M, E, P, C] → [M*E, P, C]
                     E, pts_M, C = pred.shape
                     assert pts_M == M * P, f"expected {M * P} pts in pred, got {pts_M}"
-                    pred = (
+                    pred_members = (
                         pred.reshape(E, M, P, C)
                         .permute(1, 0, 2, 3)
-                        .reshape(M * E, P, C)
                     )
+                        #.reshape(M * E, P, C)
+                    #)
+                    if M > 1:
+                        output_spread = pred_members.std(dim=0).mean()
+                        logger.info(
+                            f"{stream_name}: "
+                            f"latent_spread={latent_spread.item():.6f} "
+                            f"output_spread={output_spread.item():.6f} "
+                            f"gain={output_spread.item()/latent_spread.item() + 1e-8:.6f}"
+                        )
+                    pred = pred_members.reshape(M * E,P,C)
 
                 assert pred.shape[1] == P, f"expected {P} points in dim=1, got {pred.shape[1]}"
 
