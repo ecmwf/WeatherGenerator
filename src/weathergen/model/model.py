@@ -23,6 +23,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
+from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     BilinearDecoder,
@@ -312,6 +313,8 @@ class Model(torch.nn.Module):
         """
         super(Model, self).__init__()
 
+        self._noise = None
+
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
 
@@ -342,6 +345,9 @@ class Model(torch.nn.Module):
         self.register_token_idxs = list(range(cf.num_register_tokens))
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
         self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
+        # One-shot flag to avoid log spam when warning about an unsupported
+        # diffusion-inference + multi-step-rollout combination.
+        self._warned_diffusion_multi_step = False
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -353,6 +359,7 @@ class Model(torch.nn.Module):
                 loss_cfg,
                 use_class_token=use_class_token,
                 use_patch_token=use_patch_token,
+                default_mlp_type=global_cfg.get("mlp_type", "mlp"),
             )
         elif loss_cfg["head"].lower() == "transformer":
             return LatentPredictionHeadTransformer(
@@ -376,9 +383,20 @@ class Model(torch.nn.Module):
             cf, self.sources_size, self.targets_num_channels, self.targets_coords_size
         )
 
+        # Initialize forecasting engine: standard or diffusion-wrapped
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
-            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            if cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
+                assert cf.diffusion_conditioning_embed_dim is not None, (
+                    "Diffusion conditioning embedding dimension must be specified when using diffusion model conditioning"
+                )
+                self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells, dim_aux=self.cf.diffusion_conditioning_embed_dim)
+            else:
+                self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            if cf.get("fe_diffusion_model", False):
+                self.forecast_engine = DiffusionForecastEngine(
+                    cf, self.num_healpix_cells, forecast_engine=self.forecast_engine
+                )
         else:
             self.forecast_engine = IdentityEngine()
 
@@ -420,6 +438,13 @@ class Model(torch.nn.Module):
                     tr_mlp_hidden_factor = tr.get("mlp_hidden_factor", 2)
                     tr_dim_head_proj = tr.get("dim_head_proj", None)
                     softcap = tr.get("softcap", 0.0)
+                    # num_layers = tr["num_layers"]
+                    # tr_mlp_hidden_factor = (
+                    #     tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
+                    # )
+                    tr_mlp_type = tr.get("mlp_type", cf.get("mlp_type", "mlp"))
+                    # tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
+                    # softcap = tr["softcap"] if "softcap" in tr else 0.0
 
                     dims_embed = [
                         si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
@@ -445,6 +470,7 @@ class Model(torch.nn.Module):
                             hidden_factor=8,
                             with_residual=False,
                             dropout_rate=dropout_rate,
+                            mlp_type=self.cf.get("mlp_type", "mlp"),
                             norm_eps=self.cf.mlp_norm_eps,
                             name=f"embed_target_coords_{stream_name}",
                         )
@@ -471,6 +497,7 @@ class Model(torch.nn.Module):
                             dim_coord_in,
                             tr_dim_head_proj,
                             tr_mlp_hidden_factor,
+                            tr_mlp_type,
                             softcap,
                             stream_config=si,
                         )
@@ -621,7 +648,13 @@ class Model(torch.nn.Module):
         num_params_latent_heads = get_num_parameters(self.latent_heads)
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
+        num_params_fe = (
+            get_num_parameters(
+                self.forecast_engine.net.fe_blocks
+                if cf.fe_diffusion_model
+                else self.forecast_engine.fe_blocks
+            )
+        )
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
@@ -698,11 +731,31 @@ class Model(torch.nn.Module):
 
         # recover batch dimension and separate input_steps
         shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
-        # collapse along input step dimension
-        tokens = tokens.reshape(shape).sum(axis=1)
+        # Reshape tokens to [B, T, ...]
+        tokens = tokens.reshape(shape)
+
+        if self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
+            tokens = tokens.reshape(shape)
+            # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
+            if self.cf.stage == "inference":
+                print("Using most recent steps as conditioning tokens for forecasting inference.")
+                conditioning_tokens = tokens[:, 0]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, :-1].sum(axis=1)
+            else:
+                # Conditioning: all older context steps [t-1, ..., t-(T-1)]; denoising target: t (newest)
+                conditioning_tokens = tokens[:, 1]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                conditioning_tokens = conditioning_tokens + torch.randn_like(conditioning_tokens) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
+                if np.random.rand() < self.cf.get("fe_diffusion_classifier_free_guidance_prob", 0.0):  # occasionally dropout conditioning for classifier free guidance
+                    conditioning_tokens = torch.zeros_like(conditioning_tokens)
+            # X_t (tokens[:, 0], most recent) is the diffusion denoising target; older steps are conditioning.
+            batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = conditioning_tokens
+            # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
+            tokens = tokens[:, 0]
+        else:
+            tokens = tokens.sum(axis=1)
 
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
+
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
@@ -711,13 +764,70 @@ class Model(torch.nn.Module):
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
-            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            # apply forecasting engine
+            tokens = self.forecast_engine(
+                tokens,
+                step,
+                meta_info=batch.samples[0].meta_info,
+                coords=model_params.rope_coords
+            )
+
+            # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a
+            # list. Treat each intermediate state as its own forecast step in the output so the
+            # full denoising trajectory can be inspected downstream. The original `step` is
+            # still used to look up target coordinates (they share the same physical timestamp).
+            if isinstance(tokens, list):
+                # Diffusion inference currently only supports a single physical forecast
+                # step (forecast.num_steps=1); the per-ODE-step trajectory consumes the
+                # ModelOutput fstep dimension. Multi-step autoregressive rollouts on top of
+                # diffusion are not implemented yet.
+                if (
+                    len(batch.get_output_idxs()) > 1
+                    and not self._warned_diffusion_multi_step
+                ):
+                    logger.warning(
+                        "Diffusion inference is being run with forecast.num_steps=%d (>1). "
+                        "Only a single forecast step is supported in this mode; the "
+                        "per-ODE-step denoising trajectory will overwrite later forecast "
+                        "steps in the model output.",
+                        len(batch.get_output_idxs()),
+                    )
+                    self._warned_diffusion_multi_step = True
+                # Resize output to fit the diffusion trajectory.
+                output = self._reindex_output_for_trajectory(output, len(tokens))
+                cond = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"]
+                predict_residual = self.cf.get("fe_diffusion_model", False) and self.cf.get("fe_diffusion_predict_residual", False)
+                for i, toks in enumerate(tokens):
+                    toks_abs = cond + toks if predict_residual else toks
+                    output = self.predict_decoders(model_params, step, toks_abs, batch, output, out_step=i)
+                    output = self.predict_latent(model_params, step, toks_abs, batch, output, out_step=i)
+                # Feed the final denoised state back as conditioning for the next step.
+                # Pass tokens[-1] forward so inference diagnostics have a reference point;
+                # inference_forward always starts from pure noise regardless.
+                final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
+                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = final_abs
+                tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
+                continue
+
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
+
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
 
         return output
+
+    @staticmethod
+    def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
+        """
+        Resize a ModelOutput to hold ``n_steps`` forecast steps, preserving any latent entries
+        that were already attached to fstep 0 (e.g. encoder posteriors).
+        """
+        new_output = ModelOutput(n_steps)
+        if len(output.latent) > 0:
+            for k, v in output.latent[0].items():
+                new_output.add_latent_prediction(0, k, v)
+        return new_output
 
     def predict_latent(
         self,
@@ -726,19 +836,23 @@ class Model(torch.nn.Module):
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
+        out_step: int | None = None,
     ) -> ModelOutput:
         """
         Compute latent predictions
         """
 
+        if out_step is None:
+            out_step = step
+
         # safe latent prediction
         tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
-        output.add_latent_prediction(step, "latent_state", latent_state)
+        output.add_latent_prediction(out_step, "latent_state", latent_state)
 
         # latent predictions for SSL training
         for name, head in self.latent_heads.items():
-            output.add_latent_prediction(step, name, head(latent_state))
+            output.add_latent_prediction(out_step, name, head(latent_state))
 
         return output
 
@@ -749,6 +863,7 @@ class Model(torch.nn.Module):
         tokens: torch.Tensor,
         batch: ModelBatch,
         output: ModelOutput,
+        out_step: int | None = None,
     ) -> ModelOutput:
         """
         Compute decoder-based predictions
@@ -767,8 +882,12 @@ class Model(torch.nn.Module):
             Prediction output tokens in physical representation for each target_coords.
         """
         # Empty dicts evaluate to False in python
+        # breakpoint()
         if not self.pred_heads:
             return output
+
+        if out_step is None:
+            out_step = step
 
         # remove register  and class tokens
         tokens = tokens[:, self.num_aux_tokens :]
@@ -784,6 +903,8 @@ class Model(torch.nn.Module):
         )
         tokens_nbors_lens[0] = 0
 
+        # breakpoint()
+
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
@@ -794,6 +915,7 @@ class Model(torch.nn.Module):
             t_coords_lens = [len(t) for t in t_coords]
             t_coords = torch.cat(t_coords)
 
+            # breakpoint()
             if len(t_coords) == 0:
                 continue
 
@@ -845,6 +967,7 @@ class Model(torch.nn.Module):
 
             # recover batch dimension (ragged, so as list)
             pred = torch.split(pred, t_coords_lens, dim=1)
-            output.add_physical_prediction(step, stream_name, pred)
+
+            output.add_physical_prediction(out_step, stream_name, pred)
 
         return output

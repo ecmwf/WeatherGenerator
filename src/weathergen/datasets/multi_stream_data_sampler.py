@@ -98,6 +98,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.streams = cf.streams
         self.rank = cf.rank
         self.world_size = cf.world_size
+        self.diffusion_model_conditioning = cf.get("fe_diffusion_model_conditioning", None)
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
 
         # initialise healpic
@@ -527,7 +528,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             output_mask : mask for output/prediction/target
             input_mask : mask for network input (can be source or target)
 
-
         Returns:
             StreamData with source and targets masked according to view_meta
         """
@@ -628,6 +628,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 self.num_healpix_cells,
                 stream_info,
             )
+
             # identical for all streams
             num_target_samples = len(masks[stream_info["name"]][0])
             num_source_samples = len(masks[stream_info["name"]][1])
@@ -748,6 +749,14 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     input_mask=target_mask,
                 )
                 target_metadata = target_masks.metadata[tidx]
+
+                # Get first target step's times (using self.output_offset as the first output step index)
+                if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
+                    target_times_array = sdata.target_times_raw[self.output_offset]
+                    target_metadata.add_params({'timestamp': (
+                        target_times_array[0] if len(target_times_array) > 0 else None
+                    )})
+
                 # also want to add the mask to the metadata
                 target_metadata.mask = target_mask
                 # Map target to all source students
@@ -760,6 +769,23 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
+
+        #add target times in source for diffusion model date/time conditioning
+        if self.diffusion_model_conditioning in ["date_time", "date", "time"]:
+            #TODO: Might need upgrading fro num_samples > 1
+
+            # Assert singular source and target samples
+            assert len(batch.source_samples.samples) == 1, "Only single source sample supported for diffusion model conditioning."
+            assert len(batch.target_samples.samples) == 1, "Only single target sample supported for diffusion model conditioning."
+            
+            source_sample = batch.source_samples.samples[0]
+            target_sample = batch.target_samples.samples[0]
+            
+            # Copy target timestamps to source metadata for all streams
+            for stream_name in [s["name"] for s in self.streams]:
+                if stream_name in target_sample.meta_info and stream_name in source_sample.meta_info:
+                    target_timestamp = target_sample.meta_info[stream_name].params.get('timestamp')
+                    source_sample.meta_info[stream_name].add_params({'timestamp': target_timestamp})
 
         return batch
 
