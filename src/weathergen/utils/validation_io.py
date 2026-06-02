@@ -51,9 +51,7 @@ def write_output(
         targets_coords_all += [[]]
         targets_times_all += [[]]
         targets_lens += [[]]
-        for stream_info in cf.streams:
-            sname = stream_info["name"]
-
+        for sname in cf.streams.keys():
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
@@ -125,7 +123,8 @@ def write_output(
     # more prep work
 
     # output stream names to be written, use specified ones or all if nothing specified
-    stream_names = [stream.name for stream in cf.streams]
+    stream_names = list(cf.streams.keys())
+    stream_infos = list(cf.streams.values())
     if val_cfg.get("output").get("streams") is not None:
         output_stream_names = val_cfg.output.streams
     else:
@@ -134,10 +133,10 @@ def write_output(
     output_streams = {name: stream_names.index(name) for name in output_stream_names}
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
-    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
-    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
+    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
+    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in stream_infos]
 
-    geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
+    geoinfo_channels = [[] for _ in stream_infos]  # TODO obtain channels
 
     # calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * batch_size

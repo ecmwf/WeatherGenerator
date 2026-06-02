@@ -201,12 +201,14 @@ class OriginalPredictionBlock(nn.Module):
 
         self.block = nn.ModuleList()
 
+        target_readout_num_heads = next(self.cf.streams.values())["target_readout"]["num_heads"]
+
         # Multi-Cross Attention Head
         self.block.append(
             MultiCrossAttentionHeadVarlen(
                 dim_in,
                 self.cf.ae_global_dim_embed,
-                self.cf.streams[0]["target_readout"]["num_heads"],
+                target_readout_num_heads,
                 dim_head_proj=self.tr_dim_head_proj,
                 with_residual=True,
                 with_qk_lnorm=True,
@@ -226,7 +228,7 @@ class OriginalPredictionBlock(nn.Module):
             self.block.append(
                 MultiSelfAttentionHeadVarlen(
                     dim_in,
-                    num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                    num_heads=target_readout_num_heads,
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     with_qk_lnorm=True,
                     with_flash=self.cf.with_flash_attention,
