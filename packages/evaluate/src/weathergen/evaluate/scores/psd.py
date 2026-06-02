@@ -21,15 +21,16 @@ Provides two PSD computation paths:
   https://github.com/ecmwf/anemoi-core/blob/main/models/src/anemoi/models/layers/spectral_helpers.py
 
 - **Path B – FFT PSD** (``method="fft"``):
-  1-D zonal FFT along the longitude dimension on a regular lat-lon grid. 
+  1-D zonal FFT along the longitude dimension on a regular lat-lon grid.
   It regrids to a given resolution with:
   lat_axis = np.arange(lat_min, lat_max + regrid_resolution / 2, regrid_resolution)
   lon_axis = np.arange(lon_min, lon_max + regrid_resolution / 2, regrid_resolution)
-  In case of non regular lat-lons grids this can create distortions in the PSD, 
-  so the SHT-based method is recommended when possible. 
-  The FFT-based method is provided as a fallback for cases where the grid structure 
+  In case of non regular lat-lons grids this can create distortions in the PSD,
+  so the SHT-based method is recommended when possible.
+  The FFT-based method is provided as a fallback for cases where the grid structure
   is unknown or non-standard, but it should be used with caution and awareness of its limitations.
-  Absorbs the functions previously in ``example_extras/power_spectra/psd_calc.py`` provided by the UKMet Office.
+  Absorbs the functions previously in ``example_extras/power_spectra/psd_calc.py``
+  provided by the UKMet Office.
 """
 
 from __future__ import annotations
@@ -196,7 +197,7 @@ class InverseSphericalHarmonicTransform:
     in anemoi.models but operates on numpy arrays.
     This is not needed for the PSD computation but it is included as sanity check
     to verify that the forward and inverse transforms are consistent with each other.
-    
+
     Parameters
     ----------
     lons_per_lat : list[int]
@@ -358,9 +359,7 @@ def detect_grid_type(
     # Check if all latitude rings have the same number of points (regular but non-standard ratio)
     unique_lons_global = np.unique(lons)
     if nlat * len(unique_lons_global) == n_points:
-        _logger.info(
-            f"Detected regular grid (nlat={nlat}, nlon={len(unique_lons_global)})."
-        )
+        _logger.info(f"Detected regular grid (nlat={nlat}, nlon={len(unique_lons_global)}).")
         return "regular"
 
     _logger.warning(
@@ -747,14 +746,14 @@ def compute_psd_score(
             _logger.warning("PSD (SHT): lats/lons required for grid detection. Skipping.")
             return np.nan, {}
         grid_type = detect_grid_type(lats_valid, lons_valid, gt.shape[-1])
-        
+
         if grid_type == "octahedral":
             expected_pts = sum(_octahedral_lons_per_lat(nlat_valid))
         elif grid_type == "regular":
             expected_pts = sum(_regular_lons_per_lat(nlat_valid))
         else:
             expected_pts = None
-       
+
         actual_pts = gt.shape[-1]
         if expected_pts is not None and actual_pts != expected_pts:
             _logger.warning(
