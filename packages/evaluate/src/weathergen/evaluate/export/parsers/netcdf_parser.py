@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
+from cfgrib.xarray_to_grib import to_grib
 
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_points
@@ -21,7 +22,8 @@ uv run export --run-id ciga1p9c --stream ERA5
 --output-dir ./test_output1 
 --format netcdf --samples 1 2  --fsteps 1 2 3
 """
-
+import cfgrib
+print(cfgrib.__version__)
 
 class NetcdfParser(CfParser):
     """
@@ -550,3 +552,28 @@ class NetcdfParser(CfParser):
         _logger.info(f"Saving to {out_fname}.")
         ds.to_netcdf(out_fname)
         _logger.info(f"Saved NetCDF file to {out_fname}.")
+
+
+class GribParser(NetcdfParser):
+    """
+    Child class for handling GRIB output format.
+    """
+
+    def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
+        """
+        Save the dataset to a GRIB file.
+
+        Parameters
+        ----------
+            ds : xarray Dataset to save.
+            data_type : Type of data ('pred' or 'targ') to include in the filename.
+            forecast_ref_time : Forecast reference time to include in the filename.
+
+        Returns
+        -------
+            None
+        """
+        out_fname = self.get_output_filename(forecast_ref_time)
+        _logger.info(f"Saving to {out_fname}.")
+        to_grib(ds, out_fname)
+        _logger.info(f"Saved GRIB file to {out_fname}.")
