@@ -552,7 +552,7 @@ class LinePlots:
             plt.xticks(rotation=90, ha="right")
             plt.grid(True, linestyle="--", color="gray", alpha=0.2)
             title = (
-                f"{descr.replace('_', ' ')} {tag.split('_')[0]} -"
+                f"{descr.replace('_', ' ')} {tag.split('_')[0]} | fstep {f_step} | "
                 f" {tag.split('_')[-1]} (baseline: {baseline_name})"
             )
             self._plot_base(
