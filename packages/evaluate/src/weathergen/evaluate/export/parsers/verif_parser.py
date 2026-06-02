@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 from omegaconf import OmegaConf
 
@@ -78,6 +79,7 @@ class VerifParser(CfParser):
         ref_time: np.datetime64,
         source_interval_start: np.datetime64 = None,
         source_interval_end: np.datetime64 = None,
+        default_fstep: str = None,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -115,7 +117,9 @@ class VerifParser(CfParser):
         if da_fs:
             if self.zarr_coords is None:
                 self.zarr_coords = get_grid_points(da_fs[0])
-                self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end)
+                self.zarr_dt = self.get_zarr_dt(
+                    source_interval_start, source_interval_end, default_fstep
+                )
             # check consistency of grid points across forecast steps
             if len(da_fs) > 1:
                 assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
@@ -143,6 +147,7 @@ class VerifParser(CfParser):
         self,
         source_interval_start: np.datetime64,
         source_interval_end: np.datetime64,
+        default_fstep: np.timedelta64,
     ) -> np.timedelta64:
         """
         Compute the time difference between source interval start and end in hours.
@@ -158,9 +163,13 @@ class VerifParser(CfParser):
                 Time difference between source interval start and end in hours.
         """
         zarr_dt = (source_interval_end - source_interval_start).astype("timedelta64[h]")
-        # TODO: pull default value from config
         if zarr_dt == np.timedelta64(0, "h"):
-            zarr_dt = np.timedelta64(6, "h")
+            # get from inference config, convert to timedelta64
+            default_fstep = default_fstep.split(" ")[0]
+            zarr_dt = np.timedelta64(pd.to_timedelta(int(default_fstep), unit="ms")).astype(
+                "timedelta64[ms]"
+            )
+            zarr_dt = zarr_dt.astype("timedelta64[h]")
         return zarr_dt
 
     def get_output_filename(self, variable: str) -> Path:

@@ -7,7 +7,10 @@ import xarray as xr
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from weathergen.common.config import get_model_results
+from weathergen.common.config import (
+    get_model_results,
+    load_run_config,
+)
 from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.export.parser_factory import CfParserFactory
 from weathergen.evaluate.export.reshape import detect_grid_type
@@ -309,6 +312,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
 
     fname_zarr = get_model_results(run_id, epoch, rank)
+    inference_config = load_run_config(run_id, mini_epoch=epoch, model_path=None)
     fsteps = get_fsteps(fsteps, fname_zarr)
     samples = get_samples(samples, fname_zarr)
     streams = get_streams(stream, fname_zarr)
@@ -316,12 +320,12 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         grid_type = get_grid_type(data_type, stream, fname_zarr)
         channels = get_channels(channels, stream, fname_zarr)
         source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
+        default_fstep = inference_config.training_config.forecast.time_step
         kwargs["grid_type"] = grid_type
         kwargs["channels"] = channels
         kwargs["data_type"] = data_type
 
         parser = CfParserFactory.get_parser(config=config, **kwargs)
-
         n_fsteps = len(fsteps)
         total_tasks = len(samples) * n_fsteps
 
@@ -396,6 +400,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                             ref_time=source_end,
                             source_interval_start=source_start,
                             source_interval_end=source_end,
+                            default_fstep=default_fstep,
                         )
                         processed_samples.append(processed)
 
