@@ -733,11 +733,20 @@ class Model(torch.nn.Module):
 
         if self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
             tokens = tokens.reshape(shape)
-            conditioning_tokens = tokens[:, -2]  # TODO: enable longer history for conditioning
-            # X_t (last step) is the diffusion denoising target; X_{t-1} is the conditioning context.
+            # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
+            if self.cf.stage == "inference":
+                print("Using most recent steps as conditioning tokens for forecasting inference.")
+                conditioning_tokens = tokens[:, 0]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, :-1].sum(axis=1)
+            else:
+                # Conditioning: all older context steps [t-1, ..., t-(T-1)]; denoising target: t (newest)
+                conditioning_tokens = tokens[:, 1]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                conditioning_tokens = conditioning_tokens + torch.randn_like(conditioning_tokens) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
+                if np.random.rand() < self.cf.get("fe_diffusion_classifier_free_guidance_prob", 0.0):  # occasionally dropout conditioning for classifier free guidance
+                    conditioning_tokens = torch.zeros_like(conditioning_tokens)
+            # X_t (tokens[:, 0], most recent) is the diffusion denoising target; older steps are conditioning.
             batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = conditioning_tokens
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
-            tokens = tokens[:, -1]
+            tokens = tokens[:, 0]
         else:
             tokens = tokens.sum(axis=1)
 
@@ -783,17 +792,17 @@ class Model(torch.nn.Module):
                     self._warned_diffusion_multi_step = True
                 # Resize output to fit the diffusion trajectory.
                 output = self._reindex_output_for_trajectory(output, len(tokens))
+                cond = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"]
+                predict_residual = self.cf.get("fe_diffusion_model", False) and self.cf.get("fe_diffusion_predict_residual", False)
                 for i, toks in enumerate(tokens):
-                    output = self.predict_decoders(
-                        model_params, step, toks, batch, output, out_step=i
-                    )
-                    output = self.predict_latent(
-                        model_params, step, toks, batch, output, out_step=i
-                    )
+                    toks_abs = cond + toks if predict_residual else toks
+                    output = self.predict_decoders(model_params, step, toks_abs, batch, output, out_step=i)
+                    output = self.predict_latent(model_params, step, toks_abs, batch, output, out_step=i)
                 # Feed the final denoised state back as conditioning for the next step.
                 # Pass tokens[-1] forward so inference diagnostics have a reference point;
                 # inference_forward always starts from pure noise regardless.
-                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens[-1]
+                final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
+                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = final_abs
                 tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
                 continue
 
