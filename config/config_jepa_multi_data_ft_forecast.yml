@@ -8,5 +8,5 @@ general:
   world_size: ???
 
 training_config:
-  num_mini_epochs: 8
+  num_mini_epochs: 32
   samples_per_mini_epoch: 8192

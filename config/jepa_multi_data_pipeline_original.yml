@@ -1,0 +1,58 @@
+# JEPA deep-SSL sweep pipeline for launch-slurm-sophie.py
+#
+# Three stages:
+#   1. pretrain  — JEPA self-supervised with EMA teacher (deep SSL, context loss)
+#   2. finetune  — masking-based finetuning (freezes encoder)
+#   3. finetune-forecast — forecasting finetuning (freezes encoder)
+#
+# Sweep parameters (pretrain only) via --stage-options:
+#   - training_config.learning_rate_scheduling.lr_max
+#   - training_config.losses.student-teacher.target_and_aux_calc.EMATeacher.ema_halflife_in_thousands
+#   - training_config.model_input.random_easy.masking_strategy_config.rate
+#
+# Usage:
+#   ./hpc/launch-slurm-sophie.py config/jepa_pipeline.yml               # dry-run
+#   ./hpc/launch-slurm-sophie.py --no-dry-run config/jepa_pipeline.yml  # submit
+
+# nodes: 1
+# register: true
+# cleanup-scripts: yes
+# results-dir: shared
+# mini-epoch: -1
+
+parallelize: false
+
+stages:
+  - name: multipretrain
+    stage: train
+    config_files:
+      - ./config/config_jepa_multi_data_all_years.yml
+    chain_jobs: 3
+    nodes: 2
+
+  - name: multipretrainft
+    stage: train
+    from_run_id: multipretrain
+    config_files:
+      - ./config/config_jepa_multi_data_all_years.yml
+      - ./config/config_jepa_multi_data_all_years_ft.yml
+    chain_jobs: 3
+    nodes: 2
+
+  # Stage 3: Forecasting finetuning (freezes encoder)
+  - name: finetuneft
+    stage: train
+    from_run_id: multipretrainft
+    config_files:
+      - ./config/config_jepa_multi_data_ft_forecast_all_years.yml
+    chain_jobs: 3
+    nodes: 2
+
+  # Stage 3: Forecasting finetuning (freezes encoder)
+  - name: finetuneftft
+    stage: train
+    from_run_id: finetuneft
+    config_files:
+      - ./config/config_jepa_multi_data_ft_forecast.yml
+    chain_jobs: 3
+    nodes: 2

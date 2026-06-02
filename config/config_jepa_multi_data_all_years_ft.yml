@@ -1,5 +1,5 @@
 
-streams_directory: "./config/streams/pretrain_era5_georing_avhrr/"
+streams_directory: "./config/streams/pretrain_analysis_georing_avhrr_synop/"
 
 general:
 
@@ -9,10 +9,10 @@ general:
   world_size: ???
 
 training_config:
-  num_mini_epochs: 4
+  num_mini_epochs: 16
   samples_per_mini_epoch: 8192
 
   context_loss:
     enabled: true
-    weight: 0.4
-    warmup_steps: 2000             # linear warmup from 0 to weight over this many steps
+    weight: 1.0
+    warmup_steps: 1000             # linear warmup from 0 to weight over this many steps

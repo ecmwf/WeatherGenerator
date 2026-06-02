@@ -71,9 +71,9 @@ general:
 
 # logging frequency in the training loop (in number of batches)
 train_logging:
-  terminal: 10
+  terminal: 100
   metrics: 20
-  checkpoint: 250
+  checkpoint: 500
   log_grad_norms: True
 
 # parameters for data loading
@@ -107,14 +107,14 @@ training_config:
     enabled: false
 
 
-  num_mini_epochs: 12
+  num_mini_epochs: 32
   samples_per_mini_epoch: 8192
   shuffle: True
 
   start_date: 2016-01-01T00:00
   end_date: 2022-12-31T00:00
 
-  time_window_step: 06:00:00
+  time_window_step: 01:00:00
   time_window_len: 06:00:00
   
   learning_rate_scheduling :

@@ -126,16 +126,16 @@ general:
 
 # logging frequency in the training loop (in number of batches)
 train_logging:
-  terminal: 50
+  terminal: 100
   metrics: 20
-  checkpoint: 250
+  checkpoint: 500
   log_grad_norms: False
 
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
   # For forecasting, supports sequences of latents with per-step and aggregate metrics
   collapse_monitoring:
-    enabled: true
+    enabled: false
     compute_frequency: 100  # batches between metric computations
     log_frequency: 100      # batches between metric logging
     metrics:
@@ -163,7 +163,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 6
+  num_workers: 8
   rng_seed: ???
 
 
@@ -189,10 +189,10 @@ training_config:
   # Complements the JEPA loss which targets masked tokens.
   context_loss:
     enabled: true
-    weight: 0.4
-    warmup_steps: 10000             # linear warmup from 0 to weight over this many steps
+    weight: 1.0
+    warmup_steps: 1000             # linear warmup from 0 to weight over this many steps
 
-  num_mini_epochs: 16
+  num_mini_epochs: 32
   samples_per_mini_epoch: 8192
   shuffle: True
 
@@ -232,7 +232,7 @@ training_config:
         weight: 1.0,
         loss_fcts : {
           "JEPA": {
-            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
+            'weight': 1, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
             "num_blocks": 6, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 1024, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
@@ -267,7 +267,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "cropping_healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.7, hl_mask: 3, rate_sampling: False },
+      masking_strategy_config : { rate : 0.8, hl_mask: 3, rate_sampling: False },
     },
   }
 

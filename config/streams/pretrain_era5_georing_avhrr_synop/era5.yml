@@ -16,6 +16,11 @@ ERA5:
   tokenize_spacetime: True
   max_num_targets: -1
   frequency: 06:00:00
+  masking_override:
+    model_input:
+      masking_strategy: random
+      masking_strategy_config:
+        rate: 0.6
   embed:
     net: transformer
     num_tokens: 1

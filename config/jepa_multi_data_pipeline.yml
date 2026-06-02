@@ -14,11 +14,11 @@
 #   ./hpc/launch-slurm-sophie.py config/jepa_pipeline.yml               # dry-run
 #   ./hpc/launch-slurm-sophie.py --no-dry-run config/jepa_pipeline.yml  # submit
 
-nodes: 1
-register: true
-cleanup-scripts: yes
-results-dir: shared
-mini-epoch: -1
+# nodes: 1
+# register: true
+# cleanup-scripts: yes
+# results-dir: shared
+# mini-epoch: -1
 
 stages:
   # Stage 1: JEPA pre-training with EMA teacher + deep SSL
