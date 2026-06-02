@@ -59,7 +59,7 @@ def _add_legend(
     if loc is None:
         loc = "upper center" if outside else "best"
     if bbox_to_anchor is None and outside:
-        bbox_to_anchor = (0.25, -0.65)  # (0.5, -0.13)
+        bbox_to_anchor = (0.5, -0.13)
 
     legend_kwargs = {
         "loc": loc,
