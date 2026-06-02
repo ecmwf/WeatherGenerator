@@ -5,4 +5,5 @@ test_config:
   samples_per_mini_epoch: 16
   forecast:
     num_steps: 9
+latent_perturbation_sigma_override: 1.0
 streams_directory: ./config/inference/streams/era5_1deg/

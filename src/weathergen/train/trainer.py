@@ -335,8 +335,28 @@ class Trainer(TrainerBase):
         beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
         eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
+        # Optionally give log_sigma a separate, higher LR to counteract decoder collapse.
+        # Set latent_perturbation_sigma_lr in config (e.g. 1e-2); 0.0 disables the feature.
+        self._sigma_lr = cf.get("latent_perturbation_sigma_lr", 0.0)
+        if self._sigma_lr > 0.0:
+            sigma_param_names = {n for n, _ in self.model.named_parameters() if "log_sigma" in n}
+            sigma_params = [p for n, p in self.model.named_parameters() if n in sigma_param_names]
+            other_params = [p for n, p in self.model.named_parameters() if n not in sigma_param_names]
+            param_groups = [
+                {"params": other_params},
+                {"params": sigma_params, "name": "log_sigma"},
+            ]
+            if is_root():
+                logger.info(
+                    f"[latent_perturbation] Separate sigma LR={self._sigma_lr:.2e} "
+                    f"(main lr_max={self.training_cfg.learning_rate_scheduling.lr_max:.2e}x"
+                    f"{cf.world_size ** 0.5:.1f}sqrt_scale)"
+                )
+        else:
+            param_groups = list(self.model.parameters())
+
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
+            param_groups,
             lr=self.training_cfg.learning_rate_scheduling.lr_start,
             weight_decay=self.training_cfg.optimizer.weight_decay,
             betas=(beta1, beta2),
@@ -534,6 +554,11 @@ class Trainer(TrainerBase):
 
             # update learning rate
             self.lr_scheduler.step()
+            # Re-apply sigma's independent LR; the scheduler overwrites all param groups
+            if self._sigma_lr > 0.0:
+                for g in self.optimizer.param_groups:
+                    if g.get("name") == "log_sigma":
+                        g["lr"] = self._sigma_lr
 
             batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
             step = batch_size_total * self.cf.general.istep

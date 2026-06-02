@@ -806,7 +806,28 @@ class Model(torch.nn.Module):
         #   tokens_tiled[m*B + b]  belongs to member m, batch item b
         M = self.cf.get("latent_perturbation_num_members", 0)
         if M > 1 and self.latent_perturbation_log_sigma is not None:
-            sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
+            tokens_std = tokens.std().item()
+            tokens_abs = tokens.abs().mean().item()
+
+            sigma_log = torch.exp(self.latent_perturbation_log_sigma).item()
+
+            logger.info(
+                f"tokens_std={tokens_std:.4f} "
+                f"tokens_abs={tokens_abs:.4f} "
+                f"sigma={sigma_log:.4f} "
+                f"sigma/tokens_std={sigma_log/tokens_std:.4f}"
+            )
+            override = self.cf.get("latent_perturbation_sigma_override", None)
+            logger.info(f"sigma_override={override}")
+            if override is not None:
+                sigma = torch.tensor(
+                    override,
+                    device=tokens.device,
+                    dtype=tokens.dtype,
+                )
+            else:
+                sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
+            logger.info(f"effective_sigma={sigma.item()}")
             eps = torch.randn(M, B, H * Q, D, device=tokens.device, dtype=tokens.dtype)
             tokens_tiled = (tokens.unsqueeze(0) + sigma * eps).reshape(M * B, H * Q, D)
         else:
