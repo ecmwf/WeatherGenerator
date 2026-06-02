@@ -203,9 +203,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
                 # load offgrid datareader if specified
                 if offgrid_coords is not None:
-                    filename = pathlib.Path(str(offgrid_coords))
+                    filename = pathlib.Path(offgrid_coords)
                     geoinfos_filename = (
-                        pathlib.Path(str(offgrid_geoinfos))
+                        pathlib.Path(offgrid_geoinfos)
                         if offgrid_geoinfos is not None
                         else None
                     )
