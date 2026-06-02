@@ -55,7 +55,7 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 12
+fe_num_blocks: 8
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -314,7 +314,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config
