@@ -746,7 +746,9 @@ class TargetPredictionEngineClassic(nn.Module):
             )
 
             # Optional Self-Attention Head
-            pred_self_attention = stream_config["target_readout"].get("self_attention", self.cf.pred_self_attention)
+            pred_self_attention = stream_config["target_readout"].get(
+                "self_attention", self.cf.pred_self_attention
+            )
             if pred_self_attention:
                 self.tte.append(
                     MultiSelfAttentionHeadVarlen(
@@ -769,7 +771,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     self.dims_embed[i],
                     self.dims_embed[i + 1],
                     with_residual=True,
-                    hidden_factor=1, #self.tr_mlp_hidden_factor,
+                    hidden_factor=1,  # self.tr_mlp_hidden_factor,
                     dropout_rate=0.2,  # Assuming dropout_rate is 0.1
                     norm_type=self.cf.norm_type,
                     dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
