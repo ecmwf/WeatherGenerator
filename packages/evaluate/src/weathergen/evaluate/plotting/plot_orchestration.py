@@ -22,7 +22,6 @@ from joblib import delayed
 from PIL import Image
 from tqdm import tqdm
 
-
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.bar_plots import BarPlots
@@ -43,9 +42,9 @@ from weathergen.evaluate.plotting.plot_utils import (
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
+from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology
-from weathergen.evaluate.scores.score import VerifiedData, get_score
 
 _logger = logging.getLogger(__name__)
 
@@ -167,13 +166,19 @@ def run_score_timeseries_pipeline(
 
     # --- Parallel plotting ---
     _plot_timeseries_parallel(
-        reader, stream, scores_by_hour, unique_hours, fsteps, da_tars,
-        global_plotting_options, n_workers,
+        reader,
+        stream,
+        scores_by_hour,
+        unique_hours,
+        fsteps,
+        da_tars,
+        global_plotting_options,
+        n_workers,
     )
 
     return scores_by_hour
 
-    
+
 def _compute_timeseries_scores_for_fstep(
     fstep: int,
     region: str,
@@ -231,10 +236,7 @@ def _plot_single_timeseries(
     plt.plot(hours, values, marker="o", linewidth=2, label=run_id)
 
     ch_label = channel if channel is not None else "all"
-    title = (
-        f"{metric_name.upper()} vs source end hour | {ch_label} | "
-        f" {lt_label} | {region}"
-    )
+    title = f"{metric_name.upper()} vs source end hour | {ch_label} |  {lt_label} | {region}"
     plt.title(title)
     plt.xlabel("Source window end hour [UTC]")
     plt.ylabel(metric_name.upper())
@@ -246,9 +248,8 @@ def _plot_single_timeseries(
 
     out_dir = Path(output_dir)
     plot_path = (
-        out_dir
-        / f"{metric_name}_{ch_label}_{region}_lead_{lt_label}"
-          f"_by_source_end_hour.{image_format}"
+        out_dir / f"{metric_name}_{ch_label}_{region}_lead_{lt_label}"
+        f"_by_source_end_hour.{image_format}"
     )
     plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
@@ -319,11 +320,10 @@ def _plot_timeseries_parallel(
     )
 
     calls = [delayed(_plot_single_timeseries)(**t) for t in plot_tasks]
-    dispatch_parallel(
-        calls, n_workers=n_workers, backend="loky", desc=f"Timeseries plots {stream}"
-    )
+    dispatch_parallel(calls, n_workers=n_workers, backend="loky", desc=f"Timeseries plots {stream}")
 
     _logger.info(f"RUN {run_id} - {stream}: Score timeseries plots saved to {output_dir}.")
+
 
 # ---------------------------------------------------------------------------
 # Score maps
@@ -358,7 +358,6 @@ def run_score_map_pipeline(
     plot_score_options : dict | None
         Dictionary containing all common score calculation options.
     """
-
 
     if not reader.is_gridded_data(stream):
         _logger.debug(f"RUN {reader.run_id} - {stream}: Skipping score maps (non-gridded data).")
@@ -443,7 +442,7 @@ def run_score_map_pipeline(
 
     calls = [delayed(_plot_score_maps_per_stream)(**t) for t in fstep_tasks]
     dispatch_parallel(calls, n_workers=n_plot_workers, backend="loky", desc=f"Score maps {stream}")
-   
+
     plot_score_animations = plot_score_options.get("score_animation", False)
     if plot_score_animations:
         _dispatch_score_map_animations(
@@ -1167,17 +1166,19 @@ def plot_timeseries_summary(
                                 continue
                             score = fstep_scores[fstep]
                             score_vals = (
-                                score.sel(channel=channel)
-                                if channel is not None
-                                else score
+                                score.sel(channel=channel) if channel is not None else score
                             )
                             hours = score_vals.coords["source_end_hour"].values
                             values = score_vals.values.flatten()
                             label = runs[run_id].get("label", run_id)
                             color = runs[run_id].get("color", None)
                             plt.plot(
-                                hours, values, marker="o", linewidth=2,
-                                label=label, color=color,
+                                hours,
+                                values,
+                                marker="o",
+                                linewidth=2,
+                                label=label,
+                                color=color,
                             )
 
                         ch_label = channel if channel is not None else "all"
@@ -1196,9 +1197,8 @@ def plot_timeseries_summary(
                         plt.tight_layout()
 
                         plot_path = (
-                            ts_dir
-                            / f"{metric_name}_{ch_label}_{region}_{stream}"
-                              f"_fstep_{fstep}_by_source_end_hour.{image_format}"
+                            ts_dir / f"{metric_name}_{ch_label}_{region}_{stream}"
+                            f"_fstep_{fstep}_by_source_end_hour.{image_format}"
                         )
                         plt.savefig(plot_path, bbox_inches="tight")
                         plt.close()

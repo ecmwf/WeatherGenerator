@@ -36,7 +36,7 @@ from weathergen.evaluate.plotting.plot_orchestration import (
     plot_summary,
     plot_timeseries_summary,
     run_score_map_pipeline,
-    run_score_timeseries_pipeline, 
+    run_score_timeseries_pipeline,
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.scores.score_orchestration import (
@@ -353,7 +353,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     "global_plotting_opts": global_plotting_opts,
                     "regions": regions,
                     "metrics": metrics,
-                    "plot_score_options": plot_score_options
+                    "plot_score_options": plot_score_options,
                 }
             )
 

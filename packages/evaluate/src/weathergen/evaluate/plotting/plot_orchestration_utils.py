@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from joblib import delayed
+from numpy.typing import NDArray
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel
 from weathergen.evaluate.io.io_reader import ReaderOutput
@@ -16,7 +17,7 @@ _logger = logging.getLogger(__name__)
 
 def group_by_init_hour(
     output_data: ReaderOutput,
-) -> dict[int, np.ndarray]:
+) -> dict[int, NDArray]:
     """Group sample indices by the hour of day of the initialisation time.
 
     The initialisation time is taken from the ``source_interval_end`` coordinate
@@ -38,18 +39,14 @@ def group_by_init_hour(
     """
     first_tar = next(iter(output_data.target.values()))
     if "source_interval_end" not in first_tar.coords:
-        _logger.warning(
-            "Cannot group by init hour: 'source_interval_end' coordinate not found."
-        )
+        _logger.warning("Cannot group by init hour: 'source_interval_end' coordinate not found.")
         return {}
 
     init_times = pd.DatetimeIndex(first_tar.source_interval_end.values)
     hours = init_times.hour
     samples = first_tar.sample.values
 
-    grouped: dict[int, np.ndarray] = {
-        int(hour): samples[hours == hour] for hour in sorted(set(hours))
-    }
+    grouped: dict[int, NDArray] = {int(hour): samples[hours == hour] for hour in sorted(set(hours))}
 
     _logger.info(
         f"Grouped {len(samples)} samples into {len(grouped)} init-hour bins: "
