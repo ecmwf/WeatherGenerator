@@ -21,8 +21,15 @@ Provides two PSD computation paths:
   https://github.com/ecmwf/anemoi-core/blob/main/models/src/anemoi/models/layers/spectral_helpers.py
 
 - **Path B – FFT PSD** (``method="fft"``):
-  1-D zonal FFT along the longitude dimension on a regular lat-lon grid.
-  Absorbs the functions previously in ``example_extras/power_spectra/psd_calc.py``.
+  1-D zonal FFT along the longitude dimension on a regular lat-lon grid. 
+  It regrids to a given resolution with:
+  lat_axis = np.arange(lat_min, lat_max + regrid_resolution / 2, regrid_resolution)
+  lon_axis = np.arange(lon_min, lon_max + regrid_resolution / 2, regrid_resolution)
+  In case of non regular lat-lons grids this can create distortions in the PSD, 
+  so the SHT-based method is recommended when possible. 
+  The FFT-based method is provided as a fallback for cases where the grid structure 
+  is unknown or non-standard, but it should be used with caution and awareness of its limitations.
+  Absorbs the functions previously in ``example_extras/power_spectra/psd_calc.py`` provided by the UKMet Office.
 """
 
 from __future__ import annotations
@@ -291,6 +298,80 @@ def _regular_lons_per_lat(nlat: int) -> list[int]:
 
 
 # ---------------------------------------------------------------------------
+# Grid detection
+# ---------------------------------------------------------------------------
+
+
+def detect_grid_type(
+    lats: np.typing.NDArray,
+    lons: np.typing.NDArray,
+    n_points: int,
+) -> str | None:
+    """Detect the grid type from latitude/longitude coordinates.
+
+    Checks whether the point count matches known grid structures (octahedral
+    reduced Gaussian or regular lat-lon). Returns ``None`` with a warning if
+    the grid cannot be identified (e.g. regional subsets or non-standard grids).
+
+    Parameters
+    ----------
+    lats : np.typing.NDArray
+        Latitude values (per-point), length ``n_points``.
+    lons : np.typing.NDArray
+        Longitude values (per-point), length ``n_points``.
+    n_points : int
+        Total number of grid points.
+
+    Returns
+    -------
+    str | None
+        ``"octahedral"``, ``"regular"``, or ``None`` if detection fails.
+    """
+    unique_lats = np.unique(lats)
+    nlat = len(unique_lats)
+
+    # Check global extent
+    lat_min, lat_max = unique_lats.min(), unique_lats.max()
+    lat_span = lat_max - lat_min
+
+    expected_span = 180.0 - 2 * (90.0 / nlat)  # approx span for a Gaussian grid
+    if lat_span < 0.8 * expected_span:
+        _logger.warning(
+            f"Grid detection: latitude range [{lat_min:.1f}°, {lat_max:.1f}°] spans only "
+            f"{lat_span:.1f}° (expected ~{expected_span:.1f}° for {nlat} latitudes). "
+            f"PSD via SHT requires a global grid. Returning None."
+        )
+        return None
+
+    # Check octahedral reduced Gaussian
+    expected_oct = sum(_octahedral_lons_per_lat(nlat))
+    if n_points == expected_oct:
+        _logger.info(f"Detected octahedral reduced Gaussian grid (nlat={nlat}).")
+        return "octahedral"
+
+    # Check regular lat-lon
+    expected_reg = sum(_regular_lons_per_lat(nlat))
+    if n_points == expected_reg:
+        _logger.info(f"Detected regular lat-lon grid (nlat={nlat}).")
+        return "regular"
+
+    # Check if all latitude rings have the same number of points (regular but non-standard ratio)
+    unique_lons_global = np.unique(lons)
+    if nlat * len(unique_lons_global) == n_points:
+        _logger.info(
+            f"Detected regular grid (nlat={nlat}, nlon={len(unique_lons_global)})."
+        )
+        return "regular"
+
+    _logger.warning(
+        f"Grid detection: {n_points} points with {nlat} latitudes does not match "
+        f"octahedral ({expected_oct}) or regular ({expected_reg}) grids. "
+        f"The dataset may be regional or use an unsupported grid type. Returning None."
+    )
+    return None
+
+
+# ---------------------------------------------------------------------------
 # High-level SHT PSD
 # ---------------------------------------------------------------------------
 
@@ -370,7 +451,7 @@ def sht_psd(
 
 
 # ---------------------------------------------------------------------------
-# FFT PSD (absorbed from psd_calc.py)
+# FFT PSD (Credits to UK MetOffice)
 # ---------------------------------------------------------------------------
 
 
@@ -448,6 +529,23 @@ def fft_psd(
     For unstructured grids (where lats/lons are per-point coordinates rather
     than regular axis arrays), the data is first regridded to a regular lat-lon
     grid using scipy nearest-neighbor interpolation.
+
+    .. warning::
+
+       The regridding uses ``scipy.interpolate.griddata`` with Euclidean
+       distance in (lat, lon) space.  This has known limitations:
+
+       - **Longitude wrap-around** (0°/360°) is not handled; grids spanning
+         the date line may produce artefacts near the boundary.
+       - **Metric distortion**: distance in (lat, lon) ≠ great-circle distance,
+         so nearest-neighbor assignment is approximate at high latitudes.
+       - **Projected grids** (e.g. CERRA Lambert conformal): if the native grid
+         is uniform in projected space but irregular in geographic lat/lon, the
+         regridded field will have non-uniform effective resolution and the
+         zonal FFT results are only approximate.
+
+       For non-geographic or projected grids, prefer the SHT method on the
+       original global grid, or interpret FFT PSD results with caution.
 
     Parameters
     ----------
@@ -599,7 +697,6 @@ def compute_psd_score(
     psd_regrid_resolution: float = 1.0,
     psd_sht_truncation: int | None = None,
     lat_range: tuple[float, float] = (-60.0, 60.0),
-    grid_type: str = "octahedral",
 ) -> tuple[float, dict]:
     """Compute PSD for a pair of 2-D fields and return a scalar score + curves.
 
@@ -644,15 +741,20 @@ def compute_psd_score(
     lons_valid = lons[valid_mask] if lons is not None and len(lons) == n_points else lons
     nlat_valid = len(np.unique(lats_valid)) if lats_valid is not None else nlat
 
-    # SHT requires the structurally-complete grid (all points present).
-    # If the data is a regional subset, skip with a warning.
+    # Auto-detect grid type if not provided
     if psd_method == "sht":
+        if lats_valid is None or lons_valid is None:
+            _logger.warning("PSD (SHT): lats/lons required for grid detection. Skipping.")
+            return np.nan, {}
+        grid_type = detect_grid_type(lats_valid, lons_valid, gt.shape[-1])
+        
         if grid_type == "octahedral":
             expected_pts = sum(_octahedral_lons_per_lat(nlat_valid))
         elif grid_type == "regular":
             expected_pts = sum(_regular_lons_per_lat(nlat_valid))
         else:
-            expected_pts = None  # cannot validate
+            expected_pts = None
+       
         actual_pts = gt.shape[-1]
         if expected_pts is not None and actual_pts != expected_pts:
             _logger.warning(
