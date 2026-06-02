@@ -145,6 +145,9 @@ class NetcdfParser(CfParser):
             if "mem" in data.dims:
                 data_dims.append("mem")
             if pls[0] is not None:
+                data_dims.append("pressure_level")
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 old_vars = [f"{new_var}_{p}" for p in pls]
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
@@ -152,6 +155,8 @@ class NetcdfParser(CfParser):
                     coords={"pressure_level": pls},
                 )
             else:
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=new_var).values,
                     dims=data_dims,
