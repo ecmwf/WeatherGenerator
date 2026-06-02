@@ -121,6 +121,7 @@ train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
+  log_grad_norms: True
 
 # parameters for data loading
 data_loading :
@@ -140,7 +141,7 @@ training_config:
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 2014-01-01T00:00
+  start_date: 2016-01-01T00:00
   end_date: 2023-08-31T00:00
 
   time_window_step: 01:00:00
@@ -161,7 +162,6 @@ training_config:
   optimizer:
     grad_clip: 1.0
     weight_decay: 0.1
-    log_grad_norms: True
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.98125 # == 0.85 on 2 nodes x 4 gpus

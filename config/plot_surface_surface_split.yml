@@ -1,0 +1,22 @@
+# Plot config for different forecast runs
+train:
+  plot:    
+    hxiq2ed9:
+      slurm_id: 0      
+      description: "Surface -> surface, split validation period, 6h time window"
+
+    rws89nxd:
+      slurm_id: 0      
+      description: "Surface -> surface, split validation period, 6h time window, launch-slurm"
+
+    z549hyus:
+      slurm_id: 0      
+      description: "Surface -> surface, split validation period, 6h time window, launch-slurm v2"
+
+
+
+
+    
+    
+    
+    

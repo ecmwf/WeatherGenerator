@@ -9,7 +9,7 @@ import weathergen.common.config as config
 TEST_RUN_ID = "test123"
 SECRET_COMPONENT = "53CR3T"
 DUMMY_PRIVATE_CONF = {
-    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"]
+    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"],
     "secrets": {
         "my_big_secret": {
             "my_secret_id": f"{SECRET_COMPONENT}01234",
@@ -159,7 +159,7 @@ def config_fresh(private_config_file):
 def base_config():
     return OmegaConf.create(DUMMY_BASE_CONF)
 
-@pytest.fixure
+@pytest.fixture
 def base_file(base_config):
     with tempfile.NamedTemporaryFile("w+") as temp:
         temp.write(OmegaConf.to_yaml(base_config))
@@ -236,12 +236,44 @@ def test_load_multiple_overwrites(private_config_file):
 def test_load_existing_config(mini_epoch, private_config_file, config_fresh):
     test_num_mini_epochs = 3000
 
-    config_fresh.num_mini_epochs = test_num_mini_epochs  # some specific change
+    config_fresh.training_config.num_mini_epochs = test_num_mini_epochs  # some specific change
     config.save(config_fresh, mini_epoch)
 
-    cf = config.load_merge_configs(private_config_file, config_fresh.run_id, mini_epoch)
+    cf = config.load_merge_configs(
+        private_config_file,
+        config.get_run_id_from_config(config_fresh),
+        mini_epoch,
+    )
 
-    assert cf.num_mini_epochs == test_num_mini_epochs
+    assert cf.training_config.num_mini_epochs == test_num_mini_epochs
+
+
+def test_strip_interpolation_with_int_dict_keys():
+    conf = OmegaConf.create(
+        {
+            "training_config": {
+                "losses": {
+                    "physical": {
+                        "type": "LossPhysical",
+                        "loss_fcts": {
+                            "mse": {
+                                "target_source_correspondence": {
+                                    0: {0: "independent"},
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
+
+    stripped = config._strip_interpolation(conf)
+
+    assert (
+        stripped.training_config.losses.physical.loss_fcts.mse.target_source_correspondence["0"]["0"]
+        == "independent"
+    )
 
 
 @pytest.mark.parametrize("options,cf", [(["foo=1", "bar=2"], {"foo": 1, "bar": 2}), ([], {})])
@@ -265,7 +297,7 @@ def test_set_run_id(config_fresh, run_id, reuse, expected, mocker):
 
     config_fresh = config.set_run_id(config_fresh, run_id, reuse)
 
-    assert config_fresh.run_id == expected
+    assert config.get_run_id_from_config(config_fresh) == expected
 
 
 def test_print_cf_no_secrets(config_fresh):
@@ -348,5 +380,13 @@ def test_load_duplicate_streams_same_file(streams_dir):
 def test_save(mini_epoch, config_fresh):
     config.save(config_fresh, mini_epoch)
 
-    cf = config.load_run_config(config_fresh.run_id, mini_epoch, config_fresh.model_path)
+    cf = config.load_run_config(
+        config.get_run_id_from_config(config_fresh),
+        mini_epoch,
+        config.get_path_model(config_fresh).parent,
+    )
     assert is_equal(cf, config_fresh)
+
+
+def test_timedelta_to_str_numeric_seconds():
+    assert config.timedelta_to_str(43200) == "12:00:00"

@@ -1,0 +1,14 @@
+# Plot config for different forecast runs
+train:
+  plot:    
+    bjvbc4lr:
+      slurm_id: 0      
+      description: "JEPA, schedule masking, avhrr + geos + oper analysis -> ERA5"
+
+
+
+
+    
+    
+    
+    

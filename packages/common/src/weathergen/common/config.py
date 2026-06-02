@@ -51,11 +51,14 @@ def parse_timedelta(val: str | int | float | np.timedelta64) -> np.timedelta64:
     return np.timedelta64(pd.to_timedelta(val)).astype("timedelta64[ms]")
 
 
-def timedelta_to_str(val: np.timedelta64 | pd.Timedelta) -> str:
+def timedelta_to_str(val: np.timedelta64 | pd.Timedelta | int | float | np.number) -> str:
     """
     Put timedelta into string in format HH:MM:SS
     """
-    dt = pd.to_timedelta(val)
+    if isinstance(val, int | float | np.number):
+        dt = pd.to_timedelta(val, unit="s")
+    else:
+        dt = pd.to_timedelta(val)
     total_seconds = int(dt.total_seconds())
 
     # Calculate HH:MM:SS

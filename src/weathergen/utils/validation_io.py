@@ -56,46 +56,57 @@ def write_output(
 
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
-            if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                preds = model_output.get_physical_prediction(t_idx, sname)
-                preds_shape = preds[0].shape
-                # for-loop to make sure we have a consistent number of samples
-                preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in preds]
-                targets_s = [np.zeros((0, preds_shape[2])) for _ in preds]
-                t_coords_s = [np.zeros((0, 2)) for _ in preds]
-                t_times_s = [np.array([]).astype("datetime64[ns]") for _ in preds]
+            preds = model_output.get_physical_prediction(t_idx, sname)
+            target_data = target_aux_out.physical[t_idx][sname]
+            targets = target_data["target"]
+            spoof_flags = target_data["is_spoof"]
 
+            preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
+
+            if preds is None:
+                preds = [None] * len(targets)
             else:
-                preds = model_output.get_physical_prediction(t_idx, sname)
-                targets = target_aux_out.physical[t_idx][sname]["target"]
+                assert len(preds) == len(targets), "Prediction/target batch length mismatch."
 
-                preds_s, targets_s, t_coords_s, t_times_s = [], [], [], []
+            for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
+                t_coords = target_data["target_coords"][i_batch]
+                t_times = target_data["target_times"][i_batch]
 
-                # handle forcing streams or if sample is empty
-                if preds is None:
+                if spoof_flags[i_batch]:
+                    pred_ens_size = (
+                        pred.shape[0]
+                        if pred is not None
+                        else stream_info.get("pred_head", {}).get("ens_size", 1)
+                    )
+                    pred_num_channels = target.shape[-1]
+                    coord_dim = t_coords.shape[-1] if t_coords.ndim > 1 else 0
+
+                    preds_s += [np.zeros((pred_ens_size, 0, pred_num_channels))]
+                    targets_s += [np.zeros((0, pred_num_channels))]
+                    t_coords_s += [np.zeros((0, coord_dim))]
+                    t_times_s += [np.array([], dtype="datetime64[ns]")]
+                    continue
+
+                # handle forcing streams or samples without targets
+                if pred is None:
                     # preds are empty so create copy of target and add ensemble dimension
-                    assert targets[0].shape[0] == 0, "Empty preds but non-empty targets."
-                    preds = [target.clone().unsqueeze(0) for target in targets]
+                    assert target.shape[0] == 0, "Empty preds but non-empty non-spoof targets."
+                    pred = target.clone().unsqueeze(0)
 
-                for i_batch, (pred, target) in enumerate(zip(preds, targets, strict=True)):
-                    target_data = target_aux_out.physical[t_idx][sname]
-                    t_coords = target_data["target_coords"][i_batch]
-                    t_times = target_data["target_times"][i_batch]
+                idxs_inv = target_data["idxs_inv"][i_batch]
+                if idxs_inv is not None:
+                    pred = pred[:, idxs_inv]
+                    target = target[idxs_inv]
+                    t_coords = t_coords[idxs_inv]
+                    t_times = t_times[idxs_inv]
 
-                    idxs_inv = target_aux_out.physical[t_idx][sname]["idxs_inv"][i_batch]
-                    if idxs_inv is not None:
-                        pred = pred[:, idxs_inv]
-                        target = target[idxs_inv]
-                        t_coords = t_coords[idxs_inv]
-                        t_times = t_times[idxs_inv]
+                # denormalize data if requested and map to storage format
+                preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
+                targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
 
-                    # denormalize data if requested and map to storage format
-                    preds_s += [dn_data(sname, pred.to(fp32)).detach().cpu().numpy()]
-                    targets_s += [dn_data(sname, target.to(fp32)).detach().cpu().numpy()]
-
-                    # extract original target coords and times from target data
-                    t_coords_s += [t_coords.cpu().numpy()]
-                    t_times_s += [t_times.astype("datetime64[ns]")]
+                # extract original target coords and times from target data
+                t_coords_s += [t_coords.cpu().numpy()]
+                t_times_s += [t_times.astype("datetime64[ns]")]
 
             targets_lens[-1] += [[]]
             targets_lens[-1][-1] += [t.shape[0] for t in targets_s]

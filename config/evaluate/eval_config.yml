@@ -29,14 +29,14 @@
 # max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
 
 evaluation:
-  metrics  : ["rmse", "mae"]
+  metrics  : ["rmse"]
   # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
   summary_plots : true
   ratio_plots : false
   heat_maps : false
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
-  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  plot_score_maps: true #plot scores on a 2D maps. it slows down score computation 
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
@@ -49,165 +49,42 @@ evaluation:
 default_streams:
   ERA5:
     regions: ["global"]
-    channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+    channels: ["2t", "10u", "10v", "z_500", "z_200", "t_1000", "t_850", "t_500", "t_200", "t_100", "u_850", "v_850", "v_500", "u_500", "q_850", "q_700", "q_500", "q_200", "lcc"]
     evaluation:
       forecast_step: "all"
       sample: "all"
       ensemble: "all" #supported: "all", "mean", [0,1,2]
     plotting:
-      sample: [1, 3]
-      forecast_step: [1,3, 2] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
-      ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
+      sample: [1, 2]
+      forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      ensemble: "all" #supported: "all", "mean", [0,1,2]
       plot_maps: true
       plot_bias: false
       plot_target: false
-      plot_histograms: true
-      plot_animations: true
-  CERRA:
-    regions: ["europe"]
-    channels: ["z_500", "t_850", "u_850"] #, "blah"]
-    evaluation:
-      forecast_step: "all"
-      sample: "all"
-    plotting:
-      sample: [2, 3, 0]
-      forecast_step: [1,3, 4, 5]
-      plot_maps: true
-      plot_bias: false
-      plot_target: false
-      plot_histograms: true
-      plot_animations: true
+      plot_histograms: false
+      plot_animations: false
       
 run_ids :
-  ar40mckx:
-    label: "pretrained model ar40mckx"
-    results_base_dir : "./results/"
-    #NEW: if "streams" is not specified, the default streams are used
+  z03blwd8:
+    label: "6 hr, oper an -> ERA5, 32 samples"
+    results_base_dir : "./results/z03blwd8/"
     
-      
-  c8g5katp:
-    label: "2 steps window"
-    results_base_dir : "./results/"
-    #NEW: if "streams" is not specified, the default streams are used
+  rj4r3f7a:
+    label: "6 hr, oper an + geo + iasi -> ERA5, 32 samples"
+    results_base_dir : "./results/rj4r3f7a/"
+
+  wye2stlk:
+    label: "12 hr, oper an -> ERA5, 32 samples"
+    results_base_dir : "./results/wye2stlk/"
+
+  # jf4bmp8w:
+  #   label: "12 hr, oper an + geo + iasi -> ERA5, 32 samples...only 1 step forecast!"
+  #   results_base_dir : "./results/jf4bmp8w/"
+
+  ### need to add the 2 step forecasting here when wx2o5j8f or cxhypikb is finished and inference can begin.
+
+  ymru0ydj:
+    label: "12 hr, oper an + geo + iasi -> ERA5, 32 samples"
+    results_base_dir : "./results/ymru0ydj/"
   
-  ###############################
-
-  #How to define custom variables different than default_streams (default_streams will be ignored for this run_id):
-
-  jjc9ym62:
-    label: "2 steps window"
-    color: "magenta" #optional: if not specified, the color is automatically assigned by the plotting module
-    results_base_dir : "./results/"
-    epoch: 1 #optional: if not specified epoch 0 (in inference it is always 0) is used
-    rank: 2 #optional: if not specified rank 0 is used
-    streams:
-      ERA5:
-        channels: ["2t", "10u", "10v"] 
-        evaluation:
-          forecast_step: "all"
-          sample: "all"
-          ensemble: "mean" 
-        plotting:
-          sample: [1, 3]
-          forecast_step: [1,3, 2]
-          ensemble: "mean" 
-          plot_maps: true
-          plot_bias: false
-          plot_target: false
-          plot_histograms: true
-          plot_animations: true
-
   
-
-  #WeatherGeneratorMerge example:
-  ###############################
-
-  #Example of syntax to stack multiple runs over the ensemble dimension  
-  merge_test: #<------ This is the new run_id name of the merged dataset. NB. you always need to specify one
-    type: "merge" # <------- VERY IMPORTANT
-    merge_run_ids:
-      - so67dku4
-      - c9cg8ql3
-    merge_metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
-    label: "Merged Results"
-    color: "green" #optional
-    results_base_dir : "./results/"
-    streams:
-      ERA5:
-        channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
-        evaluation:
-          forecast_step: [2,4,6] 
-          sample: [0, 1, 2, 3]
-          ensemble: "all" 
-
-  #WeatherGeneratorJSON example:
-  ##############################
-
-  #Example of syntax to run over pre-computed scores when the .zarr output is not available anymore
-  so67dku1:
-    type: "json" # <------- VERY IMPORTANT
-    label: "WeatherGenerator"
-    results_base_dir : "./results/"
-    streams:
-      ERA5:
-        channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
-        evaluation:
-          forecast_step: [2,4,6] 
-          sample: [0, 1, 2, 3]
-          ensemble: "all" #supported
-
-  #WeatherGeneratorMerge JSON example:
-  ###############################
-
-  #Example of syntax to stack multiple runs over the ensemble dimension  
-  merge_test: #<------ This is the new run_id name of the merged dataset. NB. you always need to specify one
-    type: "jsonmerge" # <------- VERY IMPORTANT
-    merge_run_ids:
-      - so67dku4
-      - c9cg8ql3
-    merge_metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
-    label: "Merged Results"
-    results_base_dir : "./results/"
-    streams:
-      ERA5:
-        channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
-        evaluation:
-          forecast_step: [2,4,6] 
-          sample: [0, 1, 2, 3]
-          ensemble: "all" 
-
-  # CSV Reader example:
-  ###############################
-
-  #ADVANCED (please handle with care): example of how to use the csv reader to Plot PanguWeather scores computed with quaver
-  pangu:
-    type: "csv"
-    label: "Pangu-Weather"
-    metrics_dir: "<path to folder>"
-    streams: 
-      ERA5: 
-        channels: ["2t", "q_850", "t_850", "z_500"]
-        evaluation: 
-          forecast_step: "all"
-          sample: "all"
-  
-  graphcast:
-    type: "csv"
-    label: "GraphCast"
-    metrics_dir: "<path to folder>"
-    streams: 
-      ERA5: 
-        channels: ["2t", "q_850", "t_850", "z_500"]
-        evaluation: 
-          forecast_step: "all"
-          sample: "all"
-  
-  #mertics with parameters example:
-  ###############################
-
-  #Example of syntax to pass parameters to individual metrics
-  evaluation:
-    metrics:
-    - fbi:
-        thresh: 280
-    - rmse

@@ -1,0 +1,39 @@
+# Plot config for different forecast runs
+train:
+  plot:    
+    
+    # new ones with 2016 start date
+    h78w6fod:
+      slurm_id: 0      
+      description: "baseline oper analysis -> ERA5"
+
+    m0ucpht6:
+      slurm_id: 0      
+      description: "avhrr + geos + oper analysis -> ERA5"
+
+    vwuiav5p:
+      slurm_id: 0      
+      description: "masking, avhrr + geos + oper analysis -> ERA5"
+
+    mn5vyje9:
+      slurm_id: 0      
+      description: "schedule masking, avhrr + geos + oper analysis -> ERA5"
+
+    # new ones with 2016 start date
+    emj4wqir:
+      slurm_id: 0      
+      description: "baseline oper analysis -> ERA5, 2016 start date"
+
+    pizlwe4f:
+      slurm_id: 0      
+      description: "avhrr + geos + oper analysis -> ERA5, 2016 start date"
+
+    fci7feoq:
+      slurm_id: 0      
+      description: "fixed masking, avhrr + geos + oper analysis -> ERA5, 2016 start date"
+
+
+    
+    
+    
+    

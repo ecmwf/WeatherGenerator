@@ -1,0 +1,59 @@
+# Plot config for different forecast runs
+train:
+  plot:    
+    
+    # new ones with 2016 start date, 6h time window, 1h time_window_step
+    l6cwt3uq:
+      slurm_id: 0      
+      description: "baseline oper analysis -> ERA5"
+
+    zuylj62z:
+      slurm_id: 0      
+      description: "avhrr + geos + oper analysis -> ERA5"
+
+    # new ones with 2016 start date, 6h time window, 6h time_window_step
+
+    vg5dyuce:
+      slurm_id: 0      
+      description: "baseline oper analysis -> ERA5, 6h time window step"
+    
+    hstz2jbv:
+      slurm_id: 0      
+      description: "avhrr + geos + oper analysis -> ERA5, 6h time window step"
+
+    # new ones with 2016 start date, 12h time window
+    op5kar4d:
+      slurm_id: 0      
+      description: "baseline oper analysis -> ERA5, 12h time window"
+
+    # xt0fmyuo:
+    #   slurm_id: 0      
+    #   description: "avhrr + geos + oper analysis -> ERA5, 12h time window, 1 step forecast"
+
+    wx2o5j8f:
+      slurm_id: 0      
+      description: "avhrr + geos + oper analysis -> ERA5, 12h time window, 2 steps forecast"
+
+    to83j6d0:
+      slurm_id: 0      
+      description: "cont., avhrr + geos + oper analysis -> ERA5, 12h time window, 2 steps forecast"
+
+    # cxhypikb: 
+    #   slurm_id: 0      
+    #   description: "avhrr + geos + oper analysis -> ERA5, 12h time window, 2 steps forecast"
+
+    gcsy0tq5:
+      slurm_id: 0      
+      description: "baseline oper analysis -> ERA5, 12h time window, 1h time window step, 2 steps forecast"
+
+    qle54tp9:
+      slurm_id: 0      
+      description: "avhrr + geos + oper analysis -> ERA5, 12h time window, 1h time window step, 2 steps forecast"
+
+
+
+
+    
+    
+    
+    

@@ -90,7 +90,7 @@ norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_georing_avhrr_forecast_random_inputs/"
+streams_directory: "./config/streams/era5_georing_avhrr_forecast_12hr_all_inputs/"
 streams: ???
 
 # type of zarr_store
@@ -144,8 +144,10 @@ training_config:
   start_date: 2016-01-01T00:00
   end_date: 2023-08-31T00:00
 
+  # 12h windows start at 00/12 UTC. With 12h input frequency this gives one
+  # operational-analysis source at the window start; obs streams fill [start, start+12h).
   time_window_step: 01:00:00
-  time_window_len: 06:00:00
+  time_window_len: 12:00:00
 
   learning_rate_scheduling :
     lr_start: 1e-6
@@ -187,7 +189,7 @@ training_config:
     }
 
   forecast :
-      time_step: 06:00:00
+      time_step: 12:00:00
       offset: 1
       num_steps: 2
       policy: "fixed"
@@ -202,8 +204,8 @@ validation_config:
   start_date: 2023-10-01T00:00
   end_date: 2023-12-31T00:00
 
-  time_window_step: 06:00:00
-  time_window_len: 06:00:00
+  time_window_step: 01:00:00
+  time_window_len: 12:00:00
 
   # whether to track the exponential moving average of weights for validation
   validate_with_ema:
