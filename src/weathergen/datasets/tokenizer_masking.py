@@ -23,6 +23,7 @@ from weathergen.datasets.tokenizer_utils import (
     tokenize_space,
     tokenize_spacetime,
 )
+from weathergen.utils.utils import is_stream_diagnostic
 
 
 def readerdata_to_torch(rdata: IOReaderData) -> IOReaderData:
@@ -129,6 +130,18 @@ class TokenizerMasking(Tokenizer):
     ):
         # create tokenization index
         (idxs_cells, idxs_cells_lens) = idxs_cells_data
+
+        # Force-keep one populated source cell so a fully-masked (but non-empty) stream still
+        # produces tokens. Otherwise its per-stream embedding is never called, leaving those
+        # parameters without gradient and crashing DDP. Diagnostic streams are never a model
+        # input (Identity embed, no params), so they are intentionally left fully masked.
+        # cell_mask may be a numpy array or a torch tensor depending on the masking strategy.
+        if not is_stream_diagnostic(stream_info, self.masker.stage):
+            populated = np.array([len(lens_cell) > 0 for lens_cell in idxs_cells_lens], dtype=bool)
+            kept = np.asarray(cell_mask, dtype=bool)
+            if populated.any() and not (kept & populated).any():
+                cell_mask = cell_mask.clone() if torch.is_tensor(cell_mask) else cell_mask.copy()
+                cell_mask[int(np.argmax(populated))] = True
 
         # select strategy from XXX depending on stream and if student or teacher
 

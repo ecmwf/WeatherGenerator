@@ -83,7 +83,7 @@ with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
 with_fsdp: False
-ddp_find_unused_parameters: True
+ddp_find_unused_parameters: False
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
