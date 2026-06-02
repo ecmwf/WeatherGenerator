@@ -224,13 +224,13 @@ validation_config:
 
 test_config:
 
-  offgrid_eval:
+  offgrid_inference:
     # absolute path to .npy file with shape (N, 2) [lat, lon] used for offgrid inference
-    grid: /e/scratch/weatherai/shared_work/offgrid-test/offgrid_regular.npy
+    coords: /e/scratch/weatherai/shared_work/offgrid-test/offgrid_regular.npy
+    # absolute path to .npy file with shape (N, G) used for offgrid inference; use null if no geoinfos are available
+    geoinfos: /e/scratch/weatherai/shared_work/offgrid-test/offgrid_regular_geoinfos.npy
     # temporal spacing between offgrid samples, e.g. 6h
     frequency: 6h
-    # TODO add support for geoinfos
-    geoinfos: null
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val

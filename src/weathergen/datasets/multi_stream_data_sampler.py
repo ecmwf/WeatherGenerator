@@ -23,8 +23,8 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
 )
 from weathergen.datasets.data_reader_fesom import DataReaderFesom
-from weathergen.datasets.data_reader_offgrid import DataReaderOffgrid
 from weathergen.datasets.data_reader_obs import DataReaderObs
+from weathergen.datasets.data_reader_offgrid import DataReaderOffgrid
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
 from weathergen.datasets.tokenizer_masking import TokenizerMasking
@@ -141,12 +141,14 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.streams_datasets: dict[StreamName, list[AnyDataReader]] = {}
 
-        # Setup for offgrid inference and evaluation
-        offgrid_eval = mode_cfg.get("offgrid_eval", {})
-        # Path to .npy file containing offgrid coordinates
-        self.offgrid_template = offgrid_eval.get("grid", None)
-        # Frequency defined by config (offgrid_eval.frequency) with fallback to time_window_step
-        self.offgrid_frequency = offgrid_eval.get("frequency", mode_cfg.time_window_step)
+        # setup for offgrid inference and evaluation
+        offgrid_inference = mode_cfg.get("offgrid_inference", {})
+        # path to .npy file containing offgrid coordinates
+        offgrid_coords = offgrid_inference.get("coords", None)
+        # path to .npy file containing offgrid geoinfos (if available)
+        offgrid_geoinfos = offgrid_inference.get("geoinfos", None)
+        # frequency defined by config (offgrid_inference.frequency); fallback to time_window_step
+        offgrid_frequency = offgrid_inference.get("frequency", mode_cfg.time_window_step)
 
         for _, stream_info in enumerate(cf.streams):
             # list of sources for current stream
@@ -199,15 +201,22 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                # load offgrid dataset if specified
-                if self.offgrid_template is not None:
-                    filename = pathlib.Path(str(self.offgrid_template))
+                # load offgrid datareader if specified
+                if offgrid_coords is not None:
+                    filename = pathlib.Path(str(offgrid_coords))
+                    geoinfos_filename = (
+                        pathlib.Path(str(offgrid_geoinfos))
+                        if offgrid_geoinfos is not None
+                        else None
+                    )
+                    # wrap offgrid reader around current dataset to inherit metadata
                     ds = DataReaderOffgrid(
                         tw_handler=self.time_window_handler,
                         filename=filename,
-                        frequency=self.offgrid_frequency,
+                        frequency=offgrid_frequency,
                         stream_info=stream_info,
                         ref_reader=ds,
+                        geoinfos_filename=geoinfos_filename,
                     )
 
                 stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
