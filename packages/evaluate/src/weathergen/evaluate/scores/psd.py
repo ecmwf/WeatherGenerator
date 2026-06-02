@@ -12,7 +12,7 @@
 Provides two PSD computation paths:
 
 - **Path A – SHT-based PSD** (``method="sht"``):
-  Spherical Harmonic Transform on unstructured grids (octahedral, reduced
+  Spherical Harmonic Transform on separable grids (octahedral, reduced
   Gaussian, regular lat-lon).  Ported from anemoi.models ``spectral_transforms.py`` to pure
   numpy using Legendre helpers from anemoi.models ``spectral_helpers.py``.
   [anemoi.models.spectral_transforms]
@@ -187,7 +187,9 @@ class InverseSphericalHarmonicTransform:
     Reconstructs a spatial field from spectral coefficients (l, m).
     Mirrors the ``InverseSphericalHarmonicTransform`` from ``spectral_helpers.py``
     in anemoi.models but operates on numpy arrays.
-
+    This is not needed for the PSD computation but it is included as sanity check
+    to verify that the forward and inverse transforms are consistent with each other.
+    
     Parameters
     ----------
     lons_per_lat : list[int]
