@@ -99,7 +99,9 @@ class VerifParser(CfParser):
                 f"Reference time {ref_time} not found in observation data. Skipping sample."
             )
             return
-
+        
+        self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end, default_fstep)
+        
         da_fs = []
         for result in fstep_iterator_results:
             if result is None:
@@ -117,9 +119,6 @@ class VerifParser(CfParser):
         if da_fs:
             if self.zarr_coords is None:
                 self.zarr_coords = get_grid_points(da_fs[0])
-                self.zarr_dt = self.get_zarr_dt(
-                    source_interval_start, source_interval_end, default_fstep
-                )
             # check consistency of grid points across forecast steps
             if len(da_fs) > 1:
                 assert np.array_equal(get_grid_points(da_fs[1]), get_grid_points(da_fs[0])), (
@@ -324,9 +323,29 @@ class VerifParser(CfParser):
 
             # remove unnecessary
             new_ds = new_ds.drop_sel(channel=["10u", "10v"])
-            return new_ds
-        else:
-            return ds
+            ds = new_ds
+
+        if "tp" in self.channels:
+            if self.zarr_dt < np.timedelta64(1, "h"):
+                _logger.warning(
+                    f"Observation time resolution {self.zarr_dt} is less than 1 hour. "
+                    "WeatherGenerator output will be aggregated to 1 hour intervals"
+                    "This feature has not undergone rigourous testing, check output"
+                )
+                int_factor = int(np.timedelta64(1, "h") / self.zarr_dt)
+                # initialise empty
+                precip_accumulate = np.full(ds.data_vars["tp"].shape, np.nan, dtype=np.float32)
+                accumulate = np.zeros(ds.ipoint.shape[0])
+                for i, leadtime in enumerate(ds.coords["leadtime"].values):
+                    for j in range(int_factor):
+                        back_time = leadtime - self.zarr_dt + (j + 1) * self.zarr_dt
+                        accumulate += (
+                            ds.data_vars["tp"].sel(time=back_time).squeeze()
+                        )
+                    precip_accumulate[:, i, :] = accumulate
+                ds["tp"] = xr.DataArray(precip_accumulate, dims=ds.data_vars["tp"].dims, attrs=ds.data_vars["tp"].attrs)
+        
+        return ds
 
     def regrid(self, ds: xr.Dataset, verif_var: str) -> xr.Dataset:
         """
