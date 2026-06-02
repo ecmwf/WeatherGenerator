@@ -756,6 +756,52 @@ def plot_data(
 # ---------------------------------------------------------------------------
 
 
+def _fix_zero_lead_times_for_diffusion(scores_dict: dict) -> dict:
+    """Replace all-zero lead_time coordinates with 1, 2, 3, ... when forecast_step is increasing.
+
+    Some runs store no valid timestamps, leaving lead_time as all zeros while
+    forecast_step is a proper increasing sequence.  In that case the x-axis of
+    summary plots collapses to a single point.  This function detects the
+    pattern and replaces lead_time with the 1-based forecast-step index so
+    plots remain readable.
+
+    Parameters
+    ----------
+    scores_dict : dict
+        Nested dict ``scores_dict[metric][region][stream][run_id]`` → xr.DataArray.
+        Modified **in-place** and also returned for convenience.
+    """
+    import numpy as np
+
+    for metric in scores_dict:
+        for region in scores_dict[metric]:
+            for stream in scores_dict[metric][region]:
+                for run_id, da in scores_dict[metric][region][stream].items():
+                    if not isinstance(da, xr.DataArray):
+                        continue
+                    if "lead_time" not in da.coords or "forecast_step" not in da.dims:
+                        continue
+                    lt = da.coords["lead_time"].values
+                    fs = da.coords["forecast_step"].values
+                    lt_flat = np.asarray(lt).ravel()
+                    fs_flat = np.asarray(fs).ravel()
+                    if (
+                        len(lt_flat) > 1
+                        and np.all(lt_flat == 0)
+                        and np.all(np.diff(fs_flat) > 0)
+                    ):
+                        new_lt = np.arange(1, len(fs_flat) + 1, dtype=lt.dtype)
+                        scores_dict[metric][region][stream][run_id] = da.assign_coords(
+                            lead_time=("forecast_step", new_lt)
+                        )
+                        _logger.debug(
+                            f"Fixed all-zero lead_time for run={run_id} "
+                            f"metric={metric} region={region} stream={stream}: "
+                            f"replaced with 1..{len(new_lt)}"
+                        )
+    return scores_dict
+
+
 def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     """Plot summary of the evaluation results.
 
@@ -768,6 +814,9 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     summary_dir : Path
         Directory to write plots to.
     """
+    # TODO: this is a quick fix for plotting diffusion inference steps as if they were forecst steps
+    scores_dict = _fix_zero_lead_times_for_diffusion(scores_dict)
+
     runs = cfg.run_ids
     metrics = cfg.evaluation.metrics
     print_summary = cfg.evaluation.get("print_summary", False)
