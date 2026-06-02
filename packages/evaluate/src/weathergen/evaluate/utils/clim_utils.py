@@ -15,6 +15,8 @@ import xarray as xr
 from scipy.spatial import cKDTree
 from tqdm import tqdm
 
+from weathergen.evaluate.utils.derived_channels import scale_z_channels
+
 _logger = logging.getLogger(__name__)
 
 
@@ -245,6 +247,7 @@ def get_climatology(reader, da_tars, stream: str) -> dict | None:
     if clim_data_path is not None:
         clim_data = xr.open_dataset(clim_data_path)
         _logger.info("Aligning climatological data with target structure...")
-        return align_clim_data(da_tars, clim_data)
+        aligned = align_clim_data(da_tars, clim_data)
+        return {fstep: scale_z_channels(da, stream) for fstep, da in aligned.items()}
 
     return None
