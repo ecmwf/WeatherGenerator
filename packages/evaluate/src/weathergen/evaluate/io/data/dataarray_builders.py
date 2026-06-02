@@ -139,7 +139,7 @@ def build_gridded_dataarrays(
         "lat": ("ipoint", sub_lat),
         "lon": ("ipoint", sub_lon),
         "valid_time": (("sample", "ipoint"), valid_time_2d),
-        "source_interval_start": ("sample", init_times.copy()),
+        "source_interval_end": ("sample", init_times.copy()),
         "forecast_step": forecast_step_val,
     }
 
@@ -239,7 +239,7 @@ def build_scatter_dataarrays(
             "lat": ("ipoint", sample_lat),
             "lon": ("ipoint", sample_lon),
             "valid_time": ("ipoint", vt_arr),
-            "source_interval_start": si_start,
+            "source_interval_end": si_start,
             "forecast_step": forecast_step_val,
             "sample": sample,
         }

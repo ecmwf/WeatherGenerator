@@ -88,7 +88,7 @@ def _select_channels(
 def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     """
     Add lead_time coordinate computed as:
-    valid_time - source_interval_start
+    valid_time - source_interval_end
 
     lead_time has dims (sample, ipoint) and dtype timedelta64[ns].
 
@@ -109,8 +109,8 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
 
     """
     vt = da["valid_time"].values
-    sis = da["source_interval_start"].values
-    # Compute lead_time: valid_time - source_interval_start
+    sis = da["source_interval_end"].values
+    # Compute lead_time: valid_time - source_interval_end
 
     if vt.ndim > 1:
         sis_expanded = sis[:, np.newaxis] if sis.ndim == 1 else sis
