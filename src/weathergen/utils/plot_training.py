@@ -222,7 +222,10 @@ def get_stream_names(run_id: str, model_path: Path | None = "./model"):
     """
     # return col names from training (should be identical to validation)
     cf = config.load_run_config(run_id, None, model_path=model_path)
-    return [si["name"].replace(",", "").replace("/", "_").replace(" ", "_") for si in cf.streams]
+    return [
+        stream_name.replace(",", "").replace("/", "_").replace(" ", "_")
+        for stream_name in cf.streams.keys()
+    ]
 
 
 ####################################################################################################
@@ -594,16 +597,15 @@ def plot_loss_per_run(
 
             x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
             # find the cols of the requested metric (e.g. mse) for all streams
-            data_cols = [c for _, c in enumerate(run_data_mode.columns) if err in c]
             data_cols = []
             for col in run_data_mode.columns:
                 col_split = col.split(".")
-                if len(col_split) < 4:
-                    continue
-                if col_split[2].lower() == err.lower() and col_split[3] == channels:
+                if (
+                    len(col_split) >= 4
+                    and col_split[2].lower() == err.lower()
+                    and col_split[3] in channels
+                ):
                     data_cols += [col]
-
-            data_cols = list(data_cols)
 
             for _, col in enumerate(data_cols):
                 for j, stream_name in enumerate(stream_names):
@@ -833,15 +835,13 @@ def plot_train(args=None):
                     from_run_id=run_id,
                     mini_epoch=None,
                 )
-            for stream_info in cf.streams:
-                streams += [stream_info["name"]]
+            streams += list(cf.streams.keys())
         # ensure items are unique
         streams = list(set(streams))
         # remove "all" key that is a special flag and not an actual stream name
         streams.remove("all")
 
     # read logged data
-
     runs_data = [
         TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
         for run_id in runs_ids
