@@ -46,7 +46,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/ft_forecast_analysis_georing_avhrr_synop/"
+streams_directory: "./config/streams/jepa_forecast_multi_data_all_years/"
 streams: ???
 
 general:
@@ -107,11 +107,11 @@ training_config:
     enabled: false
 
 
-  num_mini_epochs: 32
+  num_mini_epochs: 24
   samples_per_mini_epoch: 8192
   shuffle: True
 
-  start_date: 2016-01-01T00:00
+  start_date: 1980-01-01T00:00
   end_date: 2022-12-31T00:00
 
   time_window_step: 01:00:00
@@ -135,8 +135,8 @@ training_config:
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.98125
-      beta2 : 0.9875
+      beta1 : 0.9875 # at B=8 beta1 =0.9
+      beta2 : 0.994 # at B=8 beta1 approx 0.95
       eps : 1e-08
 
   losses : {

@@ -101,7 +101,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/pretrain_era5_georing_avhrr_synop/"
+streams_directory: "./config/streams/pretrain_multi_data_all_years/"
 streams: ???
 
 general:
@@ -134,7 +134,7 @@ train_logging:
   # Detects representation collapse via various metrics
   # For forecasting, supports sequences of latents with per-step and aggregate metrics
   collapse_monitoring:
-    enabled: false
+    enabled: False
     compute_frequency: 100  # batches between metric computations
     log_frequency: 100      # batches between metric logging
     metrics:
@@ -198,7 +198,7 @@ training_config:
   start_date: 1980-01-01T00:00
   end_date: 2022-12-31T00:00
 
-  time_window_step: 06:00:00
+  time_window_step: 01:00:00
   time_window_len: 06:00:00
 
   window_offset_prediction : 0
@@ -220,8 +220,8 @@ training_config:
     weight_decay: 0.05
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.975
-      beta2 : 0.9875
+      beta1 : 0.9875 # at B=8 beta1 =0.9
+      beta2 : 0.994 # at B=8 beta1 approx 0.95
       eps : 2e-08
 
   losses : {
