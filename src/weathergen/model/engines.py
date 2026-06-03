@@ -570,6 +570,9 @@ class ForecastingEngine(torch.nn.Module):
         self.num_healpix_cells = num_healpix_cells
         self.fe_blocks = torch.nn.ModuleList()
 
+        _concat_hd = self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
+        _inner_dim = 2 * self.cf.ae_global_dim_embed if _concat_hd else self.cf.ae_global_dim_embed
+
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
             for i in range(self.cf.fe_num_blocks):
@@ -577,7 +580,7 @@ class ForecastingEngine(torch.nn.Module):
                 if (i % global_rate == 0) or i + 1 == self.cf.fe_num_blocks:
                     self.fe_blocks.append(
                         MultiSelfAttentionHead(
-                            self.cf.ae_global_dim_embed,
+                            _inner_dim,
                             num_heads=self.cf.fe_num_heads,
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
@@ -596,7 +599,7 @@ class ForecastingEngine(torch.nn.Module):
                 else:
                     self.fe_blocks.append(
                         MultiSelfAttentionHeadLocal(
-                            self.cf.ae_global_dim_embed,
+                            _inner_dim,
                             num_heads=self.cf.fe_num_heads,
                             qkv_len=self.num_healpix_cells * self.cf.ae_local_num_queries,
                             block_factor=self.cf.ae_global_block_factor,
@@ -635,8 +638,8 @@ class ForecastingEngine(torch.nn.Module):
                 # Add MLP block
                 self.fe_blocks.append(
                     MLP(
-                        self.cf.ae_global_dim_embed,
-                        self.cf.ae_global_dim_embed,
+                        _inner_dim,
+                        _inner_dim,
                         num_layers=2,
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
@@ -651,7 +654,7 @@ class ForecastingEngine(torch.nn.Module):
                 # Optionally, add LayerNorm after i-th layer
                 if i in self.cf.get("fe_layer_norm_after_blocks", []):
                     self.fe_blocks.append(
-                        torch.nn.LayerNorm(self.cf.ae_global_dim_embed, elementwise_affine=False)
+                        torch.nn.LayerNorm(_inner_dim, elementwise_affine=False)
                     )
 
         def init_weights_final(m):
@@ -662,6 +665,12 @@ class ForecastingEngine(torch.nn.Module):
 
         for block in self.fe_blocks:
             block.apply(init_weights_final)
+
+        # For concatenate_hiddendim: project 2D -> D after the full forward pass
+        self.out_proj = (
+            torch.nn.Linear(_inner_dim, self.cf.ae_global_dim_embed, bias=False)
+            if _concat_hd else None
+        )
 
     def forward(
         self,
@@ -694,13 +703,29 @@ class ForecastingEngine(torch.nn.Module):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 elif isinstance(block, MultiCrossAttentionHead):
                     assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
-                    tokens = checkpoint(block, tokens, conditioning, noise_emb, use_reentrant=False)
+                    if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
+                        tokens = checkpoint(block, tokens, conditioning, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn_rev":
+                        tokens = checkpoint(block, conditioning, tokens, noise_emb, use_reentrant=False)
                 else:
                     if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
                         assert conditioning is not None, "conditioning must be provided for diffusion model conditioning"
                         tokens = checkpoint(block, tokens, coords, noise_emb, conditioning, use_reentrant=False)
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
                         assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn_rev":
+                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn_rev conditioning"
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "additive":
+                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for additive conditioning"
+                        tokens = tokens + conditioning
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate":
+                        # Conditioning already baked into tokens via sequence concat in DiffusionForecastEngine.denoise()
+                        tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
+                    elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim":
+                        # Conditioning already baked into tokens via hidden-dim concat in DiffusionForecastEngine.denoise()
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     else:
                         assert conditioning is None, "conditioning should not be provided when diffusion model conditioning is disabled"
@@ -711,6 +736,9 @@ class ForecastingEngine(torch.nn.Module):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 else:
                     tokens = checkpoint(block, tokens, coords, conditioning, use_reentrant=False)
+
+        if self.out_proj is not None:
+            tokens = self.out_proj(tokens)  # (B, H, 2D) -> (B, H, D)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
 
