@@ -562,7 +562,7 @@ class DataReaderMesh(DataReaderTimestep):
                         chunk = np.repeat(np.expand_dims(chunk, 0), n_steps, axis=0)
 
                 # 6. Apply Land Masks
-                chunk[(chunk == 0.0) | (chunk <= -9000.0)] = np.nan
+                chunk[(chunk <= -9000.0)] = np.nan
                 chunk[~np.isfinite(chunk)] = np.nan
                 output_block[:, i] = chunk.reshape(-1)
 
