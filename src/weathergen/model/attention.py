@@ -19,8 +19,8 @@ from weathergen.model.positional_encoding import apply_rope
 """
 Attention blocks used by WeatherGenerator.
 
-Some blocks optionally apply 2D RoPE. When enabled, the caller must provide per-token 2D
-coordinates aligned with the token order (lat, lon in radians).
+Some blocks optionally apply RoPE-like positional modulation. When enabled, the caller must
+provide per-token coordinates aligned with the token order (lat, lon in radians).
 """
 
 

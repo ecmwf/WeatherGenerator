@@ -72,9 +72,13 @@ class EncoderModule(torch.nn.Module):
 
         self.register_buffer(
             "pe_global",
-            torch.zeros(self.num_healpix_cells, cf.ae_local_num_queries, cf.ae_global_dim_embed, dtype=self.dtype),
+            torch.zeros(
+                self.num_healpix_cells,
+                cf.ae_local_num_queries,
+                cf.ae_global_dim_embed,
+                dtype=self.dtype,
+            ),
         )
-        
 
         # RoPE coordinates
         self.rope_mode = get_rope_mode(cf, logger)
@@ -404,6 +408,8 @@ class EncoderModule(torch.nn.Module):
         tokens_global_register_class,
         tokens_lens,
         rope_cell_coords=None,
+        rope_cell_coeffs=None,
+        rope_extra_coeffs=None,
     ):
         """
         Aggregation engine on the global latents of unmasked cells
@@ -434,8 +440,19 @@ class EncoderModule(torch.nn.Module):
         )
 
         # Build packed coords matching the interleaved token order
-        if rope_cell_coords is not None:
-            num_extra = self.num_class_tokens + self.num_register_tokens
+        num_extra = self.num_class_tokens + self.num_register_tokens
+        if rope_cell_coeffs is not None:
+            extra_real, extra_imag = rope_extra_coeffs.unbind(dim=-1)
+            cell_real, cell_imag = rope_cell_coeffs.unbind(dim=-1)
+            packed_real = []
+            packed_imag = []
+            for mask_b in cell_mask.flatten(0, 1):
+                packed_real.append(extra_real)
+                packed_imag.append(extra_imag)
+                packed_real.append(cell_real[mask_b])
+                packed_imag.append(cell_imag[mask_b])
+            packed_coords = (torch.cat(packed_real, dim=0), torch.cat(packed_imag, dim=0))
+        elif rope_cell_coords is not None:
             zero_coords = torch.zeros(
                 num_extra, 2, device=rope_cell_coords.device, dtype=rope_cell_coords.dtype
             )
