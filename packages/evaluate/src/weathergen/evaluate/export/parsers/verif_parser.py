@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 import xarray as xr
 from omegaconf import OmegaConf
 
@@ -99,9 +98,9 @@ class VerifParser(CfParser):
                 f"Reference time {ref_time} not found in observation data. Skipping sample."
             )
             return
-        
+
         self.zarr_dt = self.get_zarr_dt(source_interval_start, source_interval_end, default_fstep)
-        
+
         da_fs = []
         for result in fstep_iterator_results:
             if result is None:
@@ -165,19 +164,14 @@ class VerifParser(CfParser):
         if zarr_dt == np.timedelta64(0, "h"):
             # get from inference config, convert to timedelta64
             default_fstep = default_fstep.split(" ")[0]
-            print(default_fstep)
             # backwards compatibility if fstep in '06:00:00' format
             if ":" in default_fstep:
                 default_fstep = default_fstep.split(":")[0]
                 zarr_dt = np.timedelta64(int(default_fstep), "h")
             else:
-                zarr_dt = np.timedelta64(int(default_fstep), "ms").astype(
-                    "timedelta64[h]"
-                )
+                zarr_dt = np.timedelta64(int(default_fstep), "ms").astype("timedelta64[h]")
         if zarr_dt == np.timedelta64(0, "h"):
-            raise ValueError(
-                "Default forecast step is zero. Double check config"
-            )
+            raise ValueError("Default forecast step is zero. Double check config")
         return zarr_dt
 
     def get_output_filename(self, variable: str) -> Path:
@@ -348,12 +342,12 @@ class VerifParser(CfParser):
                 for i, leadtime in enumerate(ds.coords["leadtime"].values):
                     for j in range(int_factor):
                         back_time = leadtime - self.zarr_dt + (j + 1) * self.zarr_dt
-                        accumulate += (
-                            ds.data_vars["tp"].sel(time=back_time).squeeze()
-                        )
+                        accumulate += ds.data_vars["tp"].sel(time=back_time).squeeze()
                     precip_accumulate[:, i, :] = accumulate
-                ds["tp"] = xr.DataArray(precip_accumulate, dims=ds.data_vars["tp"].dims, attrs=ds.data_vars["tp"].attrs)
-        
+                ds["tp"] = xr.DataArray(
+                    precip_accumulate, dims=ds.data_vars["tp"].dims, attrs=ds.data_vars["tp"].attrs
+                )
+
         return ds
 
     def regrid(self, ds: xr.Dataset, verif_var: str) -> xr.Dataset:

@@ -323,7 +323,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         grid_type = get_grid_type(data_type, stream, fname_zarr)
         channels = get_channels(channels, stream, fname_zarr)
         source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
-        default_fstep = inference_config.training_config.forecast.time_step if inference_config else None
+        default_fstep = (
+            inference_config.training_config.forecast.time_step if inference_config else None
+        )
         kwargs["grid_type"] = grid_type
         kwargs["channels"] = channels
         kwargs["data_type"] = data_type
