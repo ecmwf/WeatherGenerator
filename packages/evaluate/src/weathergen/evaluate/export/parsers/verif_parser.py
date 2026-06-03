@@ -125,7 +125,7 @@ class VerifParser(CfParser):
                     "Check that inference was not performed with masking"
                 )
             da_fs = self.concatenate(da_fs)
-            da_fs = self.assign_frt(da_fs, ref_time)
+            da_fs = self.assign_frt(da_fs, ref_time, default_fstep)
             da_fs = self.add_attrs(da_fs)
             vars_to_merge = {verif_var: None for verif_var in self.mapping.keys()}
 
@@ -162,16 +162,10 @@ class VerifParser(CfParser):
         """
         zarr_dt = (source_interval_end - source_interval_start).astype("timedelta64[h]")
         if zarr_dt == np.timedelta64(0, "h"):
-            # get from inference config, convert to timedelta64
-            default_fstep = default_fstep.split(" ")[0]
-            # backwards compatibility if fstep in '06:00:00' format
-            if ":" in default_fstep:
-                default_fstep = default_fstep.split(":")[0]
-                zarr_dt = np.timedelta64(int(default_fstep), "h")
-            else:
-                zarr_dt = np.timedelta64(int(default_fstep), "ms").astype("timedelta64[h]")
-        if zarr_dt == np.timedelta64(0, "h"):
-            raise ValueError("Default forecast step is zero. Double check config")
+            zarr_dt = np.timedelta64(default_fstep, "h")
+            _logger.info(f"Using default forecast step from config: {zarr_dt}")
+            if zarr_dt == np.timedelta64(0, "h"):
+                raise ValueError("Default forecast step is zero. Double check config")
         return zarr_dt
 
     def get_output_filename(self, variable: str) -> Path:
@@ -465,7 +459,7 @@ class VerifParser(CfParser):
 
         return data
 
-    def assign_frt(self, ds: xr.Dataset, reference_time: np.datetime64) -> xr.Dataset:
+    def assign_frt(self, ds: xr.Dataset, reference_time: np.datetime64, default_fstep: int) -> xr.Dataset:
         """
         Assign forecast reference time coordinate to the dataset.
 
@@ -473,6 +467,7 @@ class VerifParser(CfParser):
         ----------
             ds : xarray Dataset to assign coordinates to.
             reference_time : Forecast reference time to assign.
+            default_fstep : Default forecast step to use if not available in the dataset.
 
         Returns
         -------
@@ -482,8 +477,7 @@ class VerifParser(CfParser):
 
         if "sample" in ds.coords:
             ds = ds.drop_vars("sample")
-        n_hours = self.fstep_hours.astype("int64")
-        ds["forecast_step"] = ds["forecast_step"] * n_hours
+        ds["forecast_step"] = ds["forecast_step"] * default_fstep
         return ds
 
     def add_attrs(self, ds: xr.Dataset) -> xr.Dataset:

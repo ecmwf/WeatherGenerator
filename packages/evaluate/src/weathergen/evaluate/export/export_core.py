@@ -279,6 +279,25 @@ def get_streams(stream, fname_zarr):
     streams = zio_streams if stream is None else [stream]
     return streams
 
+def get_default_fstep(kwargs):
+    try:
+        inference_config = load_run_config(kwargs.run_id, mini_epoch=kwargs.epoch, model_path=None)
+        default_fstep = inference_config.training_config.forecast.time_step
+        # preprocess to integer hours
+        default_fstep = default_fstep.split(" ")[0]
+        # backwards compatibility if fstep in '06:00:00' format
+        if ":" in default_fstep:
+            default_fstep = default_fstep.split(":")[0]
+            default_fstep = int(default_fstep)
+        else:
+            default_fstep = int(default_fstep) // 3600000   # convert miliseconds to hours
+    except FileNotFoundError:
+        _logger.warning("Could not retrieve default forecast step from inference config."
+                        "Using fstep_hours from kwargs instead. "
+                        f"Amend if {kwargs.fstep_hours} is incorrect.")
+        default_fstep = kwargs.fstep_hours  
+
+    return default_fstep
 
 def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     """
@@ -312,10 +331,6 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
 
     fname_zarr = get_model_results(run_id, epoch, rank)
-    try:
-        inference_config = load_run_config(run_id, mini_epoch=epoch, model_path=None)
-    except FileNotFoundError:
-        inference_config = None
     fsteps = get_fsteps(fsteps, fname_zarr)
     samples = get_samples(samples, fname_zarr)
     streams = get_streams(stream, fname_zarr)
@@ -323,12 +338,11 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         grid_type = get_grid_type(data_type, stream, fname_zarr)
         channels = get_channels(channels, stream, fname_zarr)
         source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
-        default_fstep = (
-            inference_config.training_config.forecast.time_step if inference_config else None
-        )
+        default_fstep = get_default_fstep(kwargs)
         kwargs["grid_type"] = grid_type
         kwargs["channels"] = channels
         kwargs["data_type"] = data_type
+        #kwargs["default_fstep"] = default_fstep
 
         parser = CfParserFactory.get_parser(config=config, **kwargs)
         n_fsteps = len(fsteps)
