@@ -24,8 +24,16 @@ stages:
   # Stage 1: JEPA pre-training with EMA teacher + deep SSL
   - name: pretrain
     command: train
-    base-config: ./config/config_jepa_self_flow_multi_data.yml
-    config: ./config/config_jepa_self_flow_multi_data.yml
+    base-config: ./config/config_jepa_self_flow_multi_data_all_years.yml
+    config: ./config/config_jepa_self_flow_multi_data_all_years.yml
+    options: []
+    chain: 2
+    nodes: 2
+
+  # Stage 1: JEPA pre-training with EMA teacher + deep SSL
+  - name: pretrain-ft
+    command: train
+    config: ./config/config_jepa_self_flow_multi_data_all_years_ft.yml
     options: []
     chain: 2
     nodes: 2
@@ -33,7 +41,7 @@ stages:
   # Stage 1.1: JEPA pre-training with EMA teacher + deep SSL
   - name: pretrain-cooldown
     command: train-continue
-    from: pretrain
+    from: pretrain-ft
     config: ./config/config_jepa_self_flow_cooldown.yml
     options: []
     chain: 1
@@ -43,7 +51,22 @@ stages:
   - name: finetune-forecast
     command: train-continue
     from: pretrain-cooldown
-    config: ./config/config_jepa_forecasting_finetuning.yml
+    config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
     chain: 3
-    nodes: 1
+    nodes: 2
 
+  # Stage 3: Forecasting finetuning (freezes encoder)
+  - name: finetune-forecast-ft
+    command: train-continue
+    from: finetune-forecast
+    config: ./config/config_jepa_multi_data_ft_forecast.yml
+    chain: 2
+    nodes: 2
+
+  # # Stage 3: Forecasting finetuning (unfreezes encoder)
+  # - name: finetune-forecast-2
+  #   command: train-continue
+  #   from: finetune-forecast
+  #   config: ./config/config_jepa_multi_data_ft_forecast_unfreeze_encoder.yml
+  #   chain: 2
+  #   nodes: 2

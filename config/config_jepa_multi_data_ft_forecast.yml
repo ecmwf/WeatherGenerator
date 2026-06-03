@@ -1,0 +1,12 @@
+streams_directory: "./config/streams/ft_forecast_analysis_georing_avhrr_synop_all_years/"
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+training_config:
+  num_mini_epochs: 8
+  samples_per_mini_epoch: 8192

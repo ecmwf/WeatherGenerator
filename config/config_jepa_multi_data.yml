@@ -35,7 +35,7 @@ ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 4
-ae_global_trailing_layer_norm: False
+ae_global_trailing_layer_norm: True
 
 ae_aggregation_num_blocks: 5
 ae_aggregation_num_heads: 32
@@ -51,7 +51,7 @@ pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
 num_class_tokens: 0
-num_register_tokens: 8
+num_register_tokens: 64
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
@@ -96,8 +96,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/era5_georing/"
 streams: ???
 
 general:
@@ -185,10 +184,10 @@ training_config:
   # Complements the JEPA loss which targets masked tokens.
   context_loss:
     enabled: true
-    weight: 0.2
-    warmup_steps: 6000             # linear warmup from 0 to weight over this many steps
+    weight: 0.4
+    warmup_steps: 10000             # linear warmup from 0 to weight over this many steps
 
-  num_mini_epochs: 64
+  num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -236,7 +235,7 @@ training_config:
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 600000,
+            ema_halflife_in_thousands: 800000,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
@@ -331,3 +330,4 @@ wgtags:
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null
+

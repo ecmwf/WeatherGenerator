@@ -29,7 +29,6 @@ from weathergen.model.embeddings import (
     StreamEmbedTransformer,
 )
 from weathergen.model.layers import MLP
-from weathergen.model.positional_encoding import get_rope_mode
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
@@ -105,7 +104,7 @@ class EmbeddingEngine(torch.nn.Module):
             # skip empty stream
             if sdata.numel() == 0:
                 continue
-
+            
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 
@@ -395,7 +394,6 @@ class QueryAggregationEngine(torch.nn.Module):
         super(QueryAggregationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        rope_mode = get_rope_mode(self.cf)
 
         self.ae_aggregation_blocks = torch.nn.ModuleList()
 
@@ -417,7 +415,7 @@ class QueryAggregationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        rope_mode=rope_mode,
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             else:
@@ -480,7 +478,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
         self.tap_global_layers = tap_global_layers
-        rope_mode = get_rope_mode(self.cf)
 
         self.ae_global_blocks = torch.nn.ModuleList()
 
@@ -502,7 +499,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        rope_mode=rope_mode,
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             else:
@@ -520,7 +517,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
                         attention_dtype=get_dtype(self.cf.attention_dtype),
-                        rope_mode=rope_mode,
+                        with_2d_rope=self.cf.get("rope_2D", False),
                     )
                 )
             # MLP block
@@ -546,7 +543,12 @@ class GlobalAssimilationEngine(torch.nn.Module):
         intermediates: list[torch.Tensor] = []
         logical_layer = 0
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+            # The optional trailing LayerNorm (ae_global_trailing_layer_norm) takes a single
+            # input, unlike the attention/MLP blocks which also receive coords/aux_info.
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                tokens = checkpoint(block, tokens, use_reentrant=False)
+            else:
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
             if isinstance(block, MLP):
                 if self.tap_global_layers and logical_layer in self.tap_global_layers:
                     intermediates.append(tokens)
@@ -578,7 +580,6 @@ class ForecastingEngine(torch.nn.Module):
         super(ForecastingEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
-        rope_mode = get_rope_mode(self.cf)
         self.fe_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
@@ -599,7 +600,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            rope_mode=rope_mode,
+                            with_2d_rope=self.cf.get("rope_2D", False),
                         )
                     )
                 else:
@@ -618,7 +619,7 @@ class ForecastingEngine(torch.nn.Module):
                             dim_aux=dim_aux,
                             norm_eps=self.cf.norm_eps,
                             attention_dtype=get_dtype(self.cf.attention_dtype),
-                            rope_mode=rope_mode,
+                            with_2d_rope=self.cf.get("rope_2D", False),
                         )
                     )
                 # Add MLP block
@@ -1179,6 +1180,7 @@ class LatentPredictionHeadMLP(nn.Module):
             out_dim,
             num_layers,
             hidden_factor,
+            pre_layer_norm=False,
             mlp_type=loss_conf.get("mlp_type", default_mlp_type),
         )
 

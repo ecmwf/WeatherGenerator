@@ -1,0 +1,58 @@
+default_streams:
+  ERA5:
+    channels:
+    - 2t
+    - 10u
+    - 10v
+    - z_500
+    - t_850
+    - u_850
+    - v_850
+    - q_850
+    evaluation:
+      ensemble: all
+      forecast_step: all
+      sample: all
+    plotting:
+      forecast_step: all
+      plot_animations: true
+      plot_histograms: false
+      plot_maps: true
+      sample:
+      - 0
+evaluation:
+  add_grid: true
+  bar_plots: false
+  heat_maps: false
+  log_scale: false
+  metrics:
+  - rmse
+  - froct
+  plot_ensemble: members
+  plot_score_maps: false
+  print_summary: false
+  ratio_plots: false
+  regions:
+  - global
+  - tropics
+  score_cards: false
+  summary_dir: ./plots/
+  summary_plots: true
+run_ids:
+  tq60natw:
+    label: Release model
+    # type: json
+    results_base_dir: ./results/tq60natw/
+  zwny809a:
+    label: Inference of k47tobdl
+    type: json
+    # results_base_dir: ./results/zwny809a/
+  # bmbywqn6:
+  #   label: Inference of k47tobdl-ft32-with-noise
+  #   type: json
+  #   # results_base_dir: ./results/bmbywqn6/
+  ay98rzxp:
+    label: Inference of e8bd7ejo-2-nodes
+    type: json
+    # results_base_dir: ./results/ay98rzxp/
+

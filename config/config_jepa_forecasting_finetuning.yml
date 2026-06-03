@@ -14,7 +14,7 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0 # 1e-4
+fe_impute_latent_noise_std: 5e-5
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
@@ -122,7 +122,7 @@ training_config:
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256
-    num_steps_cooldown: 1
+    num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
@@ -144,6 +144,10 @@ training_config:
         type: Disabled,
         },
     "physical": {
+        enabled: False,
+        type: Disabled,
+        },
+    "forecast": {
         type: LossPhysical,
         loss_fcts: { "mse": { }, },
         },
