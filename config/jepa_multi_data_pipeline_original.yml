@@ -30,9 +30,9 @@ stages:
     chain_jobs: 3
     nodes: 2
 
-  - name: multipretrainft
+  - name: mltiprtrnft
     stage: train
-    from_run_id: multipretrain
+    from_run_id: STAGE.multipretrain
     config_files:
       - ./config/config_jepa_multi_data_all_years.yml
       - ./config/config_jepa_multi_data_all_years_ft.yml
@@ -42,7 +42,7 @@ stages:
   # Stage 3: Forecasting finetuning (freezes encoder)
   - name: finetuneft
     stage: train
-    from_run_id: multipretrainft
+    from_run_id: STAGE.mltiprtrnft
     config_files:
       - ./config/config_jepa_multi_data_ft_forecast_all_years.yml
     chain_jobs: 3
@@ -51,7 +51,7 @@ stages:
   # Stage 3: Forecasting finetuning (freezes encoder)
   - name: finetuneftft
     stage: train
-    from_run_id: finetuneft
+    from_run_id: STAGE.finetuneft
     config_files:
       - ./config/config_jepa_multi_data_ft_forecast.yml
     chain_jobs: 3

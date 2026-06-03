@@ -16,7 +16,7 @@ SurfaceCombined :
     model_input:
       masking_strategy: random
       masking_strategy_config:
-        rate: 0.9
+        rate: 0.8
   embed : 
     net : transformer
     num_tokens : 1

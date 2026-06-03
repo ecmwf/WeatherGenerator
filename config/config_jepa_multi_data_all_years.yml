@@ -120,7 +120,6 @@ general:
 
   multiprocessing_method: "fork"
 
-  desc: ""
   run_id: ???
   run_history: []
 
@@ -163,7 +162,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 8
+  num_workers: 6
   rng_seed: ???
 
 
@@ -267,7 +266,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "cropping_healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.8, hl_mask: 3, rate_sampling: False },
+      masking_strategy_config : { rate : 0.7, hl_mask: 3, rate_sampling: False },
     },
   }
 
