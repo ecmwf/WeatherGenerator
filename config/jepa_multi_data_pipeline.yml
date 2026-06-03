@@ -54,7 +54,7 @@ stages:
     command: train-continue
     from: pretrain-ft
     config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
-    chain: 3
+    chain: 4
     nodes: 2
 
   # Stage 3: Forecasting finetuning (freezes encoder)
@@ -62,7 +62,7 @@ stages:
     command: train-continue
     from: finetune-forecast
     config: ./config/config_jepa_multi_data_ft_forecast.yml
-    chain: 2
+    chain: 3
     nodes: 2
 
   # # Stage 3: Forecasting finetuning (unfreezes encoder)
