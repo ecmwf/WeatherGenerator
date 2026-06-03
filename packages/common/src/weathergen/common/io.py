@@ -736,7 +736,7 @@ class OutputBatchData:
 
     def _extract_sources(
         self, sample: int, stream_idx: int, key: ItemKey, source_interval: TimeRange
-    ) -> OutputDataset:
+    ) -> OutputDataset | None:
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
