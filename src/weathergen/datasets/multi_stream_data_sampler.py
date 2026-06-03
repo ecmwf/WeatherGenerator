@@ -484,9 +484,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     target_mask,
                 )
 
-                # if self._stage == TRAIN:
-                #     del idxs_inv
-                #     idxs_inv = None
+                if self._stage == TRAIN:
+                    del idxs_inv
+                    idxs_inv = None
                 stream_data.add_target_values(
                     timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
                 )
