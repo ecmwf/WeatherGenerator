@@ -223,7 +223,7 @@ validation_config:
 # test config; full test config is merge of validation and test config
 test_config: 
 
-  samples_per_mini_epoch: 128
+  samples_per_mini_epoch: 4096
   shuffle: False
 
   start_date: 2023-06-01T00:00
@@ -232,7 +232,7 @@ test_config:
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
-    num_samples: 128,
+    num_samples: 4096,
     # write samples in normalized model space
     normalized_samples: False,
     # output streams to write; default all
