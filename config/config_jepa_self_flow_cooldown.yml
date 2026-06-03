@@ -16,7 +16,7 @@ general:
 # config for training
 training_config:
 
-  num_mini_epochs: 5
+  num_mini_epochs: 22
 
   target_input:
     random_easy_target:
