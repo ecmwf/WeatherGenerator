@@ -1,12 +1,11 @@
-streams_directory: "./config/streams/ft_forecast_analysis_georing_avhrr_synop_all_years/"
+streams_directory: "./config/streams/jepa_forecast_multi_data_od/"
 
 general:
 
   # mutable parameters
-  istep: 0
   rank: ???
   world_size: ???
 
 training_config:
-  num_mini_epochs: 8
+  num_mini_epochs: 32
   samples_per_mini_epoch: 8192

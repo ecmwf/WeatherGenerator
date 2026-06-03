@@ -8,7 +8,7 @@ SurfaceCombined :
   stream_id : 2
   filenames : ['observations-ea-ofb-0001-1979-2022-combined-surface-v5-fixed-land-spatial80-min1km-lat60S70N-lsm09-min10.zarr', 'observations-ea-ofb-0001-2023-combined-surface-v5-fixed-land-heldout20-min1km-lat60S70N-lsm09-min10.zarr']
   geoinfos: ['reportype', 'stalt', 'lsm']
-  loss_weight : 0.5
+  forcing: True
   token_size : 64
   tokenize_spacetime : False
   max_num_targets: -1
