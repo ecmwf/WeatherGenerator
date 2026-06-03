@@ -824,6 +824,13 @@ def plot_train(args=None):
         type=int,
         help="Number of columns for the legend",
     )
+    parser.add_argument(
+        "--with-losses-per-run",
+        dest="with_losses_per_run",
+        default=False,
+        action="store_true",
+        help="Plot losses per run across channels and streams",
+    )
 
     run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
@@ -983,9 +990,22 @@ def plot_train(args=None):
     )
 
     # plot all cols for all run_ids
-    for run_id, run_data in zip(runs_ids, runs_data, strict=False):
+    if args.with_losses_per_run:
+        for run_id, run_data in zip(runs_ids, runs_data, strict=False):
+            plot_loss_per_run(
+                ["train", "val"],
+                run_id,
+                runs_ids[run_id],
+                run_data,
+                get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
+                channels=args.channels,
+                plot_dir=out_dir,
+                legend_outside=args.legend_outside,
+                legend_font_size=args.legend_font_size,
+                legend_num_columns=args.legend_num_columns,
+            )
         plot_loss_per_run(
-            ["train", "val"],
+            ["val"],
             run_id,
             runs_ids[run_id],
             run_data,
@@ -996,18 +1016,6 @@ def plot_train(args=None):
             legend_font_size=args.legend_font_size,
             legend_num_columns=args.legend_num_columns,
         )
-    plot_loss_per_run(
-        ["val"],
-        run_id,
-        runs_ids[run_id],
-        run_data,
-        get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
-        channels=args.channels,
-        plot_dir=out_dir,
-        legend_outside=args.legend_outside,
-        legend_font_size=args.legend_font_size,
-        legend_num_columns=args.legend_num_columns,
-    )
 
 
 if __name__ == "__main__":
