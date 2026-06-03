@@ -1,0 +1,106 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+# freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*fe.*|.*ERA5.*"
+# freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
+freeze_modules: ".*encoder.*|.*q_cells.*|.*latent.*|.*ERA5.*"
+# freeze_modules: ""
+
+# streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres/"
+
+general:
+
+  # mutable parameters
+  istep: 0
+
+# parameters for data loading
+data_loading :
+
+  num_workers: 10
+  rng_seed: ???
+  repeat_data_in_mini_epoch : False
+
+# config for training
+training_config:
+  
+  training_mode: ["masking"]
+
+  num_mini_epochs: 8
+  samples_per_mini_epoch: 8192
+
+  start_date: 2016-01-01T00:00
+  end_date: 2022-12-31T00:00
+  
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 3.5e-5
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 512
+    policy_warmup: "cosine"
+    policy_decay: "cosine"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 0.8
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw :
+      # parameters are scaled by number of DDP workers
+      beta1 : 0.98125 # == 0.85 on 2 nodes x 4 gpus
+      beta2 : 0.9875  # == 0.90 on 2 nodes x 4 gpus
+      eps : 2e-08
+
+  model_input: {
+    "source_masking" : {
+      # masking strategy: "random", "healpix", "forecast"
+      masking_strategy: "forecast",
+      },
+    }
+
+  forecast :
+      time_step: 06:00:00
+      offset: 1
+      num_steps: 9
+      policy: "fixed"
+
+
+validation_config: 
+
+  samples_per_mini_epoch: 256
+
+  start_date: 2023-01-01T00:00
+  end_date: 2023-05-31T00:00
+
+  time_window_step: 01:00:00
+  time_window_len: 06:00:00
+
+
+test_config: 
+
+  samples_per_mini_epoch: 4096
+  shuffle: False
+
+  start_date: 2023-06-01T00:00
+  end_date: 2023-08-31T00:00
+
+  time_window_step: 01:00:00
+  time_window_len: 06:00:00
+
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 4096,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
