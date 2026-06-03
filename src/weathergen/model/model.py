@@ -570,6 +570,7 @@ class Model(torch.nn.Module):
         # Encoder output is normalized inside the encoder via `ae_global_trailing_layer_norm`, so
         # the physical decoders and the SSL heads/teacher target consume the same normalized
         # representation. Identity here avoids a redundant second norm.
+        # TODO remove from code entirely
         self.latent_pre_norm = nn.Identity()
 
         ssl_losses_cfgs = [
