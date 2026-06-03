@@ -556,7 +556,15 @@ class Masker:
             mask = np.ones(num_cells, dtype=np.bool)
 
             if "diffusion_rn" in masking_strategy_config:
-                masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
+                noise_dist = masking_strategy_config.get("noise_distribution", "log_normal")
+                if noise_dist == "log_uniform":
+                    # Store log_sigma directly; model interprets it via noise_distribution flag.
+                    masking_params["noise_level_rn"] = self.rng.uniform(
+                        np.log(masking_strategy_config["sigma_min"]),
+                        np.log(masking_strategy_config["sigma_max"]),
+                    )
+                else:  # log_normal (default): store eta ~ N(0,1)
+                    masking_params["noise_level_rn"] = self.rng.normal(0.0, 1.0)
 
         elif strategy == "healpix":
             # prepare healpix-based masking

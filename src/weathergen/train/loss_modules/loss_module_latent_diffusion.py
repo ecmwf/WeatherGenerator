@@ -45,6 +45,7 @@ class LossLatentDiffusion(LossModuleBase):
         self.rho = self.cf.rho
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
+        self.noise_distribution = self.cf.get("noise_distribution", "log_normal")
 
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -58,8 +59,11 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.random_target = None
 
-    def _get_noise_weight(self, eta):
-        sigma = (eta * self.p_std + self.p_mean).exp()
+    def _get_noise_weight(self, noise_level_rn):
+        if self.noise_distribution == "log_uniform":
+            sigma = noise_level_rn.exp()
+        else:
+            sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
         return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
 
     def _get_fstep_weights(self, forecast_steps):

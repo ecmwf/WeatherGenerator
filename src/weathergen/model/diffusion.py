@@ -70,10 +70,10 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"'{self.conditioning}' (got offset={_offset})"
         )
         _input_num_steps = self.cf.get("training_config", {}).get("model_input", {}).get("forecasting", {}).get("num_steps_input", 0)
-        assert self.conditioning != "forecast" or _input_num_steps == 2, (
-            f"forecast.input_num_steps must be 2 when fe_diffusion_model_conditioning is "
-            f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
-        )
+        # assert self.conditioning != "forecast" or _input_num_steps == 2, (
+        #     f"forecast.input_num_steps must be 2 when fe_diffusion_model_conditioning is "
+        #     f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
+        # )
         assert self.conditioning not in ["date_time", "date", "time"] or _input_num_steps == 1, (
             f"forecast.input_num_steps must be 1 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
@@ -94,6 +94,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         self.rho = self.cf.rho
         self.p_mean = self.cf.p_mean
         self.p_std = self.cf.p_std
+        self.noise_distribution = self.cf.get("noise_distribution", "log_normal")
         self.cur_token = None  # TODO: re move after single sample experiments
         self._noised_tokens: torch.Tensor | None = None
         self._fixed_noise_level: float | None = None
@@ -206,14 +207,23 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = meta_info["ERA5"].params["conditioning_tokens"]          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
         if self.training:
-            eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
+            noise_level_rn = torch.tensor(
+                [meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device
+            )
         else:
-            # During validation, use fixed noise level (default: 0.0 = mean of noise distribution)
-            noise_level = self._fixed_noise_level if self._fixed_noise_level is not None else 0.0
-            eta = torch.tensor([noise_level], device=tokens.device)
+            # During validation, use fixed noise level (default: 0.0)
+            noise_level_rn = torch.tensor(
+                [self._fixed_noise_level if self._fixed_noise_level is not None else 0.0],
+                device=tokens.device,
+            )
 
-        # Compute sigma (noise level) from eta and create noise tensor
-        sigma = (eta * self.p_std + self.p_mean).exp()
+        # Compute sigma from noise_level_rn.
+        # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
+        # log_uniform: noise_level_rn is log_sigma directly; sigma = exp(noise_level_rn)
+        if self.noise_distribution == "log_uniform":
+            sigma = noise_level_rn.exp()
+        else:
+            sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
         n = torch.randn_like(y) * sigma
 
         self._noised_tokens = (y + n).detach()
@@ -236,6 +246,8 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Compute scaling conditionings (EDM Eq. 7 — disabled for direct prediction)
         c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
         c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
+        # c_skip = 0
+        # c_out = 1
         c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
         c_noise = sigma.log() / 4
 
@@ -331,13 +343,27 @@ class DiffusionForecastEngine(torch.nn.Module):
         #     numerical instability of dividing by near-zero sigma in the ODE.
         sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
-        sigma_min_eff = max(self.sigma_min, self.sigma_data * 0.01)
+
+        # --- Training-distribution-aligned sigma_min ---
+        # sigma_min_quantile controls what fraction of training samples fall below sigma_min_eff.
+        # sigma at quantile q of log-normal(p_mean, p_std): exp(p_mean + Φ⁻¹(q) * p_std).
+        # Φ⁻¹ approximated via its standard z-scores; default q=0.05 (5th percentile).
+        #   q=0.10 → z=-1.282 → exp(1.5-1.538)≈0.96   (stops right at sigma≈1)
+        #   q=0.05 → z=-1.645 → exp(1.5-1.974)≈0.62
+        #   q=0.01 → z=-2.326 → exp(1.5-2.791)≈0.27
+        sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
+        _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
+        _z = _z_scores.get(sigma_min_quantile, -1.645)
+        sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
+        sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
         logger.info(
             f"Inference sigma schedule: "
             f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train 3σ={sigma_max_train:.4f}), "
-            f"sigma_min_eff={sigma_min_eff:.4f} (config={self.sigma_min}), "
+            f"sigma_min_eff={sigma_min_eff:.4f} "
+            f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
             f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
         )
+        # sigma_min_eff = self.cf.get("sigma_min", 0.002)
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -391,7 +417,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep, coords=coords)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
-            
+
             # Apply 2nd order correction.
             if i < num_steps - 1:
                 denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords)

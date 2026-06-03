@@ -9,6 +9,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import copy
 import logging
 import math
 import warnings
@@ -735,11 +736,11 @@ class Model(torch.nn.Module):
             tokens = tokens.reshape(shape)
             # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
             if self.cf.stage == "inference":
-                print("Using most recent steps as conditioning tokens for forecasting inference.")
-                conditioning_tokens = tokens[:, 0]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, :-1].sum(axis=1)
+                print("Using most recent steps as conditioning tokens for inference.")
+                conditioning_tokens = tokens[:, :-1].sum(axis=1)
             else:
                 # Conditioning: all older context steps [t-1, ..., t-(T-1)]; denoising target: t (newest)
-                conditioning_tokens = tokens[:, 1]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                conditioning_tokens = tokens[:, 1:].sum(axis=1)
                 conditioning_tokens = conditioning_tokens + torch.randn_like(conditioning_tokens) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
                 if np.random.rand() < self.cf.get("fe_diffusion_classifier_free_guidance_prob", 0.0):  # occasionally dropout conditioning for classifier free guidance
                     conditioning_tokens = torch.zeros_like(conditioning_tokens)
@@ -766,7 +767,7 @@ class Model(torch.nn.Module):
                 tokens,
                 step,
                 meta_info=batch.samples[0].meta_info,
-                coords=model_params.rope_coords
+                coords=model_params.rope_coords,
             )
 
             # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a
@@ -806,13 +807,144 @@ class Model(torch.nn.Module):
                 tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
                 continue
 
+            # tokens = tokens[-1]
+            # # # tokens = (tokens - tokens.mean()) / (tokens.std() + 1e-6)
+
+            # if self.cf.get("fe_diffusion_model", False) and self.cf.get("fe_diffusion_predict_residual", False):
+            #     tokens = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] + tokens
+            
+            # batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens
+
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
 
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
 
+            # Physical-space rollout: re-encode decoded predictions as input for next step
+            if self.cf.get("physical_rollout", False) and step != max(batch.get_output_idxs()):
+                rollout_batch = self._make_physical_rollout_batch(output.physical[step], batch, step)
+                tokens, _ = self.encoder(model_params, rollout_batch)
+                tokens = tokens.reshape(len(batch), 1, *tokens.shape[1:]).sum(1)
+                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens
+
         return output
+
+    def _make_physical_rollout_batch(self, physical_preds, batch, step):
+        """
+        Build a single-step BatchSamples from decoded physical predictions for re-encoding.
+
+        Predictions are in the original data grid (e.g. o96, 40320 points).  They are
+        aggregated to the HEALPix source grid (12288 cells at level 5) using the per-cell
+        coordinate counts stored in batch.samples[i_b].streams_data[sn].target_coords_lens[step].
+        The mean over the ensemble dimension is taken first, then predictions are scatter-averaged
+        into each HEALPix cell.
+
+        Source tokens have the structure [stream_id(1), time(5), coords(2), geoinfo(G), data(D)]
+        along the channel dimension.  The original source tokens from the batch provide the
+        correct full-channel template; we tile them to cover all healpix cells (handling source
+        masking) and then replace the last N_target channels with the aggregated predictions.
+
+        Args:
+            physical_preds: dict[stream_name -> list[Tensor[ens, n_data_points, target_channels]]],
+                            one tensor per batch sample (from output.physical[step]).
+            batch: original BatchSamples.
+            step: forecast step index, used to look up target_coords_lens.
+
+        Returns:
+            A BatchSamples whose source_tokens_cells hold the decoded predictions
+            and whose tokens_lens reflects one token per cell per active stream.
+        """
+        batch_size = len(batch)
+        device = batch.get_device()
+
+        new_batch = copy.copy(batch)
+        new_batch.samples = []
+
+        for i_b in range(batch_size):
+            new_sample = copy.copy(batch.samples[i_b])
+            new_sample.streams_data = {}
+
+            for stream_name in self.stream_names:
+                new_sd = copy.copy(batch.samples[i_b].streams_data[stream_name])
+                pred = physical_preds.get(stream_name)
+
+                old_cells = batch.samples[i_b].streams_data[stream_name].source_tokens_cells[0]
+                token_size = old_cells.shape[1] if old_cells is not None else 1
+
+                if pred is not None and i_b < len(pred) and pred[i_b].numel() > 0:
+                    # pred[i_b]: [ens_size, n_data_points, N_target] (data_points on o96 grid)
+                    pred_mean = pred[i_b].mean(0).to(device)  # [n_data_points, N_target]
+                    n_tgt     = pred_mean.shape[-1]
+
+                    # Aggregate o96-space predictions → HEALPix cells.
+                    # target_coords_lens[step]: [num_healpix_cells] counts of data points per cell,
+                    # where coords are ordered cell-by-cell so repeat_interleave gives the mapping.
+                    t_lens = batch.samples[i_b].streams_data[stream_name].target_coords_lens[step].to(device)
+                    cell_idx = torch.repeat_interleave(
+                        torch.arange(self.num_healpix_cells, device=device), t_lens.long()
+                    )  # [n_data_points]
+                    cell_sum = torch.zeros(
+                        self.num_healpix_cells, n_tgt, dtype=pred_mean.dtype, device=device
+                    )
+                    cell_sum.scatter_add_(0, cell_idx.unsqueeze(1).expand(-1, n_tgt), pred_mean)
+                    cell_preds = cell_sum / t_lens.to(pred_mean.dtype).unsqueeze(1).clamp(min=1.0)
+                    # cell_preds: [num_healpix_cells, N_target]
+
+                    # Use original source tokens as a full-channel template so that the
+                    # non-data prefix (stream_id, time, coords, geoinfo) is preserved.
+                    # Tile to cover num_healpix_cells rows if masking left fewer in old_cells.
+                    n_orig = old_cells.shape[0]
+                    if n_orig >= self.num_healpix_cells:
+                        src_tokens = old_cells[:self.num_healpix_cells].clone().to(device)
+                    else:
+                        reps = (self.num_healpix_cells + n_orig - 1) // n_orig
+                        src_tokens = old_cells.repeat(reps, 1, 1)[:self.num_healpix_cells].clone().to(device)
+
+                    # Replace the last n_tgt channel positions with the aggregated predictions.
+                    sources_size_i = src_tokens.shape[-1]
+                    src_tokens[:, :, sources_size_i - n_tgt:] = (
+                        cell_preds.unsqueeze(1).expand(-1, token_size, -1)
+                    )
+                    src_tokens = src_tokens.contiguous()
+
+                    new_sd.source_tokens_cells = [src_tokens]
+                    new_sd.source_tokens_lens = [
+                        torch.ones(
+                            self.num_healpix_cells, dtype=torch.int32, device=device
+                        )
+                    ]
+                else:
+                    # Forcing stream or missing prediction: use zero (masked) tokens.
+                    sources_size_i = old_cells.shape[-1] if old_cells is not None else 1
+                    new_sd.source_tokens_cells = [
+                        torch.zeros(
+                            self.num_healpix_cells, token_size, sources_size_i,
+                            dtype=self.dtype, device=device,
+                        )
+                    ]
+                    new_sd.source_tokens_lens = [
+                        torch.zeros(
+                            self.num_healpix_cells, dtype=torch.int32, device=device
+                        )
+                    ]
+
+                new_sample.streams_data[stream_name] = new_sd
+
+            new_batch.samples.append(new_sample)
+
+        # tokens_lens: (1, batch_size, num_streams, num_healpix_cells)
+        new_batch.tokens_lens = torch.stack(
+            [
+                torch.stack(
+                    [new_batch.samples[i_b].streams_data[sn].source_tokens_lens[0]
+                     for sn in self.stream_names]
+                )
+                for i_b in range(batch_size)
+            ]
+        ).unsqueeze(0)
+
+        return new_batch
 
     @staticmethod
     def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
