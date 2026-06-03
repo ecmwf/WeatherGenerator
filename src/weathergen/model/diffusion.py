@@ -234,8 +234,12 @@ class DiffusionForecastEngine(torch.nn.Module):
         noise level sigma.
         """
         # Compute scaling conditionings (EDM Eq. 7 — disabled for direct prediction)
-        c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
-        c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
+        if self.cf.get("fe_diffusion_model_no_skip_connection", False):
+            c_skip = 0.0
+            c_out = 1.0
+        else:
+            c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
+            c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
         c_in = 1 / (sigma**2 + self.sigma_data**2).sqrt()
         c_noise = sigma.log() / 4
 
