@@ -694,6 +694,8 @@ class VerifParser(CfParser):
             ds = xr.concat(
                 var_list, dim="time", data_vars="minimal", coords="minimal", join="exact"
             )
+            # order by location
+            ds = ds.sortby("location")
             out_fname = self.get_output_filename(verif_var)
             _logger.info(f"Saving to {out_fname}.")
             ds.to_netcdf(out_fname)
