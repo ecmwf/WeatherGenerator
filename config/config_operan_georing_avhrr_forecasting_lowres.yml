@@ -200,9 +200,6 @@ validation_config:
   start_date: 2023-10-01T00:00
   end_date: 2023-12-31T00:00
 
-  time_window_step: 06:00:00
-  time_window_len: 06:00:00
-
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
     enabled : True
