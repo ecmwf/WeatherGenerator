@@ -146,7 +146,7 @@ class VerifParser(CfParser):
         self,
         source_interval_start: np.datetime64,
         source_interval_end: np.datetime64,
-        default_fstep: np.timedelta64,
+        default_fstep: str = None,
     ) -> np.timedelta64:
         """
         Compute the time difference between source interval start and end in hours.
@@ -165,10 +165,19 @@ class VerifParser(CfParser):
         if zarr_dt == np.timedelta64(0, "h"):
             # get from inference config, convert to timedelta64
             default_fstep = default_fstep.split(" ")[0]
-            zarr_dt = np.timedelta64(pd.to_timedelta(int(default_fstep), unit="ms")).astype(
-                "timedelta64[ms]"
+            print(default_fstep)
+            # backwards compatibility if fstep in '06:00:00' format
+            if ":" in default_fstep:
+                default_fstep = default_fstep.split(":")[0]
+                zarr_dt = np.timedelta64(int(default_fstep), "h")
+            else:
+                zarr_dt = np.timedelta64(int(default_fstep), "ms").astype(
+                    "timedelta64[h]"
+                )
+        if zarr_dt == np.timedelta64(0, "h"):
+            raise ValueError(
+                "Default forecast step is zero. Double check config"
             )
-            zarr_dt = zarr_dt.astype("timedelta64[h]")
         return zarr_dt
 
     def get_output_filename(self, variable: str) -> Path:

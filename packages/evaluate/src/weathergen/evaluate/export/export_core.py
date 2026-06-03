@@ -312,7 +312,10 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
 
     fname_zarr = get_model_results(run_id, epoch, rank)
-    inference_config = load_run_config(run_id, mini_epoch=epoch, model_path=None)
+    try:
+        inference_config = load_run_config(run_id, mini_epoch=epoch, model_path=None)
+    except FileNotFoundError:
+        inference_config = None
     fsteps = get_fsteps(fsteps, fname_zarr)
     samples = get_samples(samples, fname_zarr)
     streams = get_streams(stream, fname_zarr)
@@ -320,7 +323,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
         grid_type = get_grid_type(data_type, stream, fname_zarr)
         channels = get_channels(channels, stream, fname_zarr)
         source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
-        default_fstep = inference_config.training_config.forecast.time_step
+        default_fstep = inference_config.training_config.forecast.time_step if inference_config else None
         kwargs["grid_type"] = grid_type
         kwargs["channels"] = channels
         kwargs["data_type"] = data_type
