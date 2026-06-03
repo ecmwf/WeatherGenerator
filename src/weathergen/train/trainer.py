@@ -89,9 +89,7 @@ def _expand_targets_to_match_preds(preds, targets_and_auxs: dict) -> None:
         # output_idxs is consumed by validation IO via batch.get_output_idxs(), but we
         # keep the dataclass internally consistent in case other consumers read it.
         if t_aux.output_idxs is not None and len(t_aux.output_idxs) == n_tgt:
-            t_aux.output_idxs = [
-                t_aux.output_idxs[i // repeat] for i in range(n_pred)
-            ]
+            t_aux.output_idxs = [t_aux.output_idxs[i // repeat] for i in range(n_pred)]
 
 
 class Trainer(TrainerBase):
@@ -658,7 +656,6 @@ class Trainer(TrainerBase):
                             dtype=self.mixed_precision_dtype,
                             enabled=cf.with_mixed_precision,
                         ):
-
                             if self.ema_model is None:
                                 preds = self.model(
                                     self.model_params,

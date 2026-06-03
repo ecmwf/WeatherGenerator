@@ -61,15 +61,20 @@ class DiffusionForecastEngine(torch.nn.Module):
         )
         _ada_ln = self.conditioning_type == "ada_ln"
         assert self.cf.get("diffusion_conditioning_embed_dim", None) is not None or not _ada_ln, (
-            f"diffusion_conditioning_embed_dim must be set when "
-            f"fe_diffusion_model_conditioning_type is 'ada_ln'"
+            "diffusion_conditioning_embed_dim must be set when "
+            "fe_diffusion_model_conditioning_type is 'ada_ln'"
         )
-        _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)        
+        _offset = self.cf.get("training_config", {}).get("forecast", {}).get("offset", 0)
         assert self.conditioning not in _date_time_modes or _offset == 0, (
             f"forecast.offset must be 0 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got offset={_offset})"
         )
-        _input_num_steps = self.cf.get("training_config", {}).get("model_input", {}).get("forecasting", {}).get("num_steps_input", 0)
+        _input_num_steps = (
+            self.cf.get("training_config", {})
+            .get("model_input", {})
+            .get("forecasting", {})
+            .get("num_steps_input", 0)
+        )
         assert self.conditioning != "forecast" or _input_num_steps == 2, (
             f"forecast.input_num_steps must be 2 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
@@ -203,7 +208,11 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
         elif self.conditioning == "forecast":
-            c = meta_info["ERA5"].params["conditioning_tokens"]          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
+            c = meta_info[
+                "ERA5"
+            ].params[
+                "conditioning_tokens"
+            ]  # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
         if self.training:
             eta = torch.tensor([meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device)
@@ -281,7 +290,6 @@ class DiffusionForecastEngine(torch.nn.Module):
             c = meta_info["ERA5"].params["timestamp"]
         elif self.conditioning == "forecast":
             c = meta_info["ERA5"].params["conditioning_tokens"]
-
 
         # Sample pure noise (assuming single batch element for now)
         # torch.manual_seed(42)
@@ -374,7 +382,7 @@ class DiffusionForecastEngine(torch.nn.Module):
             denoised = self.denoise(x=x_hat, c=c, sigma=t_hat, fstep=fstep, coords=coords)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
-            
+
             # Apply 2nd order correction.
             if i < num_steps - 1:
                 denoised = self.denoise(x=x_next, c=c, sigma=t_next, fstep=fstep, coords=coords)
@@ -408,7 +416,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         import matplotlib
 
         matplotlib.use("Agg")
-        import os
         import matplotlib.pyplot as plt
 
         steps = list(range(len(track["sigma"])))
@@ -450,7 +457,13 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # 4) d_cur norm and step norm
         axes[3].semilogy(steps, track["d_cur_norm"], "o-", markersize=3, label="||d_cur||")
-        axes[3].semilogy(steps, track["d_cur_step_norm"], "^-", markersize=3, label="||(t_next - t_hat) * d_cur||")
+        axes[3].semilogy(
+            steps,
+            track["d_cur_step_norm"],
+            "^-",
+            markersize=3,
+            label="||(t_next - t_hat) * d_cur||",
+        )
         axes[3].set_ylabel("norm (log scale)")
         axes[3].set_title("ODE drift norms")
         axes[3].legend(fontsize=8)
@@ -561,10 +574,11 @@ class DateTimeEncoder(torch.nn.Module):
     def __init__(self, conditioning: str):
         super().__init__()
         self.num_frequencies = 8
-        assert conditioning in ["date_time", "date", "time"], f"Unsupported conditioning: {conditioning}"
+        assert conditioning in ["date_time", "date", "time"], (
+            f"Unsupported conditioning: {conditioning}"
+        )
         self.date_only = conditioning == "date"
         self.time_only = conditioning == "time"
-
 
     def forward(self, timestamp: np.ndarray | np.datetime64) -> torch.Tensor:
         """
@@ -606,10 +620,26 @@ class DateTimeEncoder(torch.nn.Module):
         doy_phase = two_pi * doy_frac[:, None] * k
         tod_phase = two_pi * tod_frac[:, None] * k
 
-        doy_cos = np.cos(doy_phase).astype(np.float32) if not self.time_only else np.zeros_like(doy_phase).astype(np.float32)
-        doy_sin = np.sin(doy_phase).astype(np.float32) if not self.time_only else np.zeros_like(doy_phase).astype(np.float32)
-        tod_cos = np.cos(tod_phase).astype(np.float32) if not self.date_only else np.zeros_like(tod_phase).astype(np.float32)
-        tod_sin = np.sin(tod_phase).astype(np.float32) if not self.date_only else np.zeros_like(tod_phase).astype(np.float32)
+        doy_cos = (
+            np.cos(doy_phase).astype(np.float32)
+            if not self.time_only
+            else np.zeros_like(doy_phase).astype(np.float32)
+        )
+        doy_sin = (
+            np.sin(doy_phase).astype(np.float32)
+            if not self.time_only
+            else np.zeros_like(doy_phase).astype(np.float32)
+        )
+        tod_cos = (
+            np.cos(tod_phase).astype(np.float32)
+            if not self.date_only
+            else np.zeros_like(tod_phase).astype(np.float32)
+        )
+        tod_sin = (
+            np.sin(tod_phase).astype(np.float32)
+            if not self.date_only
+            else np.zeros_like(tod_phase).astype(np.float32)
+        )
 
         # Stack all components: (N, K, 4) -> (N, K*4)
         out = np.stack([doy_cos, doy_sin, tod_cos, tod_sin], axis=-1)

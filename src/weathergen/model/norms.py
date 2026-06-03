@@ -60,6 +60,7 @@ class RMSNorm(torch.nn.Module):
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
+
 class AdaLNZero(torch.nn.Module):
     """
     AdaLayerNorm with zero initialization and with additional gate parameter

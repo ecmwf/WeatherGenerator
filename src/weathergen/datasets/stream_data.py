@@ -444,7 +444,7 @@ def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderD
 
     coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
     # spoof two tokens to avoid unnecessary computational load
-    coords = coords[ np.random.choice(coords.shape[0], size=2, replace=False) ]
+    coords = coords[np.random.choice(coords.shape[0], size=2, replace=False)]
 
     geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
     data = np.zeros((coords.shape[0], num_channels), dtype=np.float32)

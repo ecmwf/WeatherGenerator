@@ -14,7 +14,7 @@ from flash_attn import flash_attn_func, flash_attn_varlen_func
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 from weathergen.model.layers import LinearNormConditioning
-from weathergen.model.norms import AdaLNZero, AdaLayerNorm, RMSNorm
+from weathergen.model.norms import AdaLayerNorm, AdaLNZero, RMSNorm
 from weathergen.model.positional_encoding import rotary_pos_emb_2d
 
 """
@@ -28,8 +28,10 @@ coordinates aligned with the token order (lat, lon in radians).
 def _apply_xsa(attn_out: torch.Tensor, self_values: torch.Tensor) -> torch.Tensor:
     attn_out_float = attn_out.float()
     self_values_float = self_values.float()
-    denom = self_values_float.pow(2).sum(dim=-1, keepdim=True).clamp_min(
-        torch.finfo(self_values_float.dtype).eps
+    denom = (
+        self_values_float.pow(2)
+        .sum(dim=-1, keepdim=True)
+        .clamp_min(torch.finfo(self_values_float.dtype).eps)
     )
     proj = (attn_out_float * self_values_float).sum(dim=-1, keepdim=True) / denom
     return (attn_out_float - (proj * self_values_float)).to(attn_out.dtype)
@@ -276,7 +278,11 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
                 assert dim_aux is not None, "For DIT, need to provide dim_aux for ada layer norm"
             assert dim_aux is None, "conditioning not yet implemented for DIT attention"
             assert with_residual, "DIT attention should always have residual connection"
-            self.lnorm = AdaLNZero(dim_embed, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_embed, eps=norm_eps)
+            self.lnorm = (
+                AdaLNZero(dim_embed, dim_aux, norm_eps=norm_eps)
+                if dim_aux is not None
+                else norm(dim_embed, eps=norm_eps)
+            )
             self.noise_conditioning = LinearNormConditioning(
                 latent_space_dim=dim_embed, dtype=attention_dtype
             )
@@ -595,7 +601,7 @@ class MultiSelfAttentionHead(torch.nn.Module):
         attention_dtype=torch.bfloat16,
         with_2d_rope=False,
         is_dit=False,  # should only be True for diffusion model
-        dit_is_cond = False, # whether the attention is used for conditioning in the diffusion model (as opposed to denoising). Should only be True for cross attention layers in the diffusion model, and will control whether ada_ln_aux is applied to the input or output of the attention layer
+        dit_is_cond=False,  # whether the attention is used for conditioning in the diffusion model (as opposed to denoising). Should only be True for cross attention layers in the diffusion model, and will control whether ada_ln_aux is applied to the input or output of the attention layer
         use_xsa=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
@@ -623,7 +629,11 @@ class MultiSelfAttentionHead(torch.nn.Module):
             if dit_is_cond:
                 assert dim_aux is not None, "For DIT, need to provide dim_aux for ada layer norm"
             assert with_residual, "DIT attention should always have residual connection"
-            self.lnorm = AdaLNZero(dim_embed, dim_aux, norm_eps=norm_eps) if dim_aux is not None else norm(dim_embed, eps=norm_eps)
+            self.lnorm = (
+                AdaLNZero(dim_embed, dim_aux, norm_eps=norm_eps)
+                if dim_aux is not None
+                else norm(dim_embed, eps=norm_eps)
+            )
             self.noise_conditioning = LinearNormConditioning(
                 latent_space_dim=dim_embed, dtype=attention_dtype
             )  # TODO: Do I need to pass dtype?

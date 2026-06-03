@@ -93,6 +93,9 @@ class EmbeddingEngine(torch.nn.Module):
         # iterate over all streams
         x_embeds = []
         for stream_name in self.stream_names:
+            if type(self.embeds[stream_name]) is torch.nn.Identity:
+                continue
+
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -134,7 +137,7 @@ class EmbeddingEngine(torch.nn.Module):
         tokens_all = tokens_all + pe_embed[pe_idxs]
 
         return tokens_all
-    
+
     def get_pe_idxs_vectorized(self, batch):
         """
         Compute per cell indices into positional encoding
@@ -184,10 +187,15 @@ class EmbeddingEngine(torch.nn.Module):
         Vectorized version
         """
 
+        streams_active = []
+        for i, stream_name in enumerate(self.stream_names):
+            if type(self.embeds[stream_name]) is not torch.nn.Identity:
+                streams_active += [i]
+
         dev = batch.get_device()
         # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+        tok_counts = batch.tokens_lens[:, :, streams_active].permute([2, 0, 1, 3]).flatten(1, -1)
 
         # partial sums for per cell offsets
         pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)
@@ -588,7 +596,8 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
+                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
+                            == "ada_ln",
                         )
                     )
                 else:
@@ -609,7 +618,8 @@ class ForecastingEngine(torch.nn.Module):
                             attention_dtype=get_dtype(self.cf.attention_dtype),
                             with_2d_rope=self.cf.get("rope_2D", False),
                             is_dit=self.cf.get("fe_diffusion_model", False),
-                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
+                            dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
+                            == "ada_ln",
                         )
                     )
                 # Add cross-attention block (Q=noised tokens, KV=enc(X_t)) for cross_attn conditioning
@@ -643,7 +653,8 @@ class ForecastingEngine(torch.nn.Module):
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
                         is_dit=self.cf.get("fe_diffusion_model", False),
-                        dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln",
+                        dit_is_cond=self.cf.get("fe_diffusion_model_conditioning_type", None)
+                        == "ada_ln",
                     )
                 )
                 # Optionally, add LayerNorm after i-th layer
@@ -691,17 +702,27 @@ class ForecastingEngine(torch.nn.Module):
                 if isinstance(block, torch.nn.LayerNorm):
                     tokens = checkpoint(block, tokens, use_reentrant=False)
                 elif isinstance(block, MultiCrossAttentionHead):
-                    assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                    assert conditioning is not None, (
+                        "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                    )
                     tokens = checkpoint(block, tokens, conditioning, noise_emb, use_reentrant=False)
                 else:
                     if self.cf.get("fe_diffusion_model_conditioning_type", None) == "ada_ln":
-                        assert conditioning is not None, "conditioning must be provided for diffusion model conditioning"
-                        tokens = checkpoint(block, tokens, coords, noise_emb, conditioning, use_reentrant=False)
+                        assert conditioning is not None, (
+                            "conditioning must be provided for diffusion model conditioning"
+                        )
+                        tokens = checkpoint(
+                            block, tokens, coords, noise_emb, conditioning, use_reentrant=False
+                        )
                     elif self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
-                        assert conditioning is not None, "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                        assert conditioning is not None, (
+                            "conditioning (e.g. enc(X_t)) must be provided for cross_attn conditioning"
+                        )
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
                     else:
-                        assert conditioning is None, "conditioning should not be provided when diffusion model conditioning is disabled"
+                        assert conditioning is None, (
+                            "conditioning should not be provided when diffusion model conditioning is disabled"
+                        )
                         tokens = checkpoint(block, tokens, coords, noise_emb, use_reentrant=False)
         else:
             for block in self.fe_blocks:
@@ -824,7 +845,9 @@ class TargetPredictionEngineClassic(nn.Module):
             )
 
             # Optional Self-Attention Head
-            pred_self_attention = stream_config["target_readout"].get("self_attention", self.cf.pred_self_attention)
+            pred_self_attention = stream_config["target_readout"].get(
+                "self_attention", self.cf.pred_self_attention
+            )
             if pred_self_attention:
                 self.tte.append(
                     MultiSelfAttentionHeadVarlen(
@@ -848,7 +871,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     self.dims_embed[i],
                     self.dims_embed[i + 1],
                     with_residual=True,
-                    hidden_factor=1, #self.tr_mlp_hidden_factor,
+                    hidden_factor=1,  # self.tr_mlp_hidden_factor,
                     dropout_rate=0.2,  # Assuming dropout_rate is 0.1
                     # hidden_factor=self.tr_mlp_hidden_factor,
                     # dropout_rate=0.1,  # Assuming dropout_rate is 0.1

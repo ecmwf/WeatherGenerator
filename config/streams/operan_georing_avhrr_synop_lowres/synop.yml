@@ -26,6 +26,7 @@ SurfaceCombined :
   tokenize_spacetime : False
   max_num_targets: -1
   # diagnostic: True
+  forcing: True
   embed : 
     net : transformer
     num_tokens : 1

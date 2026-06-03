@@ -390,7 +390,12 @@ class Model(torch.nn.Module):
                 assert cf.diffusion_conditioning_embed_dim is not None, (
                     "Diffusion conditioning embedding dimension must be specified when using diffusion model conditioning"
                 )
-                self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells, dim_aux=self.cf.diffusion_conditioning_embed_dim)
+                self.forecast_engine = ForecastingEngine(
+                    cf,
+                    mode_cfg,
+                    self.num_healpix_cells,
+                    dim_aux=self.cf.diffusion_conditioning_embed_dim,
+                )
             else:
                 self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
             if cf.get("fe_diffusion_model", False):
@@ -648,12 +653,10 @@ class Model(torch.nn.Module):
         num_params_latent_heads = get_num_parameters(self.latent_heads)
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_fe = (
-            get_num_parameters(
-                self.forecast_engine.net.fe_blocks
-                if cf.fe_diffusion_model
-                else self.forecast_engine.fe_blocks
-            )
+        num_params_fe = get_num_parameters(
+            self.forecast_engine.net.fe_blocks
+            if cf.get("fe_diffusion_model", False)
+            else self.forecast_engine.fe_blocks
         )
 
         mdict = self.embed_target_coords
@@ -739,12 +742,20 @@ class Model(torch.nn.Module):
             # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
             if self.cf.stage == "inference":
                 print("Using most recent steps as conditioning tokens for forecasting inference.")
-                conditioning_tokens = tokens[:, 0]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, :-1].sum(axis=1)
+                conditioning_tokens = tokens[
+                    :, 0
+                ]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, :-1].sum(axis=1)
             else:
                 # Conditioning: all older context steps [t-1, ..., t-(T-1)]; denoising target: t (newest)
-                conditioning_tokens = tokens[:, 1]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, 1:].sum(axis=1)
-                conditioning_tokens = conditioning_tokens + torch.randn_like(conditioning_tokens) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
-                if np.random.rand() < self.cf.get("fe_diffusion_classifier_free_guidance_prob", 0.0):  # occasionally dropout conditioning for classifier free guidance
+                conditioning_tokens = tokens[
+                    :, 1
+                ]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, 1:].sum(axis=1)
+                conditioning_tokens = conditioning_tokens + torch.randn_like(
+                    conditioning_tokens
+                ) * self.cf.get("fe_impute_latent_diffusion_noise_std", 0.0)
+                if np.random.rand() < self.cf.get(
+                    "fe_diffusion_classifier_free_guidance_prob", 0.0
+                ):  # occasionally dropout conditioning for classifier free guidance
                     conditioning_tokens = torch.zeros_like(conditioning_tokens)
             # X_t (tokens[:, 0], most recent) is the diffusion denoising target; older steps are conditioning.
             batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = conditioning_tokens
@@ -766,10 +777,7 @@ class Model(torch.nn.Module):
 
             # apply forecasting engine
             tokens = self.forecast_engine(
-                tokens,
-                step,
-                meta_info=batch.samples[0].meta_info,
-                coords=model_params.rope_coords
+                tokens, step, meta_info=batch.samples[0].meta_info, coords=model_params.rope_coords
             )
 
             # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a
@@ -781,10 +789,7 @@ class Model(torch.nn.Module):
                 # step (forecast.num_steps=1); the per-ODE-step trajectory consumes the
                 # ModelOutput fstep dimension. Multi-step autoregressive rollouts on top of
                 # diffusion are not implemented yet.
-                if (
-                    len(batch.get_output_idxs()) > 1
-                    and not self._warned_diffusion_multi_step
-                ):
+                if len(batch.get_output_idxs()) > 1 and not self._warned_diffusion_multi_step:
                     logger.warning(
                         "Diffusion inference is being run with forecast.num_steps=%d (>1). "
                         "Only a single forecast step is supported in this mode; the "
@@ -796,17 +801,23 @@ class Model(torch.nn.Module):
                 # Resize output to fit the diffusion trajectory.
                 output = self._reindex_output_for_trajectory(output, len(tokens))
                 cond = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"]
-                predict_residual = self.cf.get("fe_diffusion_model", False) and self.cf.get("fe_diffusion_predict_residual", False)
+                predict_residual = self.cf.get("fe_diffusion_model", False) and self.cf.get(
+                    "fe_diffusion_predict_residual", False
+                )
                 for i, toks in enumerate(tokens):
                     toks_abs = cond + toks if predict_residual else toks
-                    output = self.predict_decoders(model_params, step, toks_abs, batch, output, out_step=i)
-                    output = self.predict_latent(model_params, step, toks_abs, batch, output, out_step=i)
+                    output = self.predict_decoders(
+                        model_params, step, toks_abs, batch, output, out_step=i
+                    )
+                    output = self.predict_latent(
+                        model_params, step, toks_abs, batch, output, out_step=i
+                    )
                 # Feed the final denoised state back as conditioning for the next step.
                 # Pass tokens[-1] forward so inference diagnostics have a reference point;
                 # inference_forward always starts from pure noise regardless.
                 final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
                 batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = final_abs
-                tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
+                tokens = None  # NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
                 continue
 
             # decoder predictions
