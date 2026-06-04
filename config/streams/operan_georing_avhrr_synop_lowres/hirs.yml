@@ -17,17 +17,18 @@ HIRS :
   #   model_input :
   #     masking_strategy_config :
   #       rate: 1.0
-  token_size : 512 # 256
+  token_size : 256 # 256
   forcing: True
+  tokenize_spacetime : False
   embed : 
     net : transformer
     num_tokens : 1
     num_heads : 2
-    dim_embed : 256
+    dim_embed : 128
     num_blocks : 2
   embed_target_coords : 
     net : linear
-    dim_embed : 256
+    dim_embed : 128
   target_readout :
     num_layers : 2
     num_heads : 4

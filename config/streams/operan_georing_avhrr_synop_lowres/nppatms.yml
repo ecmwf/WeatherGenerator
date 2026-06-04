@@ -18,6 +18,7 @@ NPP_ATMS :
   #     masking_strategy_config :
   #       rate: 1.0
   token_size : 512 # 256
+  tokenize_spacetime : False
   forcing: True
   embed : 
     net : transformer
