@@ -192,12 +192,17 @@ class LinePlots:
             )
 
         elif self.plot_ensemble == "members":
+            print(f"\n[members] {label}")
             for j in range(ens.ens.size):
+                member = ens.isel(ens=j)
+                print(f"  ens={j}: {member.values}")
                 plt.plot(
                     ens[x_dim],
-                    ens.isel(ens=j).values,
+                    member.values,
                     color=color,
-                    alpha=0.2,
+                    alpha=0.5,
+                    linestyle="--",
+                    linewidth=0.8,
                 )
         else:
             _logger.warning(
