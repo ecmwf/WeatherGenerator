@@ -25,6 +25,7 @@ SurfaceCombined :
   #       rate: 0.1
   tokenize_spacetime : False
   max_num_targets: -1
+  forcing : True
   # diagnostic: True
   embed : 
     net : transformer
