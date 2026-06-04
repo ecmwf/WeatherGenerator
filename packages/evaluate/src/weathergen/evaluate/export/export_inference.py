@@ -106,7 +106,7 @@ def parse_args(args: list) -> argparse.Namespace:
         type=str,
         choices=["ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
         help="Stream name to retrieve data for",
-        required=True,
+        default=None,
     )
 
     parser.add_argument(
@@ -152,15 +152,15 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--epoch",
-        type=int,
-        default=0,
+        nargs="+",
+        default=[None],
         help="Epoch number to identify the Zarr store",
     )
 
     parser.add_argument(
         "--rank",
-        type=int,
-        default=0,
+        nargs="+",
+        default=[None],
         help="Rank number to identify the Zarr store",
     )
 
@@ -298,7 +298,8 @@ def export_from_args(args: list) -> None:
         _logger.info(
             f"Starting processing {dtype} for run ID {kwargs['run_id']}. "
             f"Processing {kwargs['samples'] if kwargs['samples'] is not None else 'all'} samples \
-and {kwargs['fsteps'] if kwargs['fsteps'] is not None else 'all'} forecast steps."
+ {kwargs['fsteps'] if kwargs['fsteps'] is not None else 'all'} forecast steps, \
+and {kwargs['stream'] if kwargs['stream'] is not None else 'all'} streams."
         )
 
         export_model_outputs(dtype, config, **kwargs)

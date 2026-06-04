@@ -459,7 +459,9 @@ class VerifParser(CfParser):
 
         return data
 
-    def assign_frt(self, ds: xr.Dataset, reference_time: np.datetime64, default_fstep: int) -> xr.Dataset:
+    def assign_frt(
+        self, ds: xr.Dataset, reference_time: np.datetime64, default_fstep: int
+    ) -> xr.Dataset:
         """
         Assign forecast reference time coordinate to the dataset.
 
@@ -570,7 +572,6 @@ class VerifParser(CfParser):
             mapped_units = mapped_info.get("wg_unit", {})
 
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
-
             wg_unit = mapped_units.get(self.stream, "DEFAULT")
             verif_unit = mapped_info.get("verif_unit", None)
             if wg_unit != verif_unit:

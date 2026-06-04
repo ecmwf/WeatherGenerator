@@ -232,23 +232,15 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path) / run_id
 
-        config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
-        config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
+        # mini_epoch none for inference
+        config_path = path / _get_model_config_file_read_name(run_id, None)
 
-        if config_path_with_epoch.exists():
-            fname = config_path_with_epoch
-            _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
-        elif config_path_without_epoch.exists():
-            fname = config_path_without_epoch
-            _logger.info(
-                f"Config for mini_epoch {mini_epoch} not found. "
-                f"Falling back to config without mini_epoch: {fname}"
-            )
+        if config_path.exists():
+            fname = config_path
         else:
             raise FileNotFoundError(
                 f"Could not find model config for run_id '{run_id}' "
-                f"(mini_epoch={mini_epoch}) in '{path}'. "
-                f"Tried: '{config_path_with_epoch.name}' and '{config_path_without_epoch.name}'. "
+                f"at {config_path}."
                 f"Please check run_id and mini_epoch."
             )
 
@@ -284,21 +276,39 @@ def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
     return f"model_{run_id}{mini_epoch_str}.json"
 
 
-def get_model_results(run_id: str, mini_epoch: int, rank: int) -> Path:
+def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> list[Path]:
     """
-    Get the path to the model results zarr store from a given run_id and mini_epoch.
+    Find all model results zarr stores from a given run_id.
     """
     run_results = Path(_load_private_conf(None)["path_shared_working_dir"]) / f"results/{run_id}"
+    if not run_results.exists():
+        raise FileNotFoundError(
+            f"Results directory for run_id {run_id} does not exist: {run_results}"
+        )
 
-    for ext in StoreType.extensions():
-        zarr_path = run_results / f"validation_chkpt{mini_epoch:05d}_rank{rank:04d}.{ext}"
+    found_paths = []
 
-        if zarr_path.exists() or zarr_path.is_dir():
-            return zarr_path
-    raise FileNotFoundError(
-        f"Zarr file with run_id {run_id}, mini_epoch {mini_epoch} and rank {rank} does not "
-        f"exist or is not a directory."
-    )
+    for rank in rank_list:
+        if isinstance(rank, int):
+            rank = f"{rank:04d}"
+        else:
+            rank = "*"
+
+        for mini_epoch in mini_epoch_list:
+            if isinstance(mini_epoch, int):
+                mini_epoch = f"{mini_epoch:05d}"
+            else:
+                mini_epoch = "*"
+
+            glob_str = f"validation_chkpt{mini_epoch}_rank{rank}"
+
+            for ext in StoreType.extensions():
+                found_paths.extend(run_results.glob(f"{glob_str}.{ext}"))
+
+    if not found_paths:
+        raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {run_results}")
+
+    return found_paths
 
 
 def _apply_fixes(config: Config) -> Config:

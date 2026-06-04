@@ -249,7 +249,9 @@ class NetcdfParser(CfParser):
 
         return data
 
-    def assign_frt(self, ds: xr.Dataset, reference_time: np.datetime64, default_fstep: int) -> xr.Dataset:
+    def assign_frt(
+        self, ds: xr.Dataset, reference_time: np.datetime64, default_fstep: int
+    ) -> xr.Dataset:
         """
         Assign forecast reference time coordinate to the dataset.
 
