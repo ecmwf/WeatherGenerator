@@ -335,6 +335,7 @@ class Model(torch.nn.Module):
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
+        self.data_stream_names = None
         self.target_token_engines = None
         self.data_streams: list = None
         self.forecast_aux_infos = condition_num_channels
