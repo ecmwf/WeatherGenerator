@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import math
 from pathlib import Path
 from typing import override
 
@@ -62,6 +63,7 @@ class DataReaderCondition(DataReaderTimestep):
         self.variables: list[str] = list(
             stream_info.get("variables", ["start_day", "start_time", "end_day", "end_time"])
         )
+        self.emb_dimension: int = stream_info.get("emb_dimension", 4)
         self.num_channels: int = self._compute_num_channels(stream_info)
         self.source_idx = []
 
@@ -76,7 +78,7 @@ class DataReaderCondition(DataReaderTimestep):
         self.len = int((tw_handler.t_end - tw_handler.t_start) // tw_handler.t_window_step)
 
     def _compute_num_channels(self, stream_info: dict) -> int:
-        if self.transform == "absolute":
+        if self.transform in ("absolute", "absolute_normalized"):
             return len(self.variables)
         elif self.transform == "cos_sin":
             return 2 * len(self.variables)
@@ -118,7 +120,7 @@ class DataReaderCondition(DataReaderTimestep):
         encoded_condtions = self._encode(dtr, self.variables)
         return encoded_condtions
 
-    def _encode(self, dtr: DTRange, variables: list[str]):
+    def _encode(self, dtr: DTRange, variables: list[str]) -> np.ndarray:
         """
         Encode start/end datetimes into condition variable values.
 
@@ -134,17 +136,43 @@ class DataReaderCondition(DataReaderTimestep):
         np.ndarray of shape (num_channels,)
         """
 
+        _PERIODS: dict[str, float] = {
+            "start_day":  365.0,
+            "end_day":    365.0,
+            "start_time": 24.0,
+            "end_time":   24.0,
+        }
+        _RAW: dict[str, float] = {
+            # fractional day: day 25 at 12:00 → 25.5, unique signal per 6h timestep
+            "start_day":  _day_of_year(dtr.start) + _hour_of_day(dtr.start) / 24.0,
+            "start_time": _hour_of_day(dtr.start),
+            "end_day":    _day_of_year(dtr.end) + _hour_of_day(dtr.end) / 24.0,
+            "end_time":   _hour_of_day(dtr.end),
+        }
+
         values: list[float] = []
-        # Right now we only support absolute encoding, fourier or sin_cosine is not supported yet
-        for var in self.variables:
-            if var == "start_day":
-                values.append(_day_of_year(dtr.start))
-            elif var == "start_time":
-                values.append(_hour_of_day(dtr.start))
-            elif var == "end_day":  # noqa: PLR200
-                values.append(_day_of_year(dtr.end))
-            elif var == "end_time":  # noqa: PLR200
-                values.append(_hour_of_day(dtr.end))
+
+        if self.transform == "absolute":
+            for var in variables:
+                values.append(_RAW[var])
+
+        if self.transform == "absolute_normalized":
+            for var in variables:
+                values.append(_RAW[var] / _PERIODS[var])
+
+        elif self.transform == "cos_sin":
+            for var in variables:
+                angle = 2.0 * math.pi * _RAW[var] / _PERIODS[var]
+                values.append(math.cos(angle))
+                values.append(math.sin(angle))
+
+        elif self.transform == "fourier":
+            num_freqs = self.emb_dimension // 2
+            for var in variables:
+                for k in range(1, num_freqs + 1):
+                    angle = 2.0 * math.pi * k * _RAW[var] / _PERIODS[var]
+                    values.append(math.cos(angle))
+                    values.append(math.sin(angle))
 
         return values
 

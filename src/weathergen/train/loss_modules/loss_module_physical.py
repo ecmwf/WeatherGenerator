@@ -210,8 +210,8 @@ class LossPhysical(LossModuleBase):
         source2target_idxs, output_info, target2source_idxs, target_info = metadata
 
         # TODO: iterate over batch dimension
-
-        data_streams = [stream for stream in self.cf.streams if stream["type"] != "condition"]
+        data_streams = [stream_cfg for stream_cfg in self.cf.streams.values()
+                        if stream_cfg.get("type") != "condition"]
 
         for stream_info in data_streams:
             stream_name = stream_info["name"]
@@ -369,6 +369,7 @@ class LossPhysical(LossModuleBase):
                 for ch_n, output_step_dict in ch_dict.items():
                     if ch_n != "avg":
                         for _, v in output_step_dict.items():
+                            v = 0.0 if type(v) is float and np.isnan(v) else v
                             reordered_losses[stream_name][loss_fct_name]["avg"] += v
                             count += 1
                 reordered_losses[stream_name][loss_fct_name]["avg"] /= count
