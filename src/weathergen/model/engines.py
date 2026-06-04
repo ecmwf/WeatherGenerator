@@ -50,12 +50,15 @@ class EmbeddingEngine(torch.nn.Module):
         self.embeds = torch.nn.ModuleDict()
         self.data_stream_names = [
             stream_name
-            for stream_name,stream_cfg in cf.streams.items()
+            for stream_name, stream_cfg in cf.streams.items()
             if stream_cfg.get("type") != "condition"
         ]
 
-        self.data_streams = [stream_cfg for stream_cfg in cf.streams.values() 
-                             if stream_cfg.get("type") != "condition"]
+        self.data_streams = [
+            stream_cfg
+            for stream_cfg in cf.streams.values()
+            if stream_cfg.get("type") != "condition"
+        ]
 
         for i, (si, stream_name) in enumerate(
             zip(self.data_streams, self.data_stream_names, strict=True)
@@ -638,8 +641,7 @@ class ForecastingEngine(torch.nn.Module):
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
         aux_info = None if len(fstep) == 0 else fstep.to(dtype=tokens.dtype)
-       
-        print(f"-----------aux_info is {aux_info}-----------")
+
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = checkpoint(block, tokens, use_reentrant=False)

@@ -406,12 +406,15 @@ class Model(torch.nn.Module):
         # determine stream names once so downstream components use consistent keys
         self.data_stream_names = [
             stream_name
-            for stream_name,stream_cfg in cf.streams.items()
+            for stream_name, stream_cfg in cf.streams.items()
             if stream_cfg.get("type") != "condition"
         ]
 
-        self.data_streams = [stream_cfg for stream_cfg in cf.streams.values() 
-                             if stream_cfg.get("type") != "condition"]
+        self.data_streams = [
+            stream_cfg
+            for stream_cfg in cf.streams.values()
+            if stream_cfg.get("type") != "condition"
+        ]
 
         for i_stream, _ in enumerate(self.data_streams):
             stream_name = self.data_stream_names[i_stream]

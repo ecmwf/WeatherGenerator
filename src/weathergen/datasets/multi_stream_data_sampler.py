@@ -102,10 +102,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mini_epoch = 0
         self.mask_value = 0.0
-        #self.streams, self.condition_streams = (
+        # self.streams, self.condition_streams = (
         #    [s for s in cf.streams if s.get("type") != "condition"],
         #    [s for s in cf.streams if s.get("type") == "condition"],
-        #)
+        # )
         self.rank = cf.rank
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
@@ -260,7 +260,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             }
 
             dataset = self._get_dataset_class(stream_info, stream_name)
-            
+
             for fname in stream_info["filenames"]:
                 fname = pathlib.Path(fname)
                 # dont check if file exists since zarr stores might be directories
@@ -280,7 +280,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     # The same dataset can exist on different locations in the filesystem,
                     # so we need to choose here.
                     filename = filenames[0]
-                
+
                 ds_type = stream_info["type"]
                 if is_root():
                     logger.info(
@@ -295,16 +295,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
     def _init_condition_streams(self, cf) -> dict[StreamName, _Stream]:
         """Instantiate and register a condition stream (no backing files required)."""
-        condition_datasets : dict[StreamName, _Stream] = {}
+        condition_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
             if stream_info["type"] != "condition":
                 continue
             condition_datasets[stream_name] = _Stream(stream_info, [])
-            kwargs = {
-                "tw_handler": self.time_window_handler,
-                "stream_info": stream_info,
-                "stage": self._stage,
-            }
             if is_root():
                 logger.info(f"Opening condition dataset from stream config {stream_info['name']}.")
             ds = DataReaderCondition(
@@ -819,8 +814,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
 
         # for condition streams
-        for condition_name, condition_data in self.condition_datasets.items():
-            condition_info, condition_ds = condition_data.info, condition_data.readers
+        for _, condition_data in self.condition_datasets.items():
+            condition_ds = condition_data.readers
             self._build_condition_data(batch, condition_ds[0], idx, num_output_steps)
 
         source_in_steps = input_steps.max().item()
