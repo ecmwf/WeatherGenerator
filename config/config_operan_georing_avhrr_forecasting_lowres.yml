@@ -123,6 +123,8 @@ train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 500
+  log_grad_norms: True
+
 
 # parameters for data loading
 data_loading :
@@ -163,7 +165,6 @@ training_config:
   optimizer:
     grad_clip: 1.0
     weight_decay: 0.1
-    log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.98125 # == 0.85 on 2 nodes x 4 gpus
