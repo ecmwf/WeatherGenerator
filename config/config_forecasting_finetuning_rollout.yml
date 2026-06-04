@@ -7,29 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
-
-streams_directory: "./config/streams/operan_1deg_forecasting/"
+freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
 
 general:
 
   # mutable parameters
   istep: 0
-  rank: ???
-  world_size: ???
-
-  # local_rank, 
-  # with_ddp,
-  # data_path_*, 
-  # model_path, 
-  # run_path, 
-  # path_shared_
-  
-  multiprocessing_method: "fork"
-
-  desc: ""
-  run_id: ???
-  run_history: []
 
 # config for training
 training_config:
@@ -44,39 +27,19 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 3.5e-5
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
-    policy_decay: "constant"
+    policy_decay: "cosine"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
 
   forecast :
       time_step: 06:00:00
       offset: 1
-      num_steps: 3
+      num_steps: 8
       policy: "fixed"
-
-
-# test config; full test config is merge of validation and test config
-test_config: 
-
-  samples_per_mini_epoch: 4096
-  shuffle: False
-
-  start_date: 2023-06-01T00:00
-  end_date: 2023-08-31T00:00
-
-  # parameters for validation samples that are written to disk
-  output : {
-    # number of samples that are written
-    num_samples: 4096,
-    # write samples in normalized model space
-    normalized_samples: False,
-    # output streams to write; default all
-    streams: null,
-    }
 

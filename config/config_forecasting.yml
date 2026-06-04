@@ -120,7 +120,7 @@ general:
 train_logging:
   terminal: 10
   metrics: 20
-  checkpoint: 250
+  checkpoint: 50 #250
 
 # parameters for data loading
 data_loading :
@@ -136,7 +136,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 64
+  num_mini_epochs: 164
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -185,7 +185,7 @@ training_config:
   forecast :
       time_step: 06:00:00
       offset: 1
-      num_steps: 3
+      num_steps: 2
       policy: "fixed"
 
 
