@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
+from weathergen.train.utils import TRAIN, Stage
 
 
 def _pin_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -126,13 +127,6 @@ class StreamData:
         self.source_tokens_cells = _pin_tensor_list(self.source_tokens_cells)
         self.source_tokens_lens = _pin_tensor_list(self.source_tokens_lens)
         self.source_idxs_embed = _pin_tensor_list(self.source_idxs_embed)
-        self.source_idxs_embed_pe = _pin_tensor_list(self.source_idxs_embed_pe)
-
-        # Pin source_raw (list of IOReaderData objects)
-        if hasattr(self, "source_raw"):
-            for raw_data in self.source_raw:
-                if raw_data is not None and hasattr(raw_data, "pin_memory"):
-                    raw_data.pin_memory()
 
         return self
 
@@ -163,14 +157,17 @@ class StreamData:
             self.source_tokens_lens = [s.to(dv, non_blocking=True) for s in self.source_tokens_lens]
 
             self.source_idxs_embed = [s.to(dv, non_blocking=True) for s in self.source_idxs_embed]
-            self.source_idxs_embed_pe = [
-                s.to(dv, non_blocking=True) for s in self.source_idxs_embed_pe
-            ]
 
         return self
 
     def add_source(
-        self, step: int, ss_raw: IOReaderData, ss_lens: torch.Tensor, ss_cells: list
+        self,
+        stage: Stage,
+        step: int,
+        ss_raw: IOReaderData,
+        ss_lens: torch.Tensor,
+        ss_cells: list,
+        is_spoof: bool,
     ) -> None:
         """
         Add data for source for one input.
@@ -189,6 +186,10 @@ class StreamData:
 
         assert step < self.input_steps
 
+        if stage == TRAIN:
+            del ss_raw
+            ss_raw = None
+
         self.source_raw[step] = ss_raw
         self.source_tokens_lens[step] = ss_lens
         self.source_tokens_cells[step] = torch.stack(ss_cells)
@@ -196,10 +197,11 @@ class StreamData:
         idx = torch.isnan(self.source_tokens_cells[step])
         self.source_tokens_cells[step][idx] = self.mask_value
 
-        self.source_is_spoof[step] = ss_raw.is_spoof
+        self.source_is_spoof[step] = is_spoof
 
     def add_target(
         self,
+        stage: Stage,
         fstep: int,
         targets: list,
         target_coords: torch.Tensor,
@@ -245,6 +247,7 @@ class StreamData:
 
     def add_target_values(
         self,
+        stage: Stage,
         fstep: int,
         targets: list,
         target_coords_raw: torch.Tensor,
@@ -278,6 +281,10 @@ class StreamData:
         None
         """
 
+        if stage == TRAIN:
+            del idxs_inv
+            idxs_inv = None
+
         self.target_tokens[fstep] = targets
         self.target_times_raw[fstep] = times_raw
         self.target_coords_raw[fstep] = target_coords_raw
@@ -287,6 +294,7 @@ class StreamData:
 
     def add_target_coords(
         self,
+        stage: Stage,
         fstep: int,
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
@@ -451,9 +459,12 @@ def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderD
     lons, lats = hp.healpix_to_lonlat(
         np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
     )
-    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
-    geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
 
+    coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
+    # spoof two tokens to avoid unnecessary computational load
+    coords = coords[np.random.choice(coords.shape[0], size=2, replace=False)]
+
+    geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
     data = np.zeros((coords.shape[0], num_channels), dtype=np.float32)
     datetimes = np.array(datetime).repeat(coords.shape[0])
 
