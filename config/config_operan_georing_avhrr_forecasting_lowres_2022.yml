@@ -92,7 +92,7 @@ norm_type: "LayerNorm"
 #####################################
 
 # streams_directory: "./config/streams/era5_georing_avhrr/"
-streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres/"
+streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres_extras/"
 streams: ???
 
 # type of zarr_store
@@ -120,7 +120,7 @@ general:
 
 # logging frequency in the training loop (in number of batches)
 train_logging:
-  terminal: 10
+  terminal: 100
   metrics: 20
   checkpoint: 500
   log_grad_norms: True
@@ -145,7 +145,7 @@ training_config:
   shuffle: True
 
   start_date: 2016-01-01T00:00
-  end_date: 2022-12-31T00:00
+  end_date: 2022-06-30T00:00
 
   time_window_step: 01:00:00
   time_window_len: 06:00:00
@@ -198,8 +198,8 @@ validation_config:
   samples_per_mini_epoch: 256
   shuffle: False
 
-  start_date: 2023-10-01T00:00
-  end_date: 2023-12-31T00:00
+  start_date: 2022-09-01T00:00
+  end_date: 2022-12-31T00:00
 
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 

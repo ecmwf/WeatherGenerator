@@ -9,6 +9,7 @@
 
 import datetime
 import logging
+import re
 from pathlib import Path
 from typing import override
 
@@ -52,6 +53,7 @@ class DataReaderObs(DataReaderBase):
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
         data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
+        multi_file_stream = len(stream_info.get("filenames", [])) > 1
 
         # determine source / target channels and corresponding idx using include and exclude lists
 
@@ -60,7 +62,13 @@ class DataReaderObs(DataReaderBase):
             s_chs_exclude = stream_info.get("source_exclude", [])
             self.source_channels = self.select_channels(data_colnames, s_chs, s_chs_exclude)
         else:
-            self.source_channels = stream_info.get(str(stage) + "_source_channels")
+            self.source_channels = self._resolve_configured_channels(
+                stream_info.get(str(stage) + "_source_channels"),
+                data_colnames,
+                "source",
+                stream_info["name"],
+                multi_file_stream,
+            )
         self.source_idx = [self.colnames.index(c) for c in self.source_channels]
         self.source_idx = np.array(self.source_idx, dtype=np.int64)
 
@@ -69,7 +77,13 @@ class DataReaderObs(DataReaderBase):
             t_chs_exclude = stream_info.get("target_exclude", [])
             self.target_channels = self.select_channels(data_colnames, t_chs, t_chs_exclude)
         else:
-            self.target_channels = stream_info.get(str(stage) + "_target_channels")
+            self.target_channels = self._resolve_configured_channels(
+                stream_info.get(str(stage) + "_target_channels"),
+                data_colnames,
+                "target",
+                stream_info["name"],
+                multi_file_stream,
+            )
         self.target_idx = [self.colnames.index(c) for c in self.target_channels]
         self.target_idx = np.array(self.target_idx, dtype=np.int64)
 
@@ -125,6 +139,96 @@ class DataReaderObs(DataReaderBase):
         ]
 
         return selected_colnames
+
+    def _resolve_configured_channels(
+        self,
+        configured_channels: list[str] | None,
+        data_colnames: list[str],
+        channel_kind: str,
+        stream_name: str,
+        allow_empty_selector_fallback: bool,
+    ) -> list[str]:
+        """Resolve saved stage-specific channel names against the dataset schema.
+
+        Older saved configs can contain selector-style channel strings that relied on the
+        substring matching used by `source` / `target` config fields. When those values are
+        restored via `train_*_channels` / `val_*_channels`, we need to retry the same
+        selector-style matching instead of requiring exact column names.
+        """
+
+        if configured_channels is None:
+            return []
+
+        configured_channels = list(configured_channels)
+        missing_channels = [channel for channel in configured_channels if channel not in self.colnames]
+        if not missing_channels:
+            return configured_channels
+
+        resolved_channels = self._resolve_variable_suffix_channels(configured_channels, data_colnames)
+        if resolved_channels is not None:
+            _logger.warning(
+                "%s : %s channels %s not found exactly in %s. Resolved variable suffixes to %s.",
+                stream_name,
+                channel_kind,
+                missing_channels,
+                self.filename.name,
+                resolved_channels,
+            )
+            return resolved_channels
+
+        resolved_channels = self.select_channels(data_colnames, configured_channels, [])
+        if resolved_channels or allow_empty_selector_fallback:
+            _logger.warning(
+                "%s : %s channels %s not found exactly in %s. Falling back to selector-style "
+                "matching and resolved %s.",
+                stream_name,
+                channel_kind,
+                missing_channels,
+                self.filename.name,
+                resolved_channels,
+            )
+            return resolved_channels
+
+        raise ValueError(
+            f"{stream_name} : {channel_kind} channels {missing_channels} are not present in "
+            f"{self.filename.name}"
+        )
+
+    def _resolve_variable_suffix_channels(
+        self, configured_channels: list[str], data_colnames: list[str]
+    ) -> list[str] | None:
+        """Map saved channel names with file-specific numeric suffixes to local columns.
+
+        SONDES-style OBS files share the same variable layout across files, but encode the
+        pressure level in the channel suffix (for example `obsvalue_t_5000` vs
+        `obsvalue_t_70000`). When a saved run config restores one file's concrete names, match
+        the corresponding local column by variable prefix and optional `_log` suffix.
+        """
+
+        resolved_channels: list[str] = []
+        for channel in configured_channels:
+            if channel in self.colnames:
+                resolved_channels.append(channel)
+                continue
+
+            match = re.fullmatch(r"(?P<prefix>.+?_)(?P<digits>\d+)(?P<log>_log)?", channel)
+            if match is None:
+                return None
+
+            prefix = match.group("prefix")
+            has_log_suffix = match.group("log") is not None
+            candidates = [col for col in data_colnames if col.startswith(prefix)]
+            if has_log_suffix:
+                candidates = [col for col in candidates if col.endswith("_log")]
+            else:
+                candidates = [col for col in candidates if not col.endswith("_log")]
+
+            if len(candidates) != 1:
+                return None
+
+            resolved_channels.append(candidates[0])
+
+        return resolved_channels
 
     def first_sample_with_data(self) -> int:
         """

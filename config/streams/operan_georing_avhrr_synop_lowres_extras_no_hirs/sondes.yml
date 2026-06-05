@@ -7,28 +7,28 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-HIRS :
+SONDES :
   type : obs
-  stream_id : 50
-  filenames : ['observations-file-1978-2022-eumetsat-fdr-hirs-h512-v1.zarr']
+  stream_id : 70
+  filenames : ['observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-1000-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-925-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-850-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-700-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-500-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-300-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-200-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-100-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-70-v2.zarr', 'observations-ea-ofb-0001-1979-2025-combined-ea-od-sonde-50-v2.zarr']
   # geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
   # masking_override :
   #   model_input :
   #     masking_strategy_config :
   #       rate: 1.0
-  token_size : 256 # 256
-  forcing: True
+  token_size : 512 # 256
   tokenize_spacetime : False
+  forcing: True
   embed : 
     net : transformer
     num_tokens : 1
     num_heads : 2
-    dim_embed : 128
+    dim_embed : 256
     num_blocks : 2
   embed_target_coords : 
     net : linear
-    dim_embed : 128
+    dim_embed : 256
   target_readout :
     num_layers : 2
     num_heads : 4

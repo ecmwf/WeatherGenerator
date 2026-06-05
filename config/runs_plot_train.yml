@@ -1,0 +1,29 @@
+train:
+  plot:
+
+    qoxrrdp1:
+      slurm_id: 0
+      description: "forecast, oper, no obs"
+
+    # o97u9crh:
+    #   slurm_id: 0
+    #   description: "forecast, no obs, 1990 ERA5, then oper"
+    
+    pdd0b5rp:
+      slurm_id: 0
+      description: "forecast, oper+standard obs, better ema"
+
+    uubhm15c:
+      slurm_id: 0
+      description: "forecast, oper+standard obs+sondes,hirs,npp-atms"
+    
+    xaizowlc:
+      slurm_id: 0      
+      description: "cont., forecast, oper++standard obs+sondes,hirs,npp-atms"
+
+    fuslefan:
+      slurm_id: 0      
+      description: "forecast, oper+standard obs+sondes,hirs,npp-atms, better ema"
+
+
+
