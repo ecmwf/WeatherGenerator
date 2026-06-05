@@ -46,7 +46,6 @@ evaluation:
   add_grid: false
   score_cards: false
   bar_plots: false
-  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
   # baseline: "ar40mckx"
 
 

@@ -361,7 +361,7 @@ def _extract_init_times(
     si_list = []
     for i in range(len(samples)):
         si = results[i][3].get("source_interval", {})
-        last_str = si.get("end", si.get("start", None))
+        last_str = si.get("end", None)
         if last_str is not None:
             si_list.append(np.datetime64(last_str, "ns"))
         elif offset is not None:
