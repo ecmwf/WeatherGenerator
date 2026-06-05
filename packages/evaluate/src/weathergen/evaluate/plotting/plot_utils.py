@@ -839,6 +839,7 @@ def psd_plot_metric_region(
                         variable=ch,
                         forecast_step=str(fstep),
                     )
+    _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
 
 
 def create_filename(

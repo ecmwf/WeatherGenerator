@@ -24,12 +24,6 @@ dependencies = [
     "scipy>=1.12",
     ]
 
-[project.optional-dependencies]
-fft = [
-    "scitools-iris>=3.11",
-    "cf-units",
-]
-
 [dependency-groups]
 dev = [
  "pytest>=8.3",

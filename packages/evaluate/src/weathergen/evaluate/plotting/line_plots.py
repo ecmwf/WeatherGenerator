@@ -63,12 +63,16 @@ class LinePlots:
         self.baseline = plotter_cfg.get("baseline")
         self.out_plot_dir_lines = Path(output_basedir) / "line_plots"
         self.out_plot_dir_ratio = Path(output_basedir) / "ratio_plots"
+        self.out_plot_dir_psd = Path(output_basedir) / "psd_plots"
         if not os.path.exists(self.out_plot_dir_lines):
             _logger.info(f"Creating dir {self.out_plot_dir_lines}")
             os.makedirs(self.out_plot_dir_lines, exist_ok=True)
         if not os.path.exists(self.out_plot_dir_ratio):
             _logger.info(f"Creating dir {self.out_plot_dir_ratio}")
             os.makedirs(self.out_plot_dir_ratio, exist_ok=True)
+        if not os.path.exists(self.out_plot_dir_psd):
+            _logger.info(f"Creating dir {self.out_plot_dir_psd}")
+            os.makedirs(self.out_plot_dir_psd, exist_ok=True)
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
@@ -696,7 +700,7 @@ class LinePlots:
         tag : str
             Filename tag.
         """
-        out_dir = Path(self.out_plot_dir_lines) / "psd"
+        out_dir = Path(self.out_plot_dir_psd)
         out_dir.mkdir(parents=True, exist_ok=True)
 
         # Use the target from the first run as reference
@@ -748,6 +752,6 @@ class LinePlots:
 
         name = tag or "psd"
         fname = out_dir / f"{name}.{self.image_format}"
-        _logger.info(f"Saving PSD summary plot to {fname}")
+        _logger.debug(f"Saving PSD summary plot to {fname}")
         fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
         plt.close(fig)

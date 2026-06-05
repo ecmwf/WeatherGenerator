@@ -16,7 +16,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.scores.psd import compute_psd_score
+from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
 from weathergen.evaluate.scores.score_utils import to_list
 
 # from common.io import MockIO
@@ -1818,7 +1818,6 @@ class Scores:
         psd_regrid_resolution: float = 1.0,
         psd_sht_truncation: int | None = None,
         lat_range: tuple[float, float] = (-60.0, 60.0),
-        grid_type: str = "octahedral",
     ) -> xr.DataArray:
         """Compute power spectral density for prediction and ground truth.
 
@@ -1841,9 +1840,6 @@ class Scores:
         lat_range: tuple[float, float]
             Latitude range (min, max) to include in PSD calculation. Default is (-60,
             60) degrees.
-        grid_type: str
-            Type of grid for PSD calculation. Options: 'octahedral', 'regular'.
-            Default is 'octahedral'.
 
         Returns
         -------
@@ -1864,11 +1860,25 @@ class Scores:
                 f"Spatial dimension '{spatial_dim}' not found in dims {list(gt.dims)}."
             )
 
+        # PSD requires a spatial dimension with lat/lon coords (e.g. "ipoint").
+        # If the aggregation dim is "sample" or "ens" (e.g. from score map pipeline),
+        # PSD is not applicable — return NaN gracefully.
+        if spatial_dim in ("sample", "ens"):
+            _logger.debug(
+                f"PSD: aggregation dim is '{spatial_dim}' (not spatial). Skipping."
+            )
+            return xr.DataArray(np.nan)
+
         n_points = gt.sizes[spatial_dim]
         nlat, lats, lons = self._get_psd_grid_info(gt, spatial_dim)
 
         if psd_method == "fft" and (lats is None or lons is None):
             raise ValueError(f"PSD method 'fft' requires lat/lon coords on '{spatial_dim}'.")
+
+        # Detect grid type once for the entire stream (avoid repeated detection per channel)
+        grid_type = None
+        if psd_method == "sht" and lats is not None and lons is not None:
+            grid_type = detect_grid_type(lats, lons, n_points)
 
         psd_kwargs = dict(
             lats=lats,

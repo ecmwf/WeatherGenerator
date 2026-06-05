@@ -190,7 +190,10 @@ def _plot_score_maps_per_stream(
     """Plot 2D score maps for all metrics/channels for one (region, fstep)."""
 
     score_results, preds, metric_names = computed
-    valid = [(m, r) for m, r in zip(metric_names, score_results, strict=False) if r is not None]
+    valid = [
+        (m, r) for m, r in zip(metric_names, score_results, strict=False)
+        if r is not None and "ipoint" in r.dims
+    ]
     if not valid:
         return
 
