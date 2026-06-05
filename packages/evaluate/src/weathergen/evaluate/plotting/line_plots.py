@@ -338,13 +338,14 @@ class LinePlots:
         # TODO: generalise this for other x_dims by introducing a "units"
         # entry in the function if needed
         xunits = "hr" if x_dim == "lead_time" else None
+        y_dim_opts = (y_dim, "ratio", None) if y_dim == "value" else y_dim
+        x_dim_opts = (x_dim, xunits, None) if xunits else x_dim
         self._plot_base(
             fig,
             name,
-            x_dim,
-            y_dim,
+            x_dim_opts,
+            y_dim_opts,
             print_summary,
-            xunits=xunits,
             title=title,
             out_plot_dir=self.out_plot_dir_lines,
         )
@@ -353,14 +354,12 @@ class LinePlots:
         self,
         fig: plt.Figure,
         name: str,
-        x_dim: str,
-        y_dim: str,
+        x_dim: tuple[str, ...],
+        y_dim: tuple[str, ...],
         print_summary: bool = False,
         line: float | None = None,
         vlines: bool = False,
         title: str | None = None,
-        xunits: str | None = None,
-        yunits: str | None = None,
         out_plot_dir: Path = None,
         range: tuple[float, float] | None = None,
     ) -> None:
@@ -373,9 +372,13 @@ class LinePlots:
         name:
             Name of the plot file
         x_dim:
-            Label for the x-axis
+            Label for the x-axis, can be a tuple if the x-axis has units and/or
+            a description is needed (e.g. ("improvement"))
+            syntax: (label, units, description)
         y_dim:
-            Label for the y-axis
+            Label for the y-axis, can be a tuple if the y-axis has units and/or
+            a description is needed (e.g. ("improvement"))
+            syntax: (label, units, description)
         print_summary:
             If True, print a summary of the values from the graph.
         line:
@@ -384,10 +387,6 @@ class LinePlots:
             If True, draw vertical lines to separate each group of variables.
         title:
             Title for the plot.
-        xunits:
-            Units for the x-axis.
-        yunits:
-            Units for the y-axis.
         out_plot_dir:
             Directory where the plot will be saved.
         range:
@@ -396,9 +395,19 @@ class LinePlots:
         -------
             None
         """
+        x_dim, xunits, x_dim_descr = x_dim if isinstance(x_dim, tuple) else (x_dim, None, None)
+        y_dim, yunits, y_dim_descr = y_dim if isinstance(y_dim, tuple) else (y_dim, None, None)
 
-        xlabel = clean_label(x_dim) + (f" [{xunits}]" if xunits else "")
-        ylabel = clean_label(y_dim).upper() + (f" [{yunits}]" if yunits else "")
+        xlabel = (
+            clean_label(x_dim)
+            + (f" [{xunits}]" if xunits else "")
+            + (f" ({x_dim_descr})" if x_dim_descr else "")
+        )
+        ylabel = (
+            clean_label(y_dim).upper()
+            + (f" [{yunits}]" if yunits else "")
+            + (f" ({y_dim_descr})" if y_dim_descr else "")
+        )
 
         ax = fig.gca()
 
@@ -525,7 +534,6 @@ class LinePlots:
                 if c is not None:
                     color_map[rid] = c
 
-
         # Pre-compute all ratios and global y-axis range
         all_fsteps = sorted(data_list[min_index]["forecast_step"].values)
         # ratios_by_fstep[f_step] = [(run_id, label, ratio_values), ...]
@@ -576,11 +584,13 @@ class LinePlots:
                 f"{descr.replace('_', ' ')} {tag.split('_')[0]} | fstep {f_step} | "
                 f" {tag.split('_')[-1]} (baseline: {baseline_name})"
             )
+
+            y_dim_opts = (y_dim, "ratio", None) if y_dim == "value" else y_dim
             self._plot_base(
                 fig,
                 name,
                 "channel",
-                y_dim,
+                y_dim_opts,
                 print_summary,
                 line=1.0,
                 vlines=True,

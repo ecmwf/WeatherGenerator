@@ -109,12 +109,12 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
 
     """
     vt = da["valid_time"].values
-    sis = da["init_times"].values
+    it = da["init_times"].values
     # Compute lead_time: valid_time - init_times
 
     if vt.ndim > 1:
-        sis_expanded = sis[:, np.newaxis] if sis.ndim == 1 else sis
-        lead_time_values = vt - sis_expanded
+        it_expanded = it[:, np.newaxis] if it.ndim == 1 else it
+        lead_time_values = vt - it_expanded
         # Get unique lead_time per sample, verify consistency
         lead_times = [
             np.unique(lead_time_values[i][~np.isnat(lead_time_values[i])])
@@ -127,7 +127,7 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
             )
         lead_time_per_sample = np.array([lt[0] for lt in lead_times])
     else:
-        lead_time_values = vt - sis
+        lead_time_values = vt - it
         lead_time_per_sample = np.unique(lead_time_values[~np.isnat(lead_time_values)])
 
     # Verify all samples have same lead_time for this forecast_step
