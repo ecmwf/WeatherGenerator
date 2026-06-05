@@ -9,7 +9,8 @@
 
 # freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
 
-streams_directory: "./config/streams/operan_1deg_forecasting/"
+# streams_directory: "./config/streams/operan_1deg_forecasting/"
+streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres/"
 
 general:
 
