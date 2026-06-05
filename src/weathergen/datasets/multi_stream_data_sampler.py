@@ -432,8 +432,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     mask,
                 )
 
-                # collect data for stream
-                stream_data.add_source(step, rdata, source_cells_lens, source_cells)
+                stream_data.add_source(
+                    self._stage, step, rdata, source_cells_lens, source_cells, rdata.is_spoof
+                )
 
         return stream_data
 
@@ -474,7 +475,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
@@ -484,8 +485,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
+
                 stream_data.add_target_values(
-                    timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
+                    self._stage, timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
                 )
 
         return stream_data

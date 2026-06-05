@@ -27,15 +27,16 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 MAX_FILENAME_LEN = 255
-LEGEND_FONT_SIZE = "x-small"
 _LEGEND_MAX_LABEL_LEN = 80
 PLOT_DPI_VALUE = 150
 
 
 def _add_legend(
     labels,
+    outside: bool,
+    font_size: str,
+    num_columns: int,
     ax=None,
-    legend_outside: bool = False,
     loc=None,
     bbox_to_anchor=None,
     **kwargs,
@@ -49,25 +50,24 @@ def _add_legend(
     if ax is None:
         ax = plt.gca()
 
+    # avoid excessively long labels
     truncated = [
         la if len(la) <= _LEGEND_MAX_LABEL_LEN else la[: _LEGEND_MAX_LABEL_LEN - 1] + "\u2026"
         for la in labels
     ]
-    n = len(truncated)
-    ncol = 1 if n <= 3 else (2 if n <= 8 else 3)
 
     if loc is None:
-        loc = "upper center" if legend_outside else "best"
-    if bbox_to_anchor is None and legend_outside:
+        loc = "upper center" if outside else "best"
+    if bbox_to_anchor is None and outside:
         bbox_to_anchor = (0.5, -0.13)
 
     legend_kwargs = {
         "loc": loc,
-        "ncol": ncol,
-        "fontsize": LEGEND_FONT_SIZE,
+        "ncol": num_columns,
+        "fontsize": font_size,
         "framealpha": 0.9,
         "edgecolor": "0.8",
-        "borderaxespad": 0.0,
+        "borderaxespad": 0.2,
         **kwargs,
     }
     if bbox_to_anchor is not None:
@@ -236,6 +236,8 @@ def plot_lr(
     plot_dir: Path,
     x_axis: str = "samples",
     legend_outside: bool = False,
+    legend_font_size: str = "x-small",
+    legend_num_columns: int = 3,
 ):
     """
     Plot learning rate curves of training runs.
@@ -289,7 +291,12 @@ def plot_lr(
     plt.ylabel("lr")
     plt.xlabel(x_axis)
     plt.tight_layout()
-    _add_legend(legend_str, legend_outside=legend_outside)
+    _add_legend(
+        legend_str,
+        outside=legend_outside,
+        font_size=legend_font_size,
+        num_columns=legend_num_columns,
+    )
     rstr = "".join([f"{r}_" for r in runs_ids])
 
     if len(rstr) + 6 > MAX_FILENAME_LEN:
@@ -310,6 +317,8 @@ def plot_loss_avg(
     stage=TRAIN,
     x_scale_log=False,
     legend_outside: bool = False,
+    legend_font_size: str = "x-small",
+    legend_num_columns: int = 3,
 ):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
@@ -344,7 +353,12 @@ def plot_loss_avg(
     plt.ylabel("loss")
     plt.xlabel("step")
     plt.tight_layout()
-    _add_legend(legend_str, legend_outside=legend_outside)
+    _add_legend(
+        legend_str,
+        outside=legend_outside,
+        font_size=legend_font_size,
+        num_columns=legend_num_columns,
+    )
     rstr = "".join([f"{r}_" for r in runs_ids])
 
     if len(rstr) + len(f"{str(stage)}_avg.png") > MAX_FILENAME_LEN:
@@ -373,6 +387,8 @@ def plot_loss_per_stream(
     y_lim: list[float] | None = None,
     x_scale_log: bool = False,
     legend_outside: bool = False,
+    legend_font_size: str = "x-small",
+    legend_num_columns: int = 3,
 ):
     """
     Plot each stream in stream_names (using matching to data columns) for all run_ids
@@ -414,6 +430,7 @@ def plot_loss_per_stream(
                 legend_strs = []
                 min_val = np.finfo(np.float32).max
                 max_val = 0.0
+                title_col = None
                 for mode in modes:
                     legend_strs += [[]]
                     linestyle = "-" if mode == "train" else ("--x" if len(modes) > 1 else "-x")
@@ -436,6 +453,7 @@ def plot_loss_per_stream(
                             if len(col_split) < 4:
                                 if stream_name in col:
                                     data_cols += [col]
+                                    title_col = col if title_col is None else title_col
                             elif len(col_split) == 4:
                                 if (
                                     col_split[1].lower() == stream_name.lower()
@@ -443,6 +461,7 @@ def plot_loss_per_stream(
                                     and col_split[3] == channel
                                 ):
                                     data_cols += [col]
+                                    title_col = col if title_col is None else title_col
                             elif len(col_split) == 5:
                                 if (
                                     col_split[1].lower() == stream_name.lower()
@@ -451,6 +470,7 @@ def plot_loss_per_stream(
                                     and int(col_split[4]) in forecast_steps
                                 ):
                                     data_cols += [col]
+                                    title_col = col if title_col is None else title_col
 
                         for col in data_cols:
                             x_vals = np.array(run_data_mode[x_col])
@@ -470,8 +490,6 @@ def plot_loss_per_stream(
                                 + run_data.run_id
                                 + " : "
                                 + runs_ids[run_data.run_id][1]
-                                + ": "
-                                + col
                             ]
 
                             # skip all-nan slices
@@ -504,11 +522,19 @@ def plot_loss_per_stream(
                 if x_lim is not None:
                     plt.xlim(x_lim)
 
-                plt.title(stream_name + ": " + channel + " (" + ", ".join(modes) + ")")
+                # if len(title_col) == 0 :
+                # import code; code.interact( local=locals())
+                title_loss = ".".join(title_col.split(".")[:-1])
+                plt.title(title_loss + " (" + ", ".join(modes) + ")")
                 plt.ylabel(err)
                 plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
                 plt.tight_layout()
-                _add_legend(legend_str, legend_outside=legend_outside)
+                _add_legend(
+                    legend_str,
+                    outside=legend_outside,
+                    font_size=legend_font_size,
+                    num_columns=legend_num_columns,
+                )
 
                 # construct file name
                 run_ids_str = "".join([f"{r}_" for r in runs_ids])
@@ -547,6 +573,8 @@ def plot_loss_per_run(
     x_axis: str = "samples",
     x_scale_log: bool = False,
     legend_outside: bool = False,
+    legend_font_size: str = "x-small",
+    legend_num_columns: int = 3,
 ):
     """
     Plot all stream_names (using matching to data columns) for given run_id
@@ -640,7 +668,12 @@ def plot_loss_per_run(
     plt.ylabel("loss")
     plt.xlabel("samples")
     plt.tight_layout()
-    _add_legend(legend_str, legend_outside=legend_outside)
+    _add_legend(
+        legend_str,
+        outside=legend_outside,
+        font_size=legend_font_size,
+        num_columns=legend_num_columns,
+    )
 
     sstr = "".join(
         [f"{r}_".replace(",", "").replace("/", "_").replace(" ", "_") for r in legend_str]
@@ -777,6 +810,27 @@ def plot_train(args=None):
         action="store_true",
         help="Use log scale for the x-axis (produces log-log plots)",
     )
+    parser.add_argument(
+        "--legend-font-size",
+        dest="legend_font_size",
+        default="x-small",
+        type=str,
+        help="Font size for the legend",
+    )
+    parser.add_argument(
+        "--legend-num-columns",
+        dest="legend_num_columns",
+        default=3,
+        type=int,
+        help="Number of columns for the legend",
+    )
+    parser.add_argument(
+        "--with-losses-per-run",
+        dest="with_losses_per_run",
+        default=False,
+        action="store_true",
+        help="Plot losses per run across channels and streams",
+    )
 
     run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
@@ -857,7 +911,15 @@ def plot_train(args=None):
     x_scale_log = args.log_x
 
     # plot learning rate
-    plot_lr(runs_ids, runs_data, runs_active, plot_dir=out_dir, legend_outside=args.legend_outside)
+    plot_lr(
+        runs_ids,
+        runs_data,
+        runs_active,
+        plot_dir=out_dir,
+        legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
+    )
 
     # plot average loss
     plot_loss_avg(
@@ -867,6 +929,8 @@ def plot_train(args=None):
         runs_active,
         stage=TRAIN,
         legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
     )
 
     # compare different runs
@@ -884,6 +948,8 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
@@ -900,6 +966,8 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
@@ -916,13 +984,28 @@ def plot_train(args=None):
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
         legend_outside=args.legend_outside,
+        legend_font_size=args.legend_font_size,
+        legend_num_columns=args.legend_num_columns,
         plot_dir=out_dir,
     )
 
     # plot all cols for all run_ids
-    for run_id, run_data in zip(runs_ids, runs_data, strict=False):
+    if args.with_losses_per_run:
+        for run_id, run_data in zip(runs_ids, runs_data, strict=False):
+            plot_loss_per_run(
+                ["train", "val"],
+                run_id,
+                runs_ids[run_id],
+                run_data,
+                get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
+                channels=args.channels,
+                plot_dir=out_dir,
+                legend_outside=args.legend_outside,
+                legend_font_size=args.legend_font_size,
+                legend_num_columns=args.legend_num_columns,
+            )
         plot_loss_per_run(
-            ["train", "val"],
+            ["val"],
             run_id,
             runs_ids[run_id],
             run_data,
@@ -930,17 +1013,9 @@ def plot_train(args=None):
             channels=args.channels,
             plot_dir=out_dir,
             legend_outside=args.legend_outside,
+            legend_font_size=args.legend_font_size,
+            legend_num_columns=args.legend_num_columns,
         )
-    plot_loss_per_run(
-        ["val"],
-        run_id,
-        runs_ids[run_id],
-        run_data,
-        get_stream_names(run_id, model_path=model_base_dir),  # limit to available streams
-        channels=args.channels,
-        plot_dir=out_dir,
-        legend_outside=args.legend_outside,
-    )
 
 
 if __name__ == "__main__":
