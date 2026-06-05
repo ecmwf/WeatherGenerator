@@ -338,13 +338,12 @@ class LinePlots:
         # TODO: generalise this for other x_dims by introducing a "units"
         # entry in the function if needed
         xunits = "hr" if x_dim == "lead_time" else None
-        y_dim_opts = (y_dim, "ratio", None) if y_dim == "value" else y_dim
-        x_dim_opts = (x_dim, xunits, None) if xunits else x_dim
+        x_dim_opts = (x_dim, None, xunits) if xunits else x_dim
         self._plot_base(
             fig,
             name,
             x_dim_opts,
-            y_dim_opts,
+            y_dim,
             print_summary,
             title=title,
             out_plot_dir=self.out_plot_dir_lines,
@@ -395,8 +394,8 @@ class LinePlots:
         -------
             None
         """
-        x_dim, xunits, x_dim_descr = x_dim if isinstance(x_dim, tuple) else (x_dim, None, None)
-        y_dim, yunits, y_dim_descr = y_dim if isinstance(y_dim, tuple) else (y_dim, None, None)
+        x_dim, x_dim_descr, xunits = x_dim if isinstance(x_dim, tuple) else (x_dim, None, None)
+        y_dim, y_dim_descr, yunits = y_dim if isinstance(y_dim, tuple) else (y_dim, None, None)
 
         xlabel = (
             clean_label(x_dim)
@@ -585,7 +584,7 @@ class LinePlots:
                 f" {tag.split('_')[-1]} (baseline: {baseline_name})"
             )
 
-            y_dim_opts = (y_dim, "ratio", None) if y_dim == "value" else y_dim
+            y_dim_opts = (y_dim, "improvement", None)
             self._plot_base(
                 fig,
                 name,
