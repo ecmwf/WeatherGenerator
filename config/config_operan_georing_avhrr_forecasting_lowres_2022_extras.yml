@@ -92,7 +92,7 @@ norm_type: "LayerNorm"
 #####################################
 
 # streams_directory: "./config/streams/era5_georing_avhrr/"
-streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres/"
+streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres_extras/"
 streams: ???
 
 # type of zarr_store
