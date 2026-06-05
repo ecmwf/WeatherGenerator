@@ -20,7 +20,7 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import scalar_coord_to_dim
-from weathergen.evaluate.utils.clim_utils import get_climatology
+from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -174,7 +174,9 @@ def calc_scores_per_stream(
     da_preds = output_data.prediction
     da_tars = output_data.target
     fsteps = sorted(list(da_preds.keys()))
-    aligned_clim_data = get_climatology(reader, da_tars, stream)
+
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
     max_workers = reader.eval_cfg.get("max_workers", None)
     agg_dims = reader.eval_cfg.get("agg_dims", "ipoint")

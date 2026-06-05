@@ -44,7 +44,7 @@ from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
-from weathergen.evaluate.utils.clim_utils import get_climatology
+from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 
 _logger = logging.getLogger(__name__)
 
@@ -386,7 +386,8 @@ def run_score_map_pipeline(
     da_preds = output_data.prediction
     da_tars = output_data.target
     fsteps = sorted(da_preds.keys())
-    aligned_clim_data = get_climatology(reader, da_tars, stream)
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
     n_plot_workers = get_num_workers(
         check_process_headroom=True,
