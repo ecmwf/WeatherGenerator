@@ -11,6 +11,7 @@ HIRS :
   type : obs
   stream_id : 50
   filenames : ['observations-file-1978-2022-eumetsat-fdr-hirs-h512-v1.zarr']
+  source : ["obsvalue_rawbt_1", obsvalue_rawbt_2", "obsvalue_rawbt_3", "obsvalue_rawbt_4", "obsvalue_rawbt_5", "obsvalue_rawbt_6", "obsvalue_rawbt_7", "obsvalue_rawbt_8", "obsvalue_rawbt_9", "obsvalue_rawbt_10", "obsvalue_rawbt_11", "obsvalue_rawbt_12", "obsvalue_rawbt_13", "obsvalue_rawbt_14", "obsvalue_rawbt_15", "obsvalue_rawbt_16", "obsvalue_rawbt_17", "obsvalue_rawbt_18", "obsvalue_rawbt_19", "obsvalue_rawbt_20"]
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_sza', 'cos_saa']
   loss_weight : 1.0
   # masking_override :

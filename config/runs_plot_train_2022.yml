@@ -1,0 +1,56 @@
+train:
+  plot:
+
+    # qoxrrdp1:
+    #   slurm_id: 0
+    #   description: "forecast, oper, no obs"
+
+    # # o97u9crh:
+    # #   slurm_id: 0
+    # #   description: "forecast, no obs, 1990 ERA5, then oper"
+    
+    # pdd0b5rp:
+    #   slurm_id: 0
+    #   description: "forecast, oper+standard obs, better ema"
+
+    # uubhm15c:
+    #   slurm_id: 0
+    #   description: "forecast, oper+standard obs+sondes,hirs,npp-atms"
+    
+    # xaizowlc:
+    #   slurm_id: 0      
+    #   description: "cont., forecast, oper++standard obs+sondes,hirs,npp-atms"
+
+    # fuslefan:
+    #   slurm_id: 0      
+    #   description: "forecast, oper+standard obs+sondes,hirs,npp-atms, better ema"
+
+    kcq8dvhu:
+      slurm_id: 0      
+      description: "forecast, oper, better ema, 2022"
+
+    np36h5le:
+      slurm_id: 0      
+      description: "forecast, oper+standard obs, better ema, 2022"
+
+    yqzrh816:
+      slurm_id: 0      
+      description: "forecast, oper+standard obs+sondes+hirs+npp-atms, better ema+geoinfos, 2022"
+
+    ey1qatc6:
+      slurm_id: 0      
+      description: "forecast, oper+standard obs+sondes+npp-atms, better ema, 2022"
+
+    mjcwdxt1:
+      slurm_id: 0      
+      description: "forecast, oper+standard obs+sondes, better ema, 2022"
+
+    s3sj6pnz:
+      slurm_id: 0      
+      description: "forecast, oper+standard obs+hirs+nppatms, better ema, 2022"
+
+    wwfokhx4:
+      slurm_id: 0      
+      description: "forecast, oper+standard obs+nppatms, better ema, 2022"
+
+
