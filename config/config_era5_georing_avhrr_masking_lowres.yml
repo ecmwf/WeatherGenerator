@@ -198,7 +198,7 @@ training_config:
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 256
+  samples_per_mini_epoch: 128
   shuffle: False
 
   start_date: 2023-10-01T00:00
