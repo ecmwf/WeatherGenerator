@@ -1,11 +1,58 @@
+import logging
+
 import numpy as np
+import pandas as pd
 import xarray as xr
 from joblib import delayed
+from numpy.typing import NDArray
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel
+from weathergen.evaluate.io.io_reader import ReaderOutput
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.scores.score_orchestration import get_next_fstep_data
 from weathergen.evaluate.utils.regions import RegionBoundingBox
+
+_logger = logging.getLogger(__name__)
+
+
+def group_by_init_hour(
+    output_data: ReaderOutput,
+) -> dict[int, NDArray]:
+    """Group sample indices by the hour of day of the initialisation time.
+
+    The initialisation time is taken from the ``init_times`` coordinate
+    on the sample dimension (which stores the end of the conditioning window, i.e.
+    the forecast reference time).
+
+    Returns only sample index arrays (no data copies) to avoid doubling memory.
+    Use ``da.sel(sample=indices)`` on the original data when processing each group.
+
+    Parameters
+    ----------
+    output_data : ReaderOutput
+        Pre-loaded data with ``target`` and ``prediction`` dicts keyed by fstep.
+
+    Returns
+    -------
+    dict[int, np.ndarray]
+        Mapping from hour (0–23) to sample indices belonging to that hour.
+    """
+    first_tar = next(iter(output_data.target.values()))
+    if "init_times" not in first_tar.coords:
+        _logger.warning("Cannot group by init hour: 'init_times' coordinate not found.")
+        return {}
+
+    init_times = pd.DatetimeIndex(first_tar.init_times.values)
+    hours = init_times.hour
+    samples = first_tar.sample.values
+
+    grouped: dict[int, NDArray] = {int(hour): samples[hours == hour] for hour in sorted(set(hours))}
+
+    _logger.info(
+        f"Grouped {len(samples)} samples into {len(grouped)} init-hour bins: "
+        f"{sorted(grouped.keys())}."
+    )
+    return grouped
 
 
 def _compute_scores_for_fstep(
