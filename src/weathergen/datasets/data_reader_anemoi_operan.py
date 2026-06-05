@@ -101,6 +101,11 @@ class DataReaderAnemoiOperan(DataReaderAnemoi):
         """
 
         t_idxs, dtr = self._get_dataset_idxs(idx)
+        if self.ds is None or self.len == 0 or len(t_idxs) == 0:
+            return ReaderData.empty(
+                num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
+            )
+        
         # get additional timestep to ensure we have one datapoint available
         t_idxs = np.insert(t_idxs, 0, t_idxs[0] - 1)
 
