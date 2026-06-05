@@ -198,7 +198,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 12
+  num_workers: 4
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
@@ -320,7 +320,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config
