@@ -20,7 +20,7 @@ def group_by_init_hour(
 ) -> dict[int, NDArray]:
     """Group sample indices by the hour of day of the initialisation time.
 
-    The initialisation time is taken from the ``source_interval_end`` coordinate
+    The initialisation time is taken from the ``init_times`` coordinate
     on the sample dimension (which stores the end of the conditioning window, i.e.
     the forecast reference time).
 
@@ -38,11 +38,11 @@ def group_by_init_hour(
         Mapping from hour (0–23) to sample indices belonging to that hour.
     """
     first_tar = next(iter(output_data.target.values()))
-    if "source_interval_end" not in first_tar.coords:
-        _logger.warning("Cannot group by init hour: 'source_interval_end' coordinate not found.")
+    if "init_times" not in first_tar.coords:
+        _logger.warning("Cannot group by init hour: 'init_times' coordinate not found.")
         return {}
 
-    init_times = pd.DatetimeIndex(first_tar.source_interval_end.values)
+    init_times = pd.DatetimeIndex(first_tar.init_times.values)
     hours = init_times.hour
     samples = first_tar.sample.values
 
