@@ -120,8 +120,8 @@ general:
 
 # logging frequency in the training loop (in number of batches)
 train_logging:
-  terminal: 100
-  metrics: 100
+  terminal: 10
+  metrics: 20
   checkpoint: 500
 
 # parameters for data loading
@@ -138,7 +138,7 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 64
+  num_mini_epochs: 56
   samples_per_mini_epoch: 4096
   shuffle: True
 
@@ -199,9 +199,6 @@ validation_config:
 
   start_date: 2023-10-01T00:00
   end_date: 2023-12-31T00:00
-
-  time_window_step: 01:00:00
-  time_window_len: 06:00:00
 
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
