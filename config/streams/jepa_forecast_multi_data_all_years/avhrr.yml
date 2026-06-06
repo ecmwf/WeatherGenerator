@@ -8,7 +8,7 @@ METOP_ABC_AVHRR_IASI:
   forcing: True
   loss_weight: 1.0
   token_size: 512
-  tokenize_spacetime: True
+  tokenize_spacetime: False
   embed:
     net: transformer
     num_tokens: 1

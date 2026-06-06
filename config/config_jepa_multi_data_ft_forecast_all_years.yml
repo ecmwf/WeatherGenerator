@@ -9,11 +9,11 @@
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 16
+fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [2]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
@@ -71,7 +71,7 @@ general:
 
 # logging frequency in the training loop (in number of batches)
 train_logging:
-  terminal: 100
+  terminal: 1
   metrics: 20
   checkpoint: 500
   log_grad_norms: True
@@ -79,15 +79,16 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 6
+  num_workers: 4
   rng_seed: ???
   repeat_data_in_mini_epoch : False
-  persistent_workers: True
+  persistent_workers: False
+  prefetch_factor: 1
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
   # If this happens, you can disable the flag, but performance will drop on GH200.
-  memory_pinning: True
+  memory_pinning: False
 
 
 # config for training

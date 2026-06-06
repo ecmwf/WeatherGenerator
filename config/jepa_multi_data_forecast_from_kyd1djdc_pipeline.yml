@@ -1,0 +1,31 @@
+# Forecast-only JEPA multi-data pipeline starting from the completed
+# pretrain/fine-tune run `kyd1djdc`.
+#
+# Use with the strict pipeline launcher:
+#   ../WeatherGenerator-private/hpc/launch-slurm.py \
+#     --pipeline config/jepa_multi_data_forecast_from_kyd1djdc_pipeline.yml
+
+parallelize: false
+
+stages:
+  - name: forecast
+    stage: train
+    from_run_id: kyd1djdc
+    config_files:
+      - ./config/config_jepa_multi_data_ft_forecast_all_years.yml
+    options: []
+    chain_jobs: 4
+    nodes: 2
+    mini_epoch: -1
+    cleanup_scripts: yes
+
+  - name: forecastft
+    stage: train
+    from_run_id: STAGE.forecast
+    config_files:
+      - ./config/config_jepa_multi_data_ft_forecast.yml
+    options: []
+    chain_jobs: 3
+    nodes: 2
+    mini_epoch: -1
+    cleanup_scripts: yes

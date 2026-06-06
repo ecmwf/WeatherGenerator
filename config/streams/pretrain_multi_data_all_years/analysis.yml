@@ -13,14 +13,19 @@ ERA5_in:
   loss_weight: 1.0
   location_weight: cosine_latitude
   token_size: 8
-  tokenize_spacetime: True
+  tokenize_spacetime: False
   max_num_targets: -1
   frequency: 06:00:00
   nominal_time_mapping :
     "0" : 5 # 04:30:00
-    "6" : 9 # 09:00:00
+    "6" : 11 # 09:00:00
     "12" : 17 #16:30:00
-    "18" : 21 #21:00:00
+    "18" : 23 #21:00:00
+  masking_override:
+    model_input:
+      masking_strategy: random
+      masking_strategy_config:
+        rate: 0.6
   embed:
     net: transformer
     num_tokens: 1
