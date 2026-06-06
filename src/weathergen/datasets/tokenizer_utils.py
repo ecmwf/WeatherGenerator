@@ -69,9 +69,9 @@ def encode_times_target(times, time_win) -> torch.tensor:
     dt = pd.to_datetime(times)
     dt_win = pd.to_datetime(time_win)
     # for target only provide local time
-    dt_delta = torch.tensor(
-        np.atleast_1d((dt - dt_win[0]).seconds), dtype=torch.float32
-    ).unsqueeze(1)
+    dt_delta = torch.tensor(np.atleast_1d((dt - dt_win[0]).seconds), dtype=torch.float32).unsqueeze(
+        1
+    )
     time_tensor = torch.cat(
         (
             dt_delta,

@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 from weathergen.common.io import IOReaderData
+from weathergen.train.utils import TRAIN, Stage
 
 
 def _pin_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -160,7 +161,13 @@ class StreamData:
         return self
 
     def add_source(
-        self, step: int, ss_raw: IOReaderData, ss_lens: torch.Tensor, ss_cells: list, is_spoof: bool
+        self,
+        stage: Stage,
+        step: int,
+        ss_raw: IOReaderData,
+        ss_lens: torch.Tensor,
+        ss_cells: list,
+        is_spoof: bool,
     ) -> None:
         """
         Add data for source for one input.
@@ -179,6 +186,10 @@ class StreamData:
 
         assert step < self.input_steps
 
+        if stage == TRAIN:
+            del ss_raw
+            ss_raw = None
+
         self.source_raw[step] = ss_raw
         self.source_tokens_lens[step] = ss_lens
         self.source_tokens_cells[step] = torch.stack(ss_cells)
@@ -190,6 +201,7 @@ class StreamData:
 
     def add_target(
         self,
+        stage: Stage,
         fstep: int,
         targets: list,
         target_coords: torch.Tensor,
@@ -235,6 +247,7 @@ class StreamData:
 
     def add_target_values(
         self,
+        stage: Stage,
         fstep: int,
         targets: list,
         target_coords_raw: torch.Tensor,
@@ -268,6 +281,10 @@ class StreamData:
         None
         """
 
+        if stage == TRAIN:
+            del idxs_inv
+            idxs_inv = None
+
         self.target_tokens[fstep] = targets
         self.target_times_raw[fstep] = times_raw
         self.target_coords_raw[fstep] = target_coords_raw
@@ -277,6 +294,7 @@ class StreamData:
 
     def add_target_coords(
         self,
+        stage: Stage,
         fstep: int,
         target_coords: torch.Tensor,
         target_coords_per_cell: torch.Tensor,
