@@ -410,12 +410,10 @@ class Model(torch.nn.Module):
                     # extract and setup relevant parameters
                     etc = si["embed_target_coords"]
                     tr = si["target_readout"]
-                    num_layers = tr["num_layers"]
-                    tr_mlp_hidden_factor = (
-                        tr["mlp_hidden_factor"] if "mlp_hidden_factor" in tr else 2
-                    )
-                    tr_dim_head_proj = tr["dim_head_proj"] if "dim_head_proj" in tr else None
-                    softcap = tr["softcap"] if "softcap" in tr else 0.0
+                    num_layers = tr.get("num_layers", 1)
+                    tr_mlp_hidden_factor = tr.get("mlp_hidden_factor", 2)
+                    tr_dim_head_proj = tr.get("dim_head_proj", None)
+                    softcap = tr.get("softcap", 0.0)
 
                     dims_embed = [
                         si["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)

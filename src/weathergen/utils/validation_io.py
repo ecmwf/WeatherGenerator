@@ -130,7 +130,8 @@ def write_output(
         output_stream_names = stream_names
 
     output_streams = {name: stream_names.index(name) for name in output_stream_names}
-    _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
+    if batch_idx == 0:
+        _logger.info(f"Using output streams: {output_streams} from streams: {stream_names}")
 
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
     source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in stream_infos]
