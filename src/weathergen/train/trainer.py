@@ -357,19 +357,15 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
 
         # recover mini_epoch when continuing run
-        if self.world_size_original is None:
-            mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
-        else:
-            len_per_rank = (
-                len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu)
-            ) * self.batch_size_per_gpu
-            mini_epoch_base = int(
-                self.cf.general.istep
-                / (
-                    min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
-                    * self.world_size_original
-                )
-            )
+        effective_world_size = (
+            self.world_size_original if self.world_size_original is not None else cf.world_size
+        )
+        total_samples_per_mini_epoch = len(self.dataset) * cf.world_size
+        steps_per_mini_epoch = max(
+            total_samples_per_mini_epoch // (effective_world_size * self.batch_size_per_gpu),
+            1,
+        )
+        mini_epoch_base = int(self.cf.general.istep / steps_per_mini_epoch)
 
         if is_root():
             config.save(self.cf, None)
@@ -574,9 +570,9 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    if cf.data_loading.get("memory_pinning", False):
-                        # pin memory for faster CPU-GPU transfer
-                        batch = batch.pin_memory()
+                    # if cf.data_loading.get("memory_pinning", False):
+                    #     # pin memory for faster CPU-GPU transfer
+                    #     batch = batch.pin_memory()
 
                     batch.to_device(self.device)
 
