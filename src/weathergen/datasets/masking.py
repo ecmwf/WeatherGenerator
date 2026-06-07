@@ -425,6 +425,13 @@ class Masker:
                 # determine if diagnostic dataset or randomly dropped => mask is empty
                 if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                    # Propagate noise_level_rn from the corresponding target metadata so that
+                    # diffusion.py can access it via the source sample's meta_info during forward.
+                    target_noise_level = target_masks.metadata[target_idx].params.get(
+                        "noise_level_rn"
+                    )
+                    if target_noise_level is not None:
+                        mask_params = {"noise_level_rn": target_noise_level}
                 else:
                     source_mask, mask_params = self._get_mask(
                         num_cells=num_cells,

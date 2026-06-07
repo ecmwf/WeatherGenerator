@@ -131,8 +131,15 @@ class LossLatentDiffusion(LossModuleBase):
                 loss_fstep = loss_fstep + (loss_fct_weight * loss_lfct)
                 ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0
 
+            # Always add loss_fstep to keep the computational graph connected to model
+            # parameters, even when ctr_loss_fcts==0 (e.g. NaN outputs from bf16 overflow).
+            # GradScaler will detect NaN/inf gradients and skip the optimizer step safely.
+            # Using `else 0` (a Python int) disconnects the graph and causes
+            # GradScaler.step() to assert "No inf checks were recorded".
             loss_fsteps = loss_fsteps + (
-                loss_fstep * fstep_loss_weight / ctr_loss_fcts if ctr_loss_fcts > 0 else 0
+                loss_fstep * fstep_loss_weight / ctr_loss_fcts
+                if ctr_loss_fcts > 0
+                else loss_fstep * fstep_loss_weight
             )
             ctr_fsteps += 1 if ctr_loss_fcts > 0 else 0
 
