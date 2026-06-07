@@ -138,8 +138,8 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 164
-  samples_per_mini_epoch: 4096
+  num_mini_epochs: 82
+  samples_per_mini_epoch: 8192
   shuffle: True
 
   start_date: 1990-01-01T00:00
@@ -194,8 +194,8 @@ training_config:
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 128
-  shuffle: False
+  samples_per_mini_epoch: 256
+  shuffle: true
 
   start_date: 2023-10-01T00:00
   end_date: 2023-12-31T00:00
