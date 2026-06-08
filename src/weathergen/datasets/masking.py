@@ -254,7 +254,7 @@ class Masker:
                 0.0,
                 1.0,
             )
-            rate = rate * (1.0 - cool_down_progress)
+            rate = rate + (1.0 - rate) * cool_down_progress
         assert 0.0 <= rate <= 1.0, f"rate out of bounds: {rate}"
 
         return rate
