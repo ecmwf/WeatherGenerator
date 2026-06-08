@@ -295,6 +295,7 @@ def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> li
         )
 
     found_paths = []
+    epochs = []
 
     for rank in rank_list:
         if isinstance(rank, int):
@@ -302,9 +303,9 @@ def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> li
         else:
             rank = "*"
 
-        for mini_epoch in mini_epoch_list:
-            if isinstance(mini_epoch, int):
-                mini_epoch = f"{mini_epoch:05d}"
+        for mini_epoch_int in mini_epoch_list:
+            if isinstance(mini_epoch_int, int):
+                mini_epoch = f"{mini_epoch_int:05d}"
             else:
                 mini_epoch = "*"
 
@@ -312,11 +313,12 @@ def get_model_results(run_id: str, mini_epoch_list: list, rank_list: list) -> li
 
             for ext in StoreType.extensions():
                 found_paths.extend(run_results.glob(f"{glob_str}.{ext}"))
+                epochs.append(mini_epoch_int)
 
     if not found_paths:
         raise FileNotFoundError(f"No zarr files found for run_id {run_id} in {run_results}")
 
-    return found_paths
+    return found_paths, epochs
 
 
 def _apply_fixes(config: Config) -> Config:

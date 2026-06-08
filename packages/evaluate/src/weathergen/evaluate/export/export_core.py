@@ -280,9 +280,9 @@ def get_streams(stream, fname_zarr):
     return streams
 
 
-def get_default_fstep(kwargs):
+def get_default_fstep(kwargs, epoch):
     try:
-        inference_config = load_run_config(kwargs.run_id, mini_epoch=kwargs.epoch, model_path=None)
+        inference_config = load_run_config(kwargs.run_id, mini_epoch=epoch, model_path=None)
         default_fstep = inference_config.training_config.forecast.time_step
         # preprocess to integer hours
         default_fstep = default_fstep.split(" ")[0]
@@ -339,9 +339,10 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     if data_type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
 
-    fname_zarr_list = get_model_results(run_id, epoch, rank)
+    current_epoch = None
+    fname_zarr_list, epochs = get_model_results(run_id, epoch, rank)
     processed_samples = []
-    for fname_zarr in fname_zarr_list:
+    for epoch, fname_zarr in zip(epochs, fname_zarr_list, strict=False):
         fsteps = get_fsteps(fsteps, fname_zarr)
         samples = get_samples(samples, fname_zarr)
         streams = get_streams(stream, fname_zarr)
@@ -349,7 +350,12 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
             grid_type = get_grid_type(data_type, stream, fname_zarr)
             channels = get_channels(channels, stream, fname_zarr)
             source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
-            default_fstep = get_default_fstep(kwargs)
+
+            # only retrieve new default_fstep if epoch has chnaged
+            if current_epoch is None or epoch != current_epoch:
+                current_epoch = epoch
+                default_fstep = get_default_fstep(kwargs, epoch)
+
             kwargs["stream"] = stream
             kwargs["grid_type"] = grid_type
             kwargs["channels"] = channels
