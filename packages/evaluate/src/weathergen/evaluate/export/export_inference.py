@@ -154,6 +154,7 @@ def parse_args(args: list) -> argparse.Namespace:
         "--epoch",
         nargs="+",
         default=None,
+        type=int,
         help="Epoch number to identify the Zarr store",
     )
 
@@ -161,6 +162,7 @@ def parse_args(args: list) -> argparse.Namespace:
         "--rank",
         nargs="+",
         default=None,
+        type=int,
         help="Rank number to identify the Zarr store",
     )
 

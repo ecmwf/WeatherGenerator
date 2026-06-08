@@ -5,6 +5,7 @@ from multiprocessing import Pool
 import numpy as np
 import xarray as xr
 from omegaconf import OmegaConf
+from omegaconf.listconfig import ListConfig
 from tqdm import tqdm
 
 from weathergen.common.config import (
@@ -48,7 +49,6 @@ def get_data_worker(args: tuple) -> tuple[int, int, xr.DataArray]:
     # Navigate directly to the zarr group for this (sample, stream, fstep, dtype).
     group_path = f"{sample}/{stream}/{fstep}/{dtype}"
     ds_group = _CACHED_ZIO.data_root.get(group_path)
-
     if ds_group is None:
         raise FileNotFoundError(f"Zarr group '{group_path}' not found in {_CACHED_FNAME_ZARR}")
 
@@ -331,9 +331,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     epoch = kwargs.epoch
     rank = kwargs.rank
     # if not list convert to list
-    if not isinstance(epoch, list):
+    if not isinstance(epoch, ListConfig):
         epoch = [epoch]
-    if not isinstance(rank, list):
+    if not isinstance(rank, ListConfig):
         rank = [rank]
 
     if data_type not in ["target", "prediction"]:
