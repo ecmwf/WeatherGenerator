@@ -20,7 +20,6 @@ from weathergen.common.config import Config
 from weathergen.common.io import IOReaderData
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.data_reader_anemoi import DataReaderAnemoi
-from weathergen.datasets.data_reader_anemoi_operan import DataReaderAnemoiOperan
 from weathergen.datasets.data_reader_base import (
     DataReaderBase,
     TimeWindowHandler,
@@ -34,7 +33,7 @@ from weathergen.datasets.utils import (
     get_tokens_lens,
 )
 from weathergen.readers_extra.registry import get_extra_reader
-from weathergen.train.utils import TRAIN, Stage, get_batch_size_from_config
+from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
 
 type AnyDataReader = DataReaderBase | DataReaderAnemoi | DataReaderObs
