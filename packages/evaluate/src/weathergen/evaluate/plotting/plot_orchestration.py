@@ -191,7 +191,8 @@ def _plot_score_maps_per_stream(
 
     score_results, preds, metric_names = computed
     valid = [
-        (m, r) for m, r in zip(metric_names, score_results, strict=False)
+        (m, r)
+        for m, r in zip(metric_names, score_results, strict=False)
         if r is not None and "ipoint" in r.dims
     ]
     if not valid:
