@@ -40,17 +40,18 @@ evaluation:
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
   plot_score_maps: false #plot scores on a 2D maps. it slows down score computation
   plot_score_animations: false #plot animations of score maps across forecast steps. it slows down score computation
+  plot_score_timeseries: true #plot timeseries of scores across forecast steps. 
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
   score_cards: false
   bar_plots: false
-  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
   # baseline: "ar40mckx"
 
 
 default_streams:
   ERA5:
+    #offset: "1h" #optional: specify a timedelta offset to infer init_time when source_interval is missing. Format examples: "1h", "30m", "2h30m".
     regions: ["global"]
     channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
     evaluation:

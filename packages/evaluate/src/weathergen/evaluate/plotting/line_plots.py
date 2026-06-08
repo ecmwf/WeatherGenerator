@@ -338,13 +338,13 @@ class LinePlots:
         # TODO: generalise this for other x_dims by introducing a "units"
         # entry in the function if needed
         xunits = "hr" if x_dim == "lead_time" else None
+        x_dim_opts = (x_dim, None, xunits) if xunits else x_dim
         self._plot_base(
             fig,
             name,
-            x_dim,
+            x_dim_opts,
             y_dim,
             print_summary,
-            xunits=xunits,
             title=title,
             out_plot_dir=self.out_plot_dir_lines,
         )
@@ -353,15 +353,14 @@ class LinePlots:
         self,
         fig: plt.Figure,
         name: str,
-        x_dim: str,
-        y_dim: str,
+        x_dim: tuple[str, ...],
+        y_dim: tuple[str, ...],
         print_summary: bool = False,
         line: float | None = None,
         vlines: bool = False,
         title: str | None = None,
-        xunits: str | None = None,
-        yunits: str | None = None,
         out_plot_dir: Path = None,
+        range: tuple[float, float] | None = None,
     ) -> None:
         """
         Apply labels, title, legend, save and optionally print summary.
@@ -372,9 +371,13 @@ class LinePlots:
         name:
             Name of the plot file
         x_dim:
-            Label for the x-axis
+            Label for the x-axis, can be a tuple if the x-axis has units and/or
+            a description is needed (e.g. ("improvement"))
+            syntax: (label, units, description)
         y_dim:
-            Label for the y-axis
+            Label for the y-axis, can be a tuple if the y-axis has units and/or
+            a description is needed (e.g. ("improvement"))
+            syntax: (label, units, description)
         print_summary:
             If True, print a summary of the values from the graph.
         line:
@@ -383,19 +386,27 @@ class LinePlots:
             If True, draw vertical lines to separate each group of variables.
         title:
             Title for the plot.
-        xunits:
-            Units for the x-axis.
-        yunits:
-            Units for the y-axis.
         out_plot_dir:
             Directory where the plot will be saved.
+        range:
+            Tuple specifying the y-axis range (min, max).
         Returns
         -------
             None
         """
+        x_dim, x_dim_descr, xunits = x_dim if isinstance(x_dim, tuple) else (x_dim, None, None)
+        y_dim, y_dim_descr, yunits = y_dim if isinstance(y_dim, tuple) else (y_dim, None, None)
 
-        xlabel = clean_label(x_dim) + (f" [{xunits}]" if xunits else "")
-        ylabel = clean_label(y_dim).upper() + (f" [{yunits}]" if yunits else "")
+        xlabel = (
+            clean_label(x_dim)
+            + (f" [{xunits}]" if xunits else "")
+            + (f" ({x_dim_descr})" if x_dim_descr else "")
+        )
+        ylabel = (
+            clean_label(y_dim).upper()
+            + (f" [{yunits}]" if yunits else "")
+            + (f" ({y_dim_descr})" if y_dim_descr else "")
+        )
 
         ax = fig.gca()
 
@@ -515,51 +526,70 @@ class LinePlots:
 
         ref = align_labels(ref_raw, ref_channel_names, "channel").reindex(channel=ref_channel_names)
 
-        # Build a run_id → color map, skipping the baseline
+        # Build a run_id to color map, skipping the baseline
         color_map = {}
         if colors:
             for rid, c in zip(run_ids, colors, strict=False):
                 if c is not None:
                     color_map[rid] = c
 
-        for f_step in sorted(data_list[min_index]["forecast_step"].values):
-            # Create a new figure for each forecast step
-            fig = plt.figure(figsize=(max(12, len(ref_channel_names) * 0.25), 6))
-            for data, run_id, lbl in zip(data_list, run_ids, label_list, strict=False):
-                if run_id == baseline_name:
-                    continue
+        # Pre-compute all ratios and global y-axis range
+        all_fsteps = sorted(data_list[min_index]["forecast_step"].values)
+        # ratios_by_fstep[f_step] = [(run_id, label, ratio_values), ...]
+        ratios_by_fstep: dict[int, list[tuple[str, str, object]]] = {f: [] for f in all_fsteps}
+        global_ymin = float("inf")
+        global_ymax = float("-inf")
 
-                num_raw = self._preprocess_data(data, ["forecast_step", "channel"], verbose=False)
-                num = align_labels(num_raw, ref_channel_names, "channel").reindex(
-                    channel=ref_channel_names
-                )
+        for data, run_id, lbl in zip(data_list, run_ids, label_list, strict=False):
+            if run_id == baseline_name:
+                continue
+            num_raw = self._preprocess_data(data, ["forecast_step", "channel"], verbose=False)
+            num = align_labels(num_raw, ref_channel_names, "channel").reindex(
+                channel=ref_channel_names
+            )
+            for f_step in all_fsteps:
                 ratio = num.sel(channel=ref_channel_names, forecast_step=f_step) / ref.sel(
                     channel=ref_channel_names, forecast_step=f_step
                 )
+                ratios_by_fstep[f_step].append((run_id, lbl, ratio.values))
+                finite = ratio.values[~xr.DataArray(ratio).isnull().values]
+                if len(finite) > 0:
+                    global_ymin = min(global_ymin, float(finite.min()))
+                    global_ymax = max(global_ymax, float(finite.max()))
 
+        # Add a small margin (5%) around the range
+        if global_ymin != float("inf"):
+            margin = 0.05 * (global_ymax - global_ymin) if global_ymax > global_ymin else 0.1
+            global_ymin -= margin
+            global_ymax += margin
+
+        # Plot each forecast step
+        for f_step in all_fsteps:
+            fig = plt.figure(figsize=(max(12, len(ref_channel_names) * 0.25), 6))
+            for run_id, lbl, ratio_vals in ratios_by_fstep[f_step]:
                 plot_kwargs = dict(label=lbl, marker="o", linestyle="-")
                 if run_id in color_map:
                     plot_kwargs["color"] = color_map[run_id]
+                plt.plot(ref_channel_names, ratio_vals, **plot_kwargs)
 
-                plt.plot(
-                    ref_channel_names,
-                    ratio.values,
-                    **plot_kwargs,
-                )
+            if global_ymin != float("inf"):
+                plt.ylim(global_ymin, global_ymax)
 
             parts = [descr, f"fstep_0{f_step}", tag]
             name = "_".join(filter(None, parts))
             plt.xticks(rotation=90, ha="right")
             plt.grid(True, linestyle="--", color="gray", alpha=0.2)
             title = (
-                f"{descr.replace('_', ' ')} {tag.split('_')[0]} -"
+                f"{descr.replace('_', ' ')} {tag.split('_')[0]} | fstep {f_step} | "
                 f" {tag.split('_')[-1]} (baseline: {baseline_name})"
             )
+
+            y_dim_opts = (y_dim, "improvement", None)
             self._plot_base(
                 fig,
                 name,
                 "channel",
-                y_dim,
+                y_dim_opts,
                 print_summary,
                 line=1.0,
                 vlines=True,

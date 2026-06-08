@@ -34,7 +34,9 @@ from weathergen.evaluate.io.wegen_reader import (
 from weathergen.evaluate.plotting.plot_orchestration import (
     plot_data,
     plot_summary,
+    plot_timeseries_summary,
     run_score_map_pipeline,
+    run_score_timeseries_pipeline,
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.scores.score_orchestration import (
@@ -185,8 +187,7 @@ def _process_stream(
     global_plotting_opts: dict[str, object],
     regions: list[str],
     metrics: dict[str, object],
-    plot_score_maps: bool,
-    plot_score_animations: bool,
+    plot_score_options: dict[str, object],
 ) -> tuple[str, str, dict[str, dict[str, dict[str, float]]]]:
     """
     Worker function for a single stream of a single run.
@@ -208,10 +209,8 @@ def _process_stream(
         List of regions to be processed.
     metrics:
         Dict of metrics to be processed and their parameters.
-    plot_score_maps:
-        Bool to define if the score maps need to be plotted or not.
-    plot_score_animations:
-        Bool to define if the score animations need to be plotted or not.
+    plot_score_options:
+        Dictionary containing all common score calculation options.
     """
     type_ = run.get("type", "zarr")
     reader = get_reader(type_, run, run_id, private_paths, regions, metrics)
@@ -219,7 +218,7 @@ def _process_stream(
     stream_dict = reader.get_stream(stream)
     if not stream_dict:
         _logger.info(f"Stream {stream} not found for run {run_id}. Skipping.")
-        return run_id, stream, {}
+        return run_id, stream, {}, {}
 
     needs_plotting = stream_dict.get("plotting") and type_ == "zarr"
     needs_scoring = stream_dict.get("evaluation", False)
@@ -246,20 +245,23 @@ def _process_stream(
 
     # Scoring per stream
     if not needs_scoring:
-        return run_id, stream, {}
+        return run_id, stream, {}, {}
 
-    score_maps = plot_score_maps and type_ == "zarr"
+    plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ == "zarr"
+    plot_score_timeseries = (
+        plot_score_options.get("plot_score_timeseries", False) and type_ == "zarr"
+    )
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif score_maps:
+    elif plot_score_maps or plot_score_timeseries:
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
-        return run_id, stream, scores_dict
+        return run_id, stream, scores_dict, {}
 
     stream_computed_scores = calc_scores_per_stream(
         reader,
@@ -271,7 +273,7 @@ def _process_stream(
     metric_list_to_json(reader, stream, stream_computed_scores, regions_to_compute)
     scores_dict = merge(stream_loaded_scores, stream_computed_scores)
 
-    if score_maps:
+    if plot_score_maps:
         run_score_map_pipeline(
             reader,
             stream,
@@ -279,10 +281,22 @@ def _process_stream(
             metrics_to_compute,
             output_data=output_data,
             global_plotting_options=global_plotting_opts,
-            plot_score_animations=plot_score_animations,
+            plot_score_options=plot_score_options,
         )
 
-    return run_id, stream, scores_dict
+    if plot_score_timeseries:
+        ts_scores = run_score_timeseries_pipeline(
+            reader,
+            stream,
+            regions_to_compute,
+            metrics_to_compute,
+            output_data=output_data,
+            global_plotting_options=global_plotting_opts,
+        )
+    else:
+        ts_scores = {}
+
+    return run_id, stream, scores_dict, ts_scores
 
 
 def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
@@ -302,8 +316,13 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     private_paths = cfg.get("private_paths")
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
-    plot_score_maps = cfg.evaluation.get("plot_score_maps", False)
-    plot_score_animations = cfg.evaluation.get("plot_score_animations", False)
+
+    plot_score_options = {
+        "plot_score_maps": cfg.evaluation.get("plot_score_maps", False),
+        "plot_score_animations": cfg.evaluation.get("plot_score_animations", False),
+        "plot_score_timeseries": cfg.evaluation.get("plot_score_timeseries", False),
+    }
+
     global_plotting_opts = cfg.get("global_plotting_options", {})
     default_streams = cfg.get("default_streams", {})
     max_workers = cfg.get("max_workers")  # global hard cap for parallel workers
@@ -334,19 +353,27 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
                     "global_plotting_opts": global_plotting_opts,
                     "regions": regions,
                     "metrics": metrics,
-                    "plot_score_maps": plot_score_maps,
-                    "plot_score_animations": plot_score_animations,
+                    "plot_score_options": plot_score_options,
                 }
             )
 
     scores_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    # timeseries_scores[metric][region][stream][run_id][fstep] = xr.DataArray
+    timeseries_scores: dict = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    )
     results = [_process_stream(**task) for task in tasks]
 
-    for _, stream, stream_scores in results:
+    for run_id, stream, stream_scores, ts_scores in results:
         for metric, regions_dict in stream_scores.items():
             for region, streams_dict in regions_dict.items():
-                for stream, runs_dict in streams_dict.items():
-                    scores_dict[metric][region][stream].update(runs_dict)
+                for stream_key, runs_dict in streams_dict.items():
+                    scores_dict[metric][region][stream_key].update(runs_dict)
+
+        # Accumulate timeseries scores: ts_scores[metric][region][fstep]
+        for metric, region_dict in ts_scores.items():
+            for region, fstep_dict in region_dict.items():
+                timeseries_scores[metric][region][stream][run_id].update(fstep_dict)
 
     # MLFlow logging
     if mlflow_client:
@@ -382,6 +409,8 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     # summary plots
     if scores_dict:
         plot_summary(cfg, scores_dict, summary_dir)
+    if timeseries_scores:
+        plot_timeseries_summary(cfg, timeseries_scores, summary_dir)
 
 
 if __name__ == "__main__":

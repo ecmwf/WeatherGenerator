@@ -381,17 +381,22 @@ class Trainer(TrainerBase):
         # training loop
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
-            logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train."
+                )
             self.train(mini_epoch)
 
-            logger.info(
-                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
-            )
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
+                )
             self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
 
-            logger.info(
-                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
-            )
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
+                )
             self.save_model(mini_epoch)
 
         # log final model
@@ -574,10 +579,6 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    if cf.data_loading.get("memory_pinning", False):
-                        # pin memory for faster CPU-GPU transfer
-                        batch = batch.pin_memory()
-
                     batch.to_device(self.device)
 
                     # evaluate model
