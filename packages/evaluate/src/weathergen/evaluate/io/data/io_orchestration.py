@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 from joblib import Parallel, delayed
 from joblib.externals.loky import get_reusable_executor
@@ -78,6 +79,9 @@ class IOState:
     n_workers: int
     backend: str = "loky"
     rank: str = "0000"
+    offset: np.timedelta64 | None = (
+        None  # fallback offset in hours for init_time when source_interval is missing
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +262,9 @@ def _build_io_state(
     coords, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
     read_channels: list[str] = zarr_channels if zarr_channels else all_channels
     channel_idxs: list[int] | None = None if zarr_channels else list(range(len(all_channels)))
-
+    offset = stream_cfg.get("offset")
+    if offset is not None:
+        offset = np.timedelta64(pd.Timedelta(offset).value, "h")
     # ---- Early channel selection (skip unrequested channels at numpy level) ----
     channel_idxs, read_channels = _compute_early_channel_selection(
         read_channels, channels, stream_cfg
@@ -286,6 +292,7 @@ def _build_io_state(
         lon=lon,
         n_workers=n_io_workers,
         rank=rank,
+        offset=offset,
     )
 
 
@@ -343,15 +350,28 @@ def _parallel_read(
         return results, True
 
 
-def _extract_init_times(results: list, samples: list[int]) -> NDArray:
-    """Build a (n_samples,) datetime64[ns] array of initialisation times (last source time)."""
+def _extract_init_times(
+    results: list, samples: list[int], offset: np.timedelta64 | None = None
+) -> NDArray:
+    """Build a (n_samples,) datetime64[ns] array of initialisation times (last source time).
+
+    If source_interval is empty, fall back to first_valid_time - offset so that
+    lead_time for the first sub-step of fstep 1 equals offset.
+    """
     si_list = []
     for i in range(len(samples)):
         si = results[i][3].get("source_interval", {})
-        last_str = si.get("end", si.get("start", None))
-        si_list.append(
-            np.datetime64(last_str, "ns") if last_str is not None else np.datetime64("NaT", "ns")
-        )
+        last_str = si.get("end", None)
+        if last_str is not None:
+            si_list.append(np.datetime64(last_str, "ns"))
+        elif offset is not None:
+            # Fallback: infer init_time from the first valid_time minus 1h
+            time_entry = results[i][2][0] if results[i][2] else []
+            if len(time_entry) > 0:
+                first_vt = np.datetime64(time_entry[0], "ns")
+                si_list.append(first_vt - offset)
+        else:
+            si_list.append(np.datetime64("NaT", "ns"))
     return np.array(si_list)
 
 
@@ -498,7 +518,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers = 1
 
         if init_times is None:
-            init_times = _extract_init_times(results, state.samples)
+            init_times = _extract_init_times(results, state.samples, state.offset)
 
         n_sub = results[0][3]["n_substeps"][0]
 
@@ -584,6 +604,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     init_times = _extract_init_times(
         [flat_results[si * n_fsteps] for si in range(len(state.samples))],
         state.samples,
+        state.offset,
     )
 
     da_tars_dict: dict = {}

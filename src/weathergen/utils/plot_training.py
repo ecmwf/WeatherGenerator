@@ -27,7 +27,6 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_RUN_FILE = Path("./config/runs_plot_train.yml")
 MAX_FILENAME_LEN = 255
-_LEGEND_MAX_LABEL_LEN = 80
 PLOT_DPI_VALUE = 150
 
 
@@ -36,6 +35,7 @@ def _add_legend(
     outside: bool,
     font_size: str,
     num_columns: int,
+    max_label_len: int,
     ax=None,
     loc=None,
     bbox_to_anchor=None,
@@ -52,8 +52,7 @@ def _add_legend(
 
     # avoid excessively long labels
     truncated = [
-        la if len(la) <= _LEGEND_MAX_LABEL_LEN else la[: _LEGEND_MAX_LABEL_LEN - 1] + "\u2026"
-        for la in labels
+        la if len(la) <= max_label_len else la[: max_label_len - 1] + "\u2026" for la in labels
     ]
 
     if loc is None:
@@ -112,11 +111,11 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
         return False
 
     for k, v in run_id_dict.items():
-        if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
+        if not isinstance(k, str) or not isinstance(v, str):
             raise argparse.ArgumentTypeError(
                 (
                     "Each key must be a string and",
-                    f" each value must be a list of [job_id, experiment_name], but got: {k}: {v}",
+                    f" each value must be a string, but got {v}",
                 )
             )
 
@@ -151,10 +150,8 @@ def _read_yaml_config(yaml_file_path):
     train:
         plot:
             run_id:
-                slurm_id : SLURM_JOB (specify 0 if not available)
                 description: job description
             run_id:
-                slurm_id : SLURM_JOB (specify 0 if not available)
                 description : job description
             ...
 
@@ -179,9 +176,8 @@ def _read_yaml_config(yaml_file_path):
     # convert to legacy format
     config_dict = {}
     for k, v in config_dict_temp.items():
-        assert isinstance(v["slurm_id"], int), "slurm_id has to be int."
         assert isinstance(v["description"], str), "description has to be str."
-        config_dict[k] = [v["slurm_id"], v["description"]]
+        config_dict[k] = v["description"]
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
     _check_run_id_dict(config_dict)
@@ -238,6 +234,7 @@ def plot_lr(
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
     legend_num_columns: int = 3,
+    legend_max_label_len: int = 80,
 ):
     """
     Plot learning rate curves of training runs.
@@ -275,9 +272,7 @@ def plot_lr(
         y_vals[mask] = 0.0  # np.nan
 
         plt.plot(x_vals, y_vals, linestyle, color=colors[j % len(colors)])
-        legend_str += [
-            ("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
-        ]
+        legend_str += [("R" if runs_active[j] else "X") + " : " + run_id + " : " + runs_ids[run_id]]
 
     if len(legend_str) < 1:
         _logger.warning(
@@ -296,6 +291,7 @@ def plot_lr(
         outside=legend_outside,
         font_size=legend_font_size,
         num_columns=legend_num_columns,
+        max_label_len=legend_max_label_len,
     )
     rstr = "".join([f"{r}_" for r in runs_ids])
 
@@ -319,6 +315,7 @@ def plot_loss_avg(
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
     legend_num_columns: int = 3,
+    legend_max_label_len: int = 80,
 ):
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
@@ -338,9 +335,8 @@ def plot_loss_avg(
             y_vals[mask],
             color=colors[i_run % len(colors)],
         )
-        # legend_str += [ run_id + " : " + runs_ids[run_id][1]]
         legend_str += [
-            ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id][1]
+            ("R" if runs_active[i_run] else "X") + " : " + run_id + " : " + runs_ids[run_id]
         ]
 
     plt.grid(True, which="both", ls="-")
@@ -358,6 +354,7 @@ def plot_loss_avg(
         outside=legend_outside,
         font_size=legend_font_size,
         num_columns=legend_num_columns,
+        max_label_len=legend_max_label_len,
     )
     rstr = "".join([f"{r}_" for r in runs_ids])
 
@@ -389,6 +386,7 @@ def plot_loss_per_stream(
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
     legend_num_columns: int = 3,
+    legend_max_label_len: int = 80,
 ):
     """
     Plot each stream in stream_names (using matching to data columns) for all run_ids
@@ -489,7 +487,7 @@ def plot_loss_per_stream(
                                 + " : "
                                 + run_data.run_id
                                 + " : "
-                                + runs_ids[run_data.run_id][1]
+                                + runs_ids[run_data.run_id]
                             ]
 
                             # skip all-nan slices
@@ -534,6 +532,7 @@ def plot_loss_per_stream(
                     outside=legend_outside,
                     font_size=legend_font_size,
                     num_columns=legend_num_columns,
+                    max_label_len=legend_max_label_len,
                 )
 
                 # construct file name
@@ -575,6 +574,7 @@ def plot_loss_per_run(
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
     legend_num_columns: int = 3,
+    legend_max_label_len: int = 80,
 ):
     """
     Plot all stream_names (using matching to data columns) for given run_id
@@ -660,7 +660,7 @@ def plot_loss_per_run(
         plt.close()
         return
 
-    plt.title(run_id + " : " + run_desc[1])
+    plt.title(run_id + " : " + run_desc)
     plt.yscale("log")
     if x_scale_log:
         plt.xscale("log")
@@ -673,6 +673,7 @@ def plot_loss_per_run(
         outside=legend_outside,
         font_size=legend_font_size,
         num_columns=legend_num_columns,
+        max_label_len=legend_max_label_len,
     )
 
     sstr = "".join(
@@ -709,16 +710,14 @@ def plot_train(args=None):
                             train:
                                 plot:
                                     run_id:
-                                        slurm_id : SLURM_JOB (specify 0 if not available)
                                         description: job description
                                     run_id:
-                                        slurm_id : SLURM_JOB (specify 0 if not available)
                                         description : job description
                                             ...
 
                         A dictionary-string can also be specified on the command line, e.g.:
-                            "{'abcde': ['123456', 'experiment1'],
-                            'fghij': ['654321', 'experiment2']}"
+                            "{'abcde': 'experiment1',
+                            'fghij': 'experiment2'}"
                             """
     )
 
@@ -825,6 +824,13 @@ def plot_train(args=None):
         help="Number of columns for the legend",
     )
     parser.add_argument(
+        "--legend-max-label-len",
+        dest="legend_max_label_len",
+        default=80,
+        type=int,
+        help="Maximum character length of legend entries (truncation length of description)",
+    )
+    parser.add_argument(
         "--with-losses-per-run",
         dest="with_losses_per_run",
         default=False,
@@ -902,10 +908,12 @@ def plot_train(args=None):
     ]
 
     # determine which runs are still alive (as a process, though they might hang internally)
-    ret = subprocess.run(["squeue"], capture_output=True)
+    sq_arg = "--format='%.18i %.9P %.30j %.8u %.8T %.10M %.9l %.6D %R' --me"
+    ret = subprocess.run(["squeue", sq_arg], capture_output=True)
     lines = str(ret.stdout).split("\\n")
     runs_active = [
-        np.array([str(v[0]) in line for line in lines[1:]]).any() for v in runs_ids.values()
+        any([run_id in line and "RUNNING" in line for line in lines[1:]])
+        for run_id in runs_ids.keys()
     ]
 
     x_scale_log = args.log_x
@@ -919,6 +927,7 @@ def plot_train(args=None):
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
     )
 
     # plot average loss
@@ -931,6 +940,7 @@ def plot_train(args=None):
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
     )
 
     # compare different runs
@@ -950,6 +960,7 @@ def plot_train(args=None):
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
@@ -968,6 +979,7 @@ def plot_train(args=None):
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
@@ -986,6 +998,7 @@ def plot_train(args=None):
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
+        legend_max_label_len=args.legend_max_label_len,
         plot_dir=out_dir,
     )
 
@@ -1003,6 +1016,7 @@ def plot_train(args=None):
                 legend_outside=args.legend_outside,
                 legend_font_size=args.legend_font_size,
                 legend_num_columns=args.legend_num_columns,
+                legend_max_label_len=args.legend_max_label_len,
             )
         plot_loss_per_run(
             ["val"],
@@ -1015,6 +1029,7 @@ def plot_train(args=None):
             legend_outside=args.legend_outside,
             legend_font_size=args.legend_font_size,
             legend_num_columns=args.legend_num_columns,
+            legend_max_label_len=args.legend_max_label_len,
         )
 
 
