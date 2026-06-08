@@ -355,6 +355,30 @@ def _extract_init_times(results: list, samples: list[int]) -> NDArray:
     return np.array(si_list)
 
 
+def _extract_source_n_points(results: list, samples: list[int]) -> dict[str, NDArray]:
+    """Build a {stream_name: (n_samples,)} dict of source point counts.
+
+    Each value is an int64 array with one entry per sample.
+    Returns -1 for samples where that stream's source/data was not available.
+    """
+    # Collect all stream names that appear in any sample's source_n_points
+    all_streams: set[str] = set()
+    for i in range(len(samples)):
+        per_sample_dict = results[i][3].get("source_n_points", {})
+        all_streams.update(per_sample_dict.keys())
+
+    # Build per-stream arrays
+    out: dict[str, NDArray] = {}
+    for stream_name in sorted(all_streams):
+        counts = []
+        for i in range(len(samples)):
+            per_sample_dict = results[i][3].get("source_n_points", {})
+            counts.append(per_sample_dict.get(stream_name, -1))
+        out[stream_name] = np.array(counts, dtype=np.int64)
+
+    return out
+
+
 def _assemble_substep(
     state: IOState,
     results: list,
@@ -362,6 +386,7 @@ def _assemble_substep(
     preds_list: list[NDArray],
     per_sample_valid_times: list,
     init_times: NDArray,
+    source_n_points: dict[str, NDArray],
     forecast_step_val: int,
     fstep_idx: int,  # index into results[i][2] for scatter obs_times
 ) -> tuple[xr.DataArray, xr.DataArray]:
@@ -378,6 +403,7 @@ def _assemble_substep(
             init_times,
             forecast_step_val,
             state.ens_select,
+            source_n_points=source_n_points,
         )
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
@@ -399,6 +425,7 @@ def _assemble_substep(
             per_sample_coords,
             state.coords,
             per_sample_obs_times=per_sample_obs_times,
+            source_n_points=source_n_points,
         )
 
     da_tar, da_pred = _select_channels(
@@ -472,6 +499,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
     da_preds_dict: dict = {}
     fstep_counter = 1
     init_times: NDArray | None = None
+    source_n_points: dict[str, NDArray] | None = None
     n_workers = state.n_workers
 
     for fi, fs in enumerate(state.fsteps):
@@ -499,6 +527,8 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
 
         if init_times is None:
             init_times = _extract_init_times(results, state.samples)
+        if source_n_points is None:
+            source_n_points = _extract_source_n_points(results, state.samples)
 
         n_sub = results[0][3]["n_substeps"][0]
 
@@ -515,6 +545,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
                 preds_list,
                 per_sample_valid_times,
                 init_times,
+                source_n_points,
                 fs_val,
                 0,
             )
@@ -581,10 +612,9 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     # --- Re-group: flat_results[sample_idx * n_fsteps + fstep_idx] --------
     n_fsteps = len(state.fsteps)
     # Gather per-sample results in the same shape as get_data_dirstore expects
-    init_times = _extract_init_times(
-        [flat_results[si * n_fsteps] for si in range(len(state.samples))],
-        state.samples,
-    )
+    _first_results = [flat_results[si * n_fsteps] for si in range(len(state.samples))]
+    init_times = _extract_init_times(_first_results, state.samples)
+    source_n_points = _extract_source_n_points(_first_results, state.samples)
 
     da_tars_dict: dict = {}
     da_preds_dict: dict = {}
@@ -624,6 +654,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
                 preds_list,
                 per_sample_valid_times,
                 init_times,
+                source_n_points,
                 fs_val,
                 0,  # fstep_idx is always 0 since each result has a single fstep
             )

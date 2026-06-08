@@ -144,7 +144,8 @@ def _read_sample(
 
     preds_all, targets_all, times_all = [], [], []
     n_substeps = []  # track how many sub-steps per fstep
-    source_interval = None
+    source_interval: dict = {}
+    source_n_points: dict[str, int] = {}  # {stream_name: n_points}
 
     # Derive source interval from the source group's times at fstep 0.
     try:
@@ -153,7 +154,21 @@ def _read_sample(
         source_window_end = str(np.max(source_times))
         source_interval = {"start": source_window_start, "end": source_window_end}
     except (KeyError, AttributeError):
-        source_interval = {}
+        pass
+
+    # Read source/data n_points for ALL streams in this sample.
+    # Only accesses zarr metadata (shape), not actual data chunks.
+    try:
+        sample_group = ds[f"{sample}"]
+        all_streams = [k for k in sample_group.keys() if k != "zarr.json"]
+        for s in all_streams:
+            try:
+                source_data_arr = ds[f"{sample}/{s}/0/source/data"]
+                source_n_points[s] = source_data_arr.shape[0]
+            except (KeyError, AttributeError):
+                pass  # stream has no source group or no data array
+    except (KeyError, AttributeError):
+        pass  # sample group doesn't exist or isn't iterable
 
     for fs in fsteps:
         base = f"{sample}/{stream}/{fs}"
@@ -215,6 +230,7 @@ def _read_sample(
 
     meta = {
         "source_interval": source_interval,
+        "source_n_points": source_n_points,
         "n_substeps": n_substeps,
         "coords": per_fstep_coords,
     }

@@ -81,6 +81,7 @@ def build_gridded_dataarrays(
     init_times: NDArray,
     forecast_step_val: int,
     ens_select: EnsembleSelect,
+    source_n_points: dict[str, NDArray] | None = None,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Build DataArrays for gridded data by stacking samples along a new axis.
 
@@ -111,6 +112,9 @@ def build_gridded_dataarrays(
     ens_select : EnsembleSelect
         Pre-resolved ensemble selection (from :meth:`EnsembleSelect.from_names`).
         ``EnsembleSelect.mean()`` → mean; otherwise selects members.
+    source_n_points : dict[str, np.ndarray] | None
+        Per-stream source point counts, {stream_name: (n_samples,) int64}.
+        When provided, adds ``source_n_points_<stream>`` coordinates.
 
     Returns
     -------
@@ -142,6 +146,10 @@ def build_gridded_dataarrays(
         "source_interval_start": ("sample", init_times.copy()),
         "forecast_step": forecast_step_val,
     }
+    # Add per-stream source point counts as coordinates
+    if source_n_points:
+        for src_stream, n_pts_arr in source_n_points.items():
+            base_coords[f"source_n_points_{src_stream}"] = ("sample", n_pts_arr.copy())
 
     da_tar = _build_dataarray(tars_stacked, base_coords)
 
@@ -166,6 +174,7 @@ def build_scatter_dataarrays(
     per_sample_coords: list[NDArray | None],
     coords_fallback: NDArray,
     per_sample_obs_times: list[NDArray] | None = None,
+    source_n_points: dict[str, NDArray] | None = None,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Build DataArrays for non-gridded (scatter) data.
 
@@ -201,6 +210,9 @@ def build_scatter_dataarrays(
         Per-sample arrays of observation times, shape (n_ip,) each.
         When provided, each observation gets its actual timestamp;
         otherwise the single per_sample_valid_times value is broadcast.
+    source_n_points : dict[str, np.ndarray] | None
+        Per-stream source point counts, {stream_name: (n_samples,) int64}.
+        When provided, adds ``source_n_points_<stream>`` coordinates.
 
     Returns
     -------
@@ -243,6 +255,10 @@ def build_scatter_dataarrays(
             "forecast_step": forecast_step_val,
             "sample": sample,
         }
+        # Add per-stream source point counts for this sample
+        if source_n_points:
+            for src_stream, n_pts_arr in source_n_points.items():
+                sample_coords[f"source_n_points_{src_stream}"] = int(n_pts_arr[si])
 
         scatter_dims = ["ipoint", "channel"]
 
