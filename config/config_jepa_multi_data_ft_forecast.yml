@@ -1,7 +1,7 @@
 streams_directory: "./config/streams/jepa_forecast_multi_data_od/"
 
 fe_num_blocks: 6
-fe_layer_norm_after_blocks: [5]
+fe_layer_norm_after_blocks: [2]
 
 data_loading:
   num_workers: 2
