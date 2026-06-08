@@ -251,3 +251,21 @@ def get_climatology(reader, da_tars, stream: str) -> dict | None:
         return {fstep: scale_z_channels(da, stream) for fstep, da in aligned.items()}
 
     return None
+
+
+def needs_climatology(metrics_dict: dict) -> bool:
+    """
+    Check if any of the specified metrics require climatology data.
+
+    Parameters
+    ----------
+    metrics : dict
+        Dictionary mapping metric names to their parameters.
+
+    Returns
+    -------
+    bool
+        True if any metric requires climatology, False otherwise
+    """
+    metrics = [m for metrics in metrics_dict.values() for m in metrics.keys()]
+    return any(m in ["acc", "rps", "rpss"] for m in metrics)
