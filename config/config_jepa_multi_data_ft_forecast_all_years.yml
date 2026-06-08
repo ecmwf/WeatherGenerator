@@ -63,7 +63,7 @@ general:
   # run_path, 
   # path_shared_
 
-  multiprocessing_method: "fork" # "spawn" # "fork"
+  multiprocessing_method: "spawn" # "fork"
 
   desc: ""
   run_id: ???
@@ -82,7 +82,7 @@ data_loading :
   num_workers: 6
   rng_seed: ???
   repeat_data_in_mini_epoch : False
-  persistent_workers: False
+  persistent_workers: True
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.

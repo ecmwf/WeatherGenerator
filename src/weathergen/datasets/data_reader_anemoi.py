@@ -55,6 +55,10 @@ class DataReaderAnemoi(DataReaderTimestep):
         None
         """
 
+        # Stored so the dataset handle can be reopened per worker process after
+        # pickling (see __setstate__).
+        self.filename = filename
+
         # open  dataset to peak that it is compatible with requested parameters
         ds0: Dataset = anemoi_datasets.open_dataset(filename)
         # If there is no overlap with the time range, the dataset will be empty
@@ -155,6 +159,37 @@ class DataReaderAnemoi(DataReaderTimestep):
         }
         self.mean = ds.statistics["mean"]
         self.stdev = ds.statistics["stdev"]
+
+    def _open_ds(self) -> Dataset:
+        """(Re)open the underlying anemoi dataset handle from self.filename.
+
+        Mirrors the open performed in __init__. Kept separate so the handle can be
+        reopened independently in each worker process after pickling: anemoi/zarr
+        store handles are not safe to share across processes (concurrent reads from
+        a shared, inherited handle deadlock).
+        """
+        ds0 = anemoi_datasets.open_dataset(self.filename)
+        kwargs = {}
+        if "frequency" in self.stream_info:
+            kwargs["frequency"] = timedelta_to_str(self.stream_info["frequency"])
+        return anemoi_datasets.open_dataset(
+            ds0,
+            **kwargs,
+            start=self.time_window_handler.t_start,
+            end=self.time_window_handler.t_end,
+        )
+
+    def __getstate__(self) -> dict:
+        # Drop the open dataset handle; it is reopened per process in __setstate__.
+        state = self.__dict__.copy()
+        state["ds"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        # Empty streams never opened a dataset (init_empty sets ds=None, len=0).
+        if self.len > 0:
+            self.ds = self._open_ds()
 
     @override
     def init_empty(self) -> None:

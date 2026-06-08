@@ -47,7 +47,9 @@ class DataReaderObs(DataReaderBase):
 
         # To read idx convert to a string, format e.g.: 197001010000
         base_date_str = dt_obj.strftime("%Y%m%d%H%M")
-        self.hrly_index = self.z[f"idx_{base_date_str}_1"]
+        # Stored so the zarr handles can be reopened per worker process (see __setstate__).
+        self._hrly_key = f"idx_{base_date_str}_1"
+        self.hrly_index = self.z[self._hrly_key]
         self.colnames = self.data.attrs["colnames"]
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
@@ -106,6 +108,30 @@ class DataReaderObs(DataReaderBase):
     @override
     def length(self) -> int:
         return self.len
+
+    def _open_store(self) -> None:
+        """(Re)open the zarr store handles from self.filename.
+
+        Mirrors the open performed in __init__. Kept separate so the handles can be
+        reopened independently in each worker process after pickling: zarr store
+        handles are not safe to share across processes (concurrent reads from a
+        shared, inherited handle deadlock).
+        """
+        self.z = zarr.open(self.filename, mode="r")
+        self.data = self.z["data"]
+        self.dt = self.z["dates"]
+        self.hrly_index = self.z[self._hrly_key]
+
+    def __getstate__(self) -> dict:
+        # Drop the open zarr handles; they are reopened per process in __setstate__.
+        state = self.__dict__.copy()
+        for key in ("z", "data", "dt", "hrly_index"):
+            state[key] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self._open_store()
 
     def select_channels(
         self, colnames: list[str], cols_select: list[str] | None, cols_exclude: list[str] | None
