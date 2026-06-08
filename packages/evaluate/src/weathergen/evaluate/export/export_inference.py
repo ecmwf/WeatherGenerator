@@ -96,14 +96,15 @@ def parse_args(args: list) -> argparse.Namespace:
         dest="output_format",
         type=str,
         choices=["netcdf", "verif", "quaver"],
-        help="Output file format",
+        help="Output file format; netcdf (CF-compliant netcdfs), \
+        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool)",
         required=True,
     )
 
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
+        choices=["N320", "ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
         help="Stream name to retrieve data for",
     )
 

@@ -32,8 +32,6 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
-MAX_NUMBER_TOKENS_LOCAL_PER_CELL = 64
-
 
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
@@ -50,9 +48,9 @@ class EmbeddingEngine(torch.nn.Module):
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        self.streams = cf.streams
 
-        for i, (si, stream_name) in enumerate(zip(self.cf.streams, self.stream_names, strict=True)):
+        for i, (stream_name, si) in enumerate(self.streams.items()):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
@@ -91,7 +89,7 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
-        for stream_name in self.stream_names:
+        for stream_name in self.streams.keys():
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -111,6 +109,13 @@ class EmbeddingEngine(torch.nn.Module):
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
+        # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
+        max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
+        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+            "max number of tokens per cell for positional encoding exceeded."
+        )
+        " Increase ae_local_max_tokens_per_cell in config."
+
         if batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
             tokens_all = torch.cat(x_embeds)
@@ -119,10 +124,6 @@ class EmbeddingEngine(torch.nn.Module):
             scatter_idxs = self.get_scatter_idxs_vectorized(batch)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-            # if the assert is hit, MAX_NUMBER_TOKENS_LOCAL_PER_CELL needs to be increased
-            assert (
-                batch.tokens_lens.flatten(0, 2).sum(0).max() < MAX_NUMBER_TOKENS_LOCAL_PER_CELL
-            ), "max number of tokens per cell for positional encoding exceeded"
             # actual scatter operation and apply per cell positional encoding
             tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
 
@@ -529,6 +530,17 @@ class GlobalAssimilationEngine(torch.nn.Module):
         return tokens
 
 
+class IdentityEngine(torch.nn.Module):
+    """Identity engine that passes tokens through unchanged."""
+
+    def __init__(self):
+        super().__init__()
+        self.fe_blocks = torch.nn.ModuleList()
+
+    def forward(self, tokens, *args, **kwargs):
+        return tokens
+
+
 class ForecastingEngine(torch.nn.Module):
     name: "ForecastingEngine"
 
@@ -853,6 +865,7 @@ class TargetPredictionEngine(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, 9, self.cf.ae_global_dim_embed))
         dim_aux = self.cf.ae_global_dim_embed
 
+        target_readout_num_heads = next(self.cf.streams.values())["target_readout"]["num_heads"]
         for ith, dim in enumerate(self.dims_embed[:-1]):
             if self.cf.decoder_type == "PerceiverIO":
                 # a single cross attention layer as per https://arxiv.org/pdf/2107.14795
@@ -861,7 +874,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=False,
                         with_adanorm=False,
                         with_mlp=False,
@@ -873,7 +886,7 @@ class TargetPredictionEngine(nn.Module):
                     SelfAttentionBlock(
                         dim=dim,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
                         dropout_rate=0.1,
@@ -885,7 +898,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=self.cf.ae_global_dim_embed,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=False,
                         with_mlp=True,
@@ -899,7 +912,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_q=dim,
                         dim_kv=dim_aux,
                         dim_aux=dim_aux,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         with_self_attn=True,
                         with_adanorm=True,
                         with_mlp=True,
@@ -915,7 +928,7 @@ class TargetPredictionEngine(nn.Module):
                         dim_out=self.dims_embed[ith + 1],
                         dim_kv=dim_aux,
                         dim_aux=self.dim_coord_in,
-                        num_heads=self.cf.streams[0]["target_readout"]["num_heads"],
+                        num_heads=target_readout_num_heads,
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,

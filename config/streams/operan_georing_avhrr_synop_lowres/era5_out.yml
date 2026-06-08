@@ -10,21 +10,25 @@
 ERA5 :
   type : anemoi
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr']
-  stream_id : 0
+  stream_id : 1
   source_exclude : ['z', 'w_10', 'w_50', 'w_100', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_1000', 'skt', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
   target_exclude : ['z', 'w_10', 'w_50', 'w_100', 'w_150', 'w_200', 'w_250', 'w_300', 'w_400', 'w_500', 'w_600', 'w_700', 'w_850', 'w_925', 'w_1000', 'slor', 'sdor', 'tcw', 'cp', 'tp', 'q_50', 'q_100']
   geoinfo_channels : ['z', 'lsm', 'slor', 'sdor', 'insolation', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.
   location_weight : cosine_latitude
+  masking_override :
+    target_input :
+      masking_strategy_config :
+        rate: 1.0
   token_size : 8
-  tokenize_spacetime : True
-  max_num_targets: 20000
-  frequency : 06:00:00
+  tokenize_spacetime : False
+  max_num_targets: -1
+  diagnostic: True
   embed : 
     net : transformer
     num_tokens : 1
-    num_heads : 8
-    dim_embed : 512
+    num_heads : 4
+    dim_embed : 256
     num_blocks : 2
   embed_target_coords :
     net : linear
@@ -32,79 +36,6 @@ ERA5 :
   target_readout :
     num_layers : 2
     num_heads : 4
-    # sampling_rate : 0.2
   pred_head :
     ens_size : 1
     num_layers : 1
-  channel_weights :
-    q_10: 0.2
-    q_50: 0.2
-    q_100: 0.23
-    q_150: 0.26
-    q_200: 0.29
-    q_250: 0.33
-    q_300: 0.36
-    q_400: 0.42
-    q_500: 0.48
-    q_600: 0.55
-    q_700: 0.61
-    q_850: 0.71
-    q_925: 0.75
-    q_1000: 0.8
-    t_10: 0.2
-    t_50: 0.2
-    t_100: 0.23
-    t_150: 0.26
-    t_200: 0.29
-    t_250: 0.33
-    t_300: 0.36
-    t_400: 0.42
-    t_500: 0.48
-    t_600: 0.55
-    t_700: 0.61
-    t_850: 0.71
-    t_925: 0.75
-    t_1000: 0.8
-    u_10: 0.2
-    u_50: 0.2
-    u_100: 0.23
-    u_150: 0.26
-    u_200: 0.29
-    u_250: 0.33
-    u_300: 0.36
-    u_400: 0.42
-    u_500: 0.48
-    u_600: 0.55
-    u_700: 0.61
-    u_850: 0.71
-    u_925: 0.75
-    u_1000: 0.8
-    v_10: 0.2
-    v_50: 0.2
-    v_100: 0.23
-    v_150: 0.26
-    v_200: 0.29
-    v_250: 0.33
-    v_300: 0.36
-    v_400: 0.42
-    v_500: 0.48
-    v_600: 0.55
-    v_700: 0.61
-    v_850: 0.71
-    v_925: 0.75
-    v_1000: 0.8
-    z_10: 0.2
-    z_50: 0.2
-    z_100: 0.23
-    z_150: 0.26
-    z_200: 0.29
-    z_250: 0.33
-    z_300: 0.36
-    z_400: 0.42
-    z_500: 0.48
-    z_600: 0.55
-    z_700: 0.61
-    z_850: 0.71
-    z_925: 0.75
-    z_1000: 0.8
-   

@@ -8,9 +8,9 @@ import omegaconf
 import torch
 from numpy.typing import NDArray
 
+from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
 from weathergen.train.utils import Stage
-from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 logger = logging.getLogger(__name__)
@@ -166,24 +166,26 @@ class Masker:
         every target strategy, inheriting rate, rate_sampling, etc. from the
         global config.  ``masking_strategy`` itself can also be replaced.
         """
-        if override is None:
-            return mode_cfg
 
-        stream_cfg_masking = copy.deepcopy(mode_cfg)
+        stream_cfg = copy.deepcopy(mode_cfg)
 
         # Copy top-level masking keys from override
         if "randomly_drop_as_source_rate" in override:
-            stream_cfg_masking["randomly_drop_as_source_rate"] = override[
-                "randomly_drop_as_source_rate"
-            ]
+            stream_cfg["randomly_drop_as_source_rate"] = override["randomly_drop_as_source_rate"]
 
         for section_key in ("model_input", "target_input"):
-            override_values = override.get(section_key, None)
+            section = stream_cfg.get(section_key, {})
+            # target and source are identical when target is not specified
+            if section == {} and section_key == "target_input":
+                # by the processing order of "model_input" and "target_input", the target_input
+                # here will have stream specific model_input overrides
+                stream_cfg["target_input"] = copy.deepcopy(stream_cfg.get("model_input", {}))
+                section = stream_cfg["target_input"]
+
+            override_values = override.get(section_key)
             if override_values is None:
                 continue
-            section = stream_cfg_masking.get(section_key, None)
-            if section is None:
-                continue
+
             for strategy_cfg in section.values():
                 if "masking_strategy" in override_values:
                     strategy_cfg["masking_strategy"] = override_values["masking_strategy"]
@@ -193,17 +195,14 @@ class Masker:
                         override_values["masking_strategy_config"],
                     )
 
-        return stream_cfg_masking
+        return stream_cfg
 
-    def build_effective_masking_cfgs(self, streams, mode_cfg):
+    def build_effective_masking_cfgs(self, streams: Config, mode_cfg):
         """Build effective masking configs for all streams."""
         cfgs = {}
-        for stream_info in streams:
-            name = stream_info["name"]
-            override = stream_info.get("masking_override", None)
-            cfgs[name] = self.merge_masking_config(mode_cfg, override)
-            if override is not None and is_root():
-                logger.info(f"Stream '{name}' using masking override: {override}")
+        for stream_name, stream_info in streams.items():
+            override = stream_info.get("masking_override", {})
+            cfgs[stream_name] = self.merge_masking_config(mode_cfg, override)
 
         return cfgs
 
@@ -344,13 +343,10 @@ class Masker:
 
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
-        # target and source configs
-        target_cfgs = stream_masking_cfg.get("target_input", [])
-        source_cfgs = stream_masking_cfg.get("model_input", [])
-
-        # target and source are assumed identical when target is not specified
-        if len(target_cfgs) == 0:
-            target_cfgs = copy.deepcopy(source_cfgs)
+        # # target and source configs
+        target_cfgs = stream_masking_cfg.get("target_input")
+        source_cfgs = stream_masking_cfg.get("model_input")
+        assert target_cfgs is not None and source_cfgs is not None
 
         losses = stream_masking_cfg.losses
         corr_dict = self.parse_src_target_correspondence(losses, target_cfgs, source_cfgs)
@@ -374,11 +370,12 @@ class Masker:
                 if is_stream_forcing(stream_info, self.stage):
                     target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
+                    masking_config = target_cfg.get("masking_strategy_config", {})
                     # targets are never randomly dropped
                     target_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
                         strategy=target_cfg.get("masking_strategy"),
-                        masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
+                        masking_strategy_config=masking_config,
                         target_relationship_mask=("independent", None),
                     )
 
