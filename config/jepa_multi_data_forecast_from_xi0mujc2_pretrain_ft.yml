@@ -1,0 +1,30 @@
+# Forecast-only JEPA multi-data pipeline starting from the completed
+# fine-tuned pretrain run `xi0mujc2-pretrain-ft`.
+#
+# Use with the Sophie pipeline launcher:
+#   ../WeatherGenerator-private/hpc/launch-slurm-sophie.py \
+#     --no-dry-run --run-id xi0mujc2fc \
+#     config/jepa_multi_data_forecast_from_xi0mujc2_pretrain_ft.yml
+
+nodes: 1
+register: true
+cleanup-scripts: yes
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  - name: finetune-forecast
+    command: train-continue
+    from-run-id: xi0mujc2-pretrain-ft
+    config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
+    options: []
+    chain: 4
+    nodes: 2
+
+  - name: finetune-forecast-ft
+    command: train-continue
+    from: finetune-forecast
+    config: ./config/config_jepa_multi_data_ft_forecast.yml
+    options: []
+    chain: 3
+    nodes: 2

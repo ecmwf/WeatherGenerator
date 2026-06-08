@@ -1,0 +1,34 @@
+# Forecast-only self-flow JEPA pipeline starting from the completed
+# fine-tuned pretrain run `co7xb9p2-pretrain-ft`.
+#
+# This source has latest checkpoint/config artifacts. The older
+# `co7xb9ps-pretrain-cooldown` source does not, so this file starts directly
+# from `co7xb9p2-pretrain-ft`.
+#
+# Use with the Sophie pipeline launcher:
+#   ../WeatherGenerator-private/hpc/launch-slurm-sophie.py \
+#     --no-dry-run --run-id co7xb9p2fc \
+#     config/jepa_multi_data_self_flow_forecast_from_co7xb9p2_pretrain_ft.yml
+
+nodes: 1
+register: true
+cleanup-scripts: yes
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  - name: finetune-forecast
+    command: train-continue
+    from-run-id: co7xb9p2-pretrain-ft
+    config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
+    options: []
+    chain: 4
+    nodes: 2
+
+  - name: finetune-forecast-ft
+    command: train-continue
+    from: finetune-forecast
+    config: ./config/config_jepa_multi_data_ft_forecast.yml
+    options: []
+    chain: 3
+    nodes: 2

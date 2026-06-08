@@ -1,0 +1,44 @@
+# Downstream-only self-flow JEPA pipeline starting from the completed
+# pretrained run `co7xb9ps-pretrain`.
+#
+# Usage:
+#   ../WeatherGenerator-private/hpc/launch-slurm-sophie.py \
+#     --no-dry-run --run-id <new-prefix> \
+#     config/jepa_multi_data_self_flow_downstream_from_co7xb9ps_pretrain.yml
+
+nodes: 1
+register: true
+cleanup-scripts: yes
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  - name: pretrain-ft
+    command: train-continue
+    from-run-id: co7xb9ps-pretrain
+    config: ./config/config_jepa_self_flow_multi_data_all_years_ft.yml
+    options: []
+    chain: 2
+    nodes: 2
+
+  - name: pretrain-cooldown
+    command: train-continue
+    from: pretrain-ft
+    config: ./config/config_jepa_self_flow_cooldown.yml
+    options: []
+    chain: 1
+    nodes: 2
+
+  - name: finetune-forecast
+    command: train-continue
+    from: pretrain-cooldown
+    config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
+    chain: 4
+    nodes: 2
+
+  - name: finetune-forecast-ft
+    command: train-continue
+    from: finetune-forecast
+    config: ./config/config_jepa_multi_data_ft_forecast.yml
+    chain: 3
+    nodes: 2

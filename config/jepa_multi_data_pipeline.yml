@@ -32,9 +32,10 @@ stages:
     chain: 2
     nodes: 2
 
-  # Stage 1: JEPA pre-training with EMA teacher + deep SSL
+  # Stage 2: continue JEPA pre-training on the OD stream mix
   - name: pretrain-ft
-    command: train
+    command: train-continue
+    from: pretrain
     config: ./config/config_jepa_multi_data_all_years_ft.yml
     options: []
     chain: 2

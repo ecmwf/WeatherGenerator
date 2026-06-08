@@ -1,0 +1,34 @@
+# Temporary local smoke-test overlay for forecast finetuning.
+# Keep this tiny and conservative: it is intended only to prove that training
+# reaches and completes a few forward/backward steps.
+
+general:
+  istep: 0
+  multiprocessing_method: fork
+
+train_logging:
+  terminal: 1
+  metrics: 1
+  checkpoint: 1000000
+
+data_loading:
+  num_workers: 0
+  validation_num_workers: 0
+  persistent_workers: False
+  prefetch_factor: 1
+  memory_pinning: False
+
+training_config:
+  num_mini_epochs: 1
+  samples_per_mini_epoch: 4
+
+validation_config:
+  validate_before_training: False
+  samples_per_mini_epoch: 4
+  output:
+    num_samples: 0
+
+test_config:
+  samples_per_mini_epoch: 4
+  output:
+    num_samples: 0

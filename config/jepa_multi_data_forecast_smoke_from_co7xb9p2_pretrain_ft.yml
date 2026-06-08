@@ -1,0 +1,33 @@
+# One-stage Slurm smoke test for the Sophie forecast finetune path.
+# This uses the normal all-years forecast config plus tiny overrides so the job
+# should reach a few train batches quickly and leave the copied run directory.
+
+nodes: 1
+register: false
+cleanup-scripts: no
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  - name: smoke
+    command: train-continue
+    from-run-id: co7xb9p2-pretrain-ft
+    config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
+    options:
+      - general.istep=0
+      - general.multiprocessing_method=fork
+      - train_logging.terminal=1
+      - train_logging.metrics=1
+      - train_logging.checkpoint=1000000
+      - data_loading.num_workers=0
+      - data_loading.validation_num_workers=0
+      - data_loading.persistent_workers=False
+      - data_loading.prefetch_factor=1
+      - data_loading.memory_pinning=False
+      - training_config.num_mini_epochs=1
+      - training_config.samples_per_mini_epoch=16
+      - validation_config.validate_before_training=False
+      - validation_config.samples_per_mini_epoch=4
+      - validation_config.output.num_samples=0
+    chain: 1
+    nodes: 1

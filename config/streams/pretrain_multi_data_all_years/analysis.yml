@@ -18,9 +18,9 @@ ERA5_in:
   frequency: 06:00:00
   nominal_time_mapping :
     "0" : 5 # 04:30:00
-    "6" : 9 # 09:00:00
+    "6" : 11 # 09:00:00
     "12" : 17 #16:30:00
-    "18" : 21 #21:00:00
+    "18" : 23 #21:00:00
   embed:
     net: transformer
     num_tokens: 1
