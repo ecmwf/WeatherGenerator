@@ -67,6 +67,16 @@ LOSS_SPIKE_DETECTION_DEFAULTS = {
     "file_name": "loss_spikes.jsonl",
 }
 
+def _worker_faulthandler_init(worker_id: int) -> None:
+    # DIAGNOSTIC (multi-worker DataLoader hang): each worker dumps its OWN stack if it
+    # stalls, revealing the blocking call (flock/fcntl, zarr/anemoi sync, sqlite,
+    # blosc, fsspec...). Module-level so it pickles under the spawn start method.
+    import faulthandler
+    import sys
+
+    faulthandler.dump_traceback_later(120, repeat=True, file=sys.stderr)
+
+
 # cfg_keys_to_filter = ["losses", "model_input", "target_input"]
 
 
@@ -281,6 +291,7 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": cf.data_loading.num_workers,
+            "worker_init_fn": _worker_faulthandler_init,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         # loader_params["num_workers"]=  0

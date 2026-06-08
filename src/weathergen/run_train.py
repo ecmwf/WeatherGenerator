@@ -11,6 +11,7 @@
 The entry point for training and inference weathergen-atmo
 """
 
+import faulthandler
 import logging
 import os
 import pdb
@@ -24,8 +25,8 @@ import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
 from weathergen.train.trainer import Trainer
 
-# import faulthandler
-# faulthandler.dump_traceback_later(300, repeat=True)   # prints every rank's stack at 300s, before the 600s timeout
+# DIAGNOSTIC: dump every rank's main-process stack at 300s, before the 600s NCCL timeout.
+faulthandler.dump_traceback_later(300, repeat=True)
 
 logger = logging.getLogger(__name__)
 
