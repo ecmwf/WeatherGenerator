@@ -737,7 +737,8 @@ class Model(torch.nn.Module):
             # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
             if self.cf.stage == "inference":
                 print("Using most recent steps as conditioning tokens for inference.")
-                conditioning_tokens = tokens[:, :-1].sum(axis=1)
+                # conditioning_tokens = tokens[:, :-1].sum(axis=1)
+                conditioning_tokens = tokens[:, 1:].sum(axis=1)
             else:
                 # Conditioning: all older context steps [t-1, ..., t-(T-1)]; denoising target: t (newest)
                 conditioning_tokens = tokens[:, 1:].sum(axis=1)
@@ -808,7 +809,6 @@ class Model(torch.nn.Module):
                 continue
 
             # tokens = tokens[-1]
-            # # # tokens = (tokens - tokens.mean()) / (tokens.std() + 1e-6)
 
             # if self.cf.get("fe_diffusion_model", False) and self.cf.get("fe_diffusion_predict_residual", False):
             #     tokens = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] + tokens
