@@ -24,6 +24,9 @@ import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
 from weathergen.train.trainer import Trainer
 
+# import faulthandler
+# faulthandler.dump_traceback_later(300, repeat=True)   # prints every rank's stack at 300s, before the 600s timeout
+
 logger = logging.getLogger(__name__)
 
 

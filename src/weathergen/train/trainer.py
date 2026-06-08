@@ -282,7 +282,8 @@ class Trainer(TrainerBase):
             "shuffle": False,
             "num_workers": cf.data_loading.num_workers,
         }
-        self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
+        self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None,
+                                                       multiprocessing_context="forkserver")
         # loader_params["num_workers"]=  0
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
@@ -526,6 +527,17 @@ class Trainer(TrainerBase):
                 for _, target_aux in self.target_and_aux_calculators_val.items()
             ]
 
+            # Every rank must produce a gradient for the *same* parameter set each
+            # step (DDP find_unused_parameters=False). Streams empty on a given rank
+            # skip their per-stream embedding (engines.py:100/105), so those params
+            # would get no gradient on that rank -> reducer's bucket set diverges ->
+            # backward all-reduce deadlock (DETAIL: rank 0 reduces a different set).
+            # A zero-weighted touch puts every param on the graph, so all ranks reduce
+            # an identical set. Term is exactly 0 -> real gradients unchanged.
+            loss = loss + 0.0 * sum(
+                p.sum() for p in self.model.parameters() if p.requires_grad
+            )
+
             # backward pass
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
@@ -616,9 +628,9 @@ class Trainer(TrainerBase):
                 total=len(self.data_loader_validation), disable=self.cf.with_ddp
             ) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
-                    if cf.data_loading.get("memory_pinning", False):
-                        # pin memory for faster CPU-GPU transfer
-                        batch = batch.pin_memory()
+                    # if cf.data_loading.get("memory_pinning", False):
+                    #     # pin memory for faster CPU-GPU transfer
+                    #     batch = batch.pin_memory()
 
                     batch.to_device(self.device)
 

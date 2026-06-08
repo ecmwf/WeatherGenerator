@@ -97,6 +97,7 @@ class EmbeddingEngine(torch.nn.Module):
                 for sample in batch.get_samples():
                     sdata += [sample.streams_data[stream_name].source_tokens_cells[istep]]
 
+            print(f"[embed] rank={torch.distributed.get_rank()} ")
             if all(s is None for s in sdata):
                 continue
 
@@ -104,7 +105,9 @@ class EmbeddingEngine(torch.nn.Module):
             # skip empty stream
             if sdata.numel() == 0:
                 continue
-            
+
+            print(f"[embed] rank={torch.distributed.get_rank()}, sdata shape {sdata.shape}")
+            assert (sdata.shape[0] < 65535), f"{stream_name} has {sdata.shape} shape"
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 

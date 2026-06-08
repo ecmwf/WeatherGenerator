@@ -63,7 +63,7 @@ general:
   # run_path, 
   # path_shared_
 
-  multiprocessing_method: "spawn" # "fork"
+  multiprocessing_method: "fork" # "spawn" # "fork"
 
   desc: ""
   run_id: ???
@@ -82,12 +82,12 @@ data_loading :
   num_workers: 6
   rng_seed: ???
   repeat_data_in_mini_epoch : False
-  persistent_workers: True
+  persistent_workers: False
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
   # If this happens, you can disable the flag, but performance will drop on GH200.
-  memory_pinning: True
+  memory_pinning: False
 
 
 # config for training

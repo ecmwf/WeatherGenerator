@@ -73,6 +73,11 @@ def init_model_and_shard(
             gradient_as_bucket_view=True,
             bucket_cap_mb=512,
         )
+        logger.info(  # buffer-count probe
+              f"[bufprobe] rank={cf.local_rank} buffers_numel="
+              f"{sum(b.numel() for b in model.module.buffers())} "
+              f"n_buffers={sum(1 for _ in model.module.buffers())}"
+          )
 
     elif with_ddp and with_fsdp:
         # with DDP *and() FSDP
