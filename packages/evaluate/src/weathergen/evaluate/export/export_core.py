@@ -330,6 +330,11 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     n_processes = kwargs.n_processes
     epoch = kwargs.epoch
     rank = kwargs.rank
+    # if not list convert to list
+    if not isinstance(epoch, list):
+        epoch = [epoch]
+    if not isinstance(rank, list):
+        rank = [rank]
 
     if data_type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")

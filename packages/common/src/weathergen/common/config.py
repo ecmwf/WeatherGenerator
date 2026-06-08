@@ -232,15 +232,23 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path) / run_id
 
-        # mini_epoch none for inference
-        config_path = path / _get_model_config_file_read_name(run_id, None)
+        config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
+        config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
 
-        if config_path.exists():
-            fname = config_path
+        if config_path_with_epoch.exists():
+            fname = config_path_with_epoch
+            _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
+        elif config_path_without_epoch.exists():
+            fname = config_path_without_epoch
+            _logger.info(
+                f"Config for mini_epoch {mini_epoch} not found. "
+                f"Falling back to config without mini_epoch: {fname}"
+            )
         else:
             raise FileNotFoundError(
                 f"Could not find model config for run_id '{run_id}' "
-                f"at {config_path}."
+                f"(mini_epoch={mini_epoch}) in '{path}'. "
+                f"Tried: '{config_path_with_epoch.name}' and '{config_path_without_epoch.name}'. "
                 f"Please check run_id and mini_epoch."
             )
 
