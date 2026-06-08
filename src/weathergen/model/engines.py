@@ -734,7 +734,7 @@ class TargetPredictionEngineClassic(nn.Module):
                     dim_head_proj=self.tr_dim_head_proj,
                     with_residual=True,
                     with_qk_lnorm=True,
-                    dropout_rate=0.2,  # Assuming dropout_rate is 0.1
+                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     with_flash=self.cf.with_flash_attention,
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
@@ -746,10 +746,7 @@ class TargetPredictionEngineClassic(nn.Module):
             )
 
             # Optional Self-Attention Head
-            pred_self_attention = stream_config["target_readout"].get(
-                "self_attention", self.cf.pred_self_attention
-            )
-            if pred_self_attention:
+            if self.cf.pred_self_attention:
                 self.tte.append(
                     MultiSelfAttentionHeadVarlen(
                         dim_embed=self.dims_embed[i],
@@ -771,8 +768,8 @@ class TargetPredictionEngineClassic(nn.Module):
                     self.dims_embed[i],
                     self.dims_embed[i + 1],
                     with_residual=True,
-                    hidden_factor=1,  # self.tr_mlp_hidden_factor,
-                    dropout_rate=0.2,  # Assuming dropout_rate is 0.1
+                    hidden_factor=self.tr_mlp_hidden_factor,
+                    dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                     norm_type=self.cf.norm_type,
                     dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
                     norm_eps=self.cf.mlp_norm_eps,

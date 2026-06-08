@@ -209,7 +209,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
-        return np.arange(1, perms_len)
+        return np.arange(perms_len)
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""
