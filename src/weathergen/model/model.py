@@ -736,7 +736,8 @@ class Model(torch.nn.Module):
             # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
             if self.cf.stage == "inference":
                 print("Using most recent steps as conditioning tokens for forecasting inference.")
-                conditioning_tokens = tokens[:, 0]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, :-1].sum(axis=1)
+                conditioning_tokens = tokens[:, 1]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, :-1].sum(axis=1)
+                print("using correct inference!!!")
             else:
                 # Conditioning: all older context steps [t-1, ..., t-(T-1)]; denoising target: t (newest)
                 conditioning_tokens = tokens[:, 1]  # TODO: enable longer history for conditioning, e.g., conditioning_tokens = tokens[:, 1:].sum(axis=1)
@@ -768,6 +769,9 @@ class Model(torch.nn.Module):
                 meta_info=batch.samples[0].meta_info,
                 coords=model_params.rope_coords
             )
+
+            if self.cf.get("diffusion_rollout", False):
+                tokens = tokens[-1]
 
             # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a
             # list. Treat each intermediate state as its own forecast step in the output so the
