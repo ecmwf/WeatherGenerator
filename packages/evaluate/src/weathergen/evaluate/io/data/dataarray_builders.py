@@ -143,7 +143,7 @@ def build_gridded_dataarrays(
         "lat": ("ipoint", sub_lat),
         "lon": ("ipoint", sub_lon),
         "valid_time": (("sample", "ipoint"), valid_time_2d),
-        "source_interval_start": ("sample", init_times.copy()),
+        "init_times": ("sample", init_times.copy()),
         "forecast_step": forecast_step_val,
     }
     # Add per-stream source point counts as coordinates
@@ -243,7 +243,6 @@ def build_scatter_dataarrays(
             if per_sample_obs_times is not None and si < len(per_sample_obs_times)
             else np.full(n_ip, per_sample_valid_times[si], dtype="datetime64[ns]")
         )
-        si_start = init_times[si]
 
         sample_coords = {
             "ipoint": np.arange(n_ip),
@@ -251,7 +250,7 @@ def build_scatter_dataarrays(
             "lat": ("ipoint", sample_lat),
             "lon": ("ipoint", sample_lon),
             "valid_time": ("ipoint", vt_arr),
-            "source_interval_start": si_start,
+            "init_times": init_times[si],
             "forecast_step": forecast_step_val,
             "sample": sample,
         }
