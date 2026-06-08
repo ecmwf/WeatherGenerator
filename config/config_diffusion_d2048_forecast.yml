@@ -63,7 +63,7 @@ fe_diffusion_model: True
 fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
-fe_diffusion_model_conditioning_type: "cross_attn" # options: "cross_attn", "ada_ln"
+fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "concatenate", ..., "ada_ln"
 fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
 fe_impute_latent_noise_std: 0.0  # 1e-4
 fe_impute_latent_diffusion_noise_std: 0.0  # 1e-4
@@ -73,12 +73,13 @@ with_step_conditioning: True # False
 # Diffusion related parameters
 frequency_embedding_dim: 256
 embedding_dim: 512
-sigma_min: 0.002
-sigma_max: 80
+noise_distribution: &noise_distribution "log_normal"  # "log_uniform" or "log_normal"
+sigma_min: &sigma_min 0.002
+sigma_max: &sigma_max 80
 sigma_data: 1.0
 rho: 7
-p_mean: 1.5
-p_std: 1.2
+p_mean: 1.5  # only required if noise_distribution is log_normal
+p_std: 1.2  # only required if noise_distribution is log_normal
 
 healpix_level: 5
 
@@ -142,14 +143,13 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'uwyv1zdh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.0, based on l3rxe29i backbone
 # load_chkpt: {'run_id': 'dvslhdp3', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=2.5, based on l3rxe29i backbone
 # load_chkpt: {'run_id': 'mtlfdgvh', 'epoch': -1}  # diffusion model d2048 to fine-tune decoder, p_mean=3.0, based on l3rxe29i backbone
-# load_chkpt: {'run_id': 'p6cxplfd', 'epoch': -1}  # d2048 hl5, p_mean=-2.5, forecasting
-# load_chkpt: {'run_id': 'c2y0srpq', 'epoch': -1}  # d2048 hl5, p_mean=-2.0, forecasting
-# load_chkpt: {'run_id': 'c0zk6oli', 'epoch': -1}  # d2048 hl5, p_mean=-1.5, forecasting
-# load_chkpt: {'run_id': 'wt2leaf4', 'epoch': -1}  # d2048 hl5, p_mean=-1.2, forecasting
-# load_chkpt: {'run_id': 'iq5p8ujf', 'epoch': -1}  # d2048 hl5, p_mean=-0.5, forecasting
-# load_chkpt: {'run_id': 'u2r8b4z6', 'epoch': -1}  # d2048 hl5, p_mean=0.5, forecasting
+# load_chkpt: {'run_id': 'jnxvjtur', 'epoch': -1}  # d2048 hl5, p_mean=-2.5, forecasting
+# load_chkpt: {'run_id': 'ulw4wid5', 'epoch': -1}  # d2048 hl5, p_mean=-2.0, forecasting
+# load_chkpt: {'run_id': 'lxpbthna', 'epoch': -1}  # d2048 hl5, p_mean=-1.5, forecasting
+# load_chkpt: {'run_id': 'n1e97r8z', 'epoch': -1}  # d2048 hl5, p_mean=-1.2, forecasting
+# load_chkpt: {'run_id': 'halvwj21', 'epoch': -1}  # d2048 hl5, p_mean=-0.5, forecasting
+# load_chkpt: {'run_id': 'dlsp3k31', 'epoch': -1}  # d2048 hl5, p_mean=0.5, forecasting
 # load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
-# load_chkpt: {'run_id': 'l3rxe29i', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting (deterministic, precursor to ug7huxi2)
 # load_chkpt: {'run_id': 'i3y5fhda', 'epoch': -1}  # d2048 hl5, p_mean=2.5, forecasting
 # load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
 load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z
@@ -265,7 +265,12 @@ training_config:
     "forecasting" : {
       # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
-      masking_strategy_config: {diffusion_rn: True},
+      masking_strategy_config: {
+        diffusion_rn: True,
+        noise_distribution: *noise_distribution,
+        sigma_min: *sigma_min,
+        sigma_max: *sigma_max
+        },
       num_steps_input: 2,
       num_samples: 1,
       }
@@ -318,7 +323,7 @@ validation_config:
     }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: True
+  validate_before_training: False
 
 
 # test config; full test config is merge of validation and test config
