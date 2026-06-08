@@ -29,6 +29,15 @@ def freeze_weights(block):
         p.requires_grad = False
 
 
+def reset_weights(block):
+    block_name = getattr(block, "name", type(block).__name__)
+    if hasattr(block, "reset_parameters"):
+        logger.info(f"Reset weights of block {block_name}")
+        block.reset_parameters()
+    else:
+        logger.info(f"Skip reset for block {block_name} (no reset_parameters)")
+
+
 def set_to_eval(block):
     if hasattr(block, "name"):
         logger.info(f"Set block {block.name} to eval mode")

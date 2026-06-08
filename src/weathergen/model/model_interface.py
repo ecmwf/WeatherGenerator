@@ -29,7 +29,7 @@ from weathergen.model.attention import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
+from weathergen.model.utils import apply_fct_to_blocks, freeze_weights, reset_weights
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
@@ -158,21 +158,34 @@ def init_model_and_shard(
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
     # complete initalization and load model if inference/continuing a run
+    loaded_from_run_id = None
     if run_id_contd is not None:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
         model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
+        loaded_from_run_id = run_id_contd
     elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
         mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
             logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
         model = load_model(cf, model, device, run_id, mini_epoch)
+        loaded_from_run_id = run_id
     else:
         if with_ddp and with_fsdp:
             model.to_empty(device="cuda")
             if with_fsdp:
                 model.reset_parameters()
+
+    # Reset specified modules when starting a new stage (e.g. pretrain -> finetune); 
+    # skip when resuming the same run.
+    current_run_id = cf.general.run_id
+    if loaded_from_run_id is not None and loaded_from_run_id != current_run_id:
+        reset_modules = cf.get("reset_modules", "")
+        if reset_modules:
+            if is_root():
+                logger.info(f"Resetting weights for modules matching: {reset_modules}")
+            apply_fct_to_blocks(model, reset_modules, reset_weights)
 
     # model params
     model_params = ModelParams(cf).create(cf)
