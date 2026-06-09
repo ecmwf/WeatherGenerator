@@ -112,6 +112,10 @@ class EmbeddingEngine(torch.nn.Module):
 
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
+        
+        if x_embeds == []:
+            # if all streams are empty, return empty tensor with correct shape and dtype
+            return tokens_all
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 

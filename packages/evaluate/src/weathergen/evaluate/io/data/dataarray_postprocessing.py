@@ -120,6 +120,9 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
             np.unique(lead_time_values[i][~np.isnat(lead_time_values[i])])
             for i in range(lead_time_values.shape[0])
         ]
+        # If source_interval_start is unavailable (all NaT), skip lead_time coord
+        if all(len(lt) == 0 for lt in lead_times):
+            return da
         if any(len(lt) != 1 for lt in lead_times):
             raise ValueError(
                 "Inconsistent lead_time values within samples for "
@@ -129,6 +132,9 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     else:
         lead_time_values = vt - sis
         lead_time_per_sample = np.unique(lead_time_values[~np.isnat(lead_time_values)])
+        # If source_interval_start is unavailable (all NaT), skip lead_time coord
+        if len(lead_time_per_sample) == 0:
+            return da
 
     # Verify all samples have same lead_time for this forecast_step
     unique_lead = np.unique(lead_time_per_sample)

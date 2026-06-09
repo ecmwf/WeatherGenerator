@@ -295,18 +295,6 @@ class DiffusionForecastEngine(torch.nn.Module):
         # torch.manual_seed(42)
         x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
 
-        ### OLD WAY OF COMPUTING SIGMA SCHEDULE
-        # # Time step discretization.
-        # step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
-        # t_steps = (
-        #     self.sigma_max ** (1 / self.rho)
-        #     + step_indices
-        #     / (num_steps - 1)
-        #     * (self.sigma_min ** (1 / self.rho) - self.sigma_max ** (1 / self.rho))
-        # ) ** self.rho
-        # t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
-
-        ### NEW WAY OF COMPUTING SIGMA SCHEDULE WITH TRAINING-ALIGNED BOUNDS AND DIAGNOSTICS
         # --- Training-aligned sigma bounds ---
         # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
         # The network only learns to denoise reliably within the training distribution.
@@ -322,11 +310,24 @@ class DiffusionForecastEngine(torch.nn.Module):
         #     numerical instability of dividing by near-zero sigma in the ODE.
         sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
-        sigma_min_eff = max(self.sigma_min, self.sigma_data * 0.01)
+
+        # --- Training-distribution-aligned sigma_min ---
+        # sigma_min_quantile controls what fraction of training samples fall below sigma_min_eff.
+        # sigma at quantile q of log-normal(p_mean, p_std): exp(p_mean + Φ⁻¹(q) * p_std).
+        # Φ⁻¹ approximated via its standard z-scores; default q=0.05 (5th percentile).
+        #   q=0.10 → z=-1.282 → exp(1.5-1.538)≈0.96   (stops right at sigma≈1)
+        #   q=0.05 → z=-1.645 → exp(1.5-1.974)≈0.62
+        #   q=0.01 → z=-2.326 → exp(1.5-2.791)≈0.27
+        sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
+        _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
+        _z = _z_scores.get(sigma_min_quantile, -1.645)
+        sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
+        sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
         logger.info(
             f"Inference sigma schedule: "
             f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train 3σ={sigma_max_train:.4f}), "
-            f"sigma_min_eff={sigma_min_eff:.4f} (config={self.sigma_min}), "
+            f"sigma_min_eff={sigma_min_eff:.4f} "
+            f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
             f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
         )
 
