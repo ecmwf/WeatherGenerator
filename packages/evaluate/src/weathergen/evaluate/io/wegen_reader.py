@@ -45,7 +45,7 @@ class WeatherGenReader(Reader):
 
         # TODO: remove backwards compatibility to "epoch" in Feb. 2026
         self.mini_epoch = eval_cfg.get("mini_epoch", 0)
-        self.rank = eval_cfg.get("rank", 0)
+        self.rank = eval_cfg.get("rank", "all")
 
         # Load model configuration and set (run-id specific) directories
         self.inference_cfg = self.get_inference_config()
