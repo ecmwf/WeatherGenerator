@@ -35,6 +35,7 @@ from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     heat_maps_metric_region,
     plot_metric_region,
+    psd_plot_metric_region,
     quantile_plot_metric_region,
     ratio_plot_metric_region,
     score_card_metric_region,
@@ -474,7 +475,11 @@ def _plot_score_maps_per_stream(
     """Plot 2D score maps for all metrics/channels for one (region, fstep)."""
 
     score_results, preds, metric_names = computed
-    valid = [(m, r) for m, r in zip(metric_names, score_results, strict=False) if r is not None]
+    valid = [
+        (m, r)
+        for m, r in zip(metric_names, score_results, strict=False)
+        if r is not None and "ipoint" in r.dims
+    ]
     if not valid:
         return
 
@@ -1244,7 +1249,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     for metric in metrics:
         for region in scores_dict[metric].keys():
             if eval_opt.get("summary_plots", False):
-                plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+                if metric == "psd":
+                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                elif metric == "qq_analysis":
+                    quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
+                else:
+                    plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("ratio_plots", False):
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("heat_maps", False):
@@ -1253,5 +1263,3 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
-            if metric == "qq_analysis":
-                quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
