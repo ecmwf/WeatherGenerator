@@ -1,6 +1,6 @@
 runid : "i0xr7z48"
 init_time :  "2023-10-07T00"
-inpath : "/p/project1/weatherai/buschow1/wegen_export/cyclones/" 
+inpath : "../wegen_export/cyclones/" 
 outpath : "./plots/"
 latmin: -30 # TCs are only detected for latmin<=lat<=latmax
 latmax: 30
