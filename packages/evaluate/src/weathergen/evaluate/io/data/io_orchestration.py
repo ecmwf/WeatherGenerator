@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 from joblib import Parallel, delayed
 from joblib.externals.loky import get_reusable_executor
@@ -77,6 +78,10 @@ class IOState:
     lon: NDArray
     n_workers: int
     backend: str = "loky"
+    rank: str = "0000"
+    offset: np.timedelta64 | None = (
+        None  # fallback offset in hours for init_time when source_interval is missing
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +252,7 @@ def _build_io_state(
     ensemble: list[str],
     n_io_workers: int,
     ens_select: EnsembleSelect,
+    rank: str = "",
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -256,7 +262,9 @@ def _build_io_state(
     coords, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
     read_channels: list[str] = zarr_channels if zarr_channels else all_channels
     channel_idxs: list[int] | None = None if zarr_channels else list(range(len(all_channels)))
-
+    offset = stream_cfg.get("offset")
+    if offset is not None:
+        offset = np.timedelta64(pd.Timedelta(offset).value, "h")
     # ---- Early channel selection (skip unrequested channels at numpy level) ----
     channel_idxs, read_channels = _compute_early_channel_selection(
         read_channels, channels, stream_cfg
@@ -283,6 +291,8 @@ def _build_io_state(
         lat=lat,
         lon=lon,
         n_workers=n_io_workers,
+        rank=rank,
+        offset=offset,
     )
 
 
@@ -340,15 +350,28 @@ def _parallel_read(
         return results, True
 
 
-def _extract_init_times(results: list, samples: list[int]) -> NDArray:
-    """Build a (n_samples,) datetime64[ns] array of initialisation times (last source time)."""
+def _extract_init_times(
+    results: list, samples: list[int], offset: np.timedelta64 | None = None
+) -> NDArray:
+    """Build a (n_samples,) datetime64[ns] array of initialisation times (last source time).
+
+    If source_interval is empty, fall back to first_valid_time - offset so that
+    lead_time for the first sub-step of fstep 1 equals offset.
+    """
     si_list = []
     for i in range(len(samples)):
         si = results[i][3].get("source_interval", {})
-        last_str = si.get("end", si.get("start", None))
-        si_list.append(
-            np.datetime64(last_str, "ns") if last_str is not None else np.datetime64("NaT", "ns")
-        )
+        last_str = si.get("end", None)
+        if last_str is not None:
+            si_list.append(np.datetime64(last_str, "ns"))
+        elif offset is not None:
+            # Fallback: infer init_time from the first valid_time minus 1h
+            time_entry = results[i][2][0] if results[i][2] else []
+            if len(time_entry) > 0:
+                first_vt = np.datetime64(time_entry[0], "ns")
+                si_list.append(first_vt - offset)
+        else:
+            si_list.append(np.datetime64("NaT", "ns"))
     return np.array(si_list)
 
 
@@ -459,7 +482,8 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
     ``n_samples × 1 × n_ipoints × n_channels × 4 bytes``.
     """
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: Loading {len(state.samples)} samples × "
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
+        f"Loading {len(state.samples)} samples × "
         f"{len(state.fsteps)} fsteps via zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
@@ -472,7 +496,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
 
     for fi, fs in enumerate(state.fsteps):
         _logger.info(
-            f"RUN {state.run_id} - {state.stream}: "
+            f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
             f"Reading fstep {fs} ({fi + 1}/{len(state.fsteps)})..."
         )
 
@@ -487,14 +511,14 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             is_gridded=state.is_gridded,
             n_workers=n_workers,
             backend=state.backend,
-            label=f"RUN {state.run_id} - {state.stream} fstep {fs}",
+            label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
             n_workers = 1
 
         if init_times is None:
-            init_times = _extract_init_times(results, state.samples)
+            init_times = _extract_init_times(results, state.samples, state.offset)
 
         n_sub = results[0][3]["n_substeps"][0]
 
@@ -525,7 +549,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
         get_reusable_executor().shutdown(wait=True)
 
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: I/O complete. "
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
     return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
@@ -546,7 +570,8 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     """
     n_total = len(state.samples) * len(state.fsteps)
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: Loading {len(state.samples)} samples × "
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
+        f"Loading {len(state.samples)} samples × "
         f"{len(state.fsteps)} fsteps = {n_total} items via ZipStore-parallel zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
@@ -569,7 +594,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         calls,
         n_workers=state.n_workers,
         backend=state.backend,
-        desc=f"RUN {state.run_id} - {state.stream} (ZipStore)",
+        desc=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} (ZipStore)",
         verbose=5,
     )
 
@@ -579,6 +604,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     init_times = _extract_init_times(
         [flat_results[si * n_fsteps] for si in range(len(state.samples))],
         state.samples,
+        state.offset,
     )
 
     da_tars_dict: dict = {}
@@ -633,7 +659,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         get_reusable_executor().shutdown(wait=True)
 
     _logger.info(
-        f"RUN {state.run_id} - {state.stream}: ZipStore-parallel I/O complete. "
+        f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: ZipStore-parallel I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
     return ReaderOutput(target=da_tars_dict, prediction=da_preds_dict)
