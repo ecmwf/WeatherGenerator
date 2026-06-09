@@ -771,7 +771,8 @@ class Model(torch.nn.Module):
                 coords=model_params.rope_coords,
             )
 
-            # if we are doing a diffusion rollout, we discard all tokens but the last one i.e. the denoised one
+            # if we are doing a diffusion rollout, we discard discard the tokens throughout
+            # the denoising steps and take the last denoised one
             if self.cf.get("fe_diffusion_model", False) and self.cf.get("diffusion_rollout", False):
                 tokens = tokens[-1]
 
@@ -779,7 +780,7 @@ class Model(torch.nn.Module):
                 if  self.cf.get("fe_diffusion_predict_residual", False):
                     tokens = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] + tokens
                 
-                # put the last token into conditioning tokens for the next step
+                # put the denoised token into conditioning tokens for the next step
                 batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens
 
             # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a
@@ -818,7 +819,6 @@ class Model(torch.nn.Module):
                 batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = final_abs
                 tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
                 continue
-
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
