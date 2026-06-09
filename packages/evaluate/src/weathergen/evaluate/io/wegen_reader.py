@@ -12,6 +12,7 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
+import omegaconf
 
 # Third-party
 import numpy as np
@@ -434,7 +435,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             _logger.info(f"Discovered {len(files)} rank file(s) for run {self.run_id}.")
             return self._validate_rank_files(files)
 
-        elif isinstance(rank_cfg, list | tuple):
+        elif isinstance(rank_cfg, list | tuple | omegaconf.listconfig.ListConfig):
             files = []
             for r in rank_cfg:
                 fname = self.results_dir / (
