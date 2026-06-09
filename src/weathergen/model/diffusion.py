@@ -78,14 +78,18 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"forecast.input_num_steps must be 1 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
         )
-        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev", "concatenate", "concatenate_hiddendim"}, (
-            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', 'concatenate', or 'concatenate_hiddendim' when "
+        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev", "concatenate", "concatenate_hiddendim", "concatenate_hdMLP"}, (
+            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', 'concatenate', 'concatenate_hiddendim', or 'concatenate_hdMLP' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
             f"(got '{self.conditioning_type}')"
         )
 
         if self.conditioning and (self.conditioning in ["date_time", "date", "time"]):
             self.datetime_embedder = DateTimeEncoder(self.conditioning)
+
+        if self.conditioning_type == "concatenate_hdMLP":
+            _D = self.cf.ae_global_dim_embed
+            self.concat_hd_proj = torch.nn.Linear(2 * _D, _D, bias=False)
 
         # Parameters
         self.sigma_min = self.cf.sigma_min
@@ -275,6 +279,14 @@ class DiffusionForecastEngine(torch.nn.Module):
             combined = torch.cat([net_input, c], dim=2)
             return c_skip * x + c_out * self.net(
                 combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
+            )  # Eq. (7) in EDM paper
+
+        if self.conditioning_type == "concatenate_hdMLP":
+            # Concatenate along hidden dim then project back: (B, H, D) cat (B, H, D) -> (B, H, 2D) -> Linear -> (B, H, D)
+            combined = torch.cat([net_input, c], dim=2)
+            projected = self.concat_hd_proj(combined)
+            return c_skip * x + c_out * self.net(
+                projected, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
             )  # Eq. (7) in EDM paper
 
         return c_skip * x + c_out * self.net(
