@@ -558,6 +558,18 @@ class GribParser(NetcdfParser):
     """
     Child class for handling GRIB output format.
     """
+    def gribify(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Convert dataset to use GRIB data variable names.
+        """
+        # change pressure to isobaricInhPa for GRIB compliance
+        if "pressure" in ds.coords:
+            ds = ds.rename({"pressure": "isobaricInhPa"})
+        if "valid_time" in ds.coords:
+            ds = ds.rename({"valid_time": "time"})
+        if "forecast_period" in ds.coords:
+            ds = ds.rename({"forecast_period": "step"})
+        return ds
 
     def save(self, ds: xr.Dataset, forecast_ref_time: np.datetime64) -> None:
         """
@@ -575,5 +587,6 @@ class GribParser(NetcdfParser):
         """
         out_fname = self.get_output_filename(forecast_ref_time)
         _logger.info(f"Saving to {out_fname}.")
+        ds = self.gribify(ds)
         to_grib(ds, out_fname)
         _logger.info(f"Saved GRIB file to {out_fname}.")
