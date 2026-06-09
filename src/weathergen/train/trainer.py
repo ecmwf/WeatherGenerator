@@ -529,9 +529,9 @@ class Trainer(TrainerBase):
 
             self.perf_tracker.step(
                 batch,
-                self.cf.general.istep,
+                self.runstate.istep,
                 log_fn=lambda m: self.train_logger.log_metrics(
-                    TRAIN, m, step=self.cf.general.istep
+                    TRAIN, m, step=self.runstate.istep
                 ),
             )
             # Compute collapse monitoring metrics
