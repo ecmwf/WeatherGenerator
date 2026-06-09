@@ -269,9 +269,10 @@ class Trainer(TrainerBase):
     ) -> None:
         """Guard against silently scrambling the channel<->weight mapping when continuing.
 
-        Compares the channel order resolved for the current data against the order stored in
-        the checkpoint's config and raises if they differ. Streams (or channel lists) absent
-        from the checkpoint config cannot be verified and are skipped with a warning.
+        Compares the source/target/geoinfo channel order resolved for the current data against
+        the order stored in the checkpoint's config and raises if they differ. Streams (or
+        channel lists) absent from the checkpoint config cannot be verified and are skipped with
+        a warning (e.g. geoinfo for checkpoints predating the resolved-geoinfo back-fill).
         """
         try:
             prev_cf = config.load_run_config(from_run_id, mini_epoch, None)
@@ -285,6 +286,7 @@ class Trainer(TrainerBase):
         prev_streams = {s["name"]: s for s in prev_cf.get("streams", [])}
         src_key = f"{stage}_source_channels"
         tgt_key = f"{stage}_target_channels"
+        geo_key = f"{stage}_geoinfo_channels"
 
         mismatches: list[str] = []
         for name, readers in dataset.streams_datasets.items():
@@ -295,6 +297,7 @@ class Trainer(TrainerBase):
             for key, resolved in (
                 (src_key, list(reader.source_channels)),
                 (tgt_key, list(reader.target_channels)),
+                (geo_key, list(reader.geoinfo_channels)),
             ):
                 stored = prev.get(key)
                 if stored is None:

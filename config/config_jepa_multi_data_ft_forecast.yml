@@ -1,4 +1,4 @@
-streams_directory: "./config/streams/jepa_forecast_multi_data_od/"
+streams_directory: "./config/streams/jepa_forecast_multi_data_od_ckpt_order/"
 
 general:
 
