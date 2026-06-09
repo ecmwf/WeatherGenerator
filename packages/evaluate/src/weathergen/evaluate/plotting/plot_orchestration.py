@@ -35,6 +35,7 @@ from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
     heat_maps_metric_region,
     plot_metric_region,
+    psd_plot_metric_region,
     quantile_plot_metric_region,
     ratio_plot_metric_region,
     score_card_metric_region,
@@ -44,7 +45,7 @@ from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
-from weathergen.evaluate.utils.clim_utils import get_climatology
+from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 
 _logger = logging.getLogger(__name__)
 
@@ -386,7 +387,8 @@ def run_score_map_pipeline(
     da_preds = output_data.prediction
     da_tars = output_data.target
     fsteps = sorted(da_preds.keys())
-    aligned_clim_data = get_climatology(reader, da_tars, stream)
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
     n_plot_workers = get_num_workers(
         check_process_headroom=True,
@@ -473,7 +475,11 @@ def _plot_score_maps_per_stream(
     """Plot 2D score maps for all metrics/channels for one (region, fstep)."""
 
     score_results, preds, metric_names = computed
-    valid = [(m, r) for m, r in zip(metric_names, score_results, strict=False) if r is not None]
+    valid = [
+        (m, r)
+        for m, r in zip(metric_names, score_results, strict=False)
+        if r is not None and "ipoint" in r.dims
+    ]
     if not valid:
         return
 
@@ -1243,7 +1249,12 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     for metric in metrics:
         for region in scores_dict[metric].keys():
             if eval_opt.get("summary_plots", False):
-                plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
+                if metric == "psd":
+                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                elif metric == "qq_analysis":
+                    quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
+                else:
+                    plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("ratio_plots", False):
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
             if eval_opt.get("heat_maps", False):
@@ -1252,5 +1263,3 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
-            if metric == "qq_analysis":
-                quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
