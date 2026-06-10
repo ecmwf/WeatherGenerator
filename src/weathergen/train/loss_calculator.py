@@ -78,6 +78,15 @@ class LossCalculator:
             ]
         )
 
+    def _term_scale(self, term_name, calculator, targets_and_aux):
+        """Per-term multiplier applied to the loss before summation.
+
+        Extension hook for subclasses; the base calculator applies no extra scaling. See
+        DiffusionLossCalculator, which uses it to propagate the EDM noise weight λ(σ) to
+        non-diffusion loss terms.
+        """
+        return 1.0
+
     def compute_loss(
         self,
         preds: ModelOutput,
@@ -94,7 +103,8 @@ class LossCalculator:
                     preds=preds, targets=target, metadata=metadata
                 )
                 if weight > 0.0:
-                    loss = loss + weight * loss_values.loss
+                    scale = self._term_scale(loss_term_name, calculator, targets_and_aux)
+                    loss = loss + weight * scale * loss_values.loss
                 losses_all[calculator.name] = loss_values.losses_all
                 losses_all[calculator.name]["loss_avg"] = loss_values.loss
                 stddev_all[calculator.name] = loss_values.stddev_all

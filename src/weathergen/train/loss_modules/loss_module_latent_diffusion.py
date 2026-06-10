@@ -42,12 +42,6 @@ class LossLatentDiffusion(LossModuleBase):
         self.device = device
         self.name = "LossLatentDiff"
 
-        self.sigma_data = self.cf.sigma_data
-        self.rho = self.cf.rho
-        self.p_mean = self.cf.p_mean
-        self.p_std = self.cf.p_std
-        self.noise_distribution = self.cf.get("noise_distribution", "log_normal")
-
         # Dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [
@@ -82,15 +76,14 @@ class LossLatentDiffusion(LossModuleBase):
         loss_fct,
         target: torch.Tensor,
         pred: torch.Tensor,
-        noise_weight: torch.Tensor = 1.0,
     ):
         """
-        Compute loss for given loss function
+        Compute raw (unweighted) loss for given loss function.
+
+        The diffusion noise weight λ(σ) is applied at combine time by DiffusionLossCalculator,
+        not here, so this module stays free of σ logic.
         """
-
         loss, loss_chs = loss_fct(target=target, pred=pred)
-        loss = noise_weight * loss
-
         return loss
 
     def compute_loss(self, preds: dict, targets: dict, **kwargs) -> LossValues:
@@ -114,14 +107,8 @@ class LossLatentDiffusion(LossModuleBase):
                 losses_all={f"{self.name}.{n}": nan for _, _, n in self.loss_fcts},
                 stddev_all={"latent": nan},
             )
-
-        eta = torch.tensor(
-            [targets.aux_outputs["noise_level_rn"]], device=self.device, dtype=torch.float32
-        )
         fsteps = len(target_tokens_all)
 
-        # During validation, use unweighted loss (no noise-level scaling)
-        noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta, validation=self.stage == "val")
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -139,7 +126,6 @@ class LossLatentDiffusion(LossModuleBase):
                     loss_fct,
                     target=target_tokens,
                     pred=pred_tokens,
-                    noise_weight=noise_weight,
                 )
 
                 losses_all[f"{self.name}.{loss_fct_name}"] += loss_lfct  # TODO: break into fsteps
