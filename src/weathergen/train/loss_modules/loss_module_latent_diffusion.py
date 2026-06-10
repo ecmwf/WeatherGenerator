@@ -98,8 +98,18 @@ class LossLatentDiffusion(LossModuleBase):
             for _, _, loss_fct_name in self.loss_fcts
         }
 
-        pred_tokens_all = [pl["latent_state"].z_pre_norm for pl in preds.latent if pl]
+        pred_tokens_all = [pl["latent_state"].z_pre_norm for pl in preds.latent if pl and "latent_state" in pl]
         target_tokens_all = [latent["diffusion_latent"] for latent in targets.latent if latent]
+
+        # In ensemble mode predict_latent is not called, so latent predictions are absent.
+        # Return a zero loss rather than crashing.
+        if not pred_tokens_all:
+            nan = torch.tensor(torch.nan).to(self.device)
+            return LossValues(
+                loss=torch.zeros(1, device=self.device),
+                losses_all={f"{self.name}.{n}": nan for _, _, n in self.loss_fcts},
+                stddev_all={"latent": nan},
+            )
 
         eta = torch.tensor(
             [targets.aux_outputs["noise_level_rn"]], device=self.device, dtype=torch.float32

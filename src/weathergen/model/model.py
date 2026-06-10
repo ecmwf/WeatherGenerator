@@ -24,7 +24,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import DiffusionForecastEngine
+from weathergen.model.diffusion import DiffusionForecastEngine, EnsembleSamples
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     MAX_NUMBER_TOKENS_LOCAL_PER_CELL,
@@ -772,8 +772,13 @@ class Model(torch.nn.Module):
             )
 
             # if we are doing a diffusion rollout, we discard discard the tokens throughout
-            # the denoising steps and take the last denoised one
-            if self.cf.get("fe_diffusion_model", False) and self.cf.get("diffusion_rollout", False):
+            # the denoising steps and take the last denoised one.
+            # Skip for EnsembleSamples — per-member rollout is handled in the ensemble branch.
+            if (
+                self.cf.get("fe_diffusion_model", False)
+                and self.cf.get("diffusion_rollout", False)
+                and not isinstance(tokens, EnsembleSamples)
+            ):
                 tokens = tokens[-1]
 
                 # add if predicting the residual
@@ -818,6 +823,50 @@ class Model(torch.nn.Module):
                 final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
                 batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = final_abs
                 tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
+                continue
+
+            # Diffusion ensemble mode: N independently drawn samples decoded into a single
+            # forecast step whose ensemble dimension equals the number of members.
+            if isinstance(tokens, EnsembleSamples):
+                cond = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"]
+                predict_residual = (
+                    self.cf.get("fe_diffusion_model", False)
+                    and self.cf.get("fe_diffusion_predict_residual", False)
+                )
+                # Decode each member using a temporary ModelOutput, then stack predictions
+                # along the ensemble dimension (dim 0) for each stream and batch sample.
+                # Also track per-member absolute tokens for the next rollout step.
+                member_preds: dict[str, list[list[torch.Tensor]]] = {}
+                member_final_tokens: list[torch.Tensor] = []
+                for toks in tokens.members:
+                    toks_abs = cond + toks if predict_residual else toks
+                    member_final_tokens.append(toks_abs)
+                    tmp_output = ModelOutput(1)
+                    tmp_output = self.predict_decoders(
+                        model_params, step, toks_abs, batch, tmp_output, out_step=0
+                    )
+                    for sname, pred_tuple in tmp_output.physical[0].items():
+                        if sname not in member_preds:
+                            member_preds[sname] = [[] for _ in pred_tuple]
+                        for b_idx, pred_b in enumerate(pred_tuple):
+                            member_preds[sname][b_idx].append(pred_b)
+                # Stack along ensemble dim and register in the main output.
+                for sname, per_batch in member_preds.items():
+                    stacked = tuple(
+                        torch.cat(batch_member_list, dim=0)  # [N, n_points, channels]
+                        for batch_member_list in per_batch
+                    )
+                    output.add_physical_prediction(step, sname, stacked)
+                # Store per-member final tokens so inference_forward can use them as
+                # member-specific conditioning on the next rollout step.
+                batch.samples[0].meta_info["ERA5"].params["ensemble_conditioning_tokens"] = (
+                    member_final_tokens
+                )
+                # Also keep the shared key in sync (use last member for compatibility).
+                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = (
+                    member_final_tokens[-1]
+                )
+                tokens = None
                 continue
 
             # decoder predictions

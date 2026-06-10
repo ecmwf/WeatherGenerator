@@ -63,10 +63,10 @@ fe_diffusion_model: True
 fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
-fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "concatenate", ..., "ada_ln"
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
+fe_diffusion_model_conditioning_type: "cross_attn" # options: "cross_attn", "concatenate", ..., "ada_ln"
+fe_layer_norm_after_blocks: [11]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
 fe_impute_latent_noise_std: 0.0  # 1e-4
-fe_impute_latent_diffusion_noise_std: 0.0  # 1e-4
+fe_impute_latent_diffusion_noise_std: 1e-3  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 with_step_conditioning: True # False
@@ -78,7 +78,7 @@ sigma_min: &sigma_min 0.002
 sigma_max: &sigma_max 80
 sigma_data: 1.0
 rho: 7
-p_mean: 1.5  # only required if noise_distribution is log_normal
+p_mean: 3.5  # only required if noise_distribution is log_normal
 p_std: 1.2  # only required if noise_distribution is log_normal
 
 healpix_level: 5
