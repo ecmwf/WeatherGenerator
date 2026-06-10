@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+import fnmatch
 import logging
 import os
 import warnings
@@ -574,7 +575,7 @@ class Plotter:
                         var,
                         region,
                         tag=tag,
-                        map_kwargs=dict(map_kwargs.get(var, {})) | map_kwargs_global,
+                        map_kwargs=self._match_glob_kwargs(map_kwargs, var) | map_kwargs_global,
                         title=self.get_map_title(var, valid_time, da_t),
                     )
                     plot_names.append(name)
@@ -582,6 +583,39 @@ class Plotter:
         self.clean_data_selection()
 
         return plot_names
+
+    # glob pattern resolution
+    @staticmethod
+    def _match_glob_kwargs(map_kwargs: dict | None, var: str) -> dict:
+        """Resolve variable-specific plotting options, supporting exact and glob keys.
+
+        Keys under a stream section may be either:
+          - an exact channel name, e.g. "tp_imerg_0"
+          - a glob pattern containing one of ``* ? [ ]``, e.g. "tp_*"
+
+        All matching glob patterns are merged first (in config order), then the
+        exact channel key is merged on top, so an exact key overrides glob
+        values on key conflicts while non-conflicting keys from both are kept.
+        """
+        if map_kwargs is None:
+            return {}
+
+        resolved: dict = {}
+
+        # merge glob/pattern keys
+        for key, value in map_kwargs.items():
+            if not isinstance(value, oc.DictConfig | dict):
+                continue
+            k = str(key)
+            if any(ch in k for ch in "*?[]") and fnmatch.fnmatch(var, k):
+                resolved |= dict(value)
+
+        # override with exact key if present
+        exact = map_kwargs.get(var)
+        if isinstance(exact, oc.DictConfig | dict):
+            resolved |= dict(exact)
+
+        return resolved
 
     # map_kwargs parsing
     @staticmethod
