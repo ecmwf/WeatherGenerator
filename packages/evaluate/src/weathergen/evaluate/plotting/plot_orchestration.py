@@ -29,7 +29,9 @@ from weathergen.evaluate.plotting.line_plots import LinePlots
 from weathergen.evaluate.plotting.plot_orchestration_utils import (
     _compute_ranges,
     _compute_scores,
+    get_per_sample_source_n_points,
     group_by_init_hour,
+    group_by_source_n_points,
 )
 from weathergen.evaluate.plotting.plot_utils import (
     bar_plot_metric_region,
@@ -324,6 +326,558 @@ def _plot_timeseries_parallel(
     dispatch_parallel(calls, n_workers=n_workers, backend="loky", desc=f"Timeseries plots {stream}")
 
     _logger.info(f"RUN {run_id} - {stream}: Score timeseries plots saved to {output_dir}.")
+
+
+# ---------------------------------------------------------------------------
+# Score vs source n_points
+# ---------------------------------------------------------------------------
+
+
+def run_score_vs_n_points_pipeline(
+    reader: Reader,
+    stream: str,
+    regions: list[str],
+    metrics_dict: dict,
+    output_data: "ReaderOutput | None" = None,
+    global_plotting_options: dict | None = None,
+    n_bins: int = 30,
+    source_stream_filter: str | list[str] | None = None,
+) -> None:
+    """Plot score vs source observation count for all regions and fsteps.
+
+    Groups samples by total source n_points (binned into quantiles), computes
+    the requested metrics per bin, and produces one plot per (metric, region,
+    channel) with one line per lead_time.
+
+    Parameters
+    ----------
+    reader : Reader
+        Reader object containing all info about a particular run.
+    stream : str
+        Stream name to compute/plot scores for.
+    regions : list[str]
+        List of regions to plot.
+    metrics_dict : dict
+        Dictionary mapping region names to metric dicts.
+    output_data : ReaderOutput | None
+        Pre-loaded data.
+    global_plotting_options : dict | None
+        Global plotting options.
+    n_bins : int
+        Number of quantile bins.
+    source_stream_filter : str | list[str] | None
+        If set, only sum these source streams for the grouping.
+    """
+    da_tars = output_data.target
+    da_preds = output_data.prediction
+    if not da_tars or not da_preds:
+        return
+
+    # Group samples by total source n_points
+    n_points_to_samples, streams_label = group_by_source_n_points(
+        output_data, stream_filter=source_stream_filter, n_bins=n_bins
+    )
+    if not n_points_to_samples:
+        _logger.warning(
+            f"RUN {reader.run_id} - {stream}: No source_n_points coords found. "
+            "Skipping score vs n_points plot."
+        )
+        return
+
+    bin_midpoints = sorted(n_points_to_samples.keys())
+    fsteps = sorted(da_preds.keys())
+
+    n_workers = get_num_workers(
+        check_process_headroom=True,
+        max_workers=reader.eval_cfg.get("max_workers", None),
+    )
+
+    # --- Compute scores grouped by n_points bin ---
+    score_tasks: list[dict] = []
+    for fstep in fsteps:
+        preds_fs = da_preds[fstep]
+        tars_fs = da_tars[fstep]
+
+        # Assign n_points_bin coordinate from the grouping
+        sample_vals = preds_fs.sample.values
+        bin_values = np.full(len(sample_vals), -1, dtype=np.int64)
+        for midpoint, sample_indices in n_points_to_samples.items():
+            mask = np.isin(sample_vals, sample_indices)
+            bin_values[mask] = midpoint
+
+        n_points_bin = xr.DataArray(
+            bin_values, dims=("sample",), coords={"sample": sample_vals}
+        )
+        preds_with_bin = preds_fs.assign_coords(n_points_bin=n_points_bin)
+        tars_with_bin = tars_fs.assign_coords(n_points_bin=n_points_bin)
+
+        for region in regions:
+            region_metrics = metrics_dict.get(region)
+            if not region_metrics:
+                continue
+            metric_names = list(region_metrics.keys())
+            metric_params = list(region_metrics.values())
+            score_tasks.append(
+                dict(
+                    fstep=fstep,
+                    region=region,
+                    metric_names=metric_names,
+                    metric_params=metric_params,
+                    preds_with_bin=preds_with_bin,
+                    tars_with_bin=tars_with_bin,
+                    bin_midpoints=bin_midpoints,
+                )
+            )
+
+    _logger.info(
+        f"RUN {reader.run_id} - {stream}: Computing score vs n_points for "
+        f"{len(score_tasks)} (region, fstep) tasks with up to {n_workers} worker(s)."
+    )
+
+    calls = [delayed(_compute_n_points_scores_for_fstep)(**t) for t in score_tasks]
+    raw_results = dispatch_parallel(
+        calls, n_workers=n_workers, backend="loky", desc=f"Score vs n_points {stream}"
+    )
+
+    # Accumulate results into scores_by_bin[metric][region][fstep]
+    scores_by_bin: dict[str, dict[str, dict[int, xr.DataArray]]] = {}
+    for fstep, region, metric_scores in raw_results:
+        for metric_name, score in metric_scores.items():
+            scores_by_bin.setdefault(metric_name, {}).setdefault(region, {})[fstep] = score
+
+    # --- Plot ---
+    _plot_score_vs_n_points(
+        reader,
+        stream,
+        scores_by_bin,
+        bin_midpoints,
+        fsteps,
+        da_tars,
+        global_plotting_options,
+        streams_label,
+        n_workers,
+    )
+
+    # --- Scatter plot: per-sample score vs n_points, one figure per fstep ---
+    total_pts, _ = get_per_sample_source_n_points(
+        output_data, stream_filter=source_stream_filter
+    )
+    if total_pts.size > 0 and (total_pts > 0).any():
+        _plot_scatter_score_vs_n_points(
+            reader,
+            stream,
+            regions,
+            metrics_dict,
+            da_preds,
+            da_tars,
+            total_pts,
+            global_plotting_options,
+            n_workers,
+        )
+
+
+def _compute_n_points_scores_for_fstep(
+    fstep: int,
+    region: str,
+    metric_names: list[str],
+    metric_params: list,
+    preds_with_bin: xr.DataArray,
+    tars_with_bin: xr.DataArray,
+    bin_midpoints: list[int],
+) -> tuple[int, str, dict[str, xr.DataArray]]:
+    """Compute grouped scores for one (region, fstep) pair (parallelisable worker)."""
+    group_by_coord = "n_points_bin" if len(bin_midpoints) > 1 else None
+    agg_dims = ["sample", "ipoint"]
+
+    metric_scores: dict[str, xr.DataArray] = {}
+    for metric_name, parameters in zip(metric_names, metric_params, strict=False):
+        score = get_score(
+            VerifiedData(preds_with_bin, tars_with_bin, None, None, None),
+            metric_name,
+            agg_dims=agg_dims,
+            group_by_coord=group_by_coord,
+            compute=True,
+            parameters=parameters,
+        )
+        if group_by_coord is None:
+            score = score.expand_dims({"n_points_bin": [int(bin_midpoints[0])]})
+        metric_scores[metric_name] = score
+
+    return fstep, region, metric_scores
+
+
+def _plot_score_vs_n_points(
+    reader: Reader,
+    stream: str,
+    scores_by_bin: dict[str, dict[str, dict[int, xr.DataArray]]],
+    bin_midpoints: list[int],
+    fsteps: list[int],
+    da_tars: dict[int, xr.DataArray],
+    global_plotting_options: dict | None,
+    streams_label: str,
+    n_workers: int | None = None,
+) -> None:
+    """Dispatch score-vs-n_points plots in parallel."""
+    output_dir = reader.runplot_dir / "plots" / stream / "score_vs_n_points"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    run_id = reader.run_id
+    plot_cfg = global_plotting_options or {}
+    image_format = plot_cfg.get("image_format", "png")
+    dpi_val = plot_cfg.get("dpi_val", 150)
+
+    # Build fstep → lead_time label mapping
+    lead_time_by_fstep: dict[int, str] = {}
+    for fstep in fsteps:
+        da = da_tars[fstep]
+        if "lead_time" in da.coords:
+            lt = da.coords["lead_time"].values
+            hours = int(lt.astype("timedelta64[h]").astype(int))
+            lead_time_by_fstep[fstep] = f"lead {hours}h"
+        else:
+            lead_time_by_fstep[fstep] = f"fstep {fstep}"
+
+    # Build plot tasks
+    plot_tasks: list[dict] = []
+    for metric_name, region_dict in scores_by_bin.items():
+        for region, fstep_dict in region_dict.items():
+            sample_score = next(iter(fstep_dict.values()))
+            channels = (
+                list(sample_score.coords["channel"].values)
+                if "channel" in sample_score.dims
+                else [None]
+            )
+            for channel in channels:
+                plot_tasks.append(
+                    dict(
+                        output_dir=str(output_dir),
+                        run_id=run_id,
+                        metric_name=metric_name,
+                        region=region,
+                        channel=channel,
+                        fstep_dict=fstep_dict,
+                        lead_time_by_fstep=lead_time_by_fstep,
+                        bin_midpoints=bin_midpoints,
+                        streams_label=streams_label,
+                        image_format=image_format,
+                        dpi_val=dpi_val,
+                    )
+                )
+
+    _logger.info(
+        f"RUN {run_id} - {stream}: Plotting {len(plot_tasks)} score-vs-n_points figures "
+        f"with up to {n_workers} worker(s)."
+    )
+
+    calls = [delayed(_plot_single_n_points_figure)(**t) for t in plot_tasks]
+    dispatch_parallel(
+        calls, n_workers=n_workers, backend="loky", desc=f"Score vs n_points plots {stream}"
+    )
+
+    _logger.info(f"RUN {run_id} - {stream}: Score vs n_points plots saved to {output_dir}.")
+
+
+def _plot_single_n_points_figure(
+    output_dir: str,
+    run_id: str,
+    metric_name: str,
+    region: str,
+    channel: str | None,
+    fstep_dict: dict[int, xr.DataArray],
+    lead_time_by_fstep: dict[int, str],
+    bin_midpoints: list[int],
+    streams_label: str,
+    image_format: str,
+    dpi_val: int,
+) -> None:
+    """Plot a single score-vs-n_points figure (one line per lead_time)."""
+    matplotlib.use("Agg")
+
+    plt.figure(figsize=(10, 6), dpi=dpi_val)
+    sorted_fsteps = sorted(fstep_dict.keys())
+    n_lines = len(sorted_fsteps)
+    cmap = plt.cm.get_cmap("tab20" if n_lines > 10 else "tab10", n_lines)
+
+    for idx, fstep in enumerate(sorted_fsteps):
+        score = fstep_dict[fstep]
+        score_vals = score.sel(channel=channel) if channel is not None else score
+        bins = score_vals.coords["n_points_bin"].values
+        values = score_vals.values.flatten()
+        # Sort by bin value for clean line plot
+        order = np.argsort(bins)
+        plt.plot(
+            bins[order] / 1000,
+            values[order],
+            marker="o",
+            linewidth=2,
+            color=cmap(idx),
+            label=lead_time_by_fstep[fstep],
+        )
+
+    ch_label = channel if channel is not None else "all"
+    title = (
+        f"{metric_name.upper()} vs source obs count | "
+        f"{ch_label} | {region} | {run_id}"
+    )
+    plt.title(title)
+    plt.xlabel("Total source observations (×1000)")
+    plt.ylabel(metric_name.upper())
+    plt.grid(True, alpha=0.3)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.0)
+    plt.tight_layout()
+
+    out_dir = Path(output_dir)
+    plot_path = out_dir / f"{metric_name}_{ch_label}_{region}_vs_source_n_points.{image_format}"
+    plt.savefig(plot_path, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_scatter_score_vs_n_points(
+    reader: Reader,
+    stream: str,
+    regions: list[str],
+    metrics_dict: dict,
+    da_preds: dict[int, xr.DataArray],
+    da_tars: dict[int, xr.DataArray],
+    total_pts: "NDArray",
+    global_plotting_options: dict | None,
+    n_workers: int | None = None,
+) -> None:
+    """Produce scatter plots: one figure per (metric, region, channel, fstep).
+
+    Each point is a sample; x = total source n_points, y = per-sample score.
+    """
+    from weathergen.evaluate.utils.regions import RegionBoundingBox
+
+    output_dir_score = reader.runplot_dir / "plots" / stream / "score_vs_n_points_scatter"
+    output_dir_skill = reader.runplot_dir / "plots" / stream / "skill_vs_n_points_scatter"
+    output_dir_score.mkdir(parents=True, exist_ok=True)
+    output_dir_skill.mkdir(parents=True, exist_ok=True)
+
+    plot_cfg = global_plotting_options or {}
+    image_format = plot_cfg.get("image_format", "png")
+    dpi_val = plot_cfg.get("dpi_val", 150)
+
+    fsteps = sorted(da_preds.keys())
+
+    # Build fstep → lead_time label mapping
+    lead_time_by_fstep: dict[int, str] = {}
+    for fstep in fsteps:
+        da = da_tars[fstep]
+        if "lead_time" in da.coords:
+            lt = da.coords["lead_time"].values
+            hours = int(lt.astype("timedelta64[h]").astype(int))
+            lead_time_by_fstep[fstep] = f"lead {hours}h"
+        else:
+            lead_time_by_fstep[fstep] = f"fstep {fstep}"
+
+    # Build scatter tasks
+    scatter_tasks: list[dict] = []
+    for fstep in fsteps:
+        preds_fs = da_preds[fstep]
+        tars_fs = da_tars[fstep]
+        for region in regions:
+            region_metrics = metrics_dict.get(region)
+            if not region_metrics:
+                continue
+            bbox = RegionBoundingBox.from_region_name(region)
+            preds_r = bbox.apply_mask(preds_fs)
+            tars_r = bbox.apply_mask(tars_fs)
+
+            for metric_name, parameters in region_metrics.items():
+                # Compute per-sample score (aggregate over ipoint only)
+                score = get_score(
+                    VerifiedData(preds_r, tars_r, None, None, None),
+                    metric_name,
+                    agg_dims=["ipoint"],
+                    compute=True,
+                    parameters=parameters,
+                )
+                # score has dims: (sample, channel) or (sample,)
+                channels = (
+                    list(score.coords["channel"].values)
+                    if "channel" in score.dims
+                    else [None]
+                )
+                for channel in channels:
+                    scatter_tasks.append(
+                        dict(
+                            output_dir_score=str(output_dir_score),
+                            output_dir_skill=str(output_dir_skill),
+                            run_id=reader.run_id,
+                            metric_name=metric_name,
+                            region=region,
+                            channel=channel,
+                            fstep=fstep,
+                            lead_time_label=lead_time_by_fstep[fstep],
+                            score=score,
+                            total_pts=total_pts,
+                            image_format=image_format,
+                            dpi_val=dpi_val,
+                        )
+                    )
+
+    _logger.info(
+        f"RUN {reader.run_id} - {stream}: Plotting {len(scatter_tasks)} "
+        f"score-vs-n_points scatter figures with up to {n_workers} worker(s)."
+    )
+
+    calls = [delayed(_plot_single_scatter_figure)(**t) for t in scatter_tasks]
+    dispatch_parallel(
+        calls,
+        n_workers=n_workers,
+        backend="loky",
+        desc=f"Scatter score vs n_points {stream}",
+    )
+
+    _logger.info(
+        f"RUN {reader.run_id} - {stream}: Scatter plots saved to {output_dir_score} "
+        f"and {output_dir_skill}."
+    )
+
+
+def _plot_single_scatter_figure(
+    output_dir_score: str,
+    output_dir_skill: str,
+    run_id: str,
+    metric_name: str,
+    region: str,
+    channel: str | None,
+    fstep: int,
+    lead_time_label: str,
+    score: xr.DataArray,
+    total_pts: "NDArray",
+    image_format: str,
+    dpi_val: int,
+) -> None:
+    """Plot a single scatter figure: one point per sample."""
+    from scipy import stats
+
+    matplotlib.use("Agg")
+
+    score_vals = score.sel(channel=channel).values if channel is not None else score.values
+    score_vals = score_vals.flatten()
+
+    # x-axis: total source obs per sample (in thousands)
+    x = total_pts / 1000.0
+
+    ch_label = channel if channel is not None else "all"
+    out_dir_score = Path(output_dir_score)
+    out_dir_skill = Path(output_dir_skill)
+
+    # Compute skill: (1 - score) / score
+    skill_vals = abs(1.0 - score_vals) / abs(score_vals)
+
+    zoom_mask = x > 3200
+
+    # === Score plots (raw metric) ===
+    # Full-range
+    _scatter_with_regression(
+        x, score_vals,
+        title=(
+            f"{metric_name.upper()} per sample | "
+            f"{ch_label} | {region} | {lead_time_label} | {run_id}"
+        ),
+        ylabel=metric_name.upper(),
+        save_path=(
+            out_dir_score
+            / f"{metric_name}_{ch_label}_{region}_fstep{fstep:02d}_scatter.{image_format}"
+        ),
+        dpi_val=dpi_val,
+    )
+
+    # Zoomed (x > 3200)
+    if zoom_mask.sum() > 2:
+        _scatter_with_regression(
+            x[zoom_mask], score_vals[zoom_mask],
+            title=(
+                f"{metric_name.upper()} per sample (zoomed) | "
+                f"{ch_label} | {region} | {lead_time_label} | {run_id}"
+            ),
+            ylabel=metric_name.upper(),
+            save_path=(
+                out_dir_score
+                / f"{metric_name}_{ch_label}_{region}_fstep{fstep:02d}_scatter_zoom.{image_format}"
+            ),
+            dpi_val=dpi_val,
+        )
+
+    # === Skill plots: (1 - score) / score ===
+    # Full-range
+    _scatter_with_regression(
+        x, skill_vals,
+        title=(
+            f"Skill |1-{metric_name.upper()}| / |{metric_name.upper()}| per sample | "
+            f"{ch_label} | {region} | {lead_time_label} | {run_id}"
+        ),
+        ylabel=f"|1 - {metric_name.upper()}| / |{metric_name.upper()}|",
+        save_path=(
+            out_dir_skill
+            / f"{metric_name}_{ch_label}_{region}_fstep{fstep:02d}_scatter.{image_format}"
+        ),
+        dpi_val=dpi_val,
+    )
+
+    # Zoomed (x > 3200)
+    if zoom_mask.sum() > 2:
+        _scatter_with_regression(
+            x[zoom_mask], skill_vals[zoom_mask],
+            title=(
+                f"Skill |1-{metric_name.upper()}| / |{metric_name.upper()}| per sample (zoomed) | "
+                f"{ch_label} | {region} | {lead_time_label} | {run_id}"
+            ),
+            ylabel=f"|1 - {metric_name.upper()}| / |{metric_name.upper()}|",
+            save_path=(
+                out_dir_skill
+                / f"{metric_name}_{ch_label}_{region}_fstep{fstep:02d}_scatter_zoom.{image_format}"
+            ),
+            dpi_val=dpi_val,
+        )
+
+
+def _scatter_with_regression(
+    x: "NDArray",
+    y: "NDArray",
+    title: str,
+    ylabel: str,
+    save_path: Path,
+    dpi_val: int = 150,
+) -> None:
+    """Scatter plot with linear regression line and Spearman correlation annotation."""
+    from scipy import stats
+
+    fig, ax = plt.subplots(figsize=(8, 6), dpi=dpi_val)
+    ax.scatter(x, y, alpha=0.7, edgecolors="k", linewidths=0.3, s=50)
+
+    # Linear regression
+    valid = np.isfinite(x) & np.isfinite(y)
+    if valid.sum() > 2:
+        slope, intercept, r_value, p_value, _ = stats.linregress(x[valid], y[valid])
+        x_fit = np.linspace(x[valid].min(), x[valid].max(), 100)
+        ax.plot(x_fit, slope * x_fit + intercept, "r-", linewidth=2, alpha=0.8, label="Linear fit")
+
+        # Spearman rank correlation
+        spearman_r, spearman_p = stats.spearmanr(x[valid], y[valid])
+
+        # Annotate
+        textstr = (
+            f"Pearson r = {r_value:.3f} (p = {p_value:.2e})\n"
+            f"Spearman ρ = {spearman_r:.3f} (p = {spearman_p:.2e})"
+        )
+        ax.text(
+            0.02, 0.98, textstr, transform=ax.transAxes,
+            fontsize=9, verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        )
+        ax.legend(loc="lower right")
+
+    ax.set_title(title)
+    ax.set_xlabel("Total source observations (×1000)")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
 
 
 # ---------------------------------------------------------------------------

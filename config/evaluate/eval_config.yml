@@ -47,6 +47,8 @@ evaluation:
   plot_score_maps: false #plot scores on a 2D maps. it slows down score computation
   plot_score_animations: false #plot animations of score maps across forecast steps. it slows down score computation
   plot_score_timeseries: true #plot timeseries of scores across forecast steps. 
+  plot_score_vs_n_points: true   # plot scores as a function of the number of points used for the score calculation. 
+  # plot_score_vs_n_points_bins: 30  # optional, default 10
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false

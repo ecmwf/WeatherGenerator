@@ -37,6 +37,7 @@ from weathergen.evaluate.plotting.plot_orchestration import (
     plot_timeseries_summary,
     run_score_map_pipeline,
     run_score_timeseries_pipeline,
+    run_score_vs_n_points_pipeline,
 )
 from weathergen.evaluate.plotting.plot_utils import collect_channels
 from weathergen.evaluate.scores.score_orchestration import (
@@ -251,13 +252,16 @@ def _process_stream(
     plot_score_timeseries = (
         plot_score_options.get("plot_score_timeseries", False) and type_ == "zarr"
     )
+    plot_score_vs_n_points = (
+        plot_score_options.get("plot_score_vs_n_points", False) and type_ == "zarr"
+    )
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
     scores_dict = stream_loaded_scores
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif plot_score_maps or plot_score_timeseries:
+    elif plot_score_maps or plot_score_timeseries or plot_score_vs_n_points:
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
@@ -296,6 +300,18 @@ def _process_stream(
     else:
         ts_scores = {}
 
+    if plot_score_vs_n_points:
+        n_bins = plot_score_options.get("plot_score_vs_n_points_bins", 30)
+        run_score_vs_n_points_pipeline(
+            reader,
+            stream,
+            regions_to_compute,
+            metrics_to_compute,
+            output_data=output_data,
+            global_plotting_options=global_plotting_opts,
+            n_bins=n_bins,
+        )
+
     return run_id, stream, scores_dict, ts_scores
 
 
@@ -321,6 +337,8 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
         "plot_score_maps": cfg.evaluation.get("plot_score_maps", False),
         "plot_score_animations": cfg.evaluation.get("plot_score_animations", False),
         "plot_score_timeseries": cfg.evaluation.get("plot_score_timeseries", False),
+        "plot_score_vs_n_points": cfg.evaluation.get("plot_score_vs_n_points", False),
+        "plot_score_vs_n_points_bins": cfg.evaluation.get("plot_score_vs_n_points_bins", 30),
     }
 
     global_plotting_opts = cfg.get("global_plotting_options", {})

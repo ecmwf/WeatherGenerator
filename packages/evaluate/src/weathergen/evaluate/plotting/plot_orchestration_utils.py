@@ -55,6 +55,161 @@ def group_by_init_hour(
     return grouped
 
 
+def group_by_source_n_points(
+    output_data: ReaderOutput,
+    stream_filter: str | list[str] | None = None,
+    n_bins: int = 30,
+) -> tuple[dict[int, NDArray], str]:
+    """Group sample indices by binned total source observation count.
+
+    Parameters
+    ----------
+    output_data : ReaderOutput
+        Loaded data with ``source_n_points_<stream>`` coordinates.
+    stream_filter : str | list[str] | None
+        If given, sum only these source streams. If None, sum all
+        available ``source_n_points_*`` coordinates.
+    n_bins : int
+        Number of quantile bins to create.
+
+    Returns
+    -------
+    groups : dict[int, np.ndarray]
+        Mapping from bin midpoint (total n_points) to sample indices.
+    label : str
+        Human-readable label describing which streams were summed.
+    """
+    da = next(iter(output_data.prediction.values()))
+
+    # Collect source_n_points coords
+    source_coords = {
+        c: da.coords[c].values
+        for c in da.coords
+        if c.startswith("source_n_points_")
+    }
+    if not source_coords:
+        return {}, ""
+
+    # Filter to requested streams
+    if stream_filter is not None:
+        if isinstance(stream_filter, str):
+            stream_filter = [stream_filter]
+        source_coords = {
+            c: v
+            for c, v in source_coords.items()
+            if any(c == f"source_n_points_{s}" for s in stream_filter)
+        }
+
+    if not source_coords:
+        return {}, ""
+
+    # Sum across source streams (total obs feeding each sample)
+    # Exclude -1 sentinels from sum
+    n_samples = len(da.sample)
+    total_pts = np.zeros(n_samples, dtype=np.int64)
+    for arr in source_coords.values():
+        valid = arr > 0
+        total_pts[valid] += arr[valid]
+
+    # Only bin samples with valid (>0) total points
+    valid_mask = total_pts > 0
+    if not valid_mask.any():
+        return {}, ""
+
+    valid_pts = total_pts[valid_mask]
+
+    _logger.info(
+        f"source_n_points binning: {n_samples} samples, {valid_mask.sum()} valid. "
+        f"total_pts stats: min={valid_pts.min()}, max={valid_pts.max()}, "
+        f"mean={valid_pts.mean():.0f}, unique_values={len(np.unique(valid_pts))}"
+    )
+
+    # Bin into quantiles
+    bin_edges = np.quantile(valid_pts, np.linspace(0, 1, n_bins + 1))
+    bin_edges = np.unique(bin_edges)  # remove duplicates
+
+    _logger.info(
+        f"source_n_points binning: requested {n_bins} bins, "
+        f"got {len(bin_edges) - 1} after dedup (edges: {bin_edges[:5]}...{bin_edges[-3:]})"
+    )
+
+    sample_vals = da.sample.values
+    groups: dict[int, NDArray] = {}
+    for i in range(len(bin_edges) - 1):
+        lo, hi = bin_edges[i], bin_edges[i + 1]
+        if i < len(bin_edges) - 2:
+            mask = (total_pts >= lo) & (total_pts < hi)
+        else:
+            mask = (total_pts >= lo) & (total_pts <= hi)
+        if mask.any():
+            midpoint = int((lo + hi) / 2)
+            groups[midpoint] = sample_vals[mask]
+
+    # Build label from stream names
+    stream_names = [c.replace("source_n_points_", "") for c in source_coords]
+    label = "+".join(sorted(stream_names))
+
+    _logger.info(
+        f"Grouped {valid_mask.sum()} valid samples into {len(groups)} n_points bins "
+        f"(streams: {label})."
+    )
+    return groups, label
+
+
+def get_per_sample_source_n_points(
+    output_data: ReaderOutput,
+    stream_filter: str | list[str] | None = None,
+) -> tuple[NDArray, str]:
+    """Get total source n_points per sample (no binning).
+
+    Parameters
+    ----------
+    output_data : ReaderOutput
+        Loaded data with ``source_n_points_<stream>`` coordinates.
+    stream_filter : str | list[str] | None
+        If given, sum only these source streams. If None, sum all.
+
+    Returns
+    -------
+    total_pts : NDArray
+        Array of shape (n_samples,) with total source obs per sample.
+        Entries are 0 for samples without valid source data.
+    label : str
+        Human-readable label describing which streams were summed.
+    """
+    da = next(iter(output_data.prediction.values()))
+
+    source_coords = {
+        c: da.coords[c].values
+        for c in da.coords
+        if c.startswith("source_n_points_")
+    }
+    if not source_coords:
+        return np.array([], dtype=np.int64), ""
+
+    if stream_filter is not None:
+        if isinstance(stream_filter, str):
+            stream_filter = [stream_filter]
+        source_coords = {
+            c: v
+            for c, v in source_coords.items()
+            if any(c == f"source_n_points_{s}" for s in stream_filter)
+        }
+
+    if not source_coords:
+        return np.array([], dtype=np.int64), ""
+
+    n_samples = len(da.sample)
+    total_pts = np.zeros(n_samples, dtype=np.int64)
+    for arr in source_coords.values():
+        valid = arr > 0
+        total_pts[valid] += arr[valid]
+
+    stream_names = [c.replace("source_n_points_", "") for c in source_coords]
+    label = "+".join(sorted(stream_names))
+    return total_pts, label
+
+
 def _compute_scores_for_fstep(
     region: str,
     fstep: int,
