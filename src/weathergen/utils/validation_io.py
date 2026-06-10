@@ -51,7 +51,7 @@ def write_output(
         targets_coords_all += [[]]
         targets_times_all += [[]]
         targets_lens += [[]]
-        for sname in stream_infos.keys():
+        for sname in cf.streams.keys():
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
@@ -120,8 +120,8 @@ def write_output(
     ]
 
     # output stream names to be written, use specified ones or all if nothing specified
-    stream_names = list(stream_infos.keys())
-    stream_infos = list(stream_infos.values())
+    stream_names = list(cf.streams.keys())
+    stream_infos = list(cf.streams.values())
     if val_cfg.get("output").get("streams") is not None:
         output_stream_names = val_cfg.output.streams
     else:
