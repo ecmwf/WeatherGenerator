@@ -594,7 +594,7 @@ class Plotter:
         ----------
         map_kwargs : dict or None
             Raw keyword arguments from the caller. Known keys (``marker_size``,
-            ``scale_marker_size``, ``marker``, ``vmin``, ``vmax``, ``colormap``,
+            ``scale_marker_size``, ``marker``, ``vmin``, ``vmax``, ``colormap``,``colors``,
             ``use_datashader``, ``levels``, and HEALPix-related keys) are extracted;
             remaining keys are collected under ``"extra"``.
         stream : str or None
@@ -610,6 +610,7 @@ class Plotter:
                 - marker (str)
                 - vmin, vmax (float or None)
                 - cmap (matplotlib.colors.Colormap)
+                - colors (list or None)
                 - use_datashader (bool)
                 - norm (matplotlib.colors.Normalize or BoundaryNorm)
                 - add_healpix_grid (bool) and related healpix_* keys
@@ -626,6 +627,7 @@ class Plotter:
             "vmin": kw.pop("vmin", None),
             "vmax": kw.pop("vmax", None),
             "cmap": plt.get_cmap(kw.pop("colormap", "coolwarm")),
+            "colors": kw.pop("colors", None),
             "use_datashader": kw.pop("use_datashader", False),
             "levels": kw.pop("levels", None),
             # HEALPix grid
@@ -908,6 +910,9 @@ class Plotter:
                     opts["vmin"] = float(p_lo)
                 if opts["vmax"] is None:
                     opts["vmax"] = float(p_hi)
+
+        if isinstance(opts["colors"], oc.listconfig.ListConfig):
+            opts["cmap"] = mpl.colors.ListedColormap(list(opts["colors"]))
 
         if isinstance(opts["levels"], oc.listconfig.ListConfig):
             opts["norm"] = mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
