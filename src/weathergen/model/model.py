@@ -697,10 +697,18 @@ class Model(torch.nn.Module):
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
+                prev_tokens = tokens
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
-
+            prev_tokens = tokens
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            
+            # per-token cosine similarity between current and previous patch tokens
+            cur = tokens[:, self.num_aux_tokens:].reshape(-1, tokens.shape[-1])
+            prv = prev_tokens[:, self.num_aux_tokens:].reshape(-1, tokens.shape[-1])
+            cos_sim_to_prev = torch.nn.functional.cosine_similarity(cur, prv.detach(), dim=-1)
+            output.add_latent_prediction(step, "cos_sim_to_prev", cos_sim_to_prev)
+
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
