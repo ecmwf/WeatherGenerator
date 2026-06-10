@@ -31,7 +31,9 @@ class LossLatentCosineMatching(LossModuleBase):
     output.latent[step]["cos_sim_to_prev"] — no target calculator needed.
     """
 
-    def __init__(self, cf: DictConfig, mode_cfg: DictConfig, stage: Stage, device: str, **loss_fcts):
+    def __init__(
+        self, cf: DictConfig, mode_cfg: DictConfig, stage: Stage, device: str, **loss_fcts
+    ):
         LossModuleBase.__init__(self)
         self.cf = cf
         self.stage = stage
@@ -46,17 +48,17 @@ class LossLatentCosineMatching(LossModuleBase):
         acc_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
         count = 0
 
-        
         for step_pred in preds.latent:
             cos_sim = step_pred.get("cos_sim_to_prev", None)
             if cos_sim is None:
                 continue
             step_loss = (
-                F.relu(cos_sim - self.cosine_high) ** 2
-                + F.relu(self.cosine_low - cos_sim) ** 2
+                F.relu(cos_sim - self.cosine_high) ** 2 + F.relu(self.cosine_low - cos_sim) ** 2
             ).mean()
             acc_loss = acc_loss + step_loss
             count += 1
 
         loss = acc_loss / count if count > 0 else acc_loss
-        return LossValues(loss=loss, losses_all={"cosine_band": loss.detach().item()}, stddev_all={})
+        return LossValues(
+            loss=loss, losses_all={"cosine_band": loss.detach().item()}, stddev_all={}
+        )

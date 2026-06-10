@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .loss_module_cosine_matching import LossLatentCosineMatching
 from .loss_module_physical import LossPhysical
 from .loss_module_ssl import LossLatentSSLStudentTeacher
-from .loss_module_cosine_matching import LossLatentCosineMatching
 
 __all__ = [LossPhysical, LossLatentSSLStudentTeacher, LossLatentCosineMatching]

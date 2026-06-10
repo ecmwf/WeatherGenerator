@@ -702,10 +702,10 @@ class Model(torch.nn.Module):
                 continue
             prev_tokens = tokens
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
-            
+
             # per-token cosine similarity between current and previous patch tokens
-            cur = tokens[:, self.num_aux_tokens:].reshape(-1, tokens.shape[-1])
-            prv = prev_tokens[:, self.num_aux_tokens:].reshape(-1, tokens.shape[-1])
+            cur = tokens[:, self.num_aux_tokens :].reshape(-1, tokens.shape[-1])
+            prv = prev_tokens[:, self.num_aux_tokens :].reshape(-1, tokens.shape[-1])
             cos_sim_to_prev = torch.nn.functional.cosine_similarity(cur, prv.detach(), dim=-1)
             output.add_latent_prediction(step, "cos_sim_to_prev", cos_sim_to_prev)
 
