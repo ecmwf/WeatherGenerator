@@ -51,19 +51,16 @@ def write_output(
         targets_coords_all += [[]]
         targets_times_all += [[]]
         targets_lens += [[]]
-        for stream_info in cf.streams:
-            sname = stream_info["name"]
-
+        for sname in stream_infos.keys():
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
             if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
-                preds = model_output.get_physical_prediction(t_idx, sname)
-                preds_shape = preds[0].shape
+                targets = target_aux_out.physical[t_idx][sname]["target"]
                 # for-loop to make sure we have a consistent number of samples
-                preds_s = [np.zeros((preds_shape[0], 0, preds_shape[2])) for _ in preds]
-                targets_s = [np.zeros((0, preds_shape[2])) for _ in preds]
-                t_coords_s = [np.zeros((0, 2)) for _ in preds]
-                t_times_s = [np.array([]).astype("datetime64[ns]") for _ in preds]
+                preds_s = [np.zeros((1, 0, t.shape[1])) for t in targets]
+                targets_s = [np.zeros((0, t.shape[1])) for t in targets]
+                t_coords_s = [np.zeros((0, 2)) for t in targets]
+                t_times_s = [np.array([]).astype("datetime64[ns]") for t in targets]
 
             else:
                 preds = model_output.get_physical_prediction(t_idx, sname)
@@ -122,10 +119,9 @@ def write_output(
         for sample in batch.get_source_samples().get_samples()
     ]
 
-    # more prep work
-
     # output stream names to be written, use specified ones or all if nothing specified
-    stream_names = [stream.name for stream in cf.streams]
+    stream_names = list(stream_infos.keys())
+    stream_infos = list(stream_infos.values())
     if val_cfg.get("output").get("streams") is not None:
         output_stream_names = val_cfg.output.streams
     else:
@@ -134,8 +130,8 @@ def write_output(
     output_streams = {name: stream_names.index(name) for name in output_stream_names}
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
-    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in cf.streams]
-    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in cf.streams]
+    target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
+    source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in stream_infos]
 
     # Filter channels per stream from output.filter_output_channels.
     # Supported config shape:
@@ -156,7 +152,7 @@ def write_output(
                 continue
             output_filter_per_stream[str(key)] = list(value)
 
-    for stream_idx, stream in enumerate(cf.streams):
+    for stream_idx, stream in enumerate(stream_infos):
         stream_name = str(stream.name)
         write_vars = output_filter_per_stream.get(stream_name)
 
@@ -188,7 +184,7 @@ def write_output(
             targets_all[t_idx][stream_idx] = targets_all[t_idx][stream_idx][:, keep_idxs]
             preds_all[t_idx][stream_idx] = preds_all[t_idx][stream_idx][:, :, keep_idxs]
 
-    geoinfo_channels = [[] for _ in cf.streams]  # TODO obtain channels
+    geoinfo_channels = [[] for _ in stream_infos]  # TODO obtain channels
 
     # calculate global sample indices for this batch by offsetting by sample_start
     sample_start = batch_idx * batch_size

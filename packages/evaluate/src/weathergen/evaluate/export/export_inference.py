@@ -96,14 +96,15 @@ def parse_args(args: list) -> argparse.Namespace:
         dest="output_format",
         type=str,
         choices=["netcdf", "verif", "quaver"],
-        help="Output file format",
+        help="Output file format; netcdf (CF-compliant netcdfs), \
+        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool)",
         required=True,
     )
 
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
+        choices=["N320", "ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
         help="Stream name to retrieve data for",
     )
 
@@ -214,10 +215,10 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--verif-template",
-        default="verif/%S/%V/verif_%S_%V_%M_%D.nc",
+        default="verif/%S/%V/%R_%S_%V_%M_%D.nc",
         help="Template for the output nc filenames, default will be to create output/verif/%S/%V \
-              repertories where %S, %V, %M, %D are replaced by the "
-        "streams, variable, method and date",
+              repertories where %S, %V, %M, %D, %R are replaced by the "
+        "streams, variable, method, date, and run ID",
     )
 
     args, unknown_args = parser.parse_known_args(args)
