@@ -36,7 +36,6 @@ from weathergen.evaluate.io.data.dataarray_builders import (
 )
 from weathergen.evaluate.io.data.dataarray_postprocessing import (
     add_lead_time_coord,
-    regrid,
     select_channels,
 )
 from weathergen.evaluate.io.data.io_workers import (
@@ -261,7 +260,10 @@ def _build_io_state(
     is_zip = zarr_path.endswith(".zip")
 
     # ---- Read coordinates and channel names from zarr (once) ----
-    coords, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
+    regrid_opts = stream_cfg.get("regrid") if is_gridded else None
+    coords, zarr_channels, _ = _read_coords_and_meta(
+        zarr_path, stream, fsteps[0], is_zip, regrid_opts
+    )
     read_channels: list[str] = zarr_channels if zarr_channels else all_channels
     channel_idxs: list[int] | None = None if zarr_channels else list(range(len(all_channels)))
     offset = stream_cfg.get("offset")
@@ -311,6 +313,7 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
+    regrid_opts: dict | None = None,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -328,6 +331,7 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
+        regrid_opts=regrid_opts,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -429,6 +433,7 @@ def _assemble_substep(
             init_times,
             forecast_step_val,
             state.ens_select,
+            regrid_opts=state.regrid_opts,
         )
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
@@ -461,8 +466,6 @@ def _assemble_substep(
         da_pred = add_lead_time_coord(da_pred)
         da_pred = scale_z_channels(da_pred, state.stream)
         da_tar = scale_z_channels(da_tar, state.stream)
-        da_tar = regrid(da_tar, state.regrid_opts)
-        da_pred = regrid(da_pred, state.regrid_opts)
 
     return da_tar, da_pred
 
@@ -545,6 +548,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
+            regrid_opts=state.regrid_opts,
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
@@ -570,7 +574,6 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
                 init_times,
                 fs_val,
                 0,
-                state.regrid_opts,
             )
             del tars_list, preds_list
             fstep_counter = _store_substep(
@@ -618,6 +621,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
+        regrid_opts=state.regrid_opts,
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)

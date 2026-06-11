@@ -91,6 +91,7 @@ def _read_sample(
     is_zip: bool,
     read_coords: bool = False,
     is_gridded: bool = True,
+    regrid_opts: dict | None = None,
 ) -> tuple[list[NDArray], list[NDArray], list[NDArray], dict]:
     """
     Read all forecast steps for one sample via direct zarr array access.
@@ -242,6 +243,7 @@ def _read_coords_and_meta(
     stream: str,
     fstep: int,
     is_zip: bool,
+    regrid_opts: dict | None = None,
 ) -> tuple[NDArray, list[str], NDArray]:
     """
     Read coordinates and channel names from the zarr store (once).
