@@ -21,6 +21,7 @@ from pathlib import Path
 
 from omegaconf import OmegaConf
 
+from weathergen.common.config import get_model_results
 from weathergen.common.paths import _REPO_ROOT
 from weathergen.evaluate.export.export_core import export_model_outputs
 
@@ -95,16 +96,18 @@ def parse_args(args: list) -> argparse.Namespace:
         "--format",
         dest="output_format",
         type=str,
-        choices=["netcdf", "verif", "quaver"],
-        help="Output file format; netcdf (CF-compliant netcdfs), \
-        verif (netcdf compatible with MetNor verif tool), quaver (GRIB files for Quaver tool)",
+        choices=["netcdf", "verif", "quaver", "grib"],
+        help="Output file format; netcdf (CF-compliant netcdfs), "
+        "verif (netcdf compatible with MetNor verif tool), "
+        "quaver (GRIB files for Quaver tool), "
+        "grib (GRIB files for evalml / ICON-CH1 stream)",
         required=True,
     )
 
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["N320", "ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
+        choices=["N320", "ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI", "ICON"],
         help="Stream name to retrieve data for",
     )
 
@@ -221,6 +224,34 @@ def parse_args(args: list) -> argparse.Namespace:
         "streams, variable, method, date, and run ID",
     )
 
+    # ── GRIB-format-specific arguments ────────────────────────────────────────
+    parser.add_argument(
+        "--grib-templates",
+        type=str,
+        default=None,
+        dest="grib_templates",
+        help="[grib format] Path to GRIB templates directory "
+        "(evalml resources/inference/templates/). Required when --format grib.",
+    )
+
+    parser.add_argument(
+        "--grib-variables",
+        type=str,
+        nargs="+",
+        default=None,
+        dest="grib_variables",
+        help="[grib format] Surface variable names to export "
+        "(default: T_2M TD_2M U_10M V_10M TOT_PREC_1H PMSL PS).",
+    )
+
+    parser.add_argument(
+        "--grib-pressure-levels",
+        action="store_true",
+        default=False,
+        dest="grib_pressure_levels",
+        help="[grib format] Also export pressure-level variables (T, QV, U, V, FI).",
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
@@ -263,6 +294,34 @@ def generate_new_expver() -> str:
     return expver
 
 
+def _export_grib(args) -> None:
+    """Route --format grib to the GRIB converter, bypassing the CF-parser pipeline."""
+    from weathergen.evaluate.export.parsers.grib_parser import convert_zarr_to_grib
+
+    if not args.grib_templates:
+        raise ValueError("--grib-templates is required when --format grib")
+    if not args.stream:
+        raise ValueError("--stream is required when --format grib (e.g. --stream ICON)")
+
+    zarr_path = get_model_results(args.run_id, args.epoch, args.rank)
+    samples = flatten_lists(vars(args).copy()).get("samples")
+
+    _logger.info(
+        f"Exporting GRIB: run_id={args.run_id}, zarr={zarr_path}, "
+        f"stream={args.stream}, output={args.output_dir}"
+    )
+
+    convert_zarr_to_grib(
+        zarr_path=zarr_path,
+        output_dir=Path(args.output_dir),
+        templates_dir=Path(args.grib_templates),
+        stream=args.stream,
+        samples=samples,
+        variables=args.grib_variables,
+        include_pressure_levels=args.grib_pressure_levels,
+    )
+
+
 def export_from_args(args: list) -> None:
     # Get run_id zarr data as lists of xarray DataArrays
     """
@@ -272,6 +331,11 @@ def export_from_args(args: list) -> None:
         args : List of command line arguments.
     """
     args = parse_args(args)
+
+    # ── GRIB format: bypass the CF-parser pipeline entirely ───────────────────
+    if args.output_format == "grib":
+        _export_grib(args)
+        return
 
     # Load configuration
     if args.output_format == "verif":
