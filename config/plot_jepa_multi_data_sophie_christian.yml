@@ -1,0 +1,23 @@
+train:
+  plot:
+    ladqrul6:
+      slurm_id: 0
+      description: "atmofs with Oper finetuning"
+    jivvzyg0:
+      slurm_id: 0
+      description: "atmofs with Obs and Oper finetuning"
+    xi0mujc2-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA space masking, no SYNOP post decoder (ERA5 in)"
+    co7xb9p2-finetune-forecast:
+      slurm_id: 0
+      description: "JEPA self flow, no SYNOP post decoder (ERA5 in)"
+    xi0mujc2-finetune-forecast-ft-4:
+      slurm_id: 0
+      description: "JEPA space masking, no SYNOP post decoder (ERA5 in)"
+    j281hzap:
+      slurm_id: 0
+      description: "Seb JEPA space masking, ERA5 forecasting"   
+
+    # forecast only models I am training
+         
