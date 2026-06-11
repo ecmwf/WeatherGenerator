@@ -60,6 +60,8 @@ default_streams:
     #offset: "1h" #optional: specify a timedelta offset to infer init_time when source_interval is missing. Format examples: "1h", "30m", "2h30m".
     regions: ["global"]
     channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+    regrid: True 
+      # target_grid: [1.5, 1.5] #default is [1.5, 1.5], e.g. ["O96"]
     evaluation:
       forecast_step: "all"
       sample: "all"

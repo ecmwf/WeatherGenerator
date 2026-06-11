@@ -133,9 +133,10 @@ def build_gridded_dataarrays(
             if isinstance(regrid_opts, dict)
             else [1.5, 1.5]
         )
-        if isinstance(target_grid, NDArray):
-            target_grid = target_grid.tolist()
+        # earthkit.regrid requires a plain Python list, not numpy array or tuple
+        target_grid = list(target_grid)
 
+        #TODO: improve this. Now it works only for regular lat-lon grids
         out_spec = dict(regrid_opts) if isinstance(regrid_opts, dict) else {}
         out_spec["grid"] = target_grid
         # Only keep keys relevant to the output grid spec
@@ -380,7 +381,7 @@ def get_grid_name(n_ipoints: int) -> str:
 
 def _detect_grid(n_ipoints: int, regrid_opts: dict) -> str:
     """Resolve the original grid name from n_ipoints or explicit config."""
-    original_grid = regrid_opts.get("original_grid")
+    original_grid = regrid_opts.get("original_grid") if isinstance(regrid_opts, dict) else None
     if original_grid is not None:
         return original_grid
     grid = get_grid_name(n_ipoints)
