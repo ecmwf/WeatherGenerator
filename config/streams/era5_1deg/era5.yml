@@ -17,7 +17,7 @@ ERA5 :
   loss_weight : 1.
   location_weight : cosine_latitude
   token_size : 8
-  tokenize_spacetime : True
+  tokenize_spacetime : False
   max_num_targets: -1 
   frequency : 06:00:00
   embed : 
