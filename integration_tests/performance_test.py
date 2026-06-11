@@ -38,8 +38,7 @@ THROUGHPUT_METRIC = "performance.throughput.global.samples_per_sec"
 
 # Measured baselines on one Santis node (4x GH200): 2.46-2.97 global
 # samples/sec across runs; the threshold leaves ~20% margin below the lowest
-# observed value. Revisit when the config or the node type changes (see
-# stage 2 of issue #2092).
+# observed value. Revisit when the config or the node type changes.
 THROUGHPUT_THRESHOLD = 2.0
 
 
