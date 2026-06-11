@@ -107,19 +107,17 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         # select/filter requested source channels
         if stream_info.get(str(stage) + "_source_channels") is None:
-            self.source_idx = self.select_channels(ds, "source")
-            self.source_channels = [ds.variables[i] for i in self.source_idx]
+            self.source_channels = self.select_channels(ds, "source")
         else:
             self.source_channels = stream_info.get(str(stage) + "_source_channels")
-            self.source_idx = [ds.variables.index(ch) for ch in self.source_channels]
+        self.source_idx = [ds.variables.index(ch) for ch in self.source_channels]
 
         # select/filter requested target channels
         if stream_info.get(str(stage) + "_target_channels") is None:
-            self.target_idx = self.select_channels(ds, "target")
-            self.target_channels = [ds.variables[i] for i in self.target_idx]
+            self.target_channels = self.select_channels(ds, "target")
         else:
             self.target_channels = stream_info.get(str(stage) + "_target_channels")
-            self.target_idx = [ds.variables.index(ch) for ch in self.target_channels]
+        self.target_idx = [ds.variables.index(ch) for ch in self.target_channels]
 
         # get target channel weights from stream config
         if stream_info.get("target_channel_weights") is None:
@@ -129,11 +127,10 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         # select/filter requested geoinfo channels (can be any variable, not just constant-in-time)
         if stream_info.get("geoinfo_channels") is None:
-            self.geoinfo_idx = self.select_geoinfo_channels(ds)
-            self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
+            self.geoinfo_channels = self.select_geoinfo_channels(ds)
         else:
             self.geoinfo_channels = stream_info.get("geoinfo_channels")
-            self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
+        self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
 
         # set geoinfo normalization statistics
         if len(self.geoinfo_idx) > 0:
@@ -238,7 +235,7 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         return rd
 
-    def select_channels(self, ds0: anemoi_datasets, ch_type: str) -> NDArray[np.int64]:
+    def select_channels(self, ds0: anemoi_datasets, ch_type: str) -> list:
         """
         Select source or target channels
 
@@ -263,24 +260,31 @@ class DataReaderAnemoi(DataReaderTimestep):
             stream_name = self.stream_info["name"]
             _logger.warning(f"No channel for {stream_name} for {ch_type}.")
 
-        chs_idx = np.sort(
-            [
-                ds0.name_to_index[k]
-                for (k, v) in ds0.typed_variables.items()
-                if (
-                    not v.is_computed_forcing
-                    and not v.is_constant_in_time
-                    and (
-                        np.array([f == k for f in channels]).any() if channels is not None else True
-                    )
-                    and not np.array([f == k for f in channels_exclude]).any()
-                )
-            ]
-        )
+        chs = [
+            k
+            for (k, v) in ds0.typed_variables.items()
+            if (
+                not v.is_computed_forcing
+                and not v.is_constant_in_time
+                and (np.array([f == k for f in channels]).any() if channels is not None else True)
+                and not np.array([f == k for f in channels_exclude]).any()
+            )
+        ]
 
-        return np.array(chs_idx, dtype=np.int64)
+        # fail if requested channel is not found
+        if channels is not None:
+            channels_matched = [c in chs for c in channels]
+            if not all(channels_matched):
+                for ic, c in enumerate(channels):
+                    if not channels_matched[ic]:
+                        _logger.warning(
+                            f"Requested channel {c} for {ch_type} not found in dataset."
+                        )
+                assert False
 
-    def select_geoinfo_channels(self, ds0: anemoi_datasets) -> NDArray[np.int64]:
+        return chs
+
+    def select_geoinfo_channels(self, ds0: anemoi_datasets) -> list:
         """
         Select geoinfo channels (can be any variable, not just constant-in-time)
 
@@ -301,18 +305,15 @@ class DataReaderAnemoi(DataReaderTimestep):
             return np.array([], dtype=np.int64)
 
         # Select channels that match the geoinfo list (exact match required)
-        chs_idx = np.sort(
-            [ds0.name_to_index[k] for k in ds0.typed_variables.keys() if k in geoinfo_channels]
-        )
+        chs = [k for k in ds0.typed_variables.keys() if k in geoinfo_channels]
 
-        if len(chs_idx) == 0 and len(geoinfo_channels) > 0:
-            stream_name = self.stream_info["name"]
-            _logger.warning(
-                f"No matching geoinfo channels found for {stream_name}. "
-                f"Requested: {geoinfo_channels}"
-            )
+        channels_matched = [c in chs for c in geoinfo_channels]
+        if not all(channels_matched):
+            for ic, c in enumerate(geoinfo_channels):
+                if not channels_matched[ic]:
+                    _logger.warning(f"Requested geoinfo channel {c} not found in dataset.")
 
-        return np.array(chs_idx, dtype=np.int64)
+        return chs
 
 
 def _clip_lat(lats: NDArray) -> NDArray[np.float32]:
