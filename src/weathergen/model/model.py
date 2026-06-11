@@ -927,7 +927,18 @@ class Model(torch.nn.Module):
         # can pass all N members stacked on dim 0 without a separate loop.
         batch_size = tokens.shape[0]
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
-        idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
+        # Add per-member batch offsets so that member i looks up its own rows in the
+        # flattened (batch_size * H, Q, D) tensor.  Without the offset every member
+        # would index into [0, H) — i.e. always member 0's tokens — causing all
+        # ensemble members to decode with identical features and produce identical
+        # predictions.
+        batch_offsets = (
+            torch.arange(batch_size, device=model_params.hp_nbours.device)[:, None, None]
+            * self.num_healpix_cells
+        )
+        idxs = (
+            model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)) + batch_offsets
+        ).flatten(0, 1)
         tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
         # TODO: precompute in model_params?
         tokens_nbors_lens = torch.full(
