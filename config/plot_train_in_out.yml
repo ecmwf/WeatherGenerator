@@ -8,6 +8,6 @@ train:
       slurm_id: 0      
       description: "forecast, 6h, 1 stream"
     
-    wg83hu5n:
+    r8txde92:
       slurm_id: 0      
       description: "forecast, 6h, in and out"    
