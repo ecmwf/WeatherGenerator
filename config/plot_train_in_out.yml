@@ -1,0 +1,13 @@
+# Plot config for different forecast runs
+train:
+  plot:    
+    
+    # new ones with 2016 start date, 6h time window
+    
+    p5xvhvkl:
+      slurm_id: 0      
+      description: "forecast, 6h, 1 stream"
+    
+    wg83hu5n:
+      slurm_id: 0      
+      description: "forecast, 6h, in and out"    
