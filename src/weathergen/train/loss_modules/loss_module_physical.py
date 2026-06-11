@@ -57,6 +57,9 @@ class LossPhysical(LossModuleBase):
         self.device = device
         self.name = "LossPhysical"
 
+        # Dynamic Loss state (extract it before parsing the actual loss functions)
+        self.dynamic_loss_cfg = loss_fcts.pop("dynamic_loss", None)
+
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
             [
@@ -66,6 +69,14 @@ class LossPhysical(LossModuleBase):
             ]
             for name, params in loss_fcts.items()
         ]
+
+        if self.dynamic_loss_cfg is not None and self.stage == TRAIN:
+            self.ema_window = self.dynamic_loss_cfg.get("window", 100)
+            self.ema_L = self.dynamic_loss_cfg.get("L", 20.0)
+            self.channel_weights_ema = {}
+            for stream_name, stream_info in self.cf.streams.items():
+                num_channels = len(stream_info.train_target_channels)
+                self.channel_weights_ema[stream_name] = torch.ones(num_channels, device=self.device)
 
     def _get_weights(self, stream_info):
         """
@@ -82,7 +93,7 @@ class LossPhysical(LossModuleBase):
                 torch.tensor(stream_info["target_channel_weights"]).to(
                     device=device, non_blocking=True
                 )
-                if "target_channel_weights" in stream_info
+                if stream_info.get("target_channel_weights")
                 else None
             )
         elif self.stage == VAL:
@@ -220,7 +231,27 @@ class LossPhysical(LossModuleBase):
 
             losses_all[stream_name] = defaultdict(dict)
 
-            stream_loss_weight, weights_channels = self._get_weights(stream_info)
+            stream_loss_weight, weights_channels_static = self._get_weights(stream_info)
+
+            if self.stage == TRAIN and self.dynamic_loss_cfg is not None:
+                ema = self.channel_weights_ema[stream_name]
+                if ema.numel() > 0:
+                    l_min = ema.min().clamp(min=1e-8)
+                    L = self.ema_L
+                    # Clamp max weight to L * min weight as per Samudra 2 paper
+                    clamped_ema = ema.clamp(max=L * l_min)
+                    # Normalize so mean is 1.0 to preserve overall learning rate scale
+                    weights_channels = clamped_ema / clamped_ema.mean()
+                else:
+                    weights_channels = ema.clone()
+                if weights_channels_static is not None and weights_channels_static.numel() > 0:
+                    weights_channels = weights_channels * weights_channels_static
+            else:
+                weights_channels = (
+                    weights_channels_static 
+                    if weights_channels_static is None or weights_channels_static.numel() > 0 
+                    else None
+                )
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
@@ -318,6 +349,22 @@ class LossPhysical(LossModuleBase):
                             losses_all[stream_name][str(timestep_idx)][loss_fct_name][ch_n] = (
                                 spoof_weight * v if v != 0.0 and not is_spoof else torch.nan
                             )
+
+                        # Update EMA for dynamic loss if enabled, using single-step (timestep_idx=0) MSE
+                        if (
+                            self.stage == TRAIN
+                            and self.dynamic_loss_cfg is not None
+                            and timestep_idx == 0
+                            and loss_fct_name == "mse"
+                            and not is_spoof
+                        ):
+                            with torch.no_grad():
+                                mse_per_chan = loss_lfct_chs.detach().clamp(min=1e-8)
+                                inv_mse = 1.0 / mse_per_chan
+                                W = self.ema_window
+                                self.channel_weights_ema[stream_name] = (
+                                    1.0 - 1.0 / W
+                                ) * self.channel_weights_ema[stream_name] + (1.0 / W) * inv_mse
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
