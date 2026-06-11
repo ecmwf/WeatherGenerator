@@ -8,6 +8,20 @@ train:
       slurm_id: 0      
       description: "forecast, 6h, 1 stream"
     
-    r8txde92:
+    nfm0jwyx:
       slurm_id: 0      
       description: "forecast, 6h, in and out"    
+
+    aq6ou61c:
+      slurm_id: 0      
+      description: "2016-, forecast, 6h, 1 stream"
+
+    a2689i4t:
+      slurm_id: 0      
+      description: "2016-, forecast, 6h, in and out"
+
+    
+
+    
+
+    
