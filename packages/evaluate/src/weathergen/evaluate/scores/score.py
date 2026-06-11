@@ -254,12 +254,15 @@ class Scores:
             f = self.det_metrics_dict[score_name]
             _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
-            assert self.ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
-                "not found in prediction data. Skipping score calculation."
-            )
-            return None
+            if self._ens_dim not in data.prediction.dims:
+                _logger.warning(
+                    f"Probabilistic score '{score_name}' chosen, but ensemble dimension "
+                    f"'{self._ens_dim}' not found in prediction data dims "
+                    f"{data.prediction.dims}. Skipping score calculation."
+                )
+                return None
             f = self.prob_metrics_dict[score_name]
+            _logger.debug(f"Using probabilistic metric: {score_name}")
         else:
             raise ValueError(
                 f"Unknown score chosen. Supported scores: {
@@ -1273,7 +1276,13 @@ class Scores:
         xr.DataArray
             Spread-Skill Ratio (SSR)
         """
-        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)  # spread/rmse
+        # Spread-skill ratio = spread / skill, where the "skill" is the RMSE of the ensemble
+        # MEAN (GenCast / WeatherBench2 convention), not the per-member RMSE. Reducing the
+        # ensemble dim in the denominator (to match the already ens-reduced spread numerator)
+        # yields a single value per variable-level-fstep with a clean calibration interpretation,
+        # rather than one ratio per ensemble member.
+        ens_mean = p.mean(dim=self._ens_dim)
+        ssr = self.calc_spread(p) / self.calc_rmse(ens_mean, gt)
 
         return ssr
 

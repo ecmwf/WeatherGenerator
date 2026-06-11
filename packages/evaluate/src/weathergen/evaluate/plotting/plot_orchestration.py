@@ -177,6 +177,11 @@ def _plot_score_maps_per_stream(
     if not valid:
         return
 
+    # Metrics that retain a per-member ensemble dimension (e.g. rmse, mae) vs those that
+    # reduce it (e.g. spread, crps). Mixing both in the concat below broadcasts the reduced
+    # ones across the ens dim, so we track membership to plot each metric correctly.
+    ens_metrics = {m for m, r in valid if "ens" in r.dims}
+
     plot_metrics = xr.concat(
         [r for _, r in valid],
         dim="metric",
@@ -189,14 +194,20 @@ def _plot_score_maps_per_stream(
         metric=[m for m, _ in valid],
     ).compute()
 
-    if "ens" in preds.dims:
-        plot_metrics["ens"] = preds.ens
+    # Restore the ensemble member labels only when the concatenated result actually keeps the
+    # ens dimension (i.e. at least one metric is per-member). Guarding on plot_metrics rather
+    # than preds avoids a CoordinateValidationError when every valid metric reduced the ens dim.
+    if "ens" in plot_metrics.dims:
+        plot_metrics = plot_metrics.assign_coords(ens=preds.ens.values)
 
-    has_ens = "ens" in plot_metrics.coords
-    ens_values = plot_metrics.coords["ens"].values if has_ens else [None]
+    all_ens = plot_metrics.coords["ens"].values if "ens" in plot_metrics.dims else [None]
 
     plot_tasks: list[dict] = []
     for metric in plot_metrics.coords["metric"].values:
+        # Per-member maps only for metrics that kept the ens dim; ens-reduced metrics (spread,
+        # crps, ...) get a single map even when concat broadcast them across ens.
+        metric_has_ens = str(metric) in ens_metrics and "ens" in plot_metrics.dims
+        ens_values = all_ens if metric_has_ens else [None]
         for ens_val in ens_values:
             tag = f"score_maps_{metric}_fstep_{fstep}" + (
                 f"_ens_{ens_val}" if ens_val is not None else ""
@@ -205,7 +216,12 @@ def _plot_score_maps_per_stream(
                 sel = {"metric": metric, "channel": channel}
                 if ens_val is not None:
                     sel["ens"] = ens_val
-                data = plot_metrics.sel(**sel).squeeze()
+                data = plot_metrics.sel(**sel)
+                if ens_val is None and "ens" in data.dims:
+                    # Collapse the broadcast ens dim for an ens-reduced metric (values are
+                    # identical across members) to a single field.
+                    data = data.isel(ens=0, drop=True)
+                data = data.squeeze()
                 title = f"{metric} - {channel}: fstep {fstep}" + (
                     f", ens {ens_val}" if ens_val is not None else ""
                 )
