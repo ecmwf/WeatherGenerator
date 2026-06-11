@@ -16,13 +16,14 @@ import logging
 
 import numpy as np
 import xarray as xr
+import earthkit.regrid as ekr
 
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
 _logger = logging.getLogger(__name__)
 
 
-def _select_channels(
+def select_channels(
     da_tar: xr.DataArray, da_pred: xr.DataArray, stream, channels, stream_cfg
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """
@@ -85,7 +86,7 @@ def _select_channels(
     return da_tar, da_pred
 
 
-def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
+def add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     """
     Add lead_time coordinate computed as:
     valid_time - init_times
@@ -140,3 +141,57 @@ def _add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
 
     da = da.assign_coords(lead_time=unique_lead[0])
     return da
+
+def regrid(da: xr.DataArray, regrid_opts: dict | None = None) -> xr.DataArray:
+    """
+    Regrid the input DataArray to a common grid defined by regrid_opts.
+
+    The original grid type is automatically detected from the number of spatial
+    points (ipoint dimension). Currently supported grids:
+      - N320 (reduced Gaussian): 542,080 points
+      - O96  (octahedral reduced Gaussian): 40,320 points
+
+    Parameters
+    ----------
+    da :
+        Input DataArray to regrid. Must have an 'ipoint' dimension.
+    regrid_opts :
+        Dictionary containing regridding options.
+        Supported keys:
+          - target_grid: target grid spec for earthkit (default: [1.5, 1.5])
+        If None, no regridding is performed and the original DataArray is returned.
+
+    Returns
+    -------
+        Regridded DataArray.
+
+    Raises
+    ------
+    ValueError
+        If the number of grid points does not match a known grid type.
+    """
+    if regrid_opts is None:
+        return da
+
+    # Auto-detect original grid from number of spatial points
+    if regrid_opts.get("original_grid", None) is None:
+        n_ipoints = da.sizes.get("ipoint", len(da.coords.get("ipoint", [])))
+
+        # TODO: Consider more robust grid detection (e.g. from coordinates) if possible, to avoid ambiguity in case of unknown grids with same number of points.
+        known_grids = {
+            542080: "N320",
+            40320: "O96",
+        }
+
+        original_grid = known_grids.get(n_ipoints)
+        if original_grid is None:
+            raise ValueError(
+                f"Cannot auto-detect grid type: {n_ipoints} grid points does not match "
+                f"any known grid. Please pass the grid type explicitly in the config as 'original_grid'."
+            )
+
+    target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
+
+    _logger.info(f"Regridding from {original_grid} ({n_ipoints} pts) to target grid {target_grid}...")
+
+    return ekr.interpolate(da, {"grid": original_grid}, {"grid": target_grid})
