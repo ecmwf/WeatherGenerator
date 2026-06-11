@@ -24,7 +24,7 @@ from torch.utils.checkpoint import checkpoint
 from weathergen.common.config import Config
 from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
-from weathergen.model.diffusion import DiffusionForecastEngine, EnsembleSamples
+from weathergen.model.diffusion import DiffusionForecastEngine
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
     MAX_NUMBER_TOKENS_LOCAL_PER_CELL,
@@ -771,28 +771,11 @@ class Model(torch.nn.Module):
                 coords=model_params.rope_coords,
             )
 
-            # if we are doing a diffusion rollout, we discard discard the tokens throughout
-            # the denoising steps and take the last denoised one.
-            # Skip for EnsembleSamples — per-member rollout is handled in the ensemble branch.
-            if (
-                self.cf.get("fe_diffusion_model", False)
-                and self.cf.get("diffusion_rollout", False)
-                and not isinstance(tokens, EnsembleSamples)
-            ):
-                tokens = tokens[-1]
-
-                # add if predicting the residual
-                if  self.cf.get("fe_diffusion_predict_residual", False):
-                    tokens = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] + tokens
-                
-                # put the denoised token into conditioning tokens for the next step
-                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens
-
-            # Diffusion inference returns the per-ODE-step intermediate denoised tokens as a
-            # list. Treat each intermediate state as its own forecast step in the output so the
-            # full denoising trajectory can be inspected downstream. The original `step` is
-            # still used to look up target coordinates (they share the same physical timestamp).
-            if isinstance(tokens, list):
+            # Trajectory inspection mode: decode each ODE step as a separate forecast output
+            # so the full denoising trajectory can be inspected downstream.
+            # Not used when diffusion_rollout=True — that case is handled in the unified
+            # diffusion block below.
+            if isinstance(tokens, list) and not self.cf.get("diffusion_rollout", False):
                 # Diffusion inference currently only supports a single physical forecast
                 # step (forecast.num_steps=1); the per-ODE-step trajectory consumes the
                 # ModelOutput fstep dimension. Multi-step autoregressive rollouts on top of
@@ -825,46 +808,33 @@ class Model(torch.nn.Module):
                 tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
                 continue
 
-            # Diffusion ensemble mode: N independently drawn samples decoded into a single
-            # forecast step whose ensemble dimension equals the number of members.
-            if isinstance(tokens, EnsembleSamples):
+            # Unified diffusion decoding path — handles both:
+            #  • rollout (diffusion_rollout=True): tokens is a list; take the final ODE state
+            #  • ensemble (N > 1): tokens is already a (N, healpix_cells, embed_dim) tensor
+            if self.cf.get("fe_diffusion_model", False):
+                if isinstance(tokens, list):
+                    # diffusion_rollout=True: discard intermediate ODE steps, keep the final state.
+                    tokens = tokens[-1]  # (1, healpix_cells, embed_dim)
                 cond = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"]
-                predict_residual = (
-                    self.cf.get("fe_diffusion_model", False)
-                    and self.cf.get("fe_diffusion_predict_residual", False)
+                predict_residual = self.cf.get("fe_diffusion_predict_residual", False)
+                # Apply residual correction; broadcasts cond (1, H, D) over all N members.
+                member_final_tokens = cond + tokens if predict_residual else tokens
+                # Decode all members (or the single rollout state) in one forward pass.
+                tmp_output = ModelOutput(1)
+                tmp_output = self.predict_decoders(
+                    model_params, step, member_final_tokens, batch, tmp_output, out_step=0
                 )
-                # Decode each member using a temporary ModelOutput, then stack predictions
-                # along the ensemble dimension (dim 0) for each stream and batch sample.
-                # Also track per-member absolute tokens for the next rollout step.
-                member_preds: dict[str, list[list[torch.Tensor]]] = {}
-                member_final_tokens: list[torch.Tensor] = []
-                for toks in tokens.members:
-                    toks_abs = cond + toks if predict_residual else toks
-                    member_final_tokens.append(toks_abs)
-                    tmp_output = ModelOutput(1)
-                    tmp_output = self.predict_decoders(
-                        model_params, step, toks_abs, batch, tmp_output, out_step=0
+                # pred_tuple has N entries (one per member / "batch" item).
+                # Concatenate along dim 0: (N, n_points, channels), wrap in 1-tuple (batch_size=1).
+                for sname, pred_tuple in tmp_output.physical[0].items():
+                    output.add_physical_prediction(
+                        step, sname, (torch.cat(list(pred_tuple), dim=0),)
                     )
-                    for sname, pred_tuple in tmp_output.physical[0].items():
-                        if sname not in member_preds:
-                            member_preds[sname] = [[] for _ in pred_tuple]
-                        for b_idx, pred_b in enumerate(pred_tuple):
-                            member_preds[sname][b_idx].append(pred_b)
-                # Stack along ensemble dim and register in the main output.
-                for sname, per_batch in member_preds.items():
-                    stacked = tuple(
-                        torch.cat(batch_member_list, dim=0)  # [N, n_points, channels]
-                        for batch_member_list in per_batch
-                    )
-                    output.add_physical_prediction(step, sname, stacked)
-                # Store per-member final tokens so inference_forward can use them as
-                # member-specific conditioning on the next rollout step.
-                batch.samples[0].meta_info["ERA5"].params["ensemble_conditioning_tokens"] = (
-                    member_final_tokens
-                )
-                # Also keep the shared key in sync (use last member for compatibility).
+                # Store per-member conditioning for the next rollout step.
+                # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
+                # calls expand(N, ...) which is a no-op when the dim already matches.
                 batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = (
-                    member_final_tokens[-1]
+                    member_final_tokens
                 )
                 tokens = None
                 continue
@@ -875,130 +845,7 @@ class Model(torch.nn.Module):
             # latent predictions (raw and with SSL heads)
             output = self.predict_latent(model_params, step, tokens, batch, output)
 
-            # Physical-space rollout: re-encode decoded predictions as input for next step
-            if self.cf.get("physical_rollout", False) and step != max(batch.get_output_idxs()):
-                rollout_batch = self._make_physical_rollout_batch(output.physical[step], batch, step)
-                tokens, _ = self.encoder(model_params, rollout_batch)
-                tokens = tokens.reshape(len(batch), 1, *tokens.shape[1:]).sum(1)
-                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = tokens
-
         return output
-
-    def _make_physical_rollout_batch(self, physical_preds, batch, step):
-        """
-        Build a single-step BatchSamples from decoded physical predictions for re-encoding.
-
-        Predictions are in the original data grid (e.g. o96, 40320 points).  They are
-        aggregated to the HEALPix source grid (12288 cells at level 5) using the per-cell
-        coordinate counts stored in batch.samples[i_b].streams_data[sn].target_coords_lens[step].
-        The mean over the ensemble dimension is taken first, then predictions are scatter-averaged
-        into each HEALPix cell.
-
-        Source tokens have the structure [stream_id(1), time(5), coords(2), geoinfo(G), data(D)]
-        along the channel dimension.  The original source tokens from the batch provide the
-        correct full-channel template; we tile them to cover all healpix cells (handling source
-        masking) and then replace the last N_target channels with the aggregated predictions.
-
-        Args:
-            physical_preds: dict[stream_name -> list[Tensor[ens, n_data_points, target_channels]]],
-                            one tensor per batch sample (from output.physical[step]).
-            batch: original BatchSamples.
-            step: forecast step index, used to look up target_coords_lens.
-
-        Returns:
-            A BatchSamples whose source_tokens_cells hold the decoded predictions
-            and whose tokens_lens reflects one token per cell per active stream.
-        """
-        batch_size = len(batch)
-        device = batch.get_device()
-
-        new_batch = copy.copy(batch)
-        new_batch.samples = []
-
-        for i_b in range(batch_size):
-            new_sample = copy.copy(batch.samples[i_b])
-            new_sample.streams_data = {}
-
-            for stream_name in self.stream_names:
-                new_sd = copy.copy(batch.samples[i_b].streams_data[stream_name])
-                pred = physical_preds.get(stream_name)
-
-                old_cells = batch.samples[i_b].streams_data[stream_name].source_tokens_cells[0]
-                token_size = old_cells.shape[1] if old_cells is not None else 1
-
-                if pred is not None and i_b < len(pred) and pred[i_b].numel() > 0:
-                    # pred[i_b]: [ens_size, n_data_points, N_target] (data_points on o96 grid)
-                    pred_mean = pred[i_b].mean(0).to(device)  # [n_data_points, N_target]
-                    n_tgt     = pred_mean.shape[-1]
-
-                    # Aggregate o96-space predictions → HEALPix cells.
-                    # target_coords_lens[step]: [num_healpix_cells] counts of data points per cell,
-                    # where coords are ordered cell-by-cell so repeat_interleave gives the mapping.
-                    t_lens = batch.samples[i_b].streams_data[stream_name].target_coords_lens[step].to(device)
-                    cell_idx = torch.repeat_interleave(
-                        torch.arange(self.num_healpix_cells, device=device), t_lens.long()
-                    )  # [n_data_points]
-                    cell_sum = torch.zeros(
-                        self.num_healpix_cells, n_tgt, dtype=pred_mean.dtype, device=device
-                    )
-                    cell_sum.scatter_add_(0, cell_idx.unsqueeze(1).expand(-1, n_tgt), pred_mean)
-                    cell_preds = cell_sum / t_lens.to(pred_mean.dtype).unsqueeze(1).clamp(min=1.0)
-                    # cell_preds: [num_healpix_cells, N_target]
-
-                    # Use original source tokens as a full-channel template so that the
-                    # non-data prefix (stream_id, time, coords, geoinfo) is preserved.
-                    # Tile to cover num_healpix_cells rows if masking left fewer in old_cells.
-                    n_orig = old_cells.shape[0]
-                    if n_orig >= self.num_healpix_cells:
-                        src_tokens = old_cells[:self.num_healpix_cells].clone().to(device)
-                    else:
-                        reps = (self.num_healpix_cells + n_orig - 1) // n_orig
-                        src_tokens = old_cells.repeat(reps, 1, 1)[:self.num_healpix_cells].clone().to(device)
-
-                    # Replace the last n_tgt channel positions with the aggregated predictions.
-                    sources_size_i = src_tokens.shape[-1]
-                    src_tokens[:, :, sources_size_i - n_tgt:] = (
-                        cell_preds.unsqueeze(1).expand(-1, token_size, -1)
-                    )
-                    src_tokens = src_tokens.contiguous()
-
-                    new_sd.source_tokens_cells = [src_tokens]
-                    new_sd.source_tokens_lens = [
-                        torch.ones(
-                            self.num_healpix_cells, dtype=torch.int32, device=device
-                        )
-                    ]
-                else:
-                    # Forcing stream or missing prediction: use zero (masked) tokens.
-                    sources_size_i = old_cells.shape[-1] if old_cells is not None else 1
-                    new_sd.source_tokens_cells = [
-                        torch.zeros(
-                            self.num_healpix_cells, token_size, sources_size_i,
-                            dtype=self.dtype, device=device,
-                        )
-                    ]
-                    new_sd.source_tokens_lens = [
-                        torch.zeros(
-                            self.num_healpix_cells, dtype=torch.int32, device=device
-                        )
-                    ]
-
-                new_sample.streams_data[stream_name] = new_sd
-
-            new_batch.samples.append(new_sample)
-
-        # tokens_lens: (1, batch_size, num_streams, num_healpix_cells)
-        new_batch.tokens_lens = torch.stack(
-            [
-                torch.stack(
-                    [new_batch.samples[i_b].streams_data[sn].source_tokens_lens[0]
-                     for sn in self.stream_names]
-                )
-                for i_b in range(batch_size)
-            ]
-        ).unsqueeze(0)
-
-        return new_batch
 
     @staticmethod
     def _reindex_output_for_trajectory(output: ModelOutput, n_steps: int) -> ModelOutput:
@@ -1076,7 +923,9 @@ class Model(torch.nn.Module):
         tokens = tokens[:, self.num_aux_tokens :]
 
         # get 1-ring neighborhood for prediction
-        batch_size = len(batch)
+        # Derive the effective batch size from the token tensor so that the ensemble branch
+        # can pass all N members stacked on dim 0 without a separate loop.
+        batch_size = tokens.shape[0]
         s = [batch_size, self.num_healpix_cells, self.cf.ae_local_num_queries, tokens.shape[-1]]
         idxs = model_params.hp_nbours.unsqueeze(0).repeat((batch_size, 1, 1)).flatten(0, 1)
         tokens_nbors = tokens.reshape(s).flatten(0, 1)[idxs.flatten()].flatten(0, 1)
@@ -1086,13 +935,13 @@ class Model(torch.nn.Module):
         )
         tokens_nbors_lens[0] = 0
 
-        # breakpoint()
-
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
+            # Use modular indexing so that ensemble calls (batch_size > len(batch)) replicate
+            # the single real sample's coordinates across all N members.
             t_coords = [
-                batch.samples[i_b].streams_data[stream_name].target_coords[step]
+                batch.samples[i_b % len(batch)].streams_data[stream_name].target_coords[step]
                 for i_b in range(batch_size)
             ]
             t_coords_lens = [len(t) for t in t_coords]
@@ -1124,8 +973,8 @@ class Model(torch.nn.Module):
                 # lens for varlen attention
                 tcls = torch.cat(
                     [
-                        sample.streams_data[stream_name].target_coords_lens[step]
-                        for sample in batch.samples
+                        batch.samples[i_b % len(batch)].streams_data[stream_name].target_coords_lens[step]
+                        for i_b in range(batch_size)
                     ]
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])

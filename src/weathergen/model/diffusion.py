@@ -23,7 +23,6 @@
 # ----------------------------------------------------------------------------
 
 
-import dataclasses
 import logging
 import math
 
@@ -35,25 +34,6 @@ from weathergen.datasets.batch import SampleMetaData
 from weathergen.model.engines import ForecastingEngine
 
 logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass
-class EnsembleSamples:
-    """Container for N independently drawn diffusion samples (ensemble mode).
-
-    Returned by :meth:`DiffusionForecastEngine.inference_forward` when
-    ``fe_diffusion_num_ensemble_members > 1``.  Each member is the final
-    denoised latent token tensor of shape ``(1, num_healpix_cells, embed_dim)``
-    produced by one independent ODE trajectory starting from a different
-    noise realisation.  The model forward pass in ``model.py`` stacks the
-    decoded physical predictions along the ensemble dimension so that the
-    zarr output has shape ``(n_points, channels, num_members)``.
-    """
-
-    members: list[torch.Tensor]
-
-    def __len__(self) -> int:
-        return len(self.members)
 
 
 class DiffusionForecastEngine(torch.nn.Module):
@@ -319,7 +299,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         num_steps: int = 50,
         meta_info: dict[str, SampleMetaData] = None,
         coords: torch.Tensor = None,
-    ) -> "list[torch.Tensor] | EnsembleSamples":
+    ) -> "list[torch.Tensor] | torch.Tensor":
         """
         Forward pass of the diffusion model during inference.
 
@@ -327,11 +307,11 @@ class DiffusionForecastEngine(torch.nn.Module):
         with optional temporal conditioning extracted from meta_info.
         https://github.com/NVlabs/edm/blob/main/generate.py
 
-        When ``fe_diffusion_num_ensemble_members > 1`` in the config the ODE is run that
-        many times independently (each from a fresh noise draw) and an
-        :class:`EnsembleSamples` container is returned instead of the full ODE
-        trajectory list.  The model's forward pass in ``model.py`` then stacks the
-        decoded physical predictions along the ensemble dimension.
+        When ``fe_diffusion_num_ensemble_members > 1`` in the config all N members
+        are denoised in a single batched ODE pass and the final tensor of shape
+        ``(N, num_healpix_cells, embed_dim)`` is returned directly.  The model
+        forward pass in ``model.py`` detects ensemble mode by checking
+        ``tokens.shape[0] > 1`` and routes to the ensemble decoding branch.
 
         Args:
             fstep: Forecast step index for the network
@@ -341,7 +321,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         Returns:
             list[Tensor]: ODE trajectory (one tensor per denoising step) when
                 ``fe_diffusion_num_ensemble_members == 1`` (default / trajectory mode).
-            EnsembleSamples: N final denoised tokens, one per ensemble member, when
+            Tensor: shape ``(N, num_healpix_cells, embed_dim)`` when
                 ``fe_diffusion_num_ensemble_members > 1`` (ensemble mode).
         """
 
@@ -354,28 +334,24 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         num_ensemble_members: int = self.cf.get("fe_diffusion_num_ensemble_members", 1)
 
-        # Ensemble mode: draw N independent samples and return only their final states.
+        # Ensemble mode: draw N independent samples in one batched ODE pass.
         if num_ensemble_members > 1:
             logger.info(f"Diffusion ensemble mode: generating {num_ensemble_members} members.")
-            # In a rollout each member conditions on its own previous state.  The
-            # model.py forward stores per-member absolute tokens under this key after
-            # each step so they can be picked up here on the next step.
-            ensemble_cond: list[torch.Tensor] | None = None
-            if self.conditioning == "forecast":
-                ensemble_cond = meta_info["ERA5"].params.get("ensemble_conditioning_tokens", None)
-            members = []
-            for member_idx in range(num_ensemble_members):
-                c_i = ensemble_cond[member_idx] if ensemble_cond is not None else c
-                final_x, _ = self._run_ode(
-                    c=c_i,
-                    fstep=fstep,
-                    num_steps=num_steps,
-                    coords=coords,
-                    log_diagnostics=(member_idx == 0),  # only log/plot for first member
-                    return_trajectory=False,
-                )
-                members.append(final_x)
-            return EnsembleSamples(members=members)
+            # Build batched conditioning of shape (N, healpix_cells, embed_dim).
+            # conditioning_tokens is (1, H, D) on the first rollout step (encoder output) and
+            # (N, H, D) on subsequent steps (stored by model.py after the previous ensemble step).
+            # expand() is a no-op when the leading dim already matches N, so this handles both.
+            c_batched = c.expand(num_ensemble_members, *c.shape[1:]) if c is not None else None
+            final_x, _ = self._run_ode(
+                c=c_batched,
+                fstep=fstep,
+                num_steps=num_steps,
+                coords=coords,
+                batch_size=num_ensemble_members,
+                log_diagnostics=True,
+                return_trajectory=False,
+            )
+            return final_x
 
         # Default trajectory mode: return all intermediate ODE states (existing behaviour).
         _, intermediate_x = self._run_ode(
@@ -394,16 +370,20 @@ class DiffusionForecastEngine(torch.nn.Module):
         fstep: int,
         num_steps: int,
         coords: torch.Tensor | None,
+        batch_size: int = 1,
         log_diagnostics: bool = True,
         return_trajectory: bool = False,
     ) -> "tuple[torch.Tensor, list[torch.Tensor] | None]":
         """Run one complete ODE denoising trajectory from pure noise.
 
         Args:
-            c: Conditioning tensor (or ``None``).
+            c: Conditioning tensor (or ``None``).  For ensemble mode this has
+                shape ``(batch_size, num_healpix_cells, embed_dim)``.
             fstep: Forecast step index passed through to :meth:`denoise`.
             num_steps: Number of ODE integration steps.
             coords: Optional spatial coordinates for :meth:`denoise`.
+            batch_size: Number of independent noise realisations to denoise in
+                parallel.  Defaults to 1 (trajectory / single-sample mode).
             log_diagnostics: Whether to emit the sigma-schedule log message and
                 save the diagnostic plot.
             return_trajectory: When ``True``, also return the list of intermediate
@@ -412,11 +392,11 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         Returns:
             ``(final_x, intermediate_x)`` where *final_x* has shape
-            ``(1, num_healpix_cells, embed_dim)`` and *intermediate_x* is either
-            a list of per-step tensors (when ``return_trajectory=True``) or
-            ``None``.
+            ``(batch_size, num_healpix_cells, embed_dim)`` and *intermediate_x*
+            is either a list of per-step tensors (when ``return_trajectory=True``)
+            or ``None``.
         """
-        x = torch.randn(1, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
+        x = torch.randn(batch_size, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
 
         # --- Training-aligned sigma bounds ---
         # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
@@ -433,6 +413,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         #     numerical instability of dividing by near-zero sigma in the ODE.
         sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
+        # sigma_max_eff = sigma_max_eff * 1.1
 
         # --- Training-distribution-aligned sigma_min ---
         # sigma_min_quantile controls what fraction of training samples fall below sigma_min_eff.
