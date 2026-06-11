@@ -21,7 +21,6 @@ import xarray as xr
 from joblib import delayed
 from PIL import Image
 from tqdm import tqdm
-from weathergen.evaluate.plotting.timeseries import Timeseries
 
 from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_num_workers
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
@@ -44,6 +43,7 @@ from weathergen.evaluate.plotting.plot_utils import (
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
+from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
@@ -643,6 +643,7 @@ def _dispatch_timeseries_plots(
     da_tars: dict,
     output_dir: str,
     stream: str,
+    regions: list[str],
     run_id: str,
     samples: dict,
     channels: dict,
@@ -659,11 +660,13 @@ def _dispatch_timeseries_plots(
             "channel": str(channel),
             "sample": sample,
             "stream": stream,
+            "region": region,
             "ens": ens,
         }
         for channel in channels
         for sample in samples
         for ens in ens_members
+        for region in regions
     ]
     calls = [delayed(data_ts.plot_single_timeseries)(**t) for t in ts_tasks]
     dispatch_parallel(
@@ -1005,6 +1008,7 @@ def plot_data(
             da_tars=da_tars,
             output_dir=output_dir,
             stream=stream,
+            regions=plotter.regions,
             run_id=run_id,
             samples=plot_sample_set,
             channels=plot_channel_set,
