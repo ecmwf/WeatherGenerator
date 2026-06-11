@@ -2,8 +2,6 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
-import numpy as np
-import numpy.typing as npt
 import xarray as xr
 
 
@@ -55,34 +53,6 @@ class Timeseries:
         )
         return da_preds_slice, da_tars_slice
 
-    def get_valid_times_per_sample_channel(
-        self, sample: int | str, channel: str
-    ) -> npt.NDArray[np.datetime64]:
-        """Get valid times for the given sample/channel from the timeseries data.
-        Parameters
-        ----------
-        sample: int | str
-            The sample for which to extract data.
-        channel: str
-            The channel for which to extract data.
-
-        Returns
-        -------
-        npt.NDArray[np.datetime64]
-            The array of valid times for the given sample and channel.
-        """
-        return self.da_tars_ts.sel(sample=sample, channel=channel).valid_time.values
-
-    def get_channels(self) -> list[str]:
-        """Get the list of channels from the timeseries data."""
-        da_tmp = next(iter(self.da_tars.values()))
-        return da_tmp.channel.values
-
-    def get_samples(self) -> list[str]:
-        """Get the list of samples from the timeseries data."""
-        da_tmp = next(iter(self.da_tars.values()))
-        return da_tmp.sample.values
-
     def plot_single_timeseries(
         self,
         output_dir: str,
@@ -96,7 +66,7 @@ class Timeseries:
         has_ens = ens is not None and "ens" in da_preds_slice.dims and ens != "mean"
         if has_ens:
             da_preds_slice = da_preds_slice.sel(ens=ens)
-        valid_times = self.get_valid_times_per_sample_channel(sample, channel)
+        valid_times = self.da_tars_ts.sel(sample=sample, channel=channel).valid_time.values
 
         pred_label = "Prediction" if not has_ens else f"Prediction (ens {ens})"
 
@@ -112,7 +82,7 @@ class Timeseries:
         ax.set_ylabel(channel)
         ax.set_xlabel("Valid Time")
         ax.legend()
-        max_ticks = max(4, 15)
+        max_ticks = 20
         day_interval = max(1, len(valid_times) // max_ticks)
         ax.xaxis.set_major_locator(matplotlib.dates.DayLocator(interval=day_interval))
         ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter("%Y-%m-%d"))

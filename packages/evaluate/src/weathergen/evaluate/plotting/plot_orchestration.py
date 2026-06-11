@@ -644,8 +644,10 @@ def _dispatch_timeseries_plots(
     output_dir: str,
     stream: str,
     run_id: str,
-    num_plot_workers: int,
+    samples: dict,
+    channels: dict,
     ensemble: list,
+    n_workers: int,
 ) -> None:
     """Build and dispatch timeseries plot tasks for all (channel, sample[, ens]) triples."""
     data_ts = Timeseries(da_preds, da_tars)
@@ -659,14 +661,14 @@ def _dispatch_timeseries_plots(
             "stream": stream,
             "ens": ens,
         }
-        for channel in data_ts.get_channels()
-        for sample in data_ts.get_samples()
+        for channel in channels
+        for sample in samples
         for ens in ens_members
     ]
     calls = [delayed(data_ts.plot_single_timeseries)(**t) for t in ts_tasks]
     dispatch_parallel(
         calls,
-        n_workers=num_plot_workers,
+        n_workers=n_workers,
         backend="loky",
         desc=f"Timeseries {run_id} - {stream}",
     )
@@ -1004,8 +1006,10 @@ def plot_data(
             output_dir=output_dir,
             stream=stream,
             run_id=run_id,
-            num_plot_workers=num_plot_workers,
+            samples=plot_sample_set,
+            channels=plot_channel_set,
             ensemble=list(available_data.ensemble),
+            n_workers=num_plot_workers,
         )
 
     if plot_animations:
