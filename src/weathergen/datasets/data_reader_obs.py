@@ -200,7 +200,7 @@ class DataReaderObs(DataReaderBase):
                 self.indices_start = np.append(
                     self.indices_start,
                     np.ones(
-                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs, dtype=int
+                        (diff_in_hours_end - (self.hrly_index.shape[0] - 1)) // step_hrs, dtype=int
                     )
                     * self.indices_start[-1],
                 )
