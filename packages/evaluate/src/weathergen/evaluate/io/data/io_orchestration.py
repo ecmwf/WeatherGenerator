@@ -295,7 +295,7 @@ def _build_io_state(
         n_workers=n_io_workers,
         rank=rank,
         offset=offset,
-        regrid_opts=stream_cfg.get("regrid", None)
+        regrid_opts=stream_cfg.get("regrid"),
     )
 
 
@@ -397,7 +397,7 @@ def _assemble_substep(
         The per-sample raw results from _parallel_read, needed for scatter coords and obs_times.
     tars_list
         List of target arrays for this sub-step, one per sample.
-    preds_list              
+    preds_list
         List of prediction arrays for this sub-step, one per sample.
     per_sample_valid_times
         List of valid_time for each sample, aligned with tars_list and preds_list.
@@ -408,12 +408,13 @@ def _assemble_substep(
         depending on whether this sub-step is split from a larger fstep or not).
     fstep_idx
         The index into results[i][2] to extract the obs_time for this sub-step when
-        building scatter DataArrays.  For gridded DataArrays this is always 0 since there's only one valid_time per fstep.
+        building scatter DataArrays.  For gridded DataArrays this is always 0 since
+        there's only one valid_time per fstep.
     Returns
     -------
     tuple[xr.DataArray, xr.DataArray]
-        The assembled and post-processed target and prediction DataArrays for this sub-step, ready for
-        channel selection, scaling, and (for gridded) regridding.
+        The assembled and post-processed target and prediction DataArrays for this
+        sub-step, ready for channel selection, scaling, and (for gridded) regridding.
 
     """
     if state.is_gridded:
@@ -456,11 +457,11 @@ def _assemble_substep(
     )
 
     if state.is_gridded:
-        da_tar  = add_lead_time_coord(da_tar)
+        da_tar = add_lead_time_coord(da_tar)
         da_pred = add_lead_time_coord(da_pred)
         da_pred = scale_z_channels(da_pred, state.stream)
-        da_tar  = scale_z_channels(da_tar, state.stream)
-        da_tar  = regrid(da_tar, state.regrid_opts)
+        da_tar = scale_z_channels(da_tar, state.stream)
+        da_tar = regrid(da_tar, state.regrid_opts)
         da_pred = regrid(da_pred, state.regrid_opts)
 
     return da_tar, da_pred
@@ -569,7 +570,7 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
                 init_times,
                 fs_val,
                 0,
-                state.regrid_opts, 
+                state.regrid_opts,
             )
             del tars_list, preds_list
             fstep_counter = _store_substep(

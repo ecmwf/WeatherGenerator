@@ -14,9 +14,9 @@ Post-processing helpers for evaluation DataArrays
 
 import logging
 
+import earthkit.regrid as ekr
 import numpy as np
 import xarray as xr
-import earthkit.regrid as ekr
 
 from weathergen.evaluate.utils.derived_channels import DeriveChannels
 
@@ -142,6 +142,7 @@ def add_lead_time_coord(da: xr.DataArray, sample_dim="sample") -> xr.DataArray:
     da = da.assign_coords(lead_time=unique_lead[0])
     return da
 
+
 def regrid(da: xr.DataArray, regrid_opts: dict | None = None) -> xr.DataArray:
     """
     Regrid the input DataArray to a common grid defined by regrid_opts.
@@ -177,7 +178,8 @@ def regrid(da: xr.DataArray, regrid_opts: dict | None = None) -> xr.DataArray:
     if regrid_opts.get("original_grid", None) is None:
         n_ipoints = da.sizes.get("ipoint", len(da.coords.get("ipoint", [])))
 
-        # TODO: Consider more robust grid detection (e.g. from coordinates) if possible, to avoid ambiguity in case of unknown grids with same number of points.
+        # TODO: Consider more robust grid detection (e.g. from coordinates) if possible,
+        # to avoid ambiguity in case of unknown grids with same number of points.
         known_grids = {
             542080: "N320",
             40320: "O96",
@@ -187,11 +189,14 @@ def regrid(da: xr.DataArray, regrid_opts: dict | None = None) -> xr.DataArray:
         if original_grid is None:
             raise ValueError(
                 f"Cannot auto-detect grid type: {n_ipoints} grid points does not match "
-                f"any known grid. Please pass the grid type explicitly in the config as 'original_grid'."
+                f"any known grid. Please pass the grid type explicitly in the "
+                f"config as 'original_grid'."
             )
 
     target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
 
-    _logger.info(f"Regridding from {original_grid} ({n_ipoints} pts) to target grid {target_grid}...")
+    _logger.info(
+        f"Regridding from {original_grid} ({n_ipoints} pts) to target grid {target_grid}..."
+    )
 
     return ekr.interpolate(da, {"grid": original_grid}, {"grid": target_grid})
