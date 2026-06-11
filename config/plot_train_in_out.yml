@@ -20,6 +20,10 @@ train:
       slurm_id: 0      
       description: "2016-, forecast, 6h, in and out"
 
+    ueaolof7:
+      slurm_id: 0      
+      description: "2016-, forecast, 6h, in and out, multi stream"
+
     
 
     

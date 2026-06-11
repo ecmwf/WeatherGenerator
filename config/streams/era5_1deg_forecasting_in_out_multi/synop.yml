@@ -17,7 +17,7 @@ SurfaceCombined :
   target: ['obsvalue_tsts_0', 'obsvalue_t2m_0', 'obsvalue_td2m_0', 'obsvalue_u10m_0', 'obsvalue_v10m_0', 'obsvalue_pmsl_0', 'obsvalue_ps_0']
   geoinfo_channels : ['stalt', 'lsm', 'cos_sza', 'cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day']
   loss_weight : 1.0
-  token_size : 64
+  token_size : 512
   # masking_override :
   #   model_input :
   #     masking_strategy: "random"
