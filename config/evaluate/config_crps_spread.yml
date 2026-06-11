@@ -1,0 +1,50 @@
+evaluation:
+  metrics: ["rmse", "spread"]
+  regions: ["global"]
+  summary_plots: true
+  plot_score_maps: true
+  plot_ensemble: "members"   # visualise individual members
+  summary_dir: "./plots/crps_spread_v3/"
+
+default_streams:
+  ERA5:
+    channels: ["2t", "10u", "10v", "z_500", "t_850", "u_850", "v_850", "q_850"]  # a few key variables
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"      # required for all probabilistic metrics
+    plotting:
+      sample: [0,1,2,3]
+      forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      ensemble: "std"      #supported: "all", "mean", "std", [0,1,2]
+      plot_maps: true
+      plot_histograms: true
+      plot_animations: true
+
+run_ids:
+  xf74qbhg:
+    label: "CRPS_s0.05_learnable_5members"
+  bg93vcya:
+   label: "CRPS_s0.01_learnable_5members"
+  b7p4dbak:
+   label: "CRPS_s0.1_learnable_5members"
+  l6ji4cvl:
+    label: "CRPS_s0.1_learnable_5members_10_more_epochs"
+  xhl8j3wa:
+   label: "CRPS_s0.05_learnable_2members"
+  g2amz7ou:
+    label: "CRPS_s0.05_learnable_10members"
+  a9wa1rvq:
+    label: "CRPS_s0.01_fixed_5members"
+  ne54k2fa:
+    label: "CRPS_s0.05_fixed_5members"
+  g9z7j8ei:
+    label: "CRPS_s0.1_fixed_5members"
+  ra7qm4bc:
+    label: "CRPS_s0.2_fixed_5members"
+  ha23u84m:
+    label: "CRPS_s0.5_fixed_5members"
+  si91kfmq:
+    label: "CRPS_s0.05_learnable_5members_sigma+lr_1e-2"
+  o5scxlnr:
+    label: "CRPS_s0.5_learnable_5members_sigma+lr_1e-2"

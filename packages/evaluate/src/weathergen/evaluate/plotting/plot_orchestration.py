@@ -412,12 +412,14 @@ def _plot_single_sample(
     plot_histograms: bool | str,
     maps_config: dict,
     bias_config: dict,
+    std_config: dict,
 ) -> None:
     """Plot all maps/histograms for a single (fstep, sample) pair (loky worker)."""
     matplotlib.use("Agg")
 
     maps_cfg = oc.OmegaConf.create(maps_config)
     bias_cfg = oc.OmegaConf.create(bias_config)
+    std_cfg = oc.OmegaConf.create(std_config)
     plotter = Plotter(plotter_cfg, Path(output_basedir))
 
     data_selection = {"sample": sample, "stream": stream, "forecast_step": fstep}
@@ -433,18 +435,36 @@ def _plot_single_sample(
             plotter.create_maps_per_sample(bias_data, plot_chs, data_selection, "bias", bias_cfg)
 
     for ens in ensemble:
-        has_ens = "ens" in preds.dims and ens != "mean"
-        preds_ens = preds.sel(ens=ens) if has_ens else preds
-        preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+        if "ens" in preds.dims:
+            if ens == "std":
+                preds_ens = preds.std(dim="ens")
+            elif ens == "mean":
+                preds_ens = preds.mean(dim="ens")
+            else:
+                preds_ens = preds.sel(ens=ens)
+        else:
+            preds_ens = preds
+        preds_tag = f"ens_{ens}" if ens in ("mean", "std") else (
+            "" if "ens" not in preds.dims else f"ens_{ens}"
+        )
         preds_name = "_".join(filter(None, ["preds", preds_tag]))
 
         if plot_maps:
+            cfg_to_use = std_cfg if preds_tag == "ens_std" else maps_cfg
             plotter.create_maps_per_sample(
-                preds_ens, plot_chs, data_selection, preds_name, maps_cfg
+                preds_ens, plot_chs, data_selection, preds_name, cfg_to_use
             )
 
             if plot_bias and bias_has_ens:
-                bias_ens = bias_data.sel(ens=ens) if ens != "mean" else bias_data
+                if "ens" in bias_data.dims:
+                    if ens == "std":
+                        bias_ens = bias_data.std(dim="ens")
+                    elif ens == "mean":
+                        bias_ens = bias_data.mean(dim="ens")
+                    else:
+                        bias_ens = bias_data.sel(ens=ens)
+                else:
+                    bias_ens = bias_data
                 bias_tag = "_".join(filter(None, ["bias", preds_tag]))
                 plotter.create_maps_per_sample(
                     bias_ens, plot_chs, data_selection, bias_tag, bias_cfg
@@ -491,9 +511,18 @@ def _plot_all_samples(
     data_selection = {"sample": "all_samples", "stream": stream, "forecast_step": fstep}
 
     for ens in ensemble:
-        has_ens = "ens" in preds.dims and ens != "mean"
-        preds_ens = preds.sel(ens=ens) if has_ens else preds
-        preds_tag = "" if "ens" not in preds.dims else f"ens_{ens}"
+        if "ens" in preds.dims:
+            if ens == "std":
+                preds_ens = preds.std(dim="ens")
+            elif ens == "mean":
+                preds_ens = preds.mean(dim="ens")
+            else:
+                preds_ens = preds.sel(ens=ens)
+        else:
+            preds_ens = preds
+        preds_tag = f"ens_{ens}" if ens in ("mean", "std") else (
+            "" if "ens" not in preds.dims else f"ens_{ens}"
+        )
         preds_name = "_".join(filter(None, ["preds", preds_tag]))
 
         plotter.create_histograms(
@@ -623,6 +652,23 @@ def plot_data(
     maps_config_dict = oc.OmegaConf.to_container(common_ranges(*_range_args), resolve=True)
     bias_config_dict = oc.OmegaConf.to_container(bias_ranges(*_range_args), resolve=True)
 
+    has_ens = any("ens" in da.dims for da in da_preds.values())
+    if has_ens:
+        std_range_args = (
+        {fs: da.std(dim="ens") for fs, da in da_preds.items()},
+        {fs: da.std(dim="ens") for fs, da in da_preds.items()},
+        available_data.channels,
+        global_plotting_opts[stream],
+        )
+        std_config_dict = oc.OmegaConf.to_container(
+            common_ranges(*std_range_args), resolve=True
+        )
+        for var in std_config_dict:
+            if isinstance(std_config_dict[var], dict):
+                std_config_dict[var]["colormap"] = "YlOrRd"
+    else:
+        std_config_dict = maps_config_dict
+
     num_plot_workers = get_num_workers(
         check_process_headroom=True,
         max_workers=reader.eval_cfg.get("max_workers", None),
@@ -687,6 +733,7 @@ def plot_data(
                     "plot_histograms": plot_histograms,
                     "maps_config": maps_config_dict,
                     "bias_config": bias_config_dict,
+                    "std_config": std_config_dict, 
                 }
             )
 
@@ -735,12 +782,18 @@ def plot_data(
 
         tags: list[str] = []
         for ens in available_data.ensemble:
-            tags.append("preds" if not has_ens else f"preds_ens_{ens}")
+            if ens in ("mean", "std"):
+                tags.append(f"preds_ens_{ens}")
+            else:
+                tags.append("preds" if not has_ens else f"preds_ens_{ens}")
         if plot_target:
             tags.append("targets")
         if plot_bias:
             for ens in available_data.ensemble:
-                tags.append("bias" if not has_ens else f"bias_ens_{ens}")
+                if ens in ("mean", "std"):
+                    tags.append(f"bias_ens_{ens}")
+                else:
+                    tags.append("bias" if not has_ens else f"bias_ens_{ens}")
 
         for tag in tags:
             _dispatch_animations(**anim_kw, tag=tag)

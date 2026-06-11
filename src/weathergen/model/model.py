@@ -344,12 +344,6 @@ class Model(torch.nn.Module):
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
         self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
 
-        self.sigma_head = nn.Sequential(
-            nn.LayerNorm(D),
-            nn.Linear(D, D),
-            nn.SiLU(),
-            nn.Linear(D, 1)
-        )
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -818,14 +812,14 @@ class Model(torch.nn.Module):
 
             sigma_log = torch.exp(self.latent_perturbation_log_sigma).item()
 
-            logger.info(
-                f"tokens_std={tokens_std:.4f} "
-                f"tokens_abs={tokens_abs:.4f} "
-                f"sigma={sigma_log:.4f} "
-                f"sigma/tokens_std={sigma_log/tokens_std:.4f}"
-            )
+            #logger.info(
+            #    f"tokens_std={tokens_std:.4f} "
+            #    f"tokens_abs={tokens_abs:.4f} "
+            #    f"sigma={sigma_log:.4f} "
+            #    f"sigma/tokens_std={sigma_log/tokens_std:.4f}"
+           #) )
             override = self.cf.get("latent_perturbation_sigma_override", None)
-            logger.info(f"sigma_override={override}")
+            #logger.info(f"sigma_override={override}")
             if override is not None:
                 sigma = torch.tensor(
                     override,
@@ -834,7 +828,7 @@ class Model(torch.nn.Module):
                 )
             else:
                 sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
-            logger.info(f"effective_sigma={sigma.item()}")
+            #logger.info(f"effective_sigma={sigma.item()}")
             eps = torch.randn(M, B, H * Q, D, device=tokens.device, dtype=tokens.dtype)
             tokens_tiled = (tokens.unsqueeze(0) + sigma * eps).reshape(M * B, H * Q, D)
             latent_spread = (
@@ -843,9 +837,9 @@ class Model(torch.nn.Module):
                 .mean()
             )
 
-            logger.info(
-                f"latent_spread={latent_spread.item():.6f}"
-            )
+            #logger.info(
+            #    f"latent_spread={latent_spread.item():.6f}"
+            #)
         else:
             M = 1
             tokens_tiled = tokens
@@ -970,12 +964,12 @@ class Model(torch.nn.Module):
                     #)
                     if M > 1:
                         output_spread = pred_members.std(dim=0).mean()
-                        logger.info(
-                            f"{stream_name}: "
-                            f"latent_spread={latent_spread.item():.6f} "
-                            f"output_spread={output_spread.item():.6f} "
-                            f"gain={output_spread.item()/latent_spread.item() + 1e-8:.6f}"
-                        )
+                        #logger.info(
+                        #    f"{stream_name}: "
+                        #    f"latent_spread={latent_spread.item():.6f} "
+                        #    f"output_spread={output_spread.item():.6f} "
+                        #    f"gain={output_spread.item()/latent_spread.item() + 1e-8:.6f}"
+                        #)
                     pred = pred_members.reshape(M * E,P,C)
 
                 assert pred.shape[1] == P, f"expected {P} points in dim=1, got {pred.shape[1]}"

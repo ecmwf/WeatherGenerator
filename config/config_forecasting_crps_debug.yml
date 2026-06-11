@@ -86,10 +86,10 @@ latent_noise_deterministic_latents: True
 # Latent Gaussian perturbation for probabilistic forecasting (CRPS training)
 # Set num_members > 1 to enable; use kernel_crps loss.
 latent_perturbation_num_members: 5    # 0 / 1 = disabled; >1 = number of ensemble members
-latent_perturbation_sigma_init: 0.05  # initial noise standard deviation
-latent_perturbation_sigma_learnable: True  # true = nn.Parameter; false = fixed buffer
-latent_perturbation_sigma_lr: 1.0e-2  # separate LR for log_sigma (~200x main peak LR); 0.0 = disabled
-latent_perturbation_sigma_override: None
+latent_perturbation_sigma_init: 0.1  # initial noise standard deviation
+latent_perturbation_sigma_learnable: False  # true = nn.Parameter; false = fixed buffer
+latent_perturbation_sigma_lr: 0.0 #1.0e-2  # separate LR for log_sigma (~200x main peak LR); 0.0 = disabled
+latent_perturbation_sigma_override: null
 
 freeze_modules: ""
 load_chkpt: {}

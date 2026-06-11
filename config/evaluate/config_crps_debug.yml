@@ -12,7 +12,13 @@ default_streams:
       forecast_step: "all"
       sample: "all"
       ensemble: "all"      # required for all probabilistic metrics
+    plotting:
+      sample: [0]
+      forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      plot_maps: true
+      plot_histograms: true
+      plot_animations: true
 
 run_ids:
-  hoe9vsh1:
-    label: "CRPS epoch 2"
+  zt0vcpho:
+    label: "CRPS_s0.05_learnable_5members"

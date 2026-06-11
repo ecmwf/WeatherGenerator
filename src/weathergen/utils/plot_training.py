@@ -715,10 +715,9 @@ def plot_scalar_metrics(
     x_col_hint = x_axis  # substring to identify the x-axis column
 
     for group_name, cols in groups.items():
-        n = len(cols)
-        fig, axes = plt.subplots(n, 1, figsize=(10, 4 * n), dpi=PLOT_DPI_VALUE, squeeze=False)
+        for col in cols:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 4), dpi=PLOT_DPI_VALUE)
 
-        for ax, col in zip(axes[:, 0], cols):
             legend_str = []
             for j, run_data in enumerate(runs_data):
                 df = run_data.train if stage == "train" else run_data.val
@@ -739,23 +738,22 @@ def plot_scalar_metrics(
                     ("R" if runs_active[j] else "X") + " : " + run_id + " : " + list(runs_ids.values())[j][1]
                 )
 
-            ax.set_title(col)
+            ax.set_title(f"{col} ({stage})")
             ax.set_xlabel(x_axis)
             ax.grid(True, which="both", ls="-")
             if legend_str:
                 _add_legend(legend_str, ax=ax, legend_outside=legend_outside)
 
-        fig.suptitle(f"{group_name} ({stage})", fontsize=12)
-        fig.tight_layout()
+            fig.tight_layout()
 
-        safe_group = group_name.replace("/", "_")
-        rstr = "".join([f"{r}_" for r in runs_ids])
-        if len(rstr) + len(safe_group) + 10 > MAX_FILENAME_LEN:
-            rstr = rstr[: MAX_FILENAME_LEN - len(safe_group) - 10]
-        plt_fname = plot_dir / f"{rstr}{safe_group}_{stage}.png"
-        _logger.info(f"Saving scalar metrics plot to '{plt_fname}'")
-        fig.savefig(plt_fname, bbox_inches="tight")
-        plt.close(fig)
+            safe_col = col.replace("/", "_")
+            rstr = "".join([f"{r}_" for r in runs_ids])
+            if len(rstr) + len(safe_col) + 10 > MAX_FILENAME_LEN:
+                rstr = rstr[: MAX_FILENAME_LEN - len(safe_col) - 10]
+            plt_fname = plot_dir / f"{rstr}{safe_col}_{stage}.png"
+            _logger.info(f"Saving scalar metrics plot to '{plt_fname}'")
+            fig.savefig(plt_fname, bbox_inches="tight")
+            plt.close(fig)
 
 
 def plot_train(args=None):
