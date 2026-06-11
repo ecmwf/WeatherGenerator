@@ -130,6 +130,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.step_timedelta,
         )
 
+        # needed as offset for permutations
+        source_cfgs = self.mode_cfg.get("model_input")
+        self.max_input_steps = np.array(
+            [sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()]
+        ).max()
+
         self.time_window_handler = tw
         if is_root():
             logger.info(self.time_window_handler)
@@ -209,7 +215,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
-        return np.arange(perms_len)
+        return np.arange(self.max_input_steps, perms_len)
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""

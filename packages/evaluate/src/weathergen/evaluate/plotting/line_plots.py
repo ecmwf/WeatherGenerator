@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
 import xarray as xr
 
@@ -62,12 +63,16 @@ class LinePlots:
         self.baseline = plotter_cfg.get("baseline")
         self.out_plot_dir_lines = Path(output_basedir) / "line_plots"
         self.out_plot_dir_ratio = Path(output_basedir) / "ratio_plots"
+        self.out_plot_dir_psd = Path(output_basedir) / "psd_plots"
         if not os.path.exists(self.out_plot_dir_lines):
             _logger.info(f"Creating dir {self.out_plot_dir_lines}")
             os.makedirs(self.out_plot_dir_lines, exist_ok=True)
         if not os.path.exists(self.out_plot_dir_ratio):
             _logger.info(f"Creating dir {self.out_plot_dir_ratio}")
             os.makedirs(self.out_plot_dir_ratio, exist_ok=True)
+        if not os.path.exists(self.out_plot_dir_psd):
+            _logger.info(f"Creating dir {self.out_plot_dir_psd}")
+            os.makedirs(self.out_plot_dir_psd, exist_ok=True)
 
     def _check_lengths(self, data: xr.DataArray | list, labels: str | list) -> tuple[list, list]:
         """
@@ -697,3 +702,86 @@ class LinePlots:
         parts = ["heat_map", metric, tag]
         name = "_".join(filter(None, parts))
         plt.savefig(f"{self.out_plot_dir.joinpath(name)}.{self.image_format}")
+
+    # ------------------------------------------------------------------
+    # PSD summary plot
+    # ------------------------------------------------------------------
+
+    def psd_plot(
+        self,
+        psd_datasets: list[dict],
+        labels: list[str],
+        tag: str = "",
+        variable: str = "",
+        forecast_step: str = "",
+    ) -> None:
+        """Create a PSD summary plot overlaying multiple runs.
+
+        Each entry in *psd_datasets* is a dict with keys
+        ``frequencies``, ``psd_target``, ``psd_prediction``, ``psd_method``.
+
+        Parameters
+        ----------
+        psd_datasets : list[dict]
+            One dict per run, each containing the PSD arrays stored by
+            ``Scores.calc_psd`` in ``.attrs``.
+        labels : list[str]
+            Human-readable label for each run.
+        tag : str
+            Filename tag.
+        """
+        out_dir = Path(self.out_plot_dir_psd)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use the target from the first run as reference
+        freq = np.asarray(psd_datasets[0]["frequencies"])
+        tar_psd = np.asarray(psd_datasets[0]["psd_target"])
+
+        fig, (ax_spec, ax_ratio) = plt.subplots(
+            2,
+            1,
+            figsize=self.fig_size or (10, 8),
+            gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
+        )
+
+        # Upper panel: log-log spectra
+        ax_spec.loglog(freq, tar_psd, color="black", lw=1.5, label="Target")
+        colors = plt.cm.tab10.colors
+        for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
+            c = colors[i % len(colors)]
+            ax_spec.loglog(
+                np.asarray(ds["frequencies"]),
+                np.asarray(ds["psd_prediction"]),
+                color=c,
+                lw=1.5,
+                label=label,
+            )
+        ax_spec.set_ylabel("Power")
+        psd_method = psd_datasets[0].get("psd_method", "sht")
+        title_parts = [f"PSD ({psd_method})"]
+        if variable:
+            title_parts.append(variable)
+        if forecast_step:
+            title_parts.append(f"step {forecast_step}")
+        ax_spec.set_title(" – ".join(title_parts))
+        ax_spec.legend(frameon=False, fontsize=7)
+        ax_spec.grid(True, which="both", ls="--", alpha=0.4)
+
+        # Lower panel: ratio (pred / target)
+        for i, (ds, label) in enumerate(zip(psd_datasets, labels, strict=False)):
+            c = colors[i % len(colors)]
+            pred = np.asarray(ds["psd_prediction"])
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = np.where(tar_psd > 0, pred / tar_psd, np.nan)
+            ax_ratio.semilogx(freq, ratio, color=c, lw=1.2, label=label)
+        ax_ratio.axhline(1.0, ls="--", color="gray", lw=0.8)
+        ax_ratio.set_ylabel("Pred / Target")
+        ax_ratio.set_xlabel("Frequency (1/deg)")
+        ax_ratio.set_ylim(0, 2)
+        ax_ratio.grid(True, which="both", ls="--", alpha=0.4)
+
+        name = tag or "psd"
+        fname = out_dir / f"{name}.{self.image_format}"
+        _logger.debug(f"Saving PSD summary plot to {fname}")
+        fig.savefig(str(fname), bbox_inches="tight", dpi=self.dpi_val)
+        plt.close(fig)
