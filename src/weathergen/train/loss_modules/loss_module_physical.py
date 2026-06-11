@@ -237,9 +237,8 @@ class LossPhysical(LossModuleBase):
                 ema = self.channel_weights_ema[stream_name]
                 if ema.numel() > 0:
                     l_min = ema.min().clamp(min=1e-8)
-                    L = self.ema_L
                     # Clamp max weight to L * min weight as per Samudra 2 paper
-                    clamped_ema = ema.clamp(max=L * l_min)
+                    clamped_ema = ema.clamp(max=self.ema_L * l_min)
                     # Normalize so mean is 1.0 to preserve overall learning rate scale
                     weights_channels = clamped_ema / clamped_ema.mean()
                 else:
@@ -350,7 +349,7 @@ class LossPhysical(LossModuleBase):
                                 spoof_weight * v if v != 0.0 and not is_spoof else torch.nan
                             )
 
-                        # Update EMA for dynamic loss if enabled, using single-step (timestep_idx=0) MSE
+                        # Update EMA for dynamic loss if enabled
                         if (
                             self.stage == TRAIN
                             and self.dynamic_loss_cfg is not None
@@ -361,10 +360,9 @@ class LossPhysical(LossModuleBase):
                             with torch.no_grad():
                                 mse_per_chan = loss_lfct_chs.detach().clamp(min=1e-8)
                                 inv_mse = 1.0 / mse_per_chan
-                                W = self.ema_window
                                 self.channel_weights_ema[stream_name] = (
-                                    1.0 - 1.0 / W
-                                ) * self.channel_weights_ema[stream_name] + (1.0 / W) * inv_mse
+                                    1.0 - 1.0 / self.ema_window
+                                ) * self.channel_weights_ema[stream_name] + (1.0 / self.ema_window) * inv_mse
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
