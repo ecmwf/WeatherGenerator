@@ -209,8 +209,8 @@ training_config:
     lr_max: 1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
-    num_steps_warmup: 512
-    num_steps_cooldown: 1024
+    num_steps_warmup: 1024
+    num_steps_cooldown: 16384
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
@@ -222,7 +222,7 @@ training_config:
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.9875 # at B=8 beta1 =0.9
-      beta2 : 0.994 # at B=8 beta1 approx 0.95
+      beta2 : 0.99875 # at B=8 beta1 approx 0.99
       eps : 2e-08
 
   losses : {

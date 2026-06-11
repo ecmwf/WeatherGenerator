@@ -119,11 +119,11 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 8e-5
+    lr_max: 4e-5
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256
-    num_steps_cooldown: 512
+    num_steps_cooldown: 16384
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
@@ -136,7 +136,7 @@ training_config:
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.9875 # at B=8 beta1 =0.9
-      beta2 : 0.994 # at B=8 beta1 approx 0.95
+      beta2 : 0.99875 # at B=8 beta1 approx 0.95
       eps : 1e-08
 
   losses : {

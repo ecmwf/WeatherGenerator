@@ -7,6 +7,7 @@ METOP_ABC_AVHRR_IASI:
   geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'noise_time']
   loss_weight: 1.0
   token_size: 512
+  tokenize_spacetime: False
   embed:
     net: transformer
     num_tokens: 1
