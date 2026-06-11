@@ -20,6 +20,7 @@ ERA5 :
   tokenize_spacetime : False
   max_num_targets: 20000
   frequency : 06:00:00
+  forcing : True
   embed : 
     net : transformer
     num_tokens : 1
