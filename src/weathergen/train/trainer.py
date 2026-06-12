@@ -29,6 +29,7 @@ from torch.profiler import ProfilerActivity, profile
 import weathergen.common.config as config
 from weathergen.common.config import Config
 from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
+from weathergen.datasets.batch import ModelBatch
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
     init_model_and_shard,
@@ -584,7 +585,7 @@ class Trainer(TrainerBase):
         else:
             return {}
         
-    def _train_batch(self, batch: torch.Tensor, bidx: int):
+    def _train_batch(self, batch: ModelBatch, bidx: int):
         if self.cf.data_loading.get("memory_pinning", False):
             batch = batch.pin_memory()
         batch.to_device(self.device)
