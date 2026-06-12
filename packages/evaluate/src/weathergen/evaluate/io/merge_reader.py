@@ -236,7 +236,7 @@ class WeatherGenMergeReader(Reader):
         """
         for reader in self.readers:
             clim_data_path = reader.get_climatology_filename(stream)
-            if clim_data_path:
+            if clim_data_path and Path(clim_data_path).exists():
                 return clim_data_path
         return None
 

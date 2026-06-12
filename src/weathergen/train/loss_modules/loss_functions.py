@@ -289,7 +289,7 @@ def mae(
 
 def cosine_latitude(target_coords, min_value=1e-3, max_value=1.0):
     latitudes_radian = target_coords[:, 0] * np.pi / 180
-    return (max_value - min_value) * np.cos(latitudes_radian) + min_value
+    return (max_value - min_value) * torch.cos(latitudes_radian) + min_value
 
 
 def gamma_decay(num_forecast_steps, gamma):

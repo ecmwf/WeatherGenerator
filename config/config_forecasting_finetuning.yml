@@ -7,7 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
+# freeze_modules: ".*global.*|.*local.*|.*adapter.*|.*q_cells.*|.*latent.*|.*ERA5.*"
+
+# streams_directory: "./config/streams/operan_1deg_forecasting/"
+streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres/"
 
 general:
 
@@ -37,24 +40,44 @@ training_config:
 
   num_mini_epochs: 16
 
-  start_date: 2014-01-01T00:00
+  start_date: 2016-01-01T00:00
   end_date: 2022-12-31T00:00
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 1e-4
+    lr_max: 5e-5
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
-    policy_decay: "cosine"
+    policy_decay: "constant"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
 
   forecast :
       time_step: 06:00:00
       offset: 1
-      num_steps: 8
+      num_steps: 3
       policy: "fixed"
+
+
+# test config; full test config is merge of validation and test config
+test_config: 
+
+  samples_per_mini_epoch: 4096
+  shuffle: False
+
+  start_date: 2023-06-01T00:00
+  end_date: 2023-08-31T00:00
+
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 4096,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
 

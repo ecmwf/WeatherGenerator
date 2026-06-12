@@ -1,0 +1,31 @@
+
+
+parallelize: false
+# !!! BE CAREFUL !!!
+# Parallelization is supported but not recommended — can lead to unexpected issues.
+
+stages:
+  - name: forecast
+    stage: train
+    base_config: ./config/config_operan_georing_avhrr_forecasting_lowres.yml
+    chain_jobs: 8
+    nodes: 2
+    slurm_args:
+      - "--time=12:00:00"
+
+  - name: inference
+    stage: inference
+    from_run_id: STAGE.forecast
+    nodes: 1
+    slurm_args:
+      - "--time=12:00:00"
+
+  - name: evaluation
+    stage: evaluation
+    run_ids: [STAGE.inference]
+    eval_config: config/evaluate/eval_config_default.yml
+    nodes: 1
+    slurm_args:
+      - "--time=08:00:00"
+
+

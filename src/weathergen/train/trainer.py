@@ -391,9 +391,7 @@ class Trainer(TrainerBase):
         )
 
         if self.cf.general.istep > 0 and is_root():
-            str = f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}"
-            if is_root():
-                logger.info(str)
+            logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
         # Instantiate loss calculator modules to compute losses
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
@@ -425,17 +423,22 @@ class Trainer(TrainerBase):
         # training loop
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
-            logger.info(f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train.")
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: train."
+                )
             self.train(mini_epoch)
 
-            logger.info(
-                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
-            )
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
+                )
             self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
 
-            logger.info(
-                f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
-            )
+            if is_root():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
+                )
             self.save_model(mini_epoch)
 
         # log final model
@@ -955,8 +958,9 @@ class Trainer(TrainerBase):
 
                 for key, value in losses_all.items():
                     if key.endswith("avg"):
+                        val = np.nan if np.isnan(value).all() else f"{np.nanmean(value):0.4E}"
                         logger.info(
-                            f"{key} : {np.nanmean(value):0.4E} \t",
+                            f"{key} : {val} \t",
                         )
                 logger.info("\n")
 

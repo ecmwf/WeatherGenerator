@@ -217,10 +217,8 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
         maybe_sharded_sd = {}
         for param_name, full_tensor in params.items():
             sharded_meta_param = meta_sharded_sd.get(param_name)
-            if (
-                sharded_meta_param is None
-                or type(sharded_meta_param) is not torch.distributed.tensor.DTensor
-            ):
+            if sharded_meta_param is None or type(sharded_meta_param) is not torch.distributed.tensor.DTensor:
+                logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
                 continue
             sharded_tensor = distribute_tensor(
                 full_tensor,
