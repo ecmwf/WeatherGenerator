@@ -75,10 +75,6 @@ dev = [
 # aarch64: gpu
 [project.optional-dependencies]
 
-performance = [
-  "weathergen-performance",
-]
-
 cpu = [
   'torch==2.6.0',
 ]
