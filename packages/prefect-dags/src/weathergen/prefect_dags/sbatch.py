@@ -36,6 +36,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
+import httpx
 import prefect.runtime.flow_run
 from prefect import get_client
 from prefect.artifacts import acreate_markdown_artifact
@@ -72,6 +73,11 @@ from weathergen.prefect_dags.slurm import (
 _LEASE_DURATION = timedelta(seconds=20)
 # How often wait_completion_single re-checks (status variable + lease).
 _POLL_INTERVAL_SECS = 5
+# How long wait_completion_single tolerates a Prefect API outage (server
+# restart, network blip) before giving up with an OpError, and the cap on
+# the retry backoff during the outage.
+_API_OUTAGE_TOLERANCE_SECS = 300
+_API_OUTAGE_MAX_BACKOFF_SECS = 60
 
 _PRFEFECT_NUM_READS = 200
 # The children processes can update for 3 minutes, after which the lease expires.
@@ -577,43 +583,87 @@ async def wait_completion_single(
     `sbatch`, such as by an external launcher script), it is created with a
     PENDING status so the monitor loop picks the job up. The variable is
     deleted once the job reaches a terminal state.
+
+    Transient Prefect API outages (server restart, network blip, laptop
+    sleep) are tolerated: polling retries with backoff for up to
+    `_API_OUTAGE_TOLERANCE_SECS` before giving up with an OpError. The slurm
+    jobs themselves are unaffected by such outages.
     """
+    outage_started: datetime | None = None
+    backoff = _POLL_INTERVAL_SECS
     while True:
-        guard = await _flow_cancellation_guard(logger, ctx, runner)
-        if is_err(guard):
-            return guard
-        if guard.cancelled:
-            # The user asked to cancel this flow run; its jobs (including this
-            # one) have been committed to scancel. Fold immediately rather
-            # than waiting for sacct to report the terminal state.
-            logger.info(f"SLURM job {job_id} cancelled with its flow run.")
-            await _delete_status(runner.hpc, job_id)
-            return "CANCELLED"
-        await _try_update_status(logger, ctx, runner)
-        status = await _read_status(runner.hpc, job_id)
-        if status is None:
-            # Variable missing: either it should not happen (sbatch path) or
-            # the job was submitted externally and is awaited for the first time.
-            # Insert the variable with a "PENDING" status so the monitor loop
-            # can update the status.
+        try:
+            result = await _poll_completion_once(logger, ctx, job_id, runner)
+        except (httpx.HTTPError, OSError) as e:
+            # The Prefect API is unreachable. This is not a problem with the
+            # slurm job: keep polling with backoff for a bounded window.
+            now = _now_utc()
+            outage_started = outage_started or now
+            elapsed = (now - outage_started).total_seconds()
+            if elapsed > _API_OUTAGE_TOLERANCE_SECS:
+                logger.error(
+                    f"Prefect API unreachable for {elapsed:.0f}s while waiting for "
+                    f"slurm job {job_id} on hpc {runner.hpc}; giving up: {e}"
+                )
+                return OpError(err=e)
             logger.warning(
-                f"Status variable for job {job_id} on hpc {runner.hpc} is missing. "
-                f"Reinserting with PENDING status."
+                f"Prefect API unreachable ({e}); retrying in {backoff}s "
+                f"(outage tolerance: {elapsed:.0f}/{_API_OUTAGE_TOLERANCE_SECS}s)"
             )
-            await _set_status(runner.hpc, job_id, "PENDING")
-        elif status == "CANCELLING":
-            # Marked by the cancellation guard (from a concurrent task of this
-            # flow run). The guard at the top of the next iteration folds.
-            pass
-        elif status is not None and is_err(status):
-            logger.info(f"SLURM job {job_id} reached terminal error state: {status}")
-            await _delete_status(runner.hpc, job_id)
-            return status
-        elif status is not None and is_terminal_state(status):
-            logger.info(f"SLURM job {job_id} reached terminal state: {status}")
-            await _delete_status(runner.hpc, job_id)
-            return status
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, _API_OUTAGE_MAX_BACKOFF_SECS)
+            continue
+        outage_started = None
+        backoff = _POLL_INTERVAL_SECS
+        if result is not None:
+            return result
         await asyncio.sleep(_POLL_INTERVAL_SECS)
+
+
+async def _poll_completion_once(
+    logger: logging.Logger,
+    ctx: CmdContext,
+    job_id: SlurmJobId,
+    runner: CommandRunner,
+) -> Result[SlurmJobState] | None:
+    """One iteration of the wait_completion_single poll loop.
+
+    Returns the final Result when the job is done (or the guard/scancel
+    failed), or None to keep polling. Prefect API connection failures are
+    raised and handled by the caller's outage tolerance.
+    """
+    guard = await _flow_cancellation_guard(logger, ctx, runner)
+    if is_err(guard):
+        return guard
+    if guard.cancelled:
+        # The user asked to cancel this flow run; its jobs (including this
+        # one) have been committed to scancel. Fold immediately rather
+        # than waiting for sacct to report the terminal state.
+        logger.info(f"SLURM job {job_id} cancelled with its flow run.")
+        await _delete_status(runner.hpc, job_id)
+        return "CANCELLED"
+    await _try_update_status(logger, ctx, runner)
+    status = await _read_status(runner.hpc, job_id)
+    if status is None:
+        # Variable missing: either it should not happen (sbatch path) or
+        # the job was submitted externally and is awaited for the first time.
+        # Insert the variable with a "PENDING" status so the monitor loop
+        # can update the status.
+        logger.warning(
+            f"Status variable for job {job_id} on hpc {runner.hpc} is missing. "
+            f"Reinserting with PENDING status."
+        )
+        await _set_status(runner.hpc, job_id, "PENDING")
+        return None
+    if status == "CANCELLING":
+        # Marked by the cancellation guard (from a concurrent task of this
+        # flow run). The guard at the top of the next iteration folds.
+        return None
+    if is_terminal_state(status):
+        logger.info(f"SLURM job {job_id} reached terminal state: {status}")
+        await _delete_status(runner.hpc, job_id)
+        return status
+    return None
 
 
 @dataclass
