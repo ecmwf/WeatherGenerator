@@ -311,6 +311,7 @@ def plot_loss_avg(
     runs_data,
     runs_active,
     stage=TRAIN,
+    x_axis: str = "samples",
     x_scale_log=False,
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
@@ -322,10 +323,14 @@ def plot_loss_avg(
 
     _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
+    # x-axis label: "elapsed_training_time" -> "elapsed training time [s]", else "step"
+    x_label = "elapsed training time [s]" if "elapsed_training_time" in x_axis else "step"
+
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
-        x_vals = np.array(run_data_stage["num_samples"])
+        x_col = next(filter(lambda c: x_axis in c, run_data_stage.columns))
+        x_vals = np.array(run_data_stage[x_col])
         y_vals = np.array(run_data_stage["loss_avg_mean"])
 
         mask = np.logical_and(~np.isnan(x_vals), ~np.isnan(y_vals))
@@ -347,7 +352,7 @@ def plot_loss_avg(
         plt.xscale("log")
     plt.title("average loss")
     plt.ylabel("loss")
-    plt.xlabel("step")
+    plt.xlabel(x_label)
     plt.tight_layout()
     _add_legend(
         legend_str,
@@ -379,10 +384,9 @@ def plot_loss_per_stream(
     channels: list[str],
     forecast_steps: list[int],
     x_axis: str = "samples",
-    x_type: str = "step",
+    x_scale_log: bool = False,
     x_lim: list[float] | None = None,
     y_lim: list[float] | None = None,
-    x_scale_log: bool = False,
     legend_outside: bool = False,
     legend_font_size: str = "x-small",
     legend_num_columns: int = 3,
@@ -408,9 +412,7 @@ def plot_loss_per_stream(
     errs : list
         list of errors to plot (e.g. mse, stddev)
     x_axis : str
-        x-axis strings used in the column names (options: "samples", "dtime")
-    x_type : str
-        x-axis type (options: "step", "reltime")
+        x-axis column name used for the x-axis (options: "samples", "elapsed_training_time")
     x_scale_log : bool
         whether to use log scale for x-axis
     """
@@ -525,7 +527,13 @@ def plot_loss_per_stream(
                 title_loss = ".".join(title_col.split(".")[:-1])
                 plt.title(title_loss + " (" + ", ".join(modes) + ")")
                 plt.ylabel(err)
-                plt.xlabel(x_axis if x_type == "step" else "rel. time [h]")
+                # x-axis label: "elapsed_training_time" -> friendly name, else use column as-is
+                x_label = (
+                    "elapsed training time [s]"
+                    if "elapsed_training_time" in x_axis
+                    else x_axis
+                )
+                plt.xlabel(x_label)
                 plt.tight_layout()
                 _add_legend(
                     legend_str,
@@ -596,7 +604,7 @@ def plot_loss_per_run(
     errs : list
         list of errors to plot (e.g. mse, stddev)
     x_axis : str
-        x-axis strings used in the column names (options: "samples", "dtime")
+        x-axis column name used for the x-axis (options: "samples", "elapsed_training_time")
     x_scale_log : bool
         whether to use log scale for x-axis
     """
@@ -666,7 +674,10 @@ def plot_loss_per_run(
         plt.xscale("log")
     plt.grid(True, which="both", ls="-")
     plt.ylabel("loss")
-    plt.xlabel("samples")
+    x_label = (
+        "elapsed training time [s]" if "elapsed_training_time" in x_axis else x_axis
+    )
+    plt.xlabel(x_label)
     plt.tight_layout()
     _add_legend(
         legend_str,
@@ -794,13 +805,13 @@ def plot_train(args=None):
         help="x-lim for per-stream plots",
     )
     parser.add_argument(
-        "--x_type",
+        "--x-axis",
         "-x",
-        dest="x_type",
-        default="step",
+        dest="x_axis",
+        default="samples",
         type=str,
-        choices=["step", "reltime"],
-        help="Type of x-axis used in plots. Options: 'step' or 'reltime'",
+        choices=["samples", "elapsed_training_time"],
+        help="X-axis column for plots: 'samples' (default) or 'elapsed_training_time'",
     )
     parser.add_argument(
         "--log-x",
@@ -862,9 +873,7 @@ def plot_train(args=None):
     model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
-    x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
-    if args.x_type not in x_types_valid:
-        raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
+    x_axis = args.x_axis
 
     # Post-processing default logic for config from YAML-file
     if args.fd is None and args.fy is None:
@@ -924,6 +933,7 @@ def plot_train(args=None):
         runs_data,
         runs_active,
         plot_dir=out_dir,
+        x_axis=x_axis,
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
@@ -937,6 +947,7 @@ def plot_train(args=None):
         runs_data,
         runs_active,
         stage=TRAIN,
+        x_axis=x_axis,
         legend_outside=args.legend_outside,
         legend_font_size=args.legend_font_size,
         legend_num_columns=args.legend_num_columns,
@@ -953,7 +964,7 @@ def plot_train(args=None):
         errs=args.metrics,
         channels=args.channels,
         forecast_steps=args.forecast_steps,
-        x_type=args.x_type,
+        x_axis=x_axis,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
@@ -972,7 +983,7 @@ def plot_train(args=None):
         errs=args.metrics,
         channels=args.channels,
         forecast_steps=args.forecast_steps,
-        x_type=args.x_type,
+        x_axis=x_axis,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
@@ -991,7 +1002,7 @@ def plot_train(args=None):
         errs=args.metrics,
         channels=args.channels,
         forecast_steps=args.forecast_steps,
-        x_type=args.x_type,
+        x_axis=x_axis,
         x_scale_log=x_scale_log,
         x_lim=args.per_stream_x_lim,
         y_lim=args.per_stream_y_lim,
