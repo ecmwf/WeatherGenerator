@@ -35,13 +35,17 @@ def encode_times_source(times, time_win) -> torch.tensor:
     dt = pd.to_datetime(times)
     dt_win = pd.to_datetime(time_win)
     dt_delta = dt - dt_win[0]
+    year = np.atleast_1d(dt.year)
+    dayofyear = np.atleast_1d(dt.dayofyear)
+    minutes = np.atleast_1d(dt.hour * 60 + dt.minute)
+    delta_seconds = np.atleast_1d(dt_delta.seconds)
     time_tensor = torch.cat(
         (
-            torch.tensor(dt.year, dtype=fp32).unsqueeze(1),
-            torch.tensor(dt.dayofyear, dtype=fp32).unsqueeze(1),
-            torch.tensor(dt.hour * 60 + dt.minute, dtype=fp32).unsqueeze(1),
-            torch.tensor(dt_delta.seconds, dtype=fp32).unsqueeze(1),
-            torch.tensor(dt_delta.seconds, dtype=fp32).unsqueeze(1),
+            torch.tensor(year, dtype=fp32).unsqueeze(1),
+            torch.tensor(dayofyear, dtype=fp32).unsqueeze(1),
+            torch.tensor(minutes, dtype=fp32).unsqueeze(1),
+            torch.tensor(delta_seconds, dtype=fp32).unsqueeze(1),
+            torch.tensor(delta_seconds, dtype=fp32).unsqueeze(1),
         ),
         1,
     )
@@ -65,7 +69,9 @@ def encode_times_target(times, time_win) -> torch.tensor:
     dt = pd.to_datetime(times)
     dt_win = pd.to_datetime(time_win)
     # for target only provide local time
-    dt_delta = torch.tensor((dt - dt_win[0]).seconds, dtype=torch.float32).unsqueeze(1)
+    dt_delta = torch.tensor(np.atleast_1d((dt - dt_win[0]).seconds), dtype=torch.float32).unsqueeze(
+        1
+    )
     time_tensor = torch.cat(
         (
             dt_delta,
@@ -116,7 +122,7 @@ def hpy_cell_splits(coords: torch.tensor, hl: int):
 
 
 def hpy_splits(
-    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool
+    coords: torch.Tensor, hl: int, token_size: int, pad_tokens: bool, offset_step: int = 0
 ) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
     """Compute healpix cell for each data point and splitting information per cell;
        when the token_size is exceeded then splitting based on lat is used;
@@ -145,7 +151,7 @@ def hpy_splits(
 
     # helper variables to split according to cells
     # pad to token size *and* offset by +1 to account for the index 0 that is added for the padding
-    offset = 1 if pad_tokens else 0
+    offset = (1 if pad_tokens else 0) + offset_step
     int32 = torch.int32
     idxs_ord = [
         list(
@@ -172,11 +178,12 @@ def tokenize_space(
     token_size,
     hl,
     pad_tokens=True,
+    offset_step=0,
 ):
     """Process one window into tokens"""
 
     # idx_ord_lens is length is number of tokens per healpix cell
-    idxs_ord, idxs_ord_lens = hpy_splits(rdata.coords, hl, token_size, pad_tokens)
+    idxs_ord, idxs_ord_lens = hpy_splits(rdata.coords, hl, token_size, pad_tokens, offset_step)
 
     return idxs_ord, idxs_ord_lens
 
@@ -195,6 +202,7 @@ def tokenize_spacetime(
     idxs_cells = [[] for _ in range(num_healpix_cells)]
     idxs_cells_lens = [[] for _ in range(num_healpix_cells)]
 
+    offset_step = 0
     t_unique = np.unique(rdata.datetimes)
     for _, t in enumerate(t_unique):
         # data for current time step
@@ -202,11 +210,12 @@ def tokenize_spacetime(
         rdata_cur = IOReaderData(
             rdata.coords[mask], rdata.geoinfos[mask], rdata.data[mask], rdata.datetimes[mask]
         )
-        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens)
+        idxs_cur, idxs_cur_lens = tokenize_space(rdata_cur, token_size, hl, pad_tokens, offset_step)
 
         # collect data for all time steps
         idxs_cells = [t + tc for t, tc in zip(idxs_cells, idxs_cur, strict=True)]
         idxs_cells_lens = [t + tc_l for t, tc_l in zip(idxs_cells_lens, idxs_cur_lens, strict=True)]
+        offset_step += mask.sum()
 
     return idxs_cells, idxs_cells_lens
 
@@ -346,7 +355,7 @@ def tokenize_apply_mask_target(
     idxs_data = torch.cat(idxs_data)
 
     # apply mask
-    datetimes = rdata.datetimes[idxs_data]
+    datetimes = np.atleast_1d(rdata.datetimes[idxs_data])
     datetimes_enc = enc_time(datetimes, time_win)
     geoinfos = rdata.geoinfos[idxs_data]
     coords = rdata.coords[idxs_data]

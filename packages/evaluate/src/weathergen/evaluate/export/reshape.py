@@ -15,6 +15,33 @@ Enhanced functions to handle Gaussian grids when converting from Zarr to NetCDF.
 """
 
 
+def get_obs_coordinates(obs: xr.Dataset):
+    """
+    Extract latitude, longitude and altitude
+    from observation dataset
+    Args:
+        obs: Dataset
+    Outputs:
+        lat: DataArray
+        lon: DataArray
+        alt: DataArray
+    """
+
+    lat = obs.latitude.astype("float32")
+    lat.name = "lat"
+
+    lon = obs.longitude.astype("float32")
+    lon.name = "lon"
+
+    alt = obs.altitude.astype("float32")
+
+    return lat, lon, alt
+
+
+def get_grid_points(data: xr.DataArray):
+    return np.column_stack((data.lat.values, data.lon.values))
+
+
 def detect_grid_type(data: xr.DataArray) -> str:
     """
     Detect whether data is on a regular lat/lon grid or Gaussian grid.
@@ -47,6 +74,7 @@ def detect_grid_type(data: xr.DataArray) -> str:
             return "regular"
 
     # Otherwise it's Gaussian (irregular spacing or reduced grid)
+    # TODO: more checks e.g. CERRA is regional
     return "gaussian"
 
 
@@ -101,16 +129,18 @@ class Regridder:
     def find_lat_lon_ordering(self) -> list[int]:
         """
         Find all the the latitude and longitude ordering for CF-parsed WeatherGenerator data
-        Ordering from North West to South East.
+        Values start at North-West and follow in consecutive rows from West to East,
+        where West is always the 0° meridian.
         Returns the indices required to reorder the data.
         Returns
         -------
             indices: list of indices to reorder the data from original to lat/lon ordered.
         """
         ds = self.dataset
-        x = ds["longitude"].values[:, 0]
+        # 0 -> 180 then -180 -> 0
+        x = (ds["longitude"].values[:, 0]) % 360  # convert to 0-360 range
         y = ds["latitude"].values[:, 0]
-        indices = np.lexsort((x, -y))
+        indices = np.lexsort((x, y))
         return indices
 
     def detect_input_grid_type(self) -> str:
@@ -237,9 +267,15 @@ class Regridder:
         pos = dims.index("ncells")
         dims[pos : pos + 1] = ["latitude", "longitude"]
         dims = tuple(dims)
-
+        ordered_dims = (
+            ["valid_time", "pressure", "latitude", "longitude"]
+            if len(dims) == 4
+            else ["valid_time", "latitude", "longitude"]
+        )
+        permutation_indices = [dims.index(o_dim) for o_dim in ordered_dims]
+        regridded_values = np.transpose(regridded_values, axes=permutation_indices)
         regrid_data = xr.DataArray(
-            data=regridded_values, dims=dims, coords=new_coords, attrs=attrs, name=data.name
+            data=regridded_values, dims=ordered_dims, coords=new_coords, attrs=attrs, name=data.name
         )
 
         return regrid_data

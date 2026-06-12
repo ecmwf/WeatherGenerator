@@ -71,12 +71,6 @@ def infer(run_id):
     main(
         [
             "inference",
-            "-start",
-            "2021-10-10",
-            "-end",
-            "2022-10-11",
-            "--samples",
-            "10",
             "--mini-epoch",
             "0",
             "--from-run-id",
@@ -129,7 +123,7 @@ def evaluate_results(run_id):
         }
     )
     # Not passing the mlflow client for tests.
-    evaluate_from_config(cfg, None, None)
+    evaluate_from_config(cfg, None)
 
 
 def load_metrics(run_id):
