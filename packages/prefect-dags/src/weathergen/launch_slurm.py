@@ -2,6 +2,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import prefect.runtime.flow_run
 import prefect.runtime.task_run
@@ -173,20 +174,100 @@ def _parse_launch_summary(output: str) -> tuple[str, list[SlurmJobId], str] | No
 async def launch_slurm(
     ctx: CmdContext,
     wg_private_path: str,
-    stage: str,
+    # --stage: train, inference, or evaluation. Ignored when `pipeline` is set.
+    stage: Literal["train", "inference", "evaluation"] = "train",
+    # --from-run-id: run id to continue (training) or trained model to use
+    # (inference, required there).
     from_run_id: str | None = None,
+    *,
+    # --slurm-script: path to the slurm script (must be in
+    # WeatherGenerator-private/hpc/).
+    slurm_script: str | None = None,
+    # --results-dir: "shared" (script default), "local", or a directory path.
+    results_dir: str | None = None,
+    # --run-ids: inference run ids to evaluate (evaluation stage only;
+    # required in single-stage evaluation mode).
+    run_ids: list[str] | None = None,
+    # --dir: root directory for slurm job artifacts and copies.
+    root_dir: str | None = None,
+    # --link-venv: link the current venv instead of creating a fresh one.
+    link_venv: bool = False,
+    # --config: experiment-specific config files, ascending precedence.
+    config: list[str] | None = None,
+    # --options: individual config overrides (parent_obj.nested_obj=value);
+    # takes precedence over --config.
+    options: list[str] | None = None,
+    # --base-config: base config for fresh training (script defaults to
+    # ./config/default_config.yml).
+    base_config: str | None = None,
+    # --eval-config: evaluation yaml config passed to run_evaluation.py
+    # (evaluation stage only).
+    eval_config: str | None = None,
+    # --mini-epoch: mini-epoch for continuing training / loading a model for
+    # inference (script default -1 = latest checkpoint).
+    mini_epoch: int | None = None,
+    # --register / --no-register: None keeps the script default (register),
+    # True forces --register, False passes --no-register.
+    register: bool | None = None,
+    # --cleanup-scripts: "yes" (script default) or "no".
+    cleanup_scripts: Literal["yes", "no"] | None = None,
+    # --nodes: number of nodes (1-8); ignored for evaluation (always 1).
+    nodes: int | None = None,
+    # --chain-jobs: consecutive training jobs to chain (training only).
+    chain_jobs: Literal[1, 2, 3, 4] | None = None,
+    # --account: slurm account; falls back to BUDGET_ACCOUNTS env var.
+    account: str | None = None,
+    # --nsys-profiling: enables nsys profiling in the job environment.
+    nsys_profiling: bool = False,
+    # --time: walltime limit for the slurm jobs.
     time: str | None = None,
 ) -> Result[LaunchSlurm]:
     """
     Launch a sequence of slurm jobs using the weathergenerator
     launch_slurm.py command, and returns the terminal results
     with status of all the launch_slurm jobs.
+
+    Each keyword argument maps to the launch-slurm.py CLI flag named in the
+    comment above it; None (or False for flags) means "do not pass the flag"
+    so the script's own default applies.
     """
     # Do not attempt to run expanduser() or resolve(), it runs on the remote HPC
     # and python will not have the appropriate file system information.
     cmd = [str(Path(wg_private_path) / "hpc" / "launch-slurm.py"), "--stage", stage]
     if from_run_id:
         cmd += ["--from-run-id", from_run_id]
+    if slurm_script:
+        cmd += ["--slurm-script", slurm_script]
+    if results_dir:
+        cmd += ["--results-dir", results_dir]
+    if run_ids:
+        cmd += ["--run-ids", *run_ids]
+    if root_dir:
+        cmd += ["--dir", root_dir]
+    if link_venv:
+        cmd += ["--link-venv"]
+    if config:
+        cmd += ["--config", *config]
+    if options:
+        cmd += ["--options", *options]
+    if base_config:
+        cmd += ["--base-config", base_config]
+    if eval_config:
+        cmd += ["--eval-config", eval_config]
+    if mini_epoch is not None:
+        cmd += ["--mini-epoch", str(mini_epoch)]
+    if register is not None:
+        cmd += ["--register" if register else "--no-register"]
+    if cleanup_scripts:
+        cmd += ["--cleanup-scripts", cleanup_scripts]
+    if nodes is not None:
+        cmd += ["--nodes", str(nodes)]
+    if chain_jobs is not None:
+        cmd += ["--chain-jobs", str(chain_jobs)]
+    if account:
+        cmd += ["--account", account]
+    if nsys_profiling:
+        cmd += ["--nsys-profiling"]
     if time:
         cmd += ["--time", time]
     logger = get_run_logger()
