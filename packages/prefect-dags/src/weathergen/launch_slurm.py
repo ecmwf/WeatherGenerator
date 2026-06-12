@@ -8,6 +8,12 @@ import prefect.runtime.flow_run
 import prefect.runtime.task_run
 from prefect.artifacts import acreate_markdown_artifact
 
+from weathergen.prefect_dags._sbatch import (
+    SlurmJobResult,
+    _artifact_key_part,
+    _format_output_section,
+    wait_completion_single,
+)
 from weathergen.prefect_dags.cmd_runners import (
     CmdContext,
     Command,
@@ -17,12 +23,6 @@ from weathergen.prefect_dags.cmd_runners import (
 from weathergen.prefect_dags.prefect import get_run_logger, task
 from weathergen.prefect_dags.result import OpError, Result, is_err
 from weathergen.prefect_dags.run import get_head_tail_logs
-from weathergen.prefect_dags.sbatch import (
-    SlurmJobResult,
-    _artifact_key_part,
-    _format_output_section,
-    wait_completion_single,
-)
 from weathergen.prefect_dags.slurm import SlurmJobId, SlurmSubmissionResult
 
 _logger = logging.getLogger(__name__)

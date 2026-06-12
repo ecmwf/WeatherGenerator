@@ -35,9 +35,10 @@ from weathergen.prefect_dags.cmd_runners._types import (
 )
 from weathergen.prefect_dags.result import OpError, Result
 
-type JscHpc = Literal["jupiter", "jureca", "juwels-booster"]
+type JscHpc = Literal["jupiter", "jureca", "juwels"]
 
 REGISTRY_URL = "https://unicore.fz-juelich.de/FZJ/rest/registries/default_registry"
+
 DEFAULT_TOKEN_FILE = Path("~/.jsc_unicore_token").expanduser()
 
 # Known UNICORE core endpoints per JSC site. These are stable; use
@@ -52,7 +53,7 @@ _JSC_SITES: dict[str, str] = {
 _VALID_HPCS: dict[JscHpc, str] = {
     "jupiter": "JUPITER",
     "jureca": "JURECA",
-    "juwels-booster": "JUWELS",
+    "juwels": "JUWELS",
 }
 
 # UNICORE terminal job statuses.

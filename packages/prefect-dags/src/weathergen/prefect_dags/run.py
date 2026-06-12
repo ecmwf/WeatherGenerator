@@ -46,15 +46,10 @@ _MAX_OUTPUT_LINES = 100
 
 
 def get_head_tail_logs(ctx: CmdContext, stdout_path: str, stderr_path: str | None) -> dict:
-    # Combine into a json output that we can easily inspect.
-    # Important: each head and tail should be truncated to _MAX_OUTPUT_BYTES and _MAX_OUTPUT_LINES to avoid overwhelming
-    # the ssh command with too much output
-    # The output should look like: ">>>> {head_out: '...', tail_out: '...', head_err: '...', tail_err: '...'}"
-    # head_err, tail_err are null if stderr_path is None.
-    # The prefix allows easy parsing of the output given that many other lines are added by the schedulers.
     header = ">>>> "
     stdout_q = shlex.quote(stdout_path)
-    # awk replaces \ " \t \r and joins lines with literal \n so the result is a valid JSON string body.
+    # awk replaces \ " \t \r and joins lines with literal \n so
+    # the result is a valid JSON string body.
     escape_awk = (
         r"""awk 'BEGIN{ORS=""} """
         r"""{gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); gsub(/\t/,"\\t"); gsub(/\r/,"\\r"); """
