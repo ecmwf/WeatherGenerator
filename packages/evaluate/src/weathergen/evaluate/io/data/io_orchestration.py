@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 from joblib import Parallel, delayed
 from joblib.externals.loky import get_reusable_executor
@@ -34,8 +35,8 @@ from weathergen.evaluate.io.data.dataarray_builders import (
     build_scatter_dataarrays,
 )
 from weathergen.evaluate.io.data.dataarray_postprocessing import (
-    _add_lead_time_coord,
-    _select_channels,
+    add_lead_time_coord,
+    select_channels,
 )
 from weathergen.evaluate.io.data.io_workers import (
     _compute_early_channel_selection,
@@ -76,8 +77,12 @@ class IOState:
     lat: NDArray
     lon: NDArray
     n_workers: int
+    regrid_opts: dict  # options for regridding gridded DataArrays; ignored for scatter
     backend: str = "loky"
     rank: str = "0000"
+    offset: np.timedelta64 | None = (
+        None  # fallback offset in hours for init_time when source_interval is missing
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +263,9 @@ def _build_io_state(
     coords, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
     read_channels: list[str] = zarr_channels if zarr_channels else all_channels
     channel_idxs: list[int] | None = None if zarr_channels else list(range(len(all_channels)))
-
+    offset = stream_cfg.get("offset")
+    if offset is not None:
+        offset = np.timedelta64(pd.Timedelta(offset).value, "h")
     # ---- Early channel selection (skip unrequested channels at numpy level) ----
     channel_idxs, read_channels = _compute_early_channel_selection(
         read_channels, channels, stream_cfg
@@ -266,6 +273,10 @@ def _build_io_state(
 
     lat = coords[:, 0]
     lon = coords[:, 1]
+
+    regrid_opts = stream_cfg.get("regrid") if is_gridded else {}
+    if isinstance(regrid_opts, bool) and regrid_opts:
+        regrid_opts = {"target_grid": [1.5, 1.5]}
 
     return IOState(
         run_id=run_id,
@@ -286,6 +297,8 @@ def _build_io_state(
         lon=lon,
         n_workers=n_io_workers,
         rank=rank,
+        offset=offset,
+        regrid_opts=regrid_opts,
     )
 
 
@@ -301,6 +314,7 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
+    regrid_opts: dict,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -318,6 +332,7 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
+        regrid_opts=regrid_opts,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -343,15 +358,28 @@ def _parallel_read(
         return results, True
 
 
-def _extract_init_times(results: list, samples: list[int]) -> NDArray:
-    """Build a (n_samples,) datetime64[ns] array of initialisation times (last source time)."""
+def _extract_init_times(
+    results: list, samples: list[int], offset: np.timedelta64 | None = None
+) -> NDArray:
+    """Build a (n_samples,) datetime64[ns] array of initialisation times (last source time).
+
+    If source_interval is empty, fall back to first_valid_time - offset so that
+    lead_time for the first sub-step of fstep 1 equals offset.
+    """
     si_list = []
     for i in range(len(samples)):
         si = results[i][3].get("source_interval", {})
-        last_str = si.get("end", si.get("start", None))
-        si_list.append(
-            np.datetime64(last_str, "ns") if last_str is not None else np.datetime64("NaT", "ns")
-        )
+        last_str = si.get("end", None)
+        if last_str is not None:
+            si_list.append(np.datetime64(last_str, "ns"))
+        elif offset is not None:
+            # Fallback: infer init_time from the first valid_time minus 1h
+            time_entry = results[i][2][0] if results[i][2] else []
+            if len(time_entry) > 0:
+                first_vt = np.datetime64(time_entry[0], "ns")
+                si_list.append(first_vt - offset)
+        else:
+            si_list.append(np.datetime64("NaT", "ns"))
     return np.array(si_list)
 
 
@@ -365,7 +393,35 @@ def _assemble_substep(
     forecast_step_val: int,
     fstep_idx: int,  # index into results[i][2] for scatter obs_times
 ) -> tuple[xr.DataArray, xr.DataArray]:
-    """Build and post-process (select, scale, add lead_time) one sub-step's DataArrays."""
+    """Build and post-process (select, scale, add lead_time) one sub-step's DataArrays.
+    Parameters
+    ----------
+    state
+        The shared I/O state.
+    results
+        The per-sample raw results from _parallel_read, needed for scatter coords and obs_times.
+    tars_list
+        List of target arrays for this sub-step, one per sample.
+    preds_list
+        List of prediction arrays for this sub-step, one per sample.
+    per_sample_valid_times
+        List of valid_time for each sample, aligned with tars_list and preds_list.
+    init_times
+        Array of initialisation times for each sample, aligned with tars_list and preds_list.
+    forecast_step_val
+        The forecast step value to assign to the output DataArrays (either fs or fstep_counter
+        depending on whether this sub-step is split from a larger fstep or not).
+    fstep_idx
+        The index into results[i][2] to extract the obs_time for this sub-step when
+        building scatter DataArrays.  For gridded DataArrays this is always 0 since
+        there's only one valid_time per fstep.
+    Returns
+    -------
+    tuple[xr.DataArray, xr.DataArray]
+        The assembled and post-processed target and prediction DataArrays for this
+        sub-step, ready for channel selection, scaling, and (for gridded) regridding.
+
+    """
     if state.is_gridded:
         da_tar, da_pred = build_gridded_dataarrays(
             tars_list,
@@ -378,6 +434,7 @@ def _assemble_substep(
             init_times,
             forecast_step_val,
             state.ens_select,
+            regrid_opts=state.regrid_opts,
         )
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
@@ -401,13 +458,13 @@ def _assemble_substep(
             per_sample_obs_times=per_sample_obs_times,
         )
 
-    da_tar, da_pred = _select_channels(
+    da_tar, da_pred = select_channels(
         da_tar, da_pred, state.stream, state.channels, state.stream_cfg
     )
 
     if state.is_gridded:
-        da_tar = _add_lead_time_coord(da_tar)
-        da_pred = _add_lead_time_coord(da_pred)
+        da_tar = add_lead_time_coord(da_tar)
+        da_pred = add_lead_time_coord(da_pred)
         da_pred = scale_z_channels(da_pred, state.stream)
         da_tar = scale_z_channels(da_tar, state.stream)
 
@@ -492,13 +549,14 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
+            regrid_opts=state.regrid_opts,
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
             n_workers = 1
 
         if init_times is None:
-            init_times = _extract_init_times(results, state.samples)
+            init_times = _extract_init_times(results, state.samples, state.offset)
 
         n_sub = results[0][3]["n_substeps"][0]
 
@@ -564,6 +622,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
+        regrid_opts=state.regrid_opts,
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)
@@ -584,6 +643,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     init_times = _extract_init_times(
         [flat_results[si * n_fsteps] for si in range(len(state.samples))],
         state.samples,
+        state.offset,
     )
 
     da_tars_dict: dict = {}

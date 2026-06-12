@@ -25,7 +25,6 @@ from weathergen.datasets.data_reader_base import (
     TimeWindowHandler,
     TIndex,
 )
-from weathergen.datasets.data_reader_fesom import DataReaderFesom
 from weathergen.datasets.data_reader_obs import DataReaderObs
 from weathergen.datasets.masking import Masker
 from weathergen.datasets.stream_data import StreamData, spoof
@@ -131,6 +130,12 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.step_timedelta,
         )
 
+        # needed as offset for permutations
+        source_cfgs = self.mode_cfg.get("model_input")
+        self.max_input_steps = np.array(
+            [sc.get("num_steps_input", 1) for _, sc in source_cfgs.items()]
+        ).max()
+
         self.time_window_handler = tw
         if is_root():
             logger.info(self.time_window_handler)
@@ -210,7 +215,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         perms_len = int(self.index_range.end - self.index_range.start)
         perms_len -= (fsm + self.output_offset) * (self.time_step // self.step_timedelta)
 
-        return np.arange(perms_len)
+        return np.arange(self.max_input_steps, perms_len)
 
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""
@@ -230,8 +235,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     dataset = DataReaderObs
                 case "anemoi":
                     dataset = DataReaderAnemoi
-                case "fesom":
-                    dataset = DataReaderFesom
                 case type_name:
                     dataset = get_extra_reader(type_name)
                     if dataset is None:
@@ -432,8 +435,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     mask,
                 )
 
-                # collect data for stream
-                stream_data.add_source(step, rdata, source_cells_lens, source_cells)
+                stream_data.add_source(
+                    self._stage, step, rdata, source_cells_lens, source_cells, rdata.is_spoof
+                )
 
         return stream_data
 
@@ -474,7 +478,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
@@ -484,8 +488,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
+
                 stream_data.add_target_values(
-                    timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
+                    self._stage, timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
                 )
 
         return stream_data

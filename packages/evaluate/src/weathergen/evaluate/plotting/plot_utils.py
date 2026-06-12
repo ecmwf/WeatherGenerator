@@ -768,6 +768,80 @@ def quantile_plot_metric_region(
                     )
 
 
+def _extract_psd_attrs(data_ch: xr.DataArray, fstep: int, ch: str) -> list[dict] | None:
+    """Extract PSD curve data from DataArray attrs for a given fstep/channel.
+
+    Returns a single-element list of dicts ready for the plotter, or None if keys are missing.
+    """
+    attrs = data_ch.attrs
+    fp = f"fstep_{fstep}/"
+
+    for prefix in (f"{fp}{ch}/", fp):
+        if f"{prefix}frequencies" in attrs and f"{prefix}psd_target" in attrs:
+            return [
+                {
+                    "frequencies": np.array(attrs[f"{prefix}frequencies"]),
+                    "psd_target": np.array(attrs[f"{prefix}psd_target"]),
+                    "psd_prediction": np.array(attrs[f"{prefix}psd_prediction"]),
+                    "psd_method": attrs.get(f"{fp}psd_method", attrs.get("psd_method", "sht")),
+                }
+            ]
+    return None
+
+
+def psd_plot_metric_region(
+    metric: str,
+    region: str,
+    runs: dict,
+    scores_dict: dict,
+    plotter: object,
+) -> None:
+    """Create PSD plots for all streams and channels for a given metric and region.
+
+    PSD curves (frequencies, target PSD, prediction PSD) are stored in
+    ``score.attrs`` by ``Scores.calc_psd`` and read back here.
+    """
+    streams_set = collect_streams(runs)
+    channels_set = collect_channels(scores_dict, metric, region, runs)
+
+    for stream in streams_set:
+        for ch in channels_set:
+            for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+                if ch not in np.atleast_1d(data.channel.values):
+                    continue
+
+                data_ch = data.sel(channel=ch) if "channel" in data.dims else data
+                if data_ch.isnull().all():
+                    continue
+
+                attr_fsteps = data_ch.attrs.get("attr_fsteps", [])
+                if not attr_fsteps:
+                    _logger.warning(f"PSD attrs missing for {run_id}/{stream}/{ch}. Skipping.")
+                    continue
+
+                label = runs[run_id].get("label", run_id)
+
+                for fstep in attr_fsteps:
+                    psd_datasets = _extract_psd_attrs(data_ch, fstep, ch)
+                    if psd_datasets is None:
+                        continue
+
+                    method_tag = psd_datasets[0].get("psd_method", "sht")
+                    name = create_filename(
+                        prefix=[metric, method_tag, region],
+                        middle=[run_id],
+                        suffix=[stream, ch, f"fstep{fstep}"],
+                    )
+                    plotter.psd_plot(
+                        psd_datasets,
+                        [label],
+                        tag=name,
+                        variable=ch,
+                        forecast_step=str(fstep),
+                    )
+    _logger.info(f"PSD plots saved successfully into: {plotter.out_plot_dir_psd}")
+
+
 def create_filename(
     *,
     prefix: Sequence[str] = (),
