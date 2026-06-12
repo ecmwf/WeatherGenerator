@@ -9,8 +9,7 @@ from pathlib import Path
 from prefect.utilities.asyncutils import run_coro_as_sync
 
 from weathergen.prefect_dags.cmd_runners import CmdContext, Command, CommandResult, run_cmd
-from weathergen.prefect_dags.prefect_logging import get_run_logger
-from weathergen.prefect_dags.prefect_wrapper import task
+from weathergen.prefect_dags.prefect import get_run_logger, task
 from weathergen.prefect_dags.result import Result, unwrap
 
 

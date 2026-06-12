@@ -182,6 +182,26 @@ https://docs.cscs.ch/access/firecrest
 
 Copy and then store securely the certificates, for example in `~/.ssh/cscs_consumer_key` and `~/.ssh/cscs_consumer_secret` .
 
+### JSC-UNICORE
+
+You need a certificate. The easiest:
+
+Open jupyter: https://jupyter.jsc.fz-juelich.de/hub/home
+
+Run this code in a python notebook:
+
+```py
+import json, os, requests, urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+hub_api_url = os.getenv("JUPYTERHUB_API_URL")+"/user_oauth"
+headers = {"Authorization": "token {}".format(os.getenv("JUPYTERHUB_API_TOKEN"))}
+r = requests.get(hub_api_url, headers=headers, verify=False)
+resp = json.loads(r.content.decode("utf-8"))
+resp["auth_state"]["access_token"]
+```
+
+Store the token you get into `~/.jsc_unicore_token`
+
 ## Examples
 
 - [`examples/hello_world.py`](examples/hello_world.py) — minimal `run` + `sbatch` over SSH.

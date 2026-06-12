@@ -16,7 +16,6 @@ from weathergen.prefect_dags.cmd_runners._cscs_firecrest import (
     CscsFirecrestContext,
     CscsHpc,
 )
-from weathergen.prefect_dags.cmd_runners._ecmwf import EcmwfSshCommandRunner, EcmwfSshContext
 from weathergen.prefect_dags.cmd_runners._ecmwf_ecaccess import (
     EcmwfEcaccessCommandRunner,
     EcmwfEcaccessContext,
@@ -34,6 +33,7 @@ from weathergen.prefect_dags.cmd_runners._jsc import (
     JscUnicoreContext,
 )
 from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
+from weathergen.prefect_dags.cmd_runners._simple import SimpleSshCommandRunner, SimpleSshContext
 from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
 
 __all__ = [
@@ -44,8 +44,8 @@ __all__ = [
     "LocalContext",
     "GenericSshCommandRunner",
     "GenericContext",
-    "EcmwfSshCommandRunner",
-    "EcmwfSshContext",
+    "SimpleSshCommandRunner",
+    "SimpleSshContext",
     "EcmwfEcaccessCommandRunner",
     "EcmwfEcaccessContext",
     "run_cmd",

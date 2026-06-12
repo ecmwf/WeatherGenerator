@@ -54,8 +54,7 @@ from weathergen.prefect_dags.cmd_runners import (
     get_command_runner,
     run_cmd,
 )
-from weathergen.prefect_dags.prefect_logging import get_run_logger
-from weathergen.prefect_dags.prefect_wrapper import task
+from weathergen.prefect_dags.prefect import get_run_logger, task
 from weathergen.prefect_dags.result import OpError, Result, is_err
 from weathergen.prefect_dags.run import get_head_tail_logs
 from weathergen.prefect_dags.slurm import (

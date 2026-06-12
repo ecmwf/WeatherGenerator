@@ -12,7 +12,6 @@ from weathergen.prefect_dags.cmd_runners._cscs_firecrest import (
     CscsFirecrestCommandRunner,
     CscsFirecrestContext,
 )
-from weathergen.prefect_dags.cmd_runners._ecmwf import EcmwfSshCommandRunner, EcmwfSshContext
 from weathergen.prefect_dags.cmd_runners._ecmwf_ecaccess import (
     EcmwfEcaccessCommandRunner,
     EcmwfEcaccessContext,
@@ -20,6 +19,7 @@ from weathergen.prefect_dags.cmd_runners._ecmwf_ecaccess import (
 from weathergen.prefect_dags.cmd_runners._generic import GenericContext, GenericSshCommandRunner
 from weathergen.prefect_dags.cmd_runners._jsc import JscUnicoreCommandRunner, JscUnicoreContext
 from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
+from weathergen.prefect_dags.cmd_runners._simple import SimpleSshCommandRunner, SimpleSshContext
 from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
 from weathergen.prefect_dags.result import OpError, Result, is_err
 
@@ -39,7 +39,7 @@ and to invalidate cached clients if needed.
 type CmdContext = (
     LocalContext
     | GenericContext
-    | EcmwfSshContext
+    | SimpleSshContext
     | CscsFirecrestContext
     | EcmwfEcaccessContext
     | CinecaSshContext
@@ -54,7 +54,7 @@ def slurm_account(context: CmdContext) -> str | None:
     match context:
         case CscsFirecrestContext():
             return context.account
-        case EcmwfSshContext():
+        case SimpleSshContext():
             return context.account
         case EcmwfEcaccessContext():
             return context.account
@@ -70,8 +70,8 @@ def get_command_runner(context: CmdContext) -> CommandRunner | Exception:
     match context:
         case LocalContext():
             return LocalCommandRunner()
-        case EcmwfSshContext():
-            return EcmwfSshCommandRunner(context)
+        case SimpleSshContext():
+            return SimpleSshCommandRunner(context)
         case EcmwfEcaccessContext():
             return EcmwfEcaccessCommandRunner(context)
         case GenericContext():

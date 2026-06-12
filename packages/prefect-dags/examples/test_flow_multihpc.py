@@ -24,9 +24,9 @@ all_contexts = {
     "atos-ssh": SimpleSshContext(
         host="hpc-login",
     ),
-    "atos-ecaccess": EcmwfEcaccessContext(
-        cert_path="~/.ecaccess_cert.crt",
-    ),
+    # "atos-ecaccess": EcmwfEcaccessContext(
+    #     cert_path="~/.ecaccess_cert.crt",
+    # ),
     "santis-firecrest": CscsFirecrestContext(
         hpc="santis",
         account="ch17",
@@ -37,6 +37,8 @@ all_contexts = {
         host="santis",
         account="ch17",
     ),
+    "jupiter-unicore": JscUnicoreContext(hpc="jupiter", project="weatherai"),
+    "jupiter-ssh": SimpleSshContext(host="jupiter"),
 }
 
 
