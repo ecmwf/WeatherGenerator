@@ -228,7 +228,6 @@ weathergen-common = { workspace = true }
 weathergen-evaluate = { workspace = true }
 weathergen-metrics = { workspace = true }
 weathergen-readers-extra = { workspace = true }
-weathergen-performance = { workspace = true }
 
 
 flash-attn = [
@@ -273,6 +272,5 @@ members = [
    "packages/readers_extra",
 # Explicitly not depending on 'packages/dashboard' : this causes issues when deploying
 # the streamlit dashboard.
-   "packages/performance",
 ]
 
