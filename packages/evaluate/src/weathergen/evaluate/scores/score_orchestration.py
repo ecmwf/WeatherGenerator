@@ -20,7 +20,7 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import scalar_coord_to_dim
-from weathergen.evaluate.utils.clim_utils import get_climatology
+from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
 from weathergen.evaluate.utils.regions import RegionBoundingBox
 
 _logger = logging.getLogger(__name__)
@@ -174,7 +174,9 @@ def calc_scores_per_stream(
     da_preds = output_data.prediction
     da_tars = output_data.target
     fsteps = sorted(list(da_preds.keys()))
-    aligned_clim_data = get_climatology(reader, da_tars, stream)
+
+    needs_clim = needs_climatology(metrics_dict)
+    aligned_clim_data = get_climatology(reader, da_tars, stream) if needs_clim else None
 
     max_workers = reader.eval_cfg.get("max_workers", None)
     agg_dims = reader.eval_cfg.get("agg_dims", "ipoint")
@@ -375,10 +377,11 @@ def store_metrics_for_region(
     for fstep, combined_metrics, _fstep_attrs in fstep_results:
         criteria = {
             "forecast_step": int(fstep),
-            "sample": combined_metrics.sample.values,
             "channel": combined_metrics.channel.values,
             "metric": combined_metrics.metric.values,
         }
+        if "sample" in combined_metrics.dims:
+            criteria["sample"] = combined_metrics.sample.values
         if "ens" in combined_metrics.dims:
             criteria["ens"] = combined_metrics.ens.values
 
@@ -420,11 +423,20 @@ def store_metrics_for_region(
 
     for metric, parameters in metrics.items():
         metric_data = metric_stream.sel({"metric": metric}).assign_attrs(parameters)
+
+        # Restore attrs from all fsteps, keyed by fstep so downstream code
+        # (plotting) can produce one plot per forecast step.
         for (_stored_fstep, stored_metric), attrs in all_metric_attrs.items():
             if stored_metric == metric and attrs:
-                _logger.debug(f"Restoring {len(attrs)} attributes for {metric}")
-                metric_data.attrs.update(attrs)
-                break
+                for k, v in attrs.items():
+                    metric_data.attrs[f"fstep_{_stored_fstep}/{k}"] = v
+        # Also store the list of fsteps that have attrs
+        attr_fsteps = sorted(
+            {fs for (fs, m) in all_metric_attrs if m == metric and all_metric_attrs[(fs, m)]}
+        )
+        if attr_fsteps:
+            metric_data.attrs["attr_fsteps"] = attr_fsteps
+            _logger.debug(f"Stored per-fstep attributes for {metric}: fsteps={attr_fsteps}")
 
         local_scores.setdefault(metric, {}).setdefault(region, {}).setdefault(stream, {})[
             run_id

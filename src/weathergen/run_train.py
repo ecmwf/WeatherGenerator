@@ -161,7 +161,6 @@ def run_train(args):
 
     Note: All model configurations are set in the function body.
     """
-    t_start = time.time()
 
     cli_overwrite = config.from_cli_arglist(args.options)
 
@@ -189,7 +188,7 @@ def run_train(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices, t_start=t_start)
+        trainer.run(cf, devices)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()

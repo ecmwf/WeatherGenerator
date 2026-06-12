@@ -31,7 +31,13 @@
 # max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
 
 evaluation:
-  metrics  : ["rmse", "mae"]
+  metrics  : 
+  - rmse
+  - mae
+  - psd:
+        psd_method: "sht"                    # "sht" (SHT-based, default) or "fft" (regrid FFT)
+        # psd_regrid_resolution: 1.0           # degrees, only for fft method
+  # metrics  : ["rmse", "mae"]
   # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
   summary_plots : true
   ratio_plots : false

@@ -242,9 +242,7 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(
-        self, cf, devices, run_id_contd=None, mini_epoch_contd=None, t_start: float | None = None
-    ):
+    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
@@ -380,12 +378,6 @@ class Trainer(TrainerBase):
 
         # run validation before training if requested
         self.validate_before_training()
-
-        # Log startup time
-        if is_root() and t_start is not None:
-            startup_time = time.time() - t_start
-            self.train_logger.log_metrics("train", {"startup_time_seconds": startup_time})
-            logger.info(f"Startup time: {startup_time:.2f} seconds")
 
         # training loop
         self.t_training_start = time.time()
@@ -570,19 +562,6 @@ class Trainer(TrainerBase):
             self.cf.general.istep += 1
 
         self.dataset.advance()
-
-        if is_root():
-            total_training_time = time.time() - self.t_training_start
-            self.train_logger.log_metrics(
-                "train",
-                {
-                    "completed_mini_epoch": mini_epoch,
-                    "training_time_after_mini_epoch_seconds": total_training_time,
-                },
-            )
-            logger.info(
-                f"Training time after mini epoch {mini_epoch}: {total_training_time} seconds"
-            )
 
     def validate(self, mini_epoch, mode_cfg, batch_size):
         """
