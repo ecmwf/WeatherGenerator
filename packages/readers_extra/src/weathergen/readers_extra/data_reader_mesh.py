@@ -320,12 +320,6 @@ class DataReaderMesh(DataReaderTimestep):
         start_t, end_t = t_idxs[0], t_idxs[-1] + 1
         n_steps = len(t_idxs)
 
-        stride = 1
-        if self.period > self.native_period:
-            stride = int(self.period / self.native_period)
-            # extend end_t to cover the final step when striding
-            end_t = t_idxs[-1] + stride
-
         spatial_indices_ref = self.spatial_indices_src if is_source else self.spatial_indices_trg
         coords_ref = self.coords_src if is_source else self.coords_trg
         ds_ref = self.ds_source if is_source else self.ds_target

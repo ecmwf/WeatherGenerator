@@ -135,7 +135,7 @@ def _sanitize_time_keys(conf: Config) -> Config:
     return conf
 
 
-def _strip_interpolation(conf: Config) -> Config:
+def _strip_interpolation(conf: Config) -> Config | ListConfig:
     """Recursively convert interpolated timedelta/datetime objects to strings."""
     stripped = {}
     if OmegaConf.is_dict(conf):
@@ -312,7 +312,7 @@ def _apply_fixes(config: Config) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
-    config = _check_streams(config)
+    config = _check_profiling(config)
     return config
 
 
@@ -388,7 +388,7 @@ def _check_profiling(config: Config) -> Config:
     config = config.copy()
 
     defaults = {
-        "enabled": True,
+        "enabled": False,
         "wait_iteration": 1,
         "warmup_iteration": 1,
         "active_iteration": 1,
@@ -639,7 +639,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
             _logger.info("Deserialize default configuration.")
             conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
     assert isinstance(conf, Config)
-    return conf
+    return _apply_fixes(conf)
 
 
 def load_streams(streams_directory: Path) -> Config:
@@ -710,7 +710,7 @@ def load_streams(streams_directory: Path) -> Config:
 
 
 def get_path_run(config: Config) -> Path:
-    """Get the path for storing profiling logs."""
+    """Get the current runs results_path for storing run results and logs."""
     return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
 
 

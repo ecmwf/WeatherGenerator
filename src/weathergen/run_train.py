@@ -22,7 +22,8 @@ from pathlib import Path
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
-from weathergen.train.trainer import ProfilingTrainer, Trainer
+from weathergen.train.trainer import Trainer, get_trainer
+from weathergen.utils.distributed import is_root
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +43,6 @@ def inference():
     main([cli.Stage.inference] + sys.argv[1:])
 
 
-def profile():
-    """Entry point for calling the inference code from the command line."""
-    main([cli.Stage.profile] + sys.argv[1:])
-
-
 def main(argl: list[str]):
     try:
         argl = _fix_argl(argl)
@@ -55,17 +51,21 @@ def main(argl: list[str]):
 
     parser = cli.get_main_parser()
     args = parser.parse_args(argl)
-    match args.stage:
-        case cli.Stage.train:
-            run_train(args)
-        case cli.Stage.train_continue:
-            run_continue(args)
-        case cli.Stage.inference:
-            run_inference(args)
-        case cli.Stage.profile:
-            run_profile(args)
-        case _:
-            logger.error("No stage was found.")
+    try:
+        match args.stage:
+            case cli.Stage.train:
+                run_train(args)
+            case cli.Stage.train_continue:
+                run_continue(args)
+            case cli.Stage.inference:
+                run_inference(args)
+            case _:
+                logger.error("No stage was found. Aborting.")
+    except Exception:
+        extype, value, tb = sys.exc_info()
+        traceback.print_exc()
+        if is_root():
+            pdb.post_mortem(tb)
 
 
 def _fix_argl(argl):  # TODO remove this fix after grace period
@@ -113,14 +113,8 @@ def run_inference(args):
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_logging)
-    try:
-        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
-    except Exception:
-        extype, value, tb = sys.exc_info()
-        traceback.print_exc()
-        if cf.world_size == 1:
-            pdb.post_mortem(tb)
+    trainer = get_trainer(cf)
+    trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
 
 
 def run_continue(args):
@@ -151,15 +145,8 @@ def run_continue(args):
     # track history of run to ensure traceability of results
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_logging)
-
-    try:
-        trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
-    except Exception:
-        extype, value, tb = sys.exc_info()
-        traceback.print_exc()
-        if cf.world_size == 1:
-            pdb.post_mortem(tb)
+    trainer = get_trainer(cf)
+    trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
 
 
 def run_train(args):
@@ -192,58 +179,8 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    trainer = Trainer(cf.train_logging)
-
-    try:
-        trainer.run(cf, devices)
-    except Exception:
-        extype, value, tb = sys.exc_info()
-        traceback.print_exc()
-        if cf.world_size == 1:
-            pdb.post_mortem(tb)
-
-
-def run_profile(args):
-    """
-    Training function for WeatherGenerator model.
-
-    Note: All model configurations are set in the function body.
-    """
-
-    cli_overwrite = config.from_cli_arglist(args.options)
-
-    cf = config.load_merge_configs(
-        args.private_config, None, None, args.base_config, *args.config, cli_overwrite
-    )
-    cf = config.set_run_id(cf, args.run_id, False)
-
-    cf = config._check_profiling(cf)
-
-    cf.data_loading.rng_seed = int(time.time())
-    mp_method = cf.general.get("multiprocessing_method", "fork")
-    devices = Trainer.init_torch(multiprocessing_method=mp_method)
-    cf = Trainer.init_ddp(cf)
-
-    # this line should probably come after the processes have been sorted out else we get lots
-    # of duplication due to multiple process in the multiGPU case
-    init_loggers(cf.general.run_id)
-
-    logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
-
-    cf.streams = config.load_streams(Path(cf.streams_directory))
-
-    if cf.with_flash_attention:
-        assert cf.with_mixed_precision
-
-    trainer = ProfilingTrainer(cf.train_logging)
-
-    try:
-        trainer.run(cf, devices)
-    except Exception:
-        extype, value, tb = sys.exc_info()
-        traceback.print_exc()
-        if cf.world_size == 1:
-            pdb.post_mortem(tb)
+    trainer = get_trainer(cf)
+    trainer.run(cf, devices)
 
 
 if __name__ == "__main__":
