@@ -849,11 +849,15 @@ class ProfilingTrainer(Trainer):
 
         wrap_module_forward_with_profiling(self.model, prefix="model")
 
+        prof_cf = getattr(cf, "profiling", None)
+        if prof_cf is None:
+            raise AttributeError("Missing profiling config: expected cf.profiling")
+
         max_profile_steps = (
-            cf.profiling.wait_iteration
-            + cf.profiling.warmup_iteration
-            + cf.profiling.active_iteration
-        ) * cf.profiling.repeat
+            prof_cf.wait_iteration
+            + prof_cf.warmup_iteration
+            + prof_cf.active_iteration
+        ) * prof_cf.repeat
 
         handler = partial(trace_handler, cf)
 

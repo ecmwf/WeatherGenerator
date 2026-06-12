@@ -1,4 +1,4 @@
-profiler:
+profiling:
   enabled: true
   wait_iteration: 1
   warmup_iteration: 1
