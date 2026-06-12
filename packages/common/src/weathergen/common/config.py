@@ -437,6 +437,9 @@ def load_merge_configs(
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
+        # streams from an overwrite's streams_directory replace inherited streams
+        if any(o.get("streams_directory") is not None for o in overwrite_configs):
+            base_config.streams = None
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
