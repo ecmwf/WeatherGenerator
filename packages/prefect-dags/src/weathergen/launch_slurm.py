@@ -51,6 +51,11 @@ class LaunchSlurm:
     # A path to the working dir in weathergenerator (called slurm_... typically)
     wg_work_dir: str
 
+    # The path to the main output logs from the python job.
+    # They are of the form:
+    # "{wg_work_dir}/WeatherGenerator/logs/{wg_run_id}/output.{job_id}.txt"
+    output_logs: dict[SlurmJobId, str]
+
 
 # Matches the per-stage summary lines printed by launch_slurm.py, e.g.:
 #   [train     ] 'train' | run_id=c9ika5od | job_ids=[921904] |
@@ -173,12 +178,17 @@ def _parse_launch_summary(output: str) -> tuple[str, list[SlurmJobId], str] | No
 @task
 async def launch_slurm(
     ctx: CmdContext,
+    # Can be relative or absolute from the working dir.
+    # If working_dir is specified, the wg_private_path can be relative from this path
     wg_private_path: str,
     # --stage: train, inference, or evaluation. Ignored when `pipeline` is set.
     stage: Literal["train", "inference", "evaluation"] = "train",
     # --from-run-id: run id to continue (training) or trained model to use
     # (inference, required there).
     from_run_id: str | None = None,
+    # The working directory. All the config paths will be relative to this directory.
+    # By default, it is wg_private_path
+    working_dir: str | None = None,
     *,
     # --slurm-script: path to the slurm script (must be in
     # WeatherGenerator-private/hpc/).
@@ -230,10 +240,25 @@ async def launch_slurm(
     Each keyword argument maps to the launch-slurm.py CLI flag named in the
     comment above it; None (or False for flags) means "do not pass the flag"
     so the script's own default applies.
+
+    If `working_dir` is set, the command runs from that directory on the HPC
+    (the runners materialize it as a `cd` before the command), so
+    `wg_private_path` and the config paths may be relative to it. Otherwise
+    the command runs from `wg_private_path` itself.
     """
     # Do not attempt to run expanduser() or resolve(), it runs on the remote HPC
     # and python will not have the appropriate file system information.
-    cmd = [str(Path(wg_private_path) / "hpc" / "launch-slurm.py"), "--stage", stage]
+    if working_dir is not None:
+        # The command runs from working_dir: wg_private_path may be relative to it.
+        cwd = working_dir
+        script = str(Path(wg_private_path) / "hpc" / "launch-slurm.py")
+    else:
+        # Default: run from wg_private_path itself, with the script path
+        # relative to it (avoids double-prefixing when wg_private_path is
+        # itself relative, e.g. to the remote home).
+        cwd = wg_private_path
+        script = "hpc/launch-slurm.py"
+    cmd = [script, "--stage", stage]
     if from_run_id:
         cmd += ["--from-run-id", from_run_id]
     if slurm_script:
@@ -271,7 +296,7 @@ async def launch_slurm(
     if time:
         cmd += ["--time", time]
     logger = get_run_logger()
-    res = await run_cmd(ctx, Command(cmd), logger)
+    res = await run_cmd(ctx, Command(cmd, working_directory=cwd), logger)
     if is_err(res):
         await _publish_launch_error_artifact(
             logger, stage, from_run_id, f"command failed: {res.err}", res.stdout, res.stderr
@@ -330,11 +355,15 @@ async def launch_slurm(
         )
         for n, job_id in enumerate(slurm_job_ids)
     ]
+    # The main output logs of the python job itself:
+    # {wg_work_dir}/WeatherGenerator/logs/{run_id}/output.{job_id}.txt
+    output_logs = {job_id: str(logs_dir / f"output.{job_id}.txt") for job_id in slurm_job_ids}
 
     # Surface the launch details in the Prefect UI as a markdown artifact:
     # all the info in LaunchSlurm plus the launch command's stdout/stderr.
     jobs_md = "\n".join(
-        f"| {n + 1} | `{sub.job_id}` | `{sub.stdout}` | `{sub.stderr}` |"
+        f"| {n + 1} | `{sub.job_id}` | `{sub.stdout}` | `{sub.stderr}` "
+        f"| `{output_logs[sub.job_id]}` |"
         for n, sub in enumerate(slurm_jobs)
     )
     launch_md = (
@@ -344,8 +373,8 @@ async def launch_slurm(
         f"- **From run ID:** `{from_run_id}`\n"
         f"- **Work dir:** `{wg_work_dir}`\n\n"
         f"### Jobs\n\n"
-        f"| part | job id | stdout | stderr |\n"
-        f"| --- | --- | --- | --- |\n"
+        f"| part | job id | stdout | stderr | output log |\n"
+        f"| --- | --- | --- | --- | --- |\n"
         f"{jobs_md}\n\n"
         + _output_md_section("launch-slurm.py stdout", res.stdout)
         + _output_md_section("launch-slurm.py stderr", res.stderr)
@@ -361,12 +390,13 @@ async def launch_slurm(
         stage=stage,
         slurm_jobs=slurm_jobs,
         wg_work_dir=wg_work_dir,
+        output_logs=output_logs,
     )
 
 
 @task
 async def wait_for_completion(
-    ctx: CmdContext, ls: LaunchSlurm, fetch_output: bool = False
+    ctx: CmdContext, ls: LaunchSlurm, fetch_output: bool = True
 ) -> Result[list[SlurmJobResult]]:
     """
     Wait until all the slurm jobs launched by `launch_slurm` reach a terminal
@@ -396,6 +426,7 @@ async def wait_for_completion(
         artifact_key = (
             f"wg-{_artifact_key_part(ls.wg_run_id)}-{_artifact_key_part(ls.stage)}-part{n + 1}"
         )
+        output_log = ls.output_logs.get(sub.job_id)
         job_md = (
             f"## WeatherGenerator slurm job\n\n"
             f"- **Run ID:** `{ls.wg_run_id}`\n"
@@ -405,6 +436,7 @@ async def wait_for_completion(
             f"- **Status:** `{state}`\n"
             f"- **stdout:** `{sub.stdout}`\n"
             f"- **stderr:** `{sub.stderr}`\n"
+            f"- **output log:** `{output_log}`\n"
         )
         if fetch_output:
             # Fetch head and tail of stdout and stderr for debugging purposes.
@@ -417,6 +449,15 @@ async def wait_for_completion(
                 f"Fetched head/tail logs for job {sub.job_id} on hpc {_runner.hpc}: {output}"
             )
             job_md += "\n" + _format_output_section(output)
+            if output_log:
+                # The main output log of the python job itself. Fetched
+                # separately: get_head_tail_logs reads one stdout/stderr pair.
+                py_output = get_head_tail_logs(ctx=ctx, stdout_path=output_log, stderr_path=None)
+                job_md += "\n" + (
+                    "## Python job output log\n\n"
+                    + _output_md_section("output log (head)", py_output.get("head_out"))
+                    + _output_md_section("output log (tail)", py_output.get("tail_out"))
+                )
         await acreate_markdown_artifact(
             key=artifact_key,
             markdown=job_md,

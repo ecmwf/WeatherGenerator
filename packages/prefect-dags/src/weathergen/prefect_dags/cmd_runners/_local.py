@@ -6,6 +6,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from logging import Logger
+from pathlib import Path
 
 from weathergen.prefect_dags.cmd_runners._types import (
     Command,
@@ -38,13 +39,16 @@ class LocalCommandRunner(CommandRunner):
             f"Running local command: {cmd.command} with env vars: {cmd.env_vars} "
             f"and working directory: {cmd.working_directory}"
         )
+        # subprocess does not expand ~ in cwd; locally Python can do it for us
+        # (remote runners leave that to the remote shell instead).
+        cwd = Path(cmd.working_directory).expanduser() if cmd.working_directory else None
         try:
             proc = subprocess.run(
                 cmd.command,
                 # shell=True for str (so pipes/redirects work), shell=False for
                 # list[str] (safer argv form, no shell parsing). Inferred from the type.
                 shell=isinstance(cmd.command, str),
-                cwd=cmd.working_directory,
+                cwd=cwd,
                 env=env,
                 capture_output=True,
                 text=True,

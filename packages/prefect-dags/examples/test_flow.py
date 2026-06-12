@@ -99,8 +99,16 @@ def test_run_cmd_flow2(
     rerun_token=None,
 ):
     # wgp = "/users/thunter/work/WeatherGenerator-private/"
-    wgp = "/home/ecm8774/work/WeatherGenerator-private/"
-    jobs = launch_slurm.submit(ctx, wgp, stage="train", time="10").result()
+    working_dir = "~/work/"
+    wgp = "./WeatherGenerator-private/"
+    jobs = launch_slurm.submit(
+        ctx,
+        wgp,
+        working_dir=working_dir,
+        stage="train",
+        time="10",
+        # base_config="WeatherGenerator/config/default_config.yml",
+    ).result()
     print(jobs)
     assert not is_err(jobs)
     final_status = wait_for_completion.submit(ctx, jobs).result()

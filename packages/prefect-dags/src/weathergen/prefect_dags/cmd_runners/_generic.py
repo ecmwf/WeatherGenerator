@@ -22,6 +22,7 @@ from weathergen.prefect_dags.cmd_runners._types import (
     Command,
     CommandResult,
     CommandRunner,
+    quote_path,
 )
 from weathergen.prefect_dags.result import OpError, Result
 
@@ -169,7 +170,7 @@ class GenericSshCommandRunner(CommandRunner):
 def _build_remote_command(cmd: Command) -> str:
     parts: list[str] = []
     if cmd.working_directory is not None:
-        parts.append(f"cd {shlex.quote(str(cmd.working_directory))} &&")
+        parts.append(f"cd {quote_path(cmd.working_directory)} &&")
     if cmd.env_vars:
         for k, v in cmd.env_vars.items():
             parts.append(f"export {k}={shlex.quote(v)};")

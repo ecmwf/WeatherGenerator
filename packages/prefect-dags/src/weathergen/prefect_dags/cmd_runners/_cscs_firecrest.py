@@ -29,6 +29,7 @@ from weathergen.prefect_dags.cmd_runners._types import (
     Command,
     CommandResult,
     CommandRunner,
+    quote_path,
 )
 from weathergen.prefect_dags.result import OpError, Result
 
@@ -360,7 +361,7 @@ def _build_sbatch_script(
 
     body: list[str] = []
     if cmd.working_directory is not None:
-        body.append(f"cd {shlex.quote(str(cmd.working_directory))}")
+        body.append(f"cd {quote_path(cmd.working_directory)}")
     if cmd.env_vars:
         for k, v in cmd.env_vars.items():
             body.append(f"export {k}={shlex.quote(v)}")

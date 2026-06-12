@@ -23,6 +23,7 @@ from weathergen.prefect_dags.cmd_runners._types import (
     Command,
     CommandResult,
     CommandRunner,
+    quote_path,
 )
 from weathergen.prefect_dags.cmd_runners.ecmwf_ecaccess_perl import (
     DEFAULT_CERT,
@@ -130,7 +131,7 @@ def _build_script(cmd: Command) -> str:
     """
     lines = ["#!/bin/bash", "set -e"]
     if cmd.working_directory is not None:
-        lines.append(f"cd {shlex.quote(str(cmd.working_directory))}")
+        lines.append(f"cd {quote_path(cmd.working_directory)}")
     if cmd.env_vars:
         for k, v in cmd.env_vars.items():
             lines.append(f"export {k}={shlex.quote(v)}")
