@@ -811,7 +811,7 @@ class Model(torch.nn.Module):
             # Unified diffusion decoding path — handles both:
             #  • rollout (diffusion_rollout=True): tokens is a list; take the final ODE state
             #  • ensemble (N > 1): tokens is already a (N, healpix_cells, embed_dim) tensor
-            if self.cf.get("fe_diffusion_model", False):
+            if self.cf.get("fe_diffusion_model", False) and self.cf.get("diffusion_rollout", False):
                 if isinstance(tokens, list):
                     # diffusion_rollout=True: discard intermediate ODE steps, keep the final state.
                     tokens = tokens[-1]  # (1, healpix_cells, embed_dim)
