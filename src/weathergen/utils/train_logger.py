@@ -14,7 +14,7 @@ import math
 import time
 import traceback
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +44,8 @@ class Metrics:
     train: pl.DataFrame
     val: pl.DataFrame
     system: pl.DataFrame
+    # extra validation sets, keyed by stage label "val_<name>"
+    extra: dict[str, pl.DataFrame] = field(default_factory=dict)
 
     def by_mode(self, s: str) -> pl.DataFrame:
         match s:
@@ -53,8 +55,11 @@ class Metrics:
                 return self.val
             case "system":
                 return self.system
+            case _ if s.startswith("val_"):
+                # empty frame when this run lacks the extra validation set
+                return self.extra.get(s, pl.DataFrame())
             case _:
-                raise ValueError(f"Unknown mode {s}. Use 'train', 'val' or 'system'.")
+                raise ValueError(f"Unknown mode {s}. Use 'train', 'val', 'val_<name>' or 'system'.")
 
 
 class TrainLogger:
@@ -236,7 +241,16 @@ class TrainLogger:
             log_val = np.array([])
         metrics_val_df = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
 
-        return Metrics(run_id, "train", log_train_df, metrics_val_df, None)
+        # extra validation sets: discover "val_<name>" stages present in the metrics file
+        metrics_path = get_train_metrics_path(base_path=result_dir_base, run_id=run_id)
+        stages = read_metrics_file(metrics_path)["stage"].unique().to_list()
+        extra = {
+            stage: read_metrics(cf, run_id, stage, list(cols2), cols2_patterns, result_dir_base)
+            for stage in sorted(stages)
+            if stage.startswith("val_")
+        }
+
+        return Metrics(run_id, "train", log_train_df, metrics_val_df, None, extra)
 
 
 def read_metrics(

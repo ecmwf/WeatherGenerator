@@ -80,6 +80,13 @@ class Trainer(TrainerBase):
         self.data_loader_validation: torch.utils.data.DataLoader | None = None
         self.dataset: MultiStreamDataSampler | None = None
         self.dataset_val: MultiStreamDataSampler | None = None
+        # extra validation sets, keyed by stage label "val_<name>"
+        self.extra_val_cfgs: dict[str, Config] = {}
+        self.datasets_val_extra: dict[str, MultiStreamDataSampler] = {}
+        self.data_loaders_val_extra: dict[str, torch.utils.data.DataLoader] = {}
+        self.target_and_aux_calculators_val_extra: dict[str, dict] = {}
+        self.loss_calculators_val_extra: dict[str, LossCalculator] = {}
+        self.batch_sizes_val_extra: dict[str, int] = {}
         self.device: torch.device = None
         self.ema_model = None
         self.grad_scaler: torch.amp.GradScaler | None = None
@@ -144,6 +151,19 @@ class Trainer(TrainerBase):
             self.validation_cfg, cf.get("test_config", {}), cfg_keys_to_filter
         )
 
+        # extra validation sets, each derived from the validation cfg like test_cfg;
+        # extra sets must only override dates/shuffle/sample-count/batch-size, not
+        # stream/channel selection (samplers share cf.streams)
+        for name, overrides in (cf.get("extra_validation_configs", None) or {}).items():
+            if not (overrides or {}).get("enabled", True):
+                continue  # set disabled, e.g. by a train_continue override
+            stage_label = f"val_{name}"
+            extra_cfg = get_active_stage_config(self.validation_cfg, overrides, cfg_keys_to_filter)
+            # extra sets never write sample output files (would collide with primary val output)
+            extra_cfg.output = {}
+            self.extra_val_cfgs[stage_label] = extra_cfg
+            self.batch_sizes_val_extra[stage_label] = get_batch_size_from_config(extra_cfg)
+
         # batch sizes
         self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)
         self.batch_size_validation_per_gpu = get_batch_size_from_config(self.validation_cfg)
@@ -155,6 +175,8 @@ class Trainer(TrainerBase):
             strict=True,
         ):
             config.validate_forecast_policy_and_steps(mode_cfg.get("forecast", {}), mode)
+        for stage_label, extra_cfg in self.extra_val_cfgs.items():
+            config.validate_forecast_policy_and_steps(extra_cfg.get("forecast", {}), stage_label)
 
         self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 
@@ -354,6 +376,19 @@ class Trainer(TrainerBase):
             self.dataset_val, **loader_params, sampler=None
         )
 
+        for stage_label, extra_cfg in self.extra_val_cfgs.items():
+            # stage=VAL so masking/loss behave as in validation; the stage label is
+            # only used for logging
+            self.datasets_val_extra[stage_label] = MultiStreamDataSampler(cf, extra_cfg, stage=VAL)
+            # cap workers: each loader spawns its own processes, each re-opening all
+            # stream readers
+            extra_loader_params = loader_params | {
+                "num_workers": min(cf.data_loading.num_workers, 2)
+            }
+            self.data_loaders_val_extra[stage_label] = torch.utils.data.DataLoader(
+                self.datasets_val_extra[stage_label], **extra_loader_params, sampler=None
+            )
+
         self.model, self.model_params = init_model_and_shard(
             cf,
             self.dataset,
@@ -394,6 +429,10 @@ class Trainer(TrainerBase):
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
+        for stage_label, extra_cfg in self.extra_val_cfgs.items():
+            self.target_and_aux_calculators_val_extra[stage_label] = (
+                self.get_target_aux_calculators(extra_cfg)
+            )
 
         # Restore EMA teacher weights when continuing from a checkpoint
         if run_id_contd is not None: # and self.cf.general.istep != 0: # To be tested
@@ -450,6 +489,10 @@ class Trainer(TrainerBase):
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
         val_cfg = self.validation_cfg
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
+        for stage_label, extra_cfg in self.extra_val_cfgs.items():
+            self.loss_calculators_val_extra[stage_label] = LossCalculator(
+                cf, extra_cfg, VAL, device=self.device
+            )
 
         # recover mini_epoch when continuing run
         if self.world_size_original is None:
@@ -483,6 +526,18 @@ class Trainer(TrainerBase):
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
             )
             self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
+
+            for stage_label, extra_cfg in self.extra_val_cfgs.items():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: "
+                    f"validate {stage_label}."
+                )
+                self.validate(
+                    mini_epoch,
+                    extra_cfg,
+                    self.batch_sizes_val_extra[stage_label],
+                    stage=stage_label,
+                )
 
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
@@ -664,23 +719,33 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch, mode_cfg, batch_size):
+    def validate(self, mini_epoch, mode_cfg, batch_size, stage: Stage = VAL):
         """
-        Perform validation / test computation as specified by mode_cfg
+        Perform validation / test computation as specified by mode_cfg.
+
+        stage selects the dataset/loss objects: VAL for the primary validation set,
+        "val_<name>" for an extra validation set; it is also the logging label.
         """
 
         cf = self.cf
         self.model.eval()
 
-        dataset_val_iter = iter(self.data_loader_validation)
+        if stage == VAL:
+            dataset, data_loader = self.dataset_val, self.data_loader_validation
+            target_aux_calcs = self.target_and_aux_calculators_val
+        else:
+            dataset = self.datasets_val_extra[stage]
+            data_loader = self.data_loaders_val_extra[stage]
+            target_aux_calcs = self.target_and_aux_calculators_val_extra[stage]
+        loss_calculator = self._loss_calculator_for(stage)
+
+        dataset_val_iter = iter(data_loader)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
-            ) as pbar:
+            with tqdm.tqdm(total=len(data_loader), disable=self.cf.with_ddp) as pbar:
                 for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
                         # pin memory for faster CPU-GPU transfer
@@ -706,7 +771,7 @@ class Trainer(TrainerBase):
                             )
 
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                        for loss_name, target_aux in target_aux_calcs.items():
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
@@ -715,7 +780,7 @@ class Trainer(TrainerBase):
                                 self.model,
                             )
 
-                    _ = self.loss_calculator_val.compute_loss(
+                    _ = loss_calculator.compute_loss(
                         preds=preds,
                         targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
@@ -728,7 +793,7 @@ class Trainer(TrainerBase):
                         denormalize_data_fct = (
                             (lambda x0, x1: x1)
                             if mode_cfg.get("output", {}).get("normalized_samples", False)
-                            else self.dataset_val.denormalize_target_channels
+                            else dataset.denormalize_target_channels
                         )
                         # write output
                         write_output(
@@ -748,11 +813,11 @@ class Trainer(TrainerBase):
                     if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                         break
 
-                self._log_terminal(0, mini_epoch, VAL)
-                self._log(VAL)
+                self._log_terminal(0, mini_epoch, stage)
+                self._log(stage)
 
         # avoid that there is a systematic bias in the validation subset
-        self.dataset_val.advance()
+        dataset.advance()
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
@@ -958,19 +1023,29 @@ class Trainer(TrainerBase):
             total = sum(1 for _ in self.model.parameters())
             logger.info(f"Loaded optimizer state for {loaded}/{total} parameters.")
 
+    def _loss_calculator_for(self, stage: Stage) -> LossCalculator:
+        """
+        Get the loss calculator for the given stage (TRAIN, VAL or "val_<name>").
+        """
+        if stage == TRAIN:
+            return self.loss_calculator
+        if stage == VAL:
+            return self.loss_calculator_val
+        return self.loss_calculators_val_extra[stage]
+
     def _log(self, stage: Stage):
         """
         Logs training or validation metrics.
 
         Args:
-            stage: Stage Is it's VAL, logs are treated as validation logs.
-                        If TRAIN, logs are treated as training logs
+            stage: Stage If TRAIN, logs are treated as training logs.
+                        Otherwise (VAL or "val_<name>"), as validation logs.
 
         Notes:
             - This method only executes logging on the main process (rank 0).
             - After logging, historical loss and standard deviation records are cleared.
         """
-        loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
+        loss_calculator = self._loss_calculator_for(stage)
         avg_loss, losses_all, stddev_all = prepare_losses_for_logging(
             loss_calculator.loss_hist,
             loss_calculator.losses_unweighted_hist,
@@ -981,7 +1056,7 @@ class Trainer(TrainerBase):
 
         if is_root():
             # plain logger
-            if stage == VAL:
+            if stage != TRAIN:
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.general.istep >= 0:
@@ -1163,9 +1238,9 @@ class Trainer(TrainerBase):
 
     def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage):
         print_freq = self.train_logging.terminal
-        if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
+        if bidx % print_freq == 0 and bidx > 0 or stage != TRAIN:
             # compute from last iteration
-            loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
+            loss_calculator = self._loss_calculator_for(stage)
             avg_loss, losses_all, _ = prepare_losses_for_logging(
                 loss_calculator.loss_hist,
                 loss_calculator.losses_unweighted_hist,
@@ -1173,9 +1248,9 @@ class Trainer(TrainerBase):
             )
 
             if is_root():
-                if stage == VAL:
+                if stage != TRAIN:
                     logger.info(
-                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
+                        f"""validation {stage} ({self.cf.general.run_id}) : {mini_epoch:03d} :
                         {np.nanmean(avg_loss)}"""
                     )
 

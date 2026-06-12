@@ -132,6 +132,10 @@ def _sanitize_time_keys(conf: Config) -> Config:
         _sanitize_delta_time_keys(conf.test_config)
         _sanitize_start_end_time_keys(conf.test_config)
 
+    for extra_conf in (conf.get("extra_validation_configs") or {}).values():
+        _sanitize_delta_time_keys(extra_conf)
+        _sanitize_start_end_time_keys(extra_conf)
+
     return conf
 
 
@@ -354,6 +358,7 @@ def _check_time_interpolation(config: Config) -> Config:
         config.get("training_config"),
         config.get("test_config"),
         config.get("validation_config"),
+        *(config.get("extra_validation_configs") or {}).values(),
     ]
 
     for subconf in subconfs:

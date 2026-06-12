@@ -9,9 +9,10 @@ default_streams:
     - u_850
     - v_850
     - q_850
+    - q_200
     evaluation:
       ensemble: all
-      forecast_step: all
+      forecast_step: [0,1,2,3,4]
       sample: all
     plotting:
       forecast_step: all
@@ -51,8 +52,8 @@ run_ids:
   #   label: Inference of k47tobdl-ft32-with-noise
   #   type: json
   #   # results_base_dir: ./results/bmbywqn6/
-  ay98rzxp:
-    label: Inference of e8bd7ejo-2-nodes
-    type: json
-    # results_base_dir: ./results/ay98rzxp/
+  i3p7ybfn:
+    label: Inference of xi0mujc2-finetune-forecast (SSL multidata)
+    # type: json
+    results_base_dir: ./results/i3p7ybfn/
 
