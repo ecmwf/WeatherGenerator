@@ -413,7 +413,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         #     numerical instability of dividing by near-zero sigma in the ODE.
         sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
         sigma_max_eff = min(self.sigma_max, sigma_max_train)
-        # sigma_max_eff = sigma_max_eff * 1.1
+        # sigma_max_eff = sigma_max_eff * 3.0
 
         # --- Training-distribution-aligned sigma_min ---
         # sigma_min_quantile controls what fraction of training samples fall below sigma_min_eff.

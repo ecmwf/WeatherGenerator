@@ -248,7 +248,7 @@ class LocalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, cell_lens_c, use_reentrant):
         for block in self.ae_local_blocks:
-            tokens_c = block(tokens_c, cell_lens_c)
+            tokens_c = checkpoint(block, tokens_c, cell_lens_c, use_reentrant=use_reentrant)
         return tokens_c
 
 
@@ -316,11 +316,13 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
-            tokens_global_c = block(
+            tokens_global_c = checkpoint(
+                block,
                 tokens_global_c,
                 tokens_c,
                 q_cells_lens_c,
                 cell_lens_c,
+                use_reentrant=False
             )
         return tokens_global_c
 
@@ -458,9 +460,9 @@ class QueryAggregationEngine(torch.nn.Module):
         for block in self.ae_aggregation_blocks:
             aux_info = None
             if isinstance(block, MultiSelfAttentionHeadVarlen):
-                tokens = block(tokens, x_lens=batch_lens, coords=coords)
+                tokens = checkpoint(block, tokens, x_lens=batch_lens, coords=coords, use_reentrant=False)
             else:
-                tokens = block(tokens, coords, aux_info)
+                tokens = checkpoint(block, tokens, coords=coords, aux_info=aux_info, use_reentrant=False)
         return tokens
 
 
