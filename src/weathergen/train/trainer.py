@@ -381,12 +381,6 @@ class Trainer(TrainerBase):
         # run validation before training if requested
         self.validate_before_training()
 
-        # Log startup time
-        if is_root() and t_start is not None:
-            startup_time = time.time() - t_start
-            self.train_logger.log_metrics("train", {"startup_time_seconds": startup_time})
-            logger.info(f"Startup time: {startup_time:.2f} seconds")
-
         # training loop
         self.t_training_start = time.time()
 
