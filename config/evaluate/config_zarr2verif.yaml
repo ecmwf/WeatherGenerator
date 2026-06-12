@@ -89,6 +89,9 @@ coordinates:
         ncells: ncells
 
 dimensions:
+    valid_time:
+      verif: valid_time
+      std: time
     lat: 
       verif: latitude
       std: latitude

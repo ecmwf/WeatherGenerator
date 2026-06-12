@@ -256,19 +256,13 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
     source_ends = []
     with zarrio_reader(fname_zarr) as zio:
         for sample in tqdm(samples, desc="Getting source info"):
-            group_path = f"{sample}/{stream}/0/source"
-            source_group = zio.data_root.get(group_path)
-
-            if source_group is None:
-                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
-
-            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
-            source_start = np.min(times_arr)
-            source_end = np.max(times_arr)
-
-            _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
-            source_starts.append(source_start)
-            source_ends.append(source_end)
+            data = zio.get_data(sample, stream, 0).source.as_xarray()
+            source_starts.append(data.source_interval_start.values.astype("datetime64[ns]"))
+            source_ends.append(data.source_interval_end.values.astype("datetime64[ns]"))
+            _logger.debug(
+                f"Sample {sample}: source_interval_start={source_starts[-1]}, "
+                f"source_interval_end={source_ends[-1]}"
+            )
 
     return source_starts, source_ends
 
@@ -428,7 +422,9 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                         if len(sample_results[sample]) == n_fsteps:
                             b_idx = sample_to_batch_idx[sample]
                             source_start = batch_source_starts[b_idx]
+                            print("source_start", source_start)
                             source_end = batch_source_ends[b_idx]
+                            print("source_end", source_end)
                             results_iter = iter(sample_results[sample])
                             processed = parser.process_sample(
                                 results_iter,

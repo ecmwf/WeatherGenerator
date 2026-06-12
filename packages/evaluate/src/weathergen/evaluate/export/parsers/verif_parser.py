@@ -162,10 +162,8 @@ class VerifParser(CfParser):
         """
         zarr_dt = (source_interval_end - source_interval_start).astype("timedelta64[h]")
         if zarr_dt == np.timedelta64(0, "h"):
-            zarr_dt = np.timedelta64(default_fstep, "h")
-            _logger.info(f"Using default forecast step from config: {zarr_dt}")
-            if zarr_dt == np.timedelta64(0, "h"):
-                raise ValueError("Default forecast step is zero. Double check config")
+            _logger.error(
+                "Source interval start and end are the same. Check Zarr data directly. ")
         return zarr_dt
 
     def get_output_filename(self, variable: str) -> Path:
@@ -584,6 +582,8 @@ class VerifParser(CfParser):
 
             if "long" in mapped_info:
                 attributes["long_name"] = mapped_info["long"]
+            
+            print(f"Mapping variable '{var_name}' to '{mapped_name}' with attributes {attributes} and coordinates {coords}.")
             variables[mapped_name] = xr.DataArray(
                 data=da.values,
                 dims=da.dims,
