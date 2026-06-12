@@ -28,6 +28,11 @@ from weathergen.prefect_dags.cmd_runners._exec_cmd import (
     slurm_account,
 )
 from weathergen.prefect_dags.cmd_runners._generic import GenericContext, GenericSshCommandRunner
+from weathergen.prefect_dags.cmd_runners._jsc import (
+    JscHpc,
+    JscUnicoreCommandRunner,
+    JscUnicoreContext,
+)
 from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
 from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
 
@@ -53,4 +58,7 @@ __all__ = [
     "CinecaCommandRunner",
     "CinecaSshContext",
     "CinecaHpc",
+    "JscUnicoreCommandRunner",
+    "JscUnicoreContext",
+    "JscHpc",
 ]

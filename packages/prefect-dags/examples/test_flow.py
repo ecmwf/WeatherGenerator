@@ -29,7 +29,7 @@ from weathergen.prefect_dags.result import is_err
 #     consumer_key_path="~/.ssh/cscs_consumer_key",
 #     consumer_secret_path="~/.ssh/cscs_consumer_secret",
 # )
-ctx = EcmwfSshContext(
+ctx = SimpleSshContext(
     host="hpc-login",
 )
 # ctx = EcmwfEcaccessContext(

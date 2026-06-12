@@ -44,7 +44,6 @@ class LaunchSlurm:
 
     # The main jobs:
     # The stdout stderr paths are reconstructed from wg_work_dir:
-    # They should be "{wg_work_dir}/WeatherGenerator/logs/{wg_run_id}/weathergen.part{n+1}.{job_id}.out/err"
     slurm_jobs: list[SlurmSubmissionResult]
     # Cleanup job: TODO, it is hard to get from summary right now
     # cleanup_slurm_job: SlurmSubmissionResult | None

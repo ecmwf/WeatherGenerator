@@ -18,6 +18,7 @@ from weathergen.prefect_dags.cmd_runners._ecmwf_ecaccess import (
     EcmwfEcaccessContext,
 )
 from weathergen.prefect_dags.cmd_runners._generic import GenericContext, GenericSshCommandRunner
+from weathergen.prefect_dags.cmd_runners._jsc import JscUnicoreCommandRunner, JscUnicoreContext
 from weathergen.prefect_dags.cmd_runners._local import LocalCommandRunner, LocalContext
 from weathergen.prefect_dags.cmd_runners._types import Command, CommandResult, CommandRunner
 from weathergen.prefect_dags.result import OpError, Result, is_err
@@ -42,6 +43,7 @@ type CmdContext = (
     | CscsFirecrestContext
     | EcmwfEcaccessContext
     | CinecaSshContext
+    | JscUnicoreContext
 )
 
 
@@ -57,6 +59,8 @@ def slurm_account(context: CmdContext) -> str | None:
         case EcmwfEcaccessContext():
             return context.account
         case CinecaSshContext():
+            return context.account
+        case JscUnicoreContext():
             return context.account
         case _:
             return None
@@ -76,6 +80,8 @@ def get_command_runner(context: CmdContext) -> CommandRunner | Exception:
             return CscsFirecrestCommandRunner(context)
         case CinecaSshContext():
             return CinecaCommandRunner(context)
+        case JscUnicoreContext():
+            return JscUnicoreCommandRunner(context)
         case _:
             return ValueError(f"Unsupported context type: {type(context)}")
 

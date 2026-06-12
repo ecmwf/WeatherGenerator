@@ -325,10 +325,6 @@ _LOCK_ADAPTER = TypeAdapter(_SlurmJobMonitoringLock)
 # Variable naming + helpers
 # ---------------------------------------------------------------------------
 
-# TODO: job should be either a SlurmJob or a list[SlurmSubmissionResult]
-# (jobs already submitted separately, e.g. by a launch_slurm.py script). The current single-job interface is a bit awkward to use with launch_slurm.py, which submits multiple jobs and returns their details as a list.
-# TODO: result should be a list of SlurmJobResult to support the launch_slurm.py use case, which submits multiple jobs and returns their details as a list.
-
 
 async def _sbatch_try(
     job: SlurmJob,

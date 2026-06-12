@@ -102,9 +102,10 @@ HPC contexts:
 | Context | Connection | Typical use |
 | --- | --- | --- |
 | `LocalContext()` | Local shell | Development, CI. |
-| `GenericContext(host=...)` | Plain SSH | Any cluster reachable via passwordless SSH. |
-| `EcmwfSshContext(host=...)` | ECMWF SSH | ECMWF HPC2020. |
+| `SimpleSshContext(host=...)` | prefonfigured SSH | ECMWF HPC2020, etc. |
+| `GenericContext(host=...)` | SSH | Any cluster reachable via passwordless SSH (providing options) |
 | `EcmwfEcaccessContext(cert_path=...)` | ECaccess SOAP (cert auth) | ECMWF without an interactive SSH session. |
+| `JscUnicoreContext(hpc=..., user=...)` | UNICORE | JSC (juwels, jupiter, jureca) |
 | `CinecaSshContext(hpc=..., user=...)` | step-ca SSH cert | CINECA Leonardo. |
 | `CscsFirecrestContext(hpc=..., consumer_key_path=..., consumer_secret_path=..., account=...)` | FirecREST v2 (OAuth2) | CSCS santis / clariden / alps. Survives well beyond an SSH session. |
 

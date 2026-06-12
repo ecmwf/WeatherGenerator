@@ -16,11 +16,12 @@ from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task
 from weathergen.prefect_dags.cmd_runners import (
     CscsFirecrestContext,
     EcmwfEcaccessContext,
-    EcmwfSshContext,
+    JscUnicoreContext,
+    SimpleSshContext,
 )
 
 all_contexts = {
-    "atos-ssh": EcmwfSshContext(
+    "atos-ssh": SimpleSshContext(
         host="hpc-login",
     ),
     "atos-ecaccess": EcmwfEcaccessContext(
@@ -32,12 +33,11 @@ all_contexts = {
         consumer_key_path="~/.ssh/cscs_consumer_key",
         consumer_secret_path="~/.ssh/cscs_consumer_secret",
     ),
-    "santis-ssh": EcmwfSshContext(
+    "santis-ssh": SimpleSshContext(
         host="santis",
         account="ch17",
     ),
 }
-
 
 
 @task(task_run_name="get_pwd-{ctx_name}")

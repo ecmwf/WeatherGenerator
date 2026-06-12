@@ -25,7 +25,7 @@ from weathergen.prefect_dags.cmd_runners import (
 from weathergen.prefect_dags.result import OpError, Result, is_err
 
 
-class SubmissionException(Exception):
+class SubmissionError(Exception):
     """
     Raised when `sbatch` ran to completion but its output did not contain
     an extractable Slurm job id.
@@ -388,7 +388,7 @@ async def submit_slurm(
     # Extract job id from sbatch output.
     parsed_id = _parse_job_id(result)
     if parsed_id is None:
-        return OpError(err=SubmissionException(result))
+        return OpError(err=SubmissionError(result))
     job_id: SlurmJobId = parsed_id
 
     # Resolve %j (and %J) in the output paths now that we know the job id, so

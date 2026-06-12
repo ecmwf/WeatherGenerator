@@ -10,10 +10,10 @@
 # weathergen-prefect-dags = { git = "https://github.com/ecmwf/WeatherGenerator", branch = "tjh/dev/prefect-test", subdirectory = "packages/prefect-dags" }
 # ///
 from weathergen.prefect_dags import flow, run, sbatch
-from weathergen.prefect_dags.cmd_runners import EcmwfSshContext
+from weathergen.prefect_dags.cmd_runners import SimpleSshContext
 
 # The run context defines where the commands will be executed.
-ctx = EcmwfSshContext(
+ctx = SimpleSshContext(
     host="hpc-login",
 )
 

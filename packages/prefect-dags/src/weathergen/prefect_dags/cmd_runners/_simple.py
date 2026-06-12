@@ -29,7 +29,7 @@ from weathergen.prefect_dags.result import OpError, Result
 
 
 @dataclass
-class EcmwfSshContext:
+class SimpleSshContext:
     """
     Connection info for ECMWF / Atos clusters reached through Teleport.
 
@@ -42,19 +42,22 @@ class EcmwfSshContext:
     account: str | None = None
 
 
-class EcmwfSshCommandRunner(CommandRunner):
+class SimpleSshCommandRunner(CommandRunner):
     """
-    CommandRunner that executes commands on ECMWF / Atos clusters via the system ssh client.
+    CommandRunner that executes commands via the system ssh client, assuming
+    the connection has been set separately through SSH.
 
-    It assumes the standard Teleport authentication flow is used.
+    This interface directly passes batch SSH commands.
 
-    TODO: documentation to ECMWF teleport setup.
+    This is the case for:
+        - ECMWF ATOS/HPC2020 with teleport
+        - most other HPCs when following the standard interactive protocol
     """
 
     name = "ecmwf_ssh"
-    _ctx: EcmwfSshContext
+    _ctx: SimpleSshContext
 
-    def __init__(self, context: EcmwfSshContext):
+    def __init__(self, context: SimpleSshContext):
         self._ctx = context
         # No separate "hpc" name on ECMWF contexts — the ssh host alias
         # ("hpc-login", "hpc2020", ...) already identifies the cluster.
