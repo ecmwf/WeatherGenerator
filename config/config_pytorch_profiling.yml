@@ -4,12 +4,3 @@ profiling:
   warmup_iteration: 1
   active_iteration: 1
   repeat: 1
-
-ae_local_num_blocks: 1
-ae_local_num_heads: 2
-ae_global_num_blocks: 1
-ae_global_num_heads: 2
-ae_aggregation_num_blocks: 1
-ae_aggregation_num_heads: 2
-fe_num_blocks: 1
-fe_num_heads: 2
