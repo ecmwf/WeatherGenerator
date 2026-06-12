@@ -250,7 +250,7 @@ def plot_lr(
     plot_dir : Path
         directory to save the plots
     x_axis : str
-        x-axis column name used for the x-axis (options: "samples", "elapsed_training_time")
+        x-axis strings used in the column names (options: "samples", "dtime")
     """
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
@@ -284,10 +284,7 @@ def plot_lr(
     plt.yscale("log")
     plt.title("learning rate")
     plt.ylabel("lr")
-    x_label = (
-        "elapsed training time [s]" if "elapsed_training_time" in x_axis else x_axis
-    )
-    plt.xlabel(x_label)
+    plt.xlabel(x_axis)
     plt.tight_layout()
     _add_legend(
         legend_str,
