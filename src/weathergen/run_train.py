@@ -161,6 +161,7 @@ def run_train(args):
 
     Note: All model configurations are set in the function body.
     """
+
     cli_overwrite = config.from_cli_arglist(args.options)
 
     cf = config.load_merge_configs(
