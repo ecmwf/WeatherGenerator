@@ -1,5 +1,9 @@
 profiler:
   enabled: true
+  wait_iteration: 1
+  warmup_iteration: 1
+  active_iteration: 1
+  repeat: 1
 
 ae_local_num_blocks: 1
 ae_local_num_heads: 2
