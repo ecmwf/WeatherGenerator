@@ -243,7 +243,7 @@ class Trainer(TrainerBase):
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
     def run(
-        self, cf, devices, run_id_contd=None, mini_epoch_contd=None, t_start: float | None = None
+        self, cf, devices, run_id_contd=None, mini_epoch_contd=None
     ):
         # general initalization
         self.init(cf, devices)
