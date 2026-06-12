@@ -243,7 +243,6 @@ def _read_coords_and_meta(
     stream: str,
     fstep: int,
     is_zip: bool,
-    regrid_opts: dict | None = None,
 ) -> tuple[NDArray, list[str], NDArray]:
     """
     Read coordinates and channel names from the zarr store (once).

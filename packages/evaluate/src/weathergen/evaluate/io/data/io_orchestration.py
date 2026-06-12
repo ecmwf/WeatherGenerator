@@ -77,12 +77,12 @@ class IOState:
     lat: NDArray
     lon: NDArray
     n_workers: int
+    regrid_opts: dict  # options for regridding gridded DataArrays; ignored for scatter
     backend: str = "loky"
     rank: str = "0000"
     offset: np.timedelta64 | None = (
         None  # fallback offset in hours for init_time when source_interval is missing
     )
-    regrid_opts: dict = None  # options for regridding gridded DataArrays; ignored for scatter
 
 
 # ---------------------------------------------------------------------------
@@ -260,10 +260,7 @@ def _build_io_state(
     is_zip = zarr_path.endswith(".zip")
 
     # ---- Read coordinates and channel names from zarr (once) ----
-    regrid_opts = stream_cfg.get("regrid") if is_gridded else None
-    coords, zarr_channels, _ = _read_coords_and_meta(
-        zarr_path, stream, fsteps[0], is_zip, regrid_opts
-    )
+    coords, zarr_channels, _ = _read_coords_and_meta(zarr_path, stream, fsteps[0], is_zip)
     read_channels: list[str] = zarr_channels if zarr_channels else all_channels
     channel_idxs: list[int] | None = None if zarr_channels else list(range(len(all_channels)))
     offset = stream_cfg.get("offset")
@@ -276,6 +273,10 @@ def _build_io_state(
 
     lat = coords[:, 0]
     lon = coords[:, 1]
+
+    regrid_opts = stream_cfg.get("regrid") if is_gridded else {}
+    if isinstance(regrid_opts, bool) and regrid_opts:
+        regrid_opts = {"target_grid": [1.5, 1.5]}
 
     return IOState(
         run_id=run_id,
@@ -297,7 +298,7 @@ def _build_io_state(
         n_workers=n_io_workers,
         rank=rank,
         offset=offset,
-        regrid_opts=stream_cfg.get("regrid"),
+        regrid_opts=regrid_opts,
     )
 
 
@@ -313,7 +314,7 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
-    regrid_opts: dict | None = None,
+    regrid_opts: dict,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 

@@ -14,7 +14,6 @@ Post-processing helpers for evaluation DataArrays
 
 import logging
 
-import earthkit.regrid as ekr
 import numpy as np
 import xarray as xr
 
