@@ -200,7 +200,14 @@ resp = json.loads(r.content.decode("utf-8"))
 resp["auth_state"]["access_token"]
 ```
 
-Store the token you get into `~/.jsc_unicore_token`
+This gives you a short-lived token. Then run (for JUPITER)
+
+```bash
+./scripts/token_jsc.py --from-token - -u JUDOR_USER_NAME --lifetime 7776000 --site JUPITER 
+```
+
+This command will prompt you for copy/pasting the token
+and will store it to `~/.jsc_unicore_token`.
 
 ## Examples
 

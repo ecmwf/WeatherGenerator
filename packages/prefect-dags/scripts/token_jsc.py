@@ -238,6 +238,83 @@ def verify_token(base_url: str, token: str) -> bool:
     return True
 
 
+def _read_token_tty() -> str:
+    """Read a long secret from the terminal without echo.
+
+    getpass() cannot be used here: it reads the tty in canonical mode, where
+    POSIX caps a line at MAX_CANON (1024 bytes on macOS). UNICORE JWTs are
+    longer, so pasting one stalls/truncates. Reading in cbreak mode
+    (non-canonical, echo off) has no such limit.
+    """
+    import termios
+    import tty as _tty
+
+    sys.stderr.write("Paste token (input hidden), then press Enter: ")
+    sys.stderr.flush()
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    chars: list[str] = []
+    try:
+        # cbreak: clears ICANON (no 1024-byte line limit) and ECHO.
+        # ISIG stays on, so Ctrl-C still raises KeyboardInterrupt.
+        _tty.setcbreak(fd)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch in ("", "\n", "\r", "\x04"):  # EOF / Enter / Ctrl-D
+                break
+            if ch in ("\x7f", "\b"):  # backspace
+                if chars:
+                    chars.pop()
+                continue
+            chars.append(ch)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        sys.stderr.write("\n")
+    return "".join(chars).strip()
+
+
+def resolve_bootstrap_token(arg: str) -> str:
+    """Resolve the --from-token argument to a token string.
+
+    Accepts, in order of detection:
+    - "-": read the token from stdin. If stdin is a pipe, reads it all
+      (e.g. `pbpaste | token_jsc.py --from-token -`); if it is a terminal,
+      prompts for a hidden interactive paste.
+    - a literal JWT (starts with "eyJ", three dot-separated base64url segments)
+    - a path to a file containing the token
+    """
+    if arg == "-":
+        if sys.stdin.isatty():
+            token = _read_token_tty()
+        else:
+            log.info("Reading token from stdin.")
+            token = sys.stdin.read().strip()
+        if not token:
+            log.error("No token entered.")
+            sys.exit(1)
+        return token
+    # JWTs always start with "eyJ" (base64url of '{"'), which also keeps
+    # dotted filenames like my.token.txt from being misdetected.
+    if re.fullmatch(r"eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", arg):
+        log.info("Using token passed on the command line.")
+        return arg
+    token_path = os.path.expanduser(arg)
+    if not os.path.isfile(token_path):
+        log.error(
+            "Token file not found: %s (pass '-' to paste the token "
+            "interactively, or the token value itself)",
+            token_path,
+        )
+        sys.exit(1)
+    with open(token_path) as f:
+        token = f.read().strip()
+    if not token:
+        log.error("Token file is empty: %s", token_path)
+        sys.exit(1)
+    log.info("Authenticating with existing bearer token from: %s", token_path)
+    return token
+
+
 def save_token(token: str, path: str) -> None:
     """Save the token string to a file with restricted permissions."""
     with open(path, "w") as f:
@@ -266,6 +343,16 @@ Examples:
 
   # List available sites only:
   python create_jsc_token.py -u myuser --list-sites
+
+  # Bootstrap a new long-lived token from an existing valid token
+  # (no password/OTP needed; the old token must be renewable):
+  python create_jsc_token.py --from-token --site JUPITER --lifetime 7776000
+
+  # Same, but paste a temporary token interactively (input hidden):
+  python create_jsc_token.py --from-token - --site JUPITER
+
+  # Or pipe the token in from the clipboard (macOS):
+  pbpaste | python create_jsc_token.py --from-token - --site JUPITER
 """,
     )
     parser.add_argument(
@@ -323,6 +410,19 @@ Examples:
         "--identity",
         help="Path to SSH private key for authentication (e.g. ~/.ssh/id_rsa). "
         "If given, authenticates via a locally-signed JWT instead of password.",
+    )
+    parser.add_argument(
+        "--from-token",
+        nargs="?",
+        const=DEFAULT_TOKEN_FILE,
+        metavar="PATH|TOKEN|-",
+        help="Bootstrap: authenticate with an existing (still valid) bearer token "
+        "instead of username/password. Accepts a file path (default: "
+        f"{DEFAULT_TOKEN_FILE}), a literal JWT value, or '-' to paste the "
+        "token interactively (input hidden). "
+        "Useful when password auth requires an OTP the script cannot provide: "
+        "a token issued with renewable=true is allowed to mint new tokens "
+        "(see UNICORE REST docs, BASE/token).",
     )
     parser.add_argument(
         "-v",
@@ -409,12 +509,17 @@ Examples:
                 ok = False
         sys.exit(0 if ok else 1)
 
-    # ── Gather credentials ────────────────────────────────────────────
+    # ── Gather credentials ────────────────────────────────────
     log.info("JSC UNICORE Long-Lived Token Creator")
 
-    username = args.username or input("Username: ")
-
-    if args.identity:
+    if args.from_token:
+        # Bootstrap from an existing, still-valid bearer token. The UNICORE
+        # token endpoint accepts any authenticated credential, including a
+        # previously issued token — provided that token was created with
+        # renewable=true. No username/password (and thus no OTP) needed.
+        old_token = resolve_bootstrap_token(args.from_token)
+        credential = uc_credentials.BearerToken(token=old_token)
+    elif args.identity:
         # SSH key authentication: sign a short-lived JWT locally.
         # pyunicore's create_credential handles key loading and algorithm detection.
         key_path = os.path.expanduser(args.identity)
@@ -422,6 +527,7 @@ Examples:
             log.error("SSH key not found: %s", key_path)
             sys.exit(1)
         log.info("Authenticating with SSH key: %s", key_path)
+        username = args.username or input("Username: ")
         key_password = getpass.getpass("Key passphrase (empty if none): ")
         credential = uc_credentials.create_credential(
             username=username,
@@ -430,6 +536,12 @@ Examples:
         )
     else:
         log.info("Authenticating with JUDOOR username/password.")
+        log.warning(
+            "Note: if JSC requires an OTP for password logins, this will be "
+            "rejected as anonymous. Use --from-token to bootstrap from a "
+            "valid token instead."
+        )
+        username = args.username or input("Username: ")
         password = getpass.getpass("Password: ")
         credential = uc_credentials.UsernamePassword(username, password)
 
