@@ -13,6 +13,7 @@
 # weathergen-prefect-dags = { path = "../", editable = true }
 # ///
 
+from weathergen.launch_slurm import launch_slurm, wait_for_completion
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch_try, task
 from weathergen.prefect_dags.cmd_runners import *
 from weathergen.prefect_dags.result import is_err
@@ -93,5 +94,18 @@ def test_run_cmd_flow(
         print(f"Job result: {res}, ")
 
 
+@flow(log_prints=True)
+def test_run_cmd_flow2(
+    rerun_token=None,
+):
+    # wgp = "/users/thunter/work/WeatherGenerator-private/"
+    wgp = "/home/ecm8774/work/WeatherGenerator-private/"
+    jobs = launch_slurm.submit(ctx, wgp, stage="train", time="10").result()
+    print(jobs)
+    assert not is_err(jobs)
+    final_status = wait_for_completion.submit(ctx, jobs).result()
+    print(final_status)
+
+
 if __name__ == "__main__":
-    test_run_cmd_flow()
+    test_run_cmd_flow2()

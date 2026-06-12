@@ -36,16 +36,24 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
+import prefect.runtime.flow_run
 from prefect import get_client
 from prefect.artifacts import acreate_markdown_artifact
+from prefect.client.schemas.objects import StateType
 from prefect.concurrency.asyncio import concurrency as _async_concurrency
-from prefect.exceptions import ObjectAlreadyExists
+from prefect.exceptions import ObjectAlreadyExists, ObjectNotFound
 from prefect.transactions import CommitMode, transaction
 from prefect.utilities.asyncutils import run_coro_as_sync
 from prefect.variables import Variable
 from pydantic import TypeAdapter, ValidationError
 
-from weathergen.prefect_dags.cmd_runners import CmdContext, CommandRunner, get_command_runner
+from weathergen.prefect_dags.cmd_runners import (
+    CmdContext,
+    Command,
+    CommandRunner,
+    get_command_runner,
+    run_cmd,
+)
 from weathergen.prefect_dags.prefect_logging import get_run_logger
 from weathergen.prefect_dags.prefect_wrapper import task
 from weathergen.prefect_dags.result import OpError, Result, is_err
@@ -63,7 +71,7 @@ from weathergen.prefect_dags.slurm import (
 # Lease window: only one monitor per HPC actively polls sacct per window.
 # Others read the per-job status variables that monitor updated.
 _LEASE_DURATION = timedelta(seconds=20)
-# How often _wait_completion_single re-checks (status variable + lease).
+# How often wait_completion_single re-checks (status variable + lease).
 _POLL_INTERVAL_SECS = 5
 
 _PRFEFECT_NUM_READS = 200
@@ -97,7 +105,7 @@ class SlurmJobResult:
     submission: SlurmSubmissionResult
 
 
-class SlurmTerminalFailure(Exception):
+class SlurmTerminalError(Exception):
     """
     Exception raised when a slurm job ends in a non-successful terminal state.
     """
@@ -166,7 +174,7 @@ def sbatch(
         raise res.err
     job_res: SlurmJobResult = res
     if job_res.status != "COMPLETED" and not _accept_failure:
-        raise SlurmTerminalFailure(result=job_res)
+        raise SlurmTerminalError(result=job_res)
     return job_res
 
 
@@ -287,7 +295,13 @@ class _SlurmJobPrefectStatus:
     job_id: SlurmJobId
     hpc: str
     # Typed as a Literal so TypeAdapter rejects unknown state strings on read.
-    status: SlurmJobState
+    # "CANCELLING" is not a slurm state: it is set by _flow_cancellation_guard
+    # between committing to scancel and slurm reporting the terminal CANCELLED.
+    status: SlurmJobState | Literal["CANCELLING"]
+    # The flow run that created this variable (i.e. submitted or first awaited
+    # the job). Preserved across sacct refreshes so cancellation of a flow run
+    # only affects its own jobs. None when created outside a flow run context.
+    flow_run_id: str | None = None
 
 
 @dataclass
@@ -311,9 +325,10 @@ _LOCK_ADAPTER = TypeAdapter(_SlurmJobMonitoringLock)
 # Variable naming + helpers
 # ---------------------------------------------------------------------------
 
-# TODO: job should be either a SlurmJob or a list[SlurmSubmissionResult] 
+# TODO: job should be either a SlurmJob or a list[SlurmSubmissionResult]
 # (jobs already submitted separately, e.g. by a launch_slurm.py script). The current single-job interface is a bit awkward to use with launch_slurm.py, which submits multiple jobs and returns their details as a list.
 # TODO: result should be a list of SlurmJobResult to support the launch_slurm.py use case, which submits multiple jobs and returns their details as a list.
+
 
 async def _sbatch_try(
     job: SlurmJob,
@@ -369,10 +384,9 @@ async def _sbatch_try(
         description=artifact_description,
     )
 
-    # Now await completion of the job.
-    state = await _wait_completion_single(logger, context, job_id, runner)
-    # Job is done. Cleane up the variable.
-    await _delete_status(runner.hpc, job_id)
+    # Now await completion of the job. The status variable is cleaned up by
+    # wait_completion_single once the job reaches a terminal state.
+    state = await wait_completion_single(logger, context, job_id, runner)
     if isinstance(state, OpError):
         return state
 
@@ -442,40 +456,66 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-async def _set_status(hpc: str, job_id: SlurmJobId, status: SlurmJobState) -> None:
-    payload = _SlurmJobPrefectStatus(job_id=job_id, hpc=hpc, status=status)
+async def _set_status(
+    hpc: str, job_id: SlurmJobId, status: SlurmJobState | Literal["CANCELLING"]
+) -> None:
+    # Preserve the flow run that originally created this variable: the
+    # lease-holding monitor refreshes variables for jobs belonging to *other*
+    # flow runs and must not re-stamp them as its own (otherwise cancelling
+    # one flow run could scancel another's jobs).
+    existing = await _read_status_payload(hpc, job_id)
+    flow_run_id = (
+        existing.flow_run_id
+        if existing is not None and existing.flow_run_id
+        else prefect.runtime.flow_run.id or None
+    )
+    payload = _SlurmJobPrefectStatus(job_id=job_id, hpc=hpc, status=status, flow_run_id=flow_run_id)
+    tags = [f"hpc:{hpc}", "status:active"]
+    # Tag with the flow currently running this task, to ease tracing a status
+    # variable back to its flow in the UI. May be absent (e.g. unit tests).
+    flow_name = prefect.runtime.flow_run.flow_name
+    if flow_name:
+        tags.append(f"flow:{flow_name}")
+    if flow_run_id:
+        tags.append(f"flow_run:{flow_run_id}")
     await Variable.aset(
         name=_status_var_name(hpc, job_id),
         value=_STATUS_ADAPTER.dump_python(payload),
-        tags=[f"hpc:{hpc}", "status:running"],
+        tags=tags,
         overwrite=True,
     )
 
 
-async def _read_status(hpc: str, job_id: SlurmJobId) -> SlurmJobState | None:
+async def _read_status_payload(hpc: str, job_id: SlurmJobId) -> _SlurmJobPrefectStatus | None:
     raw = await Variable.aget(name=_status_var_name(hpc, job_id))
     if raw is None:
         return None
     try:
-        parsed = _STATUS_ADAPTER.validate_python(raw)
+        return _STATUS_ADAPTER.validate_python(raw)
     except ValidationError:
         # Stale or malformed variable from an older schema; treat as missing.
         return None
-    return parsed.status
+
+
+async def _read_status(
+    hpc: str, job_id: SlurmJobId
+) -> SlurmJobState | Literal["CANCELLING"] | None:
+    parsed = await _read_status_payload(hpc, job_id)
+    return parsed.status if parsed is not None else None
 
 
 async def _delete_status(hpc: str, job_id: SlurmJobId) -> None:
     await Variable.aunset(name=_status_var_name(hpc, job_id))
 
 
-async def _list_running_job_ids(hpc: str, logger: logging.Logger) -> list[SlurmJobId]:
+async def _list_status_payloads(hpc: str, logger: logging.Logger) -> list[_SlurmJobPrefectStatus]:
     # Prefect's client doesn't expose server-side filtering on variables, so
     # we read a bounded batch and filter by tags client-side. Fine for the
     # typical "tens of active jobs per HPC" scale.
     async with get_client() as client:
         results = await client.read_variables(limit=_PRFEFECT_NUM_READS)
-    needed = {f"hpc:{hpc}", "status:running"}
-    out: list[SlurmJobId] = []
+    needed = {f"hpc:{hpc}", "status:active"}
+    out: list[_SlurmJobPrefectStatus] = []
     for v in results:
         if not needed.issubset(set(v.tags)):
             continue
@@ -485,8 +525,16 @@ async def _list_running_job_ids(hpc: str, logger: logging.Logger) -> list[SlurmJ
             logger.warning(f"Malformed status variable: {v.name}: {v.value}: {v.tags} : {e}")
             # Skip malformed values rather than failing the whole refresh.
             continue
-        out.append(parsed.job_id)
+        out.append(parsed)
     return out
+
+
+async def _list_running_job_ids(hpc: str, logger: logging.Logger) -> list[SlurmJobId]:
+    payloads = await _list_status_payloads(hpc, logger)
+    # Jobs in CANCELLING are being folded by _flow_cancellation_guard: skip
+    # them so the sacct refresh does not overwrite the marker (sacct may
+    # still briefly report them as RUNNING after scancel).
+    return [p.job_id for p in payloads if p.status != "CANCELLING"]
 
 
 async def _lease_expired(hpc: str) -> bool:
@@ -518,38 +566,132 @@ async def _write_lease(hpc: str) -> None:
     )
 
 
-async def _wait_completion_single(
+async def wait_completion_single(
     logger: logging.Logger,
     ctx: CmdContext,
     job_id: SlurmJobId,
     runner: CommandRunner,
 ) -> Result[SlurmJobState]:
-    """Poll the per-job status variable until it disappears (terminal signal).
+    """Poll the per-job status variable until the job reaches a terminal state.
 
     Each iteration:
       1. Try to refresh sacct (only succeeds if we win the HPC lease).
       2. Read this job's status variable.
 
+    If the status variable is missing (e.g. the job was submitted outside of
+    `sbatch`, such as by an external launcher script), it is created with a
+    PENDING status so the monitor loop picks the job up. The variable is
+    deleted once the job reaches a terminal state.
     """
     while True:
+        guard = await _flow_cancellation_guard(logger, ctx, runner)
+        if is_err(guard):
+            return guard
+        if guard.cancelled:
+            # The user asked to cancel this flow run; its jobs (including this
+            # one) have been committed to scancel. Fold immediately rather
+            # than waiting for sacct to report the terminal state.
+            logger.info(f"SLURM job {job_id} cancelled with its flow run.")
+            await _delete_status(runner.hpc, job_id)
+            return "CANCELLED"
         await _try_update_status(logger, ctx, runner)
         status = await _read_status(runner.hpc, job_id)
         if status is None:
-            # Variable missing. It should not happen.
-            # Reinsert the variable with a "PENDING" status so the monitor loop can update the
-            # status.
+            # Variable missing: either it should not happen (sbatch path) or
+            # the job was submitted externally and is awaited for the first time.
+            # Insert the variable with a "PENDING" status so the monitor loop
+            # can update the status.
             logger.warning(
                 f"Status variable for job {job_id} on hpc {runner.hpc} is missing. "
                 f"Reinserting with PENDING status."
             )
             await _set_status(runner.hpc, job_id, "PENDING")
+        elif status == "CANCELLING":
+            # Marked by the cancellation guard (from a concurrent task of this
+            # flow run). The guard at the top of the next iteration folds.
+            pass
         elif status is not None and is_err(status):
             logger.info(f"SLURM job {job_id} reached terminal error state: {status}")
+            await _delete_status(runner.hpc, job_id)
             return status
         elif status is not None and is_terminal_state(status):
             logger.info(f"SLURM job {job_id} reached terminal state: {status}")
+            await _delete_status(runner.hpc, job_id)
             return status
         await asyncio.sleep(_POLL_INTERVAL_SECS)
+
+
+@dataclass
+class CancelledSlurmJobs:
+    # The list of slurm jobs that have been committed to cancellation with scancel.
+    cancelled: list[SlurmJobId]
+
+
+async def _flow_cancellation_guard(
+    logger: logging.Logger, ctx: CmdContext, runner: CommandRunner
+) -> Result[CancelledSlurmJobs]:
+    """
+    Check whether the user asked to cancel the current flow run, and if so,
+    fold all the slurm jobs associated with it.
+
+    Local (non-deployment) flow runs have no worker to enforce cancellation,
+    so the UI cancel button is greyed out. The cooperative signals are:
+    - the flow run was forced into Cancelling/Cancelled state by the user
+      (UI kebab menu "Change state", or `prefect flow-run cancel <id>`);
+    - the flow run was deleted in the UI.
+
+    When a signal is detected:
+    - mark preemptively as CANCELLING (with _set_status) all the slurm jobs
+      associated with that flow run, so the sacct monitor stops refreshing them;
+    - call scancel on all those jobs. If scancel fails, return the error.
+
+    Returns the (possibly empty) list of jobs committed to cancellation.
+    Transient API failures while checking the state are logged and treated as
+    "no signal": a network blip must not cancel real work.
+    """
+    no_signal = CancelledSlurmJobs(cancelled=[])
+    flow_run_id = prefect.runtime.flow_run.id
+    if not flow_run_id:
+        # Not running inside a flow run (e.g. unit tests): nothing to guard.
+        return no_signal
+
+    # 1. Detect the cancellation signal.
+    try:
+        async with get_client() as client:
+            flow_run = await client.read_flow_run(flow_run_id)
+        if flow_run.state_type not in (StateType.CANCELLING, StateType.CANCELLED):
+            return no_signal
+        reason = f"flow run {flow_run_id} was put in state {flow_run.state_type}"
+    except ObjectNotFound:
+        reason = f"flow run {flow_run_id} was deleted"
+    except Exception as e:
+        logger.warning(f"Could not check the cancellation state of flow run {flow_run_id}: {e}")
+        return no_signal
+
+    logger.warning(f"Cancellation requested: {reason}. Cancelling its slurm jobs.")
+
+    # 2. Find all the jobs of this flow run on this HPC and mark them as
+    # CANCELLING so the sacct refresh loop leaves them alone.
+    payloads = await _list_status_payloads(runner.hpc, logger)
+    job_ids = [p.job_id for p in payloads if p.flow_run_id == flow_run_id]
+    for jid in job_ids:
+        await _set_status(runner.hpc, jid, "CANCELLING")
+
+    # 3. Cancel them on the HPC. scancel is idempotent on jobs that are
+    # already terminal, so concurrent guards racing here are harmless.
+    if job_ids:
+        res = await run_cmd(ctx, Command(command=["scancel", *job_ids]), logger)
+        if is_err(res):
+            return res
+        if res.return_code != 0:
+            return OpError(
+                err=RuntimeError(f"scancel failed for jobs {job_ids} on hpc {runner.hpc}"),
+                stdout=res.stdout,
+                stderr=res.stderr,
+                return_code=res.return_code,
+            )
+        logger.info(f"scancel issued for jobs {job_ids} on hpc {runner.hpc}")
+    return CancelledSlurmJobs(cancelled=job_ids)
 
 
 async def _try_update_status(
