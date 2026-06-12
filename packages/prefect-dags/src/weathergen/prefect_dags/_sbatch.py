@@ -139,7 +139,7 @@ def sbatch(
     slurm_options: dict[str, str] | None = None,
     account: str | Literal["auto"] | None = "auto",
     job: SlurmJob | None = None,
-    fetch_output: bool = False,
+    fetch_output: bool = True,
     _accept_failure: bool = False,  # Internal, non-documented.
 ) -> SlurmJobResult:
     """

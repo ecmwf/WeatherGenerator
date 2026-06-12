@@ -15,7 +15,7 @@
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch, task
 from weathergen.prefect_dags.cmd_runners import (
     CscsFirecrestContext,
-    EcmwfEcaccessContext,
+    # EcmwfEcaccessContext,
     JscUnicoreContext,
     SimpleSshContext,
 )
@@ -69,7 +69,6 @@ def sleep_and_print(ctx_name, sleep_sec: int, pwd: str) -> SlurmJobResult:
         working_directory=pwd,
     )
     print(f"result: {res}, type: {type(res)}")
-    # assert sleep_sec < 6, "xxx"
     return res
 
 

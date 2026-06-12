@@ -59,6 +59,10 @@ _VALID_HPCS: dict[JscHpc, str] = {
 # UNICORE terminal job statuses.
 _TERMINAL_STATUSES = ("SUCCESSFUL", "FAILED", "DONE")
 
+# Name of the inline-imported script holding the actual command in the job
+# sandbox (see JscUnicoreCommandRunner._run).
+_COMMAND_SCRIPT = "wg_command.sh"
+
 
 def discover_sites(credential) -> dict[str, str]:
     """Query the JSC UNICORE registry and return {site_name: base_url}."""
@@ -139,7 +143,23 @@ class JscUnicoreCommandRunner(CommandRunner):
         # the job description's Environment instead of `export` lines.
         remote_cmd = _build_remote_command(cmd)
         env = {"UC_PREFER_INTERACTIVE_EXECUTION": "true", **(cmd.env_vars or {})}
-        job_desc: dict[str, Any] = {"Executable": remote_cmd, "Environment": env}
+        # The Executable string is embedded by UNICORE/X inside a
+        # double-quoted shell assignment (`UC_EXECUTABLE="..."`) in its
+        # generated wrapper script, so any quoting in the command breaks the
+        # wrapper. Ship the command verbatim as an inline-imported script in
+        # the job sandbox and keep Executable/Arguments trivially shell-safe.
+        job_desc: dict[str, Any] = {
+            "Executable": "/bin/bash",
+            "Arguments": [_COMMAND_SCRIPT],
+            "Environment": env,
+            "Imports": [
+                {
+                    "From": "inline://dummy",
+                    "To": _COMMAND_SCRIPT,
+                    "Data": remote_cmd + "\n",
+                }
+            ],
+        }
         if ctx.project:
             job_desc["Project"] = ctx.project
 
