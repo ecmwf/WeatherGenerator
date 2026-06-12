@@ -159,6 +159,7 @@ class Trainer(TrainerBase):
         cf.world_size_original = self.world_size_original
 
         self.log_grad_norms = cf.train_logging.get("log_grad_norms", False)
+
         # create output directory
         if is_root():
             config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
@@ -384,6 +385,7 @@ class Trainer(TrainerBase):
             config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
         self._training_loop(mini_epoch_base)
+
 
     def _training_loop(self, mini_epoch_base: int):
         # run validation before training if requested
@@ -830,6 +832,15 @@ class Trainer(TrainerBase):
 
             self.t_start = time.time()
 
+    def _log_collapse_metrics(self, stage: Stage) -> None:
+        """
+        Log cached collapse monitoring metrics.
+        """
+        metrics = self.collapse_monitor.get_cached_metrics()
+        if metrics and is_root():
+            metrics["num_samples"] = self.cf.general.istep
+            self.train_logger.log_metrics(stage, metrics)
+
 
 class ProfilingTrainer(Trainer):
     def init(self, cf, devices):
@@ -890,7 +901,7 @@ class ProfilingTrainer(Trainer):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=True,
                 profile_memory=True,
-                with_stack=not on_aarch64,
+                with_stack=True, # TODO: ensure pytorch 2.9.1 before merging!
                 with_modules=True,
                 with_flops=True,
                 schedule=torch.profiler.schedule(
@@ -1039,21 +1050,3 @@ class ProfilingTrainer(Trainer):
 
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
-
-
-def _log_collapse_metrics(self, stage: Stage) -> None:
-    """
-    Log cached collapse monitoring metrics.
-    """
-    metrics = self.collapse_monitor.get_cached_metrics()
-    if metrics and is_root():
-        metrics["num_samples"] = self.cf.general.istep
-        self.train_logger.log_metrics(stage, metrics)
-
-
-def get_trainer(cf: Config) -> Trainer:
-    if cf.get("profiling", {}).get("enabled", False):
-        trainer = ProfilingTrainer(cf.train_logging)
-    else:
-        trainer = Trainer(cf.train_logging)
-    return trainer

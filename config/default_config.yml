@@ -93,12 +93,6 @@ load_chkpt: {}
 norm_type: "LayerNorm"
 qk_norm_type: null  # if null, defaults to norm_type
 
-profiling:
-  enabled: False 
-  wait_iteration: 2
-  warmup_iteration: 4
-  active_iteration: 2
-  repeat: 1
 #####################################
 
 streams_directory: "./config/streams/era5_1deg/"

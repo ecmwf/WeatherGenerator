@@ -135,7 +135,7 @@ def _sanitize_time_keys(conf: Config) -> Config:
     return conf
 
 
-def _strip_interpolation(conf: Config) -> Config | ListConfig:
+def _strip_interpolation(conf: Config) -> Config:
     """Recursively convert interpolated timedelta/datetime objects to strings."""
     stripped = {}
     if OmegaConf.is_dict(conf):
@@ -312,7 +312,9 @@ def _apply_fixes(config: Config) -> Config:
     """
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
+    config = _check_streams(config)
     config = _check_profiling(config)
+
     return config
 
 
@@ -387,23 +389,16 @@ def _check_profiling(config: Config) -> Config:
     """
     config = config.copy()
 
-    defaults = {
-        "enabled": False,
-        "wait_iteration": 1,
-        "warmup_iteration": 1,
-        "active_iteration": 1,
-        "repeat": 1,
-    }
-
-    if config.get("profiling") is None:
-        # no profiling section at all — inject full defaults
-        config.profiling = OmegaConf.create(defaults)
-    else:
-        # profiling section exists — fill in any missing fields and force enabled=True
+    if config.get("profiling"):
+        defaults = {
+            "wait_iteration": 1,
+            "warmup_iteration": 1,
+            "active_iteration": 1,
+            "repeat": 1,
+        }
         for key, value in defaults.items():
-            if config.profiling.get(key) is None:
+            if not config.profiling.get(key):
                 config.profiling[key] = value
-        config.profiling.enabled = True  # always True when called from run_profile
 
     return config
 
@@ -639,7 +634,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
             _logger.info("Deserialize default configuration.")
             conf = OmegaConf.load(_DEFAULT_CONFIG_PTH)
     assert isinstance(conf, Config)
-    return _apply_fixes(conf)
+    return conf
 
 
 def load_streams(streams_directory: Path) -> Config:
