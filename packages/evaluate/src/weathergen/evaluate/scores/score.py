@@ -1276,11 +1276,6 @@ class Scores:
         xr.DataArray
             Spread-Skill Ratio (SSR)
         """
-        # Spread-skill ratio = spread / skill, where the "skill" is the RMSE of the ensemble
-        # MEAN (GenCast / WeatherBench2 convention), not the per-member RMSE. Reducing the
-        # ensemble dim in the denominator (to match the already ens-reduced spread numerator)
-        # yields a single value per variable-level-fstep with a clean calibration interpretation,
-        # rather than one ratio per ensemble member.
         ens_mean = p.mean(dim=self._ens_dim)
         ssr = self.calc_spread(p) / self.calc_rmse(ens_mean, gt)
 
