@@ -637,7 +637,7 @@ class Model(torch.nn.Module):
         num_params_fe = (
             get_num_parameters(
                 self.forecast_engine.net.fe_blocks
-                if cf.fe_diffusion_model
+                if self.cf.fe_diffusion_model
                 else self.forecast_engine.fe_blocks
             )
         )
@@ -718,7 +718,7 @@ class Model(torch.nn.Module):
         # Reshape tokens to [B, T, ...]
         tokens = tokens.reshape(shape)
 
-        if self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
+        if self.cf.get("fe_diffusion_model", False) and self.cf.get("fe_diffusion_model_conditioning", None) == "forecast":
             tokens = tokens.reshape(shape)
             # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
             if self.cf.stage == "inference":

@@ -733,7 +733,7 @@ class ForecastingEngine(torch.nn.Module):
         else:
             for block in self.fe_blocks:
                 if isinstance(block, torch.nn.LayerNorm):
-                    tokens = checkpoint(block, tokens, use_reentrant=False)
+                    tokens = block(tokens)
                 else:
                     tokens = checkpoint(block, tokens, coords, conditioning, use_reentrant=False)
 

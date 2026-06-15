@@ -22,7 +22,7 @@ ERA5_in :
       masking_strategy_config :
         rate: 0.5
   token_size : 8 # 512
-  tokenize_spacetime : False
+  tokenize_spacetime : True
   max_num_targets: -1
   forcing: True
   frequency : 06:00:00
