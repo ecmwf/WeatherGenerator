@@ -815,6 +815,10 @@ class ProfilingTrainer(Trainer):
         if is_root():
             config.get_path_profiler(self.cf).mkdir(exist_ok=True, parents=True)
 
+    def save_model(self, mini_epoch: int, name=None):
+        # Skip save in profiling mode.
+        return
+
     def _training_loop(self, mini_epoch_base: int):
         # run validation before training if requested
         self.validate_before_training()
