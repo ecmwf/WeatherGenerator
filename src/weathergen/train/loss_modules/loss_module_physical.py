@@ -31,6 +31,55 @@ def get_num_samples(config) -> np.typing.NDArray:
     return np.array([s_cfg.get("num_samples", 1) for _, s_cfg in config.items()])
 
 
+class DynamicLossEMA:
+    """
+    Tracks and applies dynamic channel weights using an Exponential Moving Average (EMA)
+    of inverse MSE, as described in Samudra 2.
+    """
+
+    def __init__(self, cfg: dict | None, streams_cfg: dict, device: str):
+        self.enabled = cfg is not None
+        if self.enabled:
+            self.window = cfg.get("window", 100)
+            self.L = cfg.get("L", 20.0)
+            self.channel_weights_ema = {}
+            for stream_name, stream_info in streams_cfg.items():
+                num_channels = len(stream_info.train_target_channels)
+                self.channel_weights_ema[stream_name] = torch.ones(num_channels, device=device)
+
+    def get_weights(
+        self, stream_name: str, weights_channels_static: torch.Tensor | None
+    ) -> torch.Tensor | None:
+        if not self.enabled:
+            return None
+
+        ema = self.channel_weights_ema[stream_name]
+        if ema.numel() > 0:
+            l_min = ema.min().clamp(min=1e-8)
+            # Clamp max weight to L * min weight as per Samudra 2 paper
+            clamped_ema = ema.clamp(max=self.L * l_min)
+            # Normalize so mean is 1.0 to preserve overall learning rate scale
+            weights_channels = clamped_ema / clamped_ema.mean()
+        else:
+            weights_channels = ema.clone()
+
+        if weights_channels_static is not None and weights_channels_static.numel() > 0:
+            weights_channels = weights_channels * weights_channels_static
+
+        return weights_channels
+
+    def update(self, stream_name: str, loss_lfct_chs: torch.Tensor):
+        if not self.enabled:
+            return
+
+        with torch.no_grad():
+            mse_per_chan = loss_lfct_chs.detach().clamp(min=1e-8)
+            inv_mse = 1.0 / mse_per_chan
+            self.channel_weights_ema[stream_name] = (
+                1.0 - 1.0 / self.window
+            ) * self.channel_weights_ema[stream_name] + (1.0 / self.window) * inv_mse
+
+
 class LossPhysical(LossModuleBase):
     """
     Manages and computes the overall loss for a WeatherGenerator model during
@@ -70,13 +119,11 @@ class LossPhysical(LossModuleBase):
             for name, params in loss_fcts.items()
         ]
 
-        if self.dynamic_loss_cfg is not None and self.stage == TRAIN:
-            self.ema_window = self.dynamic_loss_cfg.get("window", 100)
-            self.ema_L = self.dynamic_loss_cfg.get("L", 20.0)
-            self.channel_weights_ema = {}
-            for stream_name, stream_info in self.cf.streams.items():
-                num_channels = len(stream_info.train_target_channels)
-                self.channel_weights_ema[stream_name] = torch.ones(num_channels, device=self.device)
+        self.dynamic_loss_ema = DynamicLossEMA(
+            self.dynamic_loss_cfg if self.stage == TRAIN else None,
+            self.cf.streams,
+            self.device,
+        )
 
     def _get_weights(self, stream_info):
         """
@@ -233,18 +280,10 @@ class LossPhysical(LossModuleBase):
 
             stream_loss_weight, weights_channels_static = self._get_weights(stream_info)
 
-            if self.stage == TRAIN and self.dynamic_loss_cfg is not None:
-                ema = self.channel_weights_ema[stream_name]
-                if ema.numel() > 0:
-                    l_min = ema.min().clamp(min=1e-8)
-                    # Clamp max weight to L * min weight as per Samudra 2 paper
-                    clamped_ema = ema.clamp(max=self.ema_L * l_min)
-                    # Normalize so mean is 1.0 to preserve overall learning rate scale
-                    weights_channels = clamped_ema / clamped_ema.mean()
-                else:
-                    weights_channels = ema.clone()
-                if weights_channels_static is not None and weights_channels_static.numel() > 0:
-                    weights_channels = weights_channels * weights_channels_static
+            if self.dynamic_loss_ema.enabled:
+                weights_channels = self.dynamic_loss_ema.get_weights(
+                    stream_name, weights_channels_static
+                )
             else:
                 weights_channels = (
                     weights_channels_static 
@@ -351,18 +390,12 @@ class LossPhysical(LossModuleBase):
 
                         # Update EMA for dynamic loss if enabled
                         if (
-                            self.stage == TRAIN
-                            and self.dynamic_loss_cfg is not None
+                            self.dynamic_loss_ema.enabled
                             and timestep_idx == 0
                             and loss_fct_name == "mse"
                             and not is_spoof
                         ):
-                            with torch.no_grad():
-                                mse_per_chan = loss_lfct_chs.detach().clamp(min=1e-8)
-                                inv_mse = 1.0 / mse_per_chan
-                                self.channel_weights_ema[stream_name] = (
-                                    1.0 - 1.0 / self.ema_window
-                                ) * self.channel_weights_ema[stream_name] + (1.0 / self.ema_window) * inv_mse
+                            self.dynamic_loss_ema.update(stream_name, loss_lfct_chs)
 
                         # Add the weighted and normalized loss from this loss function to the total
                         # batch loss
