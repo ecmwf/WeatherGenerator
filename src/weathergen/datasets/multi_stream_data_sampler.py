@@ -102,7 +102,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # initialise healpix
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -149,6 +148,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
         self.check_samples(self._get_fsm())
+        if stage == "train":
+            self.total_train_steps = int((self.len * mode_cfg.num_mini_epochs) / self.batch_size)
+        else:
+            self.total_train_steps = None
+        self.masker = Masker(
+            cf.healpix_level,
+            stage,
+            self.streams,
+            self.mode_cfg,
+            total_train_steps=self.total_train_steps,
+        )
+        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
         self.streams_datasets = self._init_stream_datasets(cf)
 
         # RNG seed setup
