@@ -3,7 +3,7 @@
 # forcing so the teacher metadata mask remains populated for SSL targets.
 
 ERA5_in:
-  type: anemoi
+  type: anemoi_operan
   filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr'] #['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
   # filenames: # ['aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6.zarr']
   stream_id: 0
