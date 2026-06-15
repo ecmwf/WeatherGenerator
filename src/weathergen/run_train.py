@@ -185,8 +185,7 @@ def run_train(args):
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
 
-    profiling_cfg = getattr(cf, "profiling", None)
-    if profiling_cfg and profiling_cfg.enabled:
+    if cf.profiling and cf.profiling.enabled:
         trainer = ProfilingTrainer(cf.train_logging)
     else:
         trainer = Trainer(cf.train_logging)
