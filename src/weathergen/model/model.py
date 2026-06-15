@@ -800,7 +800,7 @@ class Model(torch.nn.Module):
         # If Q>1 each neighbour contributes Q tokens and the value must change to 9*Q.
         assert Q == 1, "predict_decoders assumes ae_local_num_queries==1; update tokens_nbors_lens fill_value if Q>1"
 
-        # ── ② Latent Gaussian perturbation ────────────────────────────────
+        # ── Latent Gaussian perturbation ────────────────────────────────
         # Sample M independent members by treating each as an extra batch element 
         # The entire decoder forward pass runs once, fully vectorised.
         # Layout convention (used throughout): M is the OUTER axis, B is the INNER axis.
@@ -846,12 +846,12 @@ class Model(torch.nn.Module):
         # tokens_tiled: [M*B, H, D]  (Q=1 so H*Q == H)
         assert tokens_tiled.shape == (M * B, H * Q, D)
 
-        # ── ③ Flatten to cell level ────────────────────────────────────────
+        # ── Flatten to cell level ────────────────────────────────────────
         # tokens_flat[i*H + h]  =  D-dim token for (member i//B, batch i%B, cell h)
         tokens_flat = tokens_tiled.reshape(M * B, H, Q, D).flatten(0, 1)  # [M*B*H, Q, D]
         assert tokens_flat.shape == (M * B * H, Q, D)
 
-        # ── ④ Neighbour token gather ───────────────────────────────────────
+        # ── Neighbour token gather ───────────────────────────────────────
         # hp_nbours[h, k] is the k-th neighbour cell index of cell h; values in [0, H).
         #
         # For the i-th (m, b) pair (i = m*B + b) the neighbour of cell h lives at flat row
@@ -874,7 +874,7 @@ class Model(torch.nn.Module):
         tokens_nbors_lens = tokens_flat.new_zeros(MB * H + 1, dtype=torch.int32)
         tokens_nbors_lens[1:] = 9 * Q
 
-        # ── ⑤ Per-stream decoding ──────────────────────────────────────────
+        # ── Per-stream decoding ──────────────────────────────────────────
         for stream_name in self.stream_names:
             # Collect target coordinates for this stream + step across the batch.
             t_coords = [
@@ -974,7 +974,7 @@ class Model(torch.nn.Module):
 
                 assert pred.shape[1] == P, f"expected {P} points in dim=1, got {pred.shape[1]}"
 
-            # ── ⑥ Unpack into per-batch-item list ─────────────────────────
+            # ── Unpack into per-batch-item list ─────────────────────────
             # pred: [M or M*E, P, C]  →  list of B tensors, each [M or M*E, pts_b, C]
             pred = torch.split(pred, t_coords_lens, dim=1)
             output.add_physical_prediction(step, stream_name, pred)
