@@ -256,6 +256,7 @@ class LinePlots:
         print_summary: bool = False,
         title: str | None = None,
         colors: list[str | None] | None = None,
+        line: float | None = None,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -274,6 +275,9 @@ class LinePlots:
             Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
+        line:
+            If provided, draw a horizontal reference line at the given y-value
+            (e.g. the optimal value of a metric).
         Returns
         -------
             None
@@ -321,7 +325,9 @@ class LinePlots:
         # TODO: generalise this for other x_dims by introducing a "units"
         # entry in the function if needed
         xunits = "hr" if x_dim == "lead_time" else None
-        self._plot_base(fig, name, x_dim, y_dim, print_summary, xunits=xunits, title=title)
+        self._plot_base(
+            fig, name, x_dim, y_dim, print_summary, line=line, xunits=xunits, title=title
+        )
 
     def _plot_base(
         self,

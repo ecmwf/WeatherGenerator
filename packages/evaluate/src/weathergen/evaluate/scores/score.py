@@ -199,9 +199,11 @@ class Scores:
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
+            "ssr_adj": self.calc_ssr_adj,
             "crps": self.calc_crps,
             "rank_histogram": self.calc_rank_histogram,
             "spread": self.calc_spread,
+            "spread_adj": self.calc_spread_adj,
         }
 
     def get_score(
@@ -1261,6 +1263,33 @@ class Scores:
 
         return self._mean(np.sqrt(ens_std**2))
 
+    def calc_spread_adj(self, p: xr.DataArray, **kwargs) -> xr.DataArray:
+        """
+        Calculate the (unbiased) ensemble spread following the GenCast convention.
+
+        Defined as the square root of the mean *unbiased* (``ddof=1``) ensemble variance, matching
+        the spread of GenCast (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.6). The
+        finite-ensemble inflation factor ``sqrt((M + 1) / M)`` is *not* applied here; following
+        GenCast it is applied in the spread-skill ratio instead (see ``calc_ssr_adj``).
+
+        Unlike the unadjusted ``calc_spread`` (which uses the biased ``ddof=0`` standard
+        deviation), this uses the unbiased variance, as required for the GenCast spread-skill
+        relation to hold. The unadjusted ``calc_spread`` is left unchanged.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+
+        Returns
+        -------
+        xr.DataArray
+            Unbiased ensemble spread (GenCast convention)
+        """
+        ens_var = p.var(dim=self._ens_dim, ddof=1)
+
+        return np.sqrt(self._mean(ens_var))
+
     def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
         Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
@@ -1280,6 +1309,39 @@ class Scores:
         ssr = self.calc_spread(p) / self.calc_rmse(ens_mean, gt)
 
         return ssr
+
+    def calc_ssr_adj(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+        """
+        Calculate the ensemble-size-adjusted Spread-Skill Ratio (SSR) of the forecast ensemble
+        data w.r.t. reference data.
+
+        Following GenCast (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.9), this is
+
+            SSR_adj = sqrt((M + 1) / M) * spread / RMSE(ensemble_mean)
+
+        where ``spread`` is the unbiased ensemble spread (``calc_spread_adj``) and M is the
+        ensemble size. For a perfectly reliable ensemble of finite size M, the RMSE of the
+        ensemble mean is inflated relative to the spread by exactly ``sqrt((M + 1) / M)``
+        (Fortin et al., 2014), so the ``sqrt((M + 1) / M)`` factor applied here makes a perfectly
+        calibrated ensemble yield an adjusted SSR of exactly 1. The original ``calc_spread`` /
+        ``calc_ssr`` are left unchanged.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array with ensemble dimension
+        gt: xr.DataArray
+            Ground truth data array
+        Returns
+        -------
+        xr.DataArray
+            Ensemble-size-adjusted Spread-Skill Ratio (SSR). Optimal value is 1.
+        """
+        ens_size = p.sizes[self._ens_dim]
+        correction = np.sqrt((ens_size + 1) / ens_size)
+        ens_mean = p.mean(dim=self._ens_dim)
+
+        return correction * self.calc_spread_adj(p) / self.calc_rmse(ens_mean, gt)
 
     def calc_crps(
         self,
