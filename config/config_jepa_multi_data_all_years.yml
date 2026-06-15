@@ -280,6 +280,8 @@ training_config:
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
+  time_window_step: 05:00:00
+
   samples_per_mini_epoch: 256
   shuffle: False
 
