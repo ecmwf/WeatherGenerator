@@ -248,8 +248,8 @@ def _process_stream(
         return run_id, stream, {}, {}
 
     plot_score_maps = plot_score_options.get("plot_score_maps", False) and type_ == "zarr"
-    plot_score_timeseries = (
-        plot_score_options.get("plot_score_timeseries", False) and type_ == "zarr"
+    plot_score_init_time_series = (
+        plot_score_options.get("plot_score_init_time_series", False) and type_ == "zarr"
     )
 
     stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
@@ -257,7 +257,7 @@ def _process_stream(
     if recomputable_metrics:
         metrics_to_compute = recomputable_metrics
         regions_to_compute = list(set(recomputable_metrics.keys()))
-    elif plot_score_maps or plot_score_timeseries:
+    elif plot_score_maps or plot_score_init_time_series:
         metrics_to_compute = {r: metrics for r in regions}
         regions_to_compute = regions
     else:
@@ -284,7 +284,7 @@ def _process_stream(
             plot_score_options=plot_score_options,
         )
 
-    if plot_score_timeseries:
+    if plot_score_init_time_series:
         ts_scores = run_score_timeseries_pipeline(
             reader,
             stream,
@@ -320,7 +320,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     plot_score_options = {
         "plot_score_maps": cfg.evaluation.get("plot_score_maps", False),
         "plot_score_animations": cfg.evaluation.get("plot_score_animations", False),
-        "plot_score_timeseries": cfg.evaluation.get("plot_score_timeseries", False),
+        "plot_score_init_time_series": cfg.evaluation.get("plot_score_init_time_series", False),
     }
 
     global_plotting_opts = cfg.get("global_plotting_options", {})

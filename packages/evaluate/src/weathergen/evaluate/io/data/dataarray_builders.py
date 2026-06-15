@@ -17,8 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import earthkit.regrid as ekr
 import numpy as np
 import xarray as xr
+from earthkit.regrid.gridspec import GridSpec as EkGridSpec
 from numpy.typing import NDArray
 
 
@@ -81,6 +83,7 @@ def build_gridded_dataarrays(
     init_times: NDArray,
     forecast_step_val: int,
     ens_select: EnsembleSelect,
+    regrid_opts: dict,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Build DataArrays for gridded data by stacking samples along a new axis.
 
@@ -111,11 +114,19 @@ def build_gridded_dataarrays(
     ens_select : EnsembleSelect
         Pre-resolved ensemble selection (from :meth:`EnsembleSelect.from_names`).
         ``EnsembleSelect.mean()`` → mean; otherwise selects members.
+    regrid_opts : dict
+        Regrid each sample from its original grid to a regular
+        lat/lon grid before stacking.  Must contain 'target_grid' (e.g. [1.5, 1.5]).
+        Optionally 'original_grid' to skip auto-detection.
 
     Returns
     -------
     da_tar, da_pred : xr.DataArray
     """
+    # Regrid each sample individually (correct n_ipoints per sub-step)
+    if regrid_opts:
+        tars_list, preds_list, lat, lon = regrid_dataarrays(tars_list, preds_list, regrid_opts)
+
     n_samples = len(samples)
     n_ipoints = tars_list[0].shape[0]
     sub_lat = lat[:n_ipoints]
@@ -314,3 +325,127 @@ def _build_dataarray(
             coords["ens"] = ens_select.labels
 
     return xr.DataArray(data, dims=dims, coords=coords)
+
+
+# ---------------------------------------------------------------------------
+# Numpy-level regridding (called inside each worker)
+# ---------------------------------------------------------------------------
+
+
+# Grid point counts for known ECMWF grids
+def get_grid_name(n_ipoints: int) -> str:
+    """Get the grid name corresponding to a given number of grid points.
+
+    Parameters
+    ----------
+    n_ipoints : int
+        The number of grid points in the input data.
+
+    Returns
+    -------
+    str
+        The name of the grid corresponding to the given number of grid points.
+    """
+    known_grids = {
+        542080: "N320",
+        40320: "O96",
+    }
+    return known_grids.get(n_ipoints)
+
+
+def _detect_grid(n_ipoints: int, regrid_opts: dict) -> str:
+    """Resolve the original grid name from n_ipoints or explicit config."""
+    original_grid = regrid_opts.get("original_grid") if isinstance(regrid_opts, dict) else None
+    if original_grid is not None:
+        return original_grid
+    grid = get_grid_name(n_ipoints)
+    if grid is None:
+        raise ValueError(
+            f"Cannot auto-detect grid type: {n_ipoints} grid points does not match "
+            f"any known grid. Supported: N320 (542080 pts), O96 (40320 pts). "
+            f"Pass 'original_grid' explicitly in the regrid config."
+        )
+    return grid
+
+
+def _regrid_field(field_1d: NDArray, in_grid: dict, out_grid: dict) -> NDArray:
+    """Regrid a single 1D field and return the flattened result."""
+
+    result_2d = ekr.interpolate(field_1d, in_grid, out_grid)
+    return result_2d.ravel()
+
+
+def _regrid_array(data: NDArray, regrid_opts: dict) -> NDArray:
+    """Regrid a numpy array from a reduced Gaussian grid to a regular lat/lon grid.
+
+    Parameters
+    ----------
+    data : NDArray
+        Input array of shape ``(n_ipoints, n_channels)`` or
+        ``(n_ipoints, n_channels, n_ens)``.
+    regrid_opts : dict
+        Must contain 'target_grid' (e.g. [1.5, 1.5]).  Optionally
+        'original_grid' to skip auto-detection.
+
+    Returns
+    -------
+    NDArray
+        Regridded array of shape ``(n_lat * n_lon, n_channels[, n_ens])``.
+    """
+    n_ipoints = data.shape[0]
+    original_grid = regrid_opts.get("original_grid")
+    if original_grid is None:
+        original_grid = _detect_grid(n_ipoints, regrid_opts)
+    target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
+    if not isinstance(target_grid, str):
+        target_grid = list(target_grid)  # earthkit.regrid requires a plain list, not numpy array
+
+    in_grid = {"grid": original_grid}
+    out_grid = {"grid": target_grid}
+
+    if data.ndim == 2:
+        # (n_ipoints, n_channels)
+        n_channels = data.shape[1]
+        cols = [_regrid_field(data[:, ch], in_grid, out_grid) for ch in range(n_channels)]
+        out = np.column_stack(cols)
+    elif data.ndim == 3:
+        # (n_ipoints, n_channels, n_ens)
+        n_channels, n_ens = data.shape[1], data.shape[2]
+        slices = [
+            [_regrid_field(data[:, ch, e], in_grid, out_grid) for e in range(n_ens)]
+            for ch in range(n_channels)
+        ]
+        out = np.stack([np.column_stack(s) for s in slices], axis=1)
+    else:
+        raise ValueError(f"Unexpected data shape for regridding: {data.shape}")
+
+    return out
+
+
+def regrid_dataarrays(tars_list, preds_list, regrid_opts):
+    """Regrid each sample in tars_list and preds_list according to regrid_opts."""
+
+    tars_list = [_regrid_array(t, regrid_opts) for t in tars_list]
+    preds_list = [_regrid_array(p, regrid_opts) for p in preds_list]
+
+    target_grid = (
+        regrid_opts.get("target_grid", [1.5, 1.5]) if isinstance(regrid_opts, dict) else [1.5, 1.5]
+    )
+
+    # TODO: improve this. Now it works only for regular lat-lon grids
+    out_spec = {}
+    out_spec["grid"] = list(target_grid)
+    # Only keep keys relevant to the output grid spec
+    gs = EkGridSpec.from_dict(out_spec)
+    ymax, xmin, ymin, xmax = gs["area"]
+    dy, dx = gs["grid"]
+    n_lat_out = round((ymax - ymin) / dy) + 1
+    n_lon_out = round((xmax - xmin) / dx) + 1
+
+    lat_1d = np.linspace(ymin, ymax, n_lat_out)
+    lon_1d = np.linspace(xmin, xmax, n_lon_out)
+    lat_grid, lon_grid = np.meshgrid(lat_1d, lon_1d, indexing="ij")
+    lat = lat_grid.ravel()
+    lon = lon_grid.ravel()
+
+    return tars_list, preds_list, lat, lon

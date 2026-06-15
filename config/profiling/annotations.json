@@ -23,6 +23,34 @@
     },
     {
         "domain": "WeatherGen",
+        "color": "0264F7",
+        "module": "weathergen.model.encoder",
+        "functions": [
+            "EncoderModule.__init__",
+            "EncoderModule.forward",
+            "EncoderModule.interpolate_latents",
+            "EncoderModule.assimilate_local_project_chunked",
+            "EncoderModule.aggregation_engine_unmasked",
+            "EncoderModule.assimilate_local"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
+        "color": "0264F7",
+        "module": "weathergen.model.ema",
+        "functions": [
+            "EMAModel.__init__",
+            "EMAModel.reset",
+            "EMAModel.requires_grad_",
+            "EMAModel.get_current_beta",
+            "EMAModel.update",
+            "EMAModel.forward_eval",
+            "EMAModel.state_dict",
+            "EMAModel.load_state_dict"
+        ]
+    },
+    {
+        "domain": "WeatherGen",
         "color": "A1F702",
         "module": "weathergen.datasets.tokenizer_masking", 
         "functions": [
@@ -211,6 +239,7 @@
             "StreamEmbedTransformer.__init__",
             "StreamEmbedTransformer.forward_channels",
             "StreamEmbedTransformer.forward_columns",
+            "StreamEmbedTransformer.forward",
             "StreamEmbedLinear.__init__",
             "StreamEmbedLinear.forward"
             
