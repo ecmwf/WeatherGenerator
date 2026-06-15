@@ -48,7 +48,7 @@ def apply_fct_to_blocks(model, blocks, fct):
         name = module.name if hasattr(module, "name") else name
         # avoid the whole model element which has name ''
         if (re.fullmatch(blocks, name) is not None) and (name != ""):
-            logger.info(f"Freezing weights of {name}")
+            # logger.info(f"Freezing weights of {name}")
             fct(module)
 
 

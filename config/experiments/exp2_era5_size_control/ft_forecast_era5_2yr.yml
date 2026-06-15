@@ -1,0 +1,211 @@
+# EXP2 — era5-size-control  (targets H1, the primary cause: small-data memorization)
+#
+# This is a COPY of config/config_jepa_multi_data_ft_forecast_all_years.yml (the
+# baseline stage-3 frozen-encoder ERA5 forecast finetune) with ONLY two changes:
+#   1. training window 1980-01-01..2022-12-31  ->  2016-01-01..2022-09-30
+#      i.e. ERA5 restricted to the SAME ~7-yr window as the operational stage 4
+#      (~10k distinct 6-hourly states, ~6x smaller than the full ERA5 set).
+#   2. an extra heldout-train-years (2022-OND) validation slice added.
+#
+# Source stays ERA5, encoder stays frozen, LR stays constant 4e-5 — so the ONLY
+# variable that moves vs the baseline stage 3 is the amount of training data.
+# Baseline stage 3 (full ERA5, frozen) does NOT overfit. If this size-matched
+# ERA5 run now overfits like the oper stage 4, the train/val gap is driven by
+# data volume (H1), independent of the oper source -> H1 confirmed. If it stays
+# clean, size alone is not sufficient and the oper source / non-stationarity
+# (H2) is implicated. Decisive, cheap control.
+#
+# No stage 4 in this pipeline: the diagnostic signal is entirely at this stage.
+
+fe_num_blocks: 16
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+fe_layer_norm_after_blocks: [7]
+fe_impute_latent_noise_std: 0
+forecast_att_dense_rate: 1.0
+
+healpix_level: 5
+
+# performance
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: False
+ddp_find_unused_parameters: False
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
+
+latent_noise_kl_weight: 0.0
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True
+
+freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
+
+norm_type: "LayerNorm"
+
+# type of zarr_store
+zarr_store: "zip"
+
+#####################################
+
+# UNCHANGED streams directory (ERA5 all-years forecast streams)
+streams_directory: "./config/streams/jepa_forecast_multi_data_all_years/"
+streams: ???
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+  multiprocessing_method: "spawn"
+
+  desc: ""
+  run_id: ???
+  run_history: []
+
+train_logging:
+  terminal: 50
+  metrics: 20
+  checkpoint: 500
+  log_grad_norms: False
+
+data_loading :
+
+  num_workers: 6
+  rng_seed: ???
+  repeat_data_in_mini_epoch : False
+  persistent_workers: True
+  memory_pinning: True
+
+
+training_config:
+
+  training_mode: ["masking"]
+
+  context_loss:
+    enabled: false
+
+  deep_ssl:
+    enabled: false
+
+  num_mini_epochs: 24
+  samples_per_mini_epoch: 8192
+  shuffle: True
+
+  # *** ONLY FUNCTIONAL CHANGE vs baseline stage 3: size-matched to the oper window ***
+  start_date: 2016-01-01T00:00
+  end_date: 2022-09-30T00:00      # OND-2022 carved out for the heldout probe below
+
+  time_window_step: 01:00:00
+  time_window_len: 06:00:00
+
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 4e-5
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 16384
+    policy_warmup: "cosine"
+    policy_decay: "constant"     # kept constant on purpose: only data size varies
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 0.25
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw :
+      beta1 : 0.9875
+      beta2 : 0.99875
+      eps : 1e-08
+
+  losses : {
+    "student-teacher": {
+        enabled: False,
+        type: Disabled,
+        },
+    "forecast": {
+        type: LossPhysical,
+        loss_fcts: { "mse": { }, },
+        },
+    }
+
+  model_input: {
+    "random_easy" : {
+      enabled: False,
+      num_samples: 0,
+      },
+    "forecasting" : {
+      masking_strategy: "forecast",
+      },
+    }
+
+  target_input: {
+    "random_easy_target" : {
+      enabled: False,
+      },
+    }
+
+  forecast :
+      time_step: 06:00:00
+      num_steps: 3
+      offset: 1
+      policy: "fixed"
+
+validation_config:
+
+  samples_per_mini_epoch: 256
+  shuffle: False
+
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+
+  validate_with_ema:
+    enabled : True
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 600
+
+  output : {
+    num_samples: 0,
+    normalized_samples: False,
+    streams: null,
+  }
+
+  validate_before_training: False
+
+# heldout slice INSIDE the (now restricted) training years, season-matched to the
+# OND-2023 primary val window. Direct memorization gap measurement for H1.
+extra_validation_configs:
+  heldout-train-years:
+    start_date: 2022-10-01T00:00
+    end_date: 2022-12-31T00:00
+    shuffle: True
+    samples_per_mini_epoch: 256
+
+test_config:
+
+  samples_per_mini_epoch: 128
+  shuffle: False
+
+  start_date: 2023-06-01T00:00
+  end_date: 2023-08-31T00:00
+
+  output : {
+    num_samples: 128,
+    normalized_samples: False,
+    streams: null,
+    }
+
+wgtags:
+  org: null
+  issue: null
+  exp: null
+  grid: null

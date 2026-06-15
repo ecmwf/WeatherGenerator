@@ -205,6 +205,19 @@ validation_config:
   # run validation before training starts (mainly for model development)
   validate_before_training: False
  
+# # extra validation sets, evaluated each mini-epoch and logged as stage "val_<name>";
+# # each entry overrides the primary validation_config
+# extra_validation_configs:
+#   # held-out slice inside the training years (excluded from training via the
+#   # end_date above), season-matched to the OND-2023 primary val window;
+#   # memorization probe: if its loss tracks val, the train/val gap is memorization,
+#   # if it stays well below val, the gap is distribution shift
+#   heldout-train-years:
+#     start_date: 2022-10-01T00:00
+#     end_date: 2022-12-31T00:00
+#     shuffle: True
+#     samples_per_mini_epoch: 256
+
 # test config; full test config is merge of validation and test config
 test_config: 
 
