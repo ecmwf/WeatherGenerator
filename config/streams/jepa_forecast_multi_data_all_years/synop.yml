@@ -1,0 +1,29 @@
+# obs_types
+# 0 : polar orbiting satellites
+# 1 : geostationay satellites
+# 2 : conventional observations
+
+SurfaceCombined :
+  type : obs
+  stream_id : 2
+  filenames : ['observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr']
+  geoinfos: ['reportype', 'stalt', 'lsm']
+  forcing: True
+  token_size : 512
+  tokenize_spacetime : False
+  max_num_targets: -1
+  embed : 
+    net : transformer
+    num_tokens : 1
+    num_heads : 2
+    dim_embed : 256
+    num_blocks : 2
+  embed_target_coords : 
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head : 
+    ens_size : 1
+    num_layers : 1
