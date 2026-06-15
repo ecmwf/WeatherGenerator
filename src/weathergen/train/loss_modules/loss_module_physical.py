@@ -55,7 +55,7 @@ class DynamicLossEMA:
 
         ema = self.channel_weights_ema[stream_name]
         if ema.numel() > 0:
-            l_min = ema.min().clamp(min=1e-8)
+            l_min = ema.min().clamp(min=1e-6)
             # Clamp max weight to L * min weight as per Samudra 2 paper
             clamped_ema = ema.clamp(max=self.L * l_min)
             # Normalize so mean is 1.0 to preserve overall learning rate scale
@@ -73,7 +73,7 @@ class DynamicLossEMA:
             return
 
         with torch.no_grad():
-            mse_per_chan = loss_lfct_chs.detach().clamp(min=1e-8)
+            mse_per_chan = loss_lfct_chs.detach().clamp(min=1e-6)
             inv_mse = 1.0 / mse_per_chan
             self.channel_weights_ema[stream_name] = (
                 1.0 - 1.0 / self.window
@@ -107,7 +107,7 @@ class LossPhysical(LossModuleBase):
         self.name = "LossPhysical"
 
         # Dynamic Loss state (extract it before parsing the actual loss functions)
-        self.dynamic_loss_cfg = loss_fcts.pop("dynamic_loss", None)
+        self.dynamic_loss_cfg = loss_fcts.get("dynamic_loss", None)
 
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -117,6 +117,7 @@ class LossPhysical(LossModuleBase):
                 name,
             ]
             for name, params in loss_fcts.items()
+            if name != "dynamic_loss"
         ]
 
         self.dynamic_loss_ema = DynamicLossEMA(
@@ -125,7 +126,7 @@ class LossPhysical(LossModuleBase):
             self.device,
         )
 
-    def _get_weights(self, stream_info):
+    def _get_weights(self, stream_name, stream_info):
         """
         Get weights for current stream
         """
@@ -136,7 +137,7 @@ class LossPhysical(LossModuleBase):
         if self.stage == TRAIN:
             # set loss_weights to 1. when not specified
             stream_info_loss_weight = stream_info.get("loss_weight", 1.0)
-            weights_channels = (
+            weights_channels_static = (
                 torch.tensor(stream_info["target_channel_weights"]).to(
                     device=device, non_blocking=True
                 )
@@ -146,7 +147,18 @@ class LossPhysical(LossModuleBase):
         elif self.stage == VAL:
             # in validation mode, always unweighted loss
             stream_info_loss_weight = 1.0
-            weights_channels = None
+            weights_channels_static = None
+
+        if self.dynamic_loss_ema.enabled:
+            weights_channels = self.dynamic_loss_ema.get_weights(
+                stream_name, weights_channels_static
+            )
+        else:
+            weights_channels = (
+                weights_channels_static
+                if weights_channels_static is None or weights_channels_static.numel() > 0
+                else None
+            )
 
         return stream_info_loss_weight, weights_channels
 
@@ -278,18 +290,7 @@ class LossPhysical(LossModuleBase):
 
             losses_all[stream_name] = defaultdict(dict)
 
-            stream_loss_weight, weights_channels_static = self._get_weights(stream_info)
-
-            if self.dynamic_loss_ema.enabled:
-                weights_channels = self.dynamic_loss_ema.get_weights(
-                    stream_name, weights_channels_static
-                )
-            else:
-                weights_channels = (
-                    weights_channels_static 
-                    if weights_channels_static is None or weights_channels_static.numel() > 0 
-                    else None
-                )
+            stream_loss_weight, weights_channels = self._get_weights(stream_name, stream_info)
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
