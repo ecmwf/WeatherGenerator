@@ -107,7 +107,7 @@ class LossPhysical(LossModuleBase):
         self.name = "LossPhysical"
 
         # Dynamic Loss state (extract it before parsing the actual loss functions)
-        self.dynamic_loss_cfg = loss_fcts.get("dynamic_loss", None)
+        self.dynamic_loss_cfg = loss_fcts.get("dynamic_loss")
 
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
