@@ -22,7 +22,7 @@ from pathlib import Path
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
-from weathergen.train.trainer import Trainer, ProfilingTrainer
+from weathergen.train.trainer import ProfilingTrainer, Trainer
 
 logger = logging.getLogger(__name__)
 

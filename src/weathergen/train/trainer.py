@@ -10,7 +10,6 @@
 # nor does it submit to any jurisdiction.
 import copy
 import logging
-import platform
 import time
 from contextlib import nullcontext
 from functools import partial
@@ -28,8 +27,8 @@ from torch.profiler import ProfilerActivity, profile
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
-from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.datasets.batch import ModelBatch
+from weathergen.datasets.multi_stream_data_sampler import MultiStreamDataSampler
 from weathergen.model.ema import EMAModel
 from weathergen.model.model_interface import (
     init_model_and_shard,
@@ -388,7 +387,6 @@ class Trainer(TrainerBase):
         self._training_loop(mini_epoch_base)
         self.save_model(self.training_cfg.num_mini_epochs)
 
-
     def _training_loop(self, mini_epoch_base: int):
         # run validation before training if requested
         self.validate_before_training()
@@ -584,7 +582,7 @@ class Trainer(TrainerBase):
             }
         else:
             return {}
-        
+
     def _train_batch(self, batch: ModelBatch, bidx: int):
         if self.cf.data_loading.get("memory_pinning", False):
             batch = batch.pin_memory()
@@ -657,9 +655,7 @@ class Trainer(TrainerBase):
         ]
 
         if self.validate_with_ema:
-            self.ema_model.update(
-                self.cf.general.istep * batch_size_total, batch_size_total
-            )
+            self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
         if bidx % self.train_logging.metrics == 0:
             self._log(TRAIN)
@@ -668,7 +664,6 @@ class Trainer(TrainerBase):
             self.save_model(-1)
 
         self.cf.general.istep += 1
-
 
     def save_model(self, mini_epoch: int, name=None):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
@@ -854,9 +849,7 @@ class ProfilingTrainer(Trainer):
             raise AttributeError("Missing profiling config: expected cf.profiling")
 
         max_profile_steps = (
-            prof_cf.wait_iteration
-            + prof_cf.warmup_iteration
-            + prof_cf.active_iteration
+            prof_cf.wait_iteration + prof_cf.warmup_iteration + prof_cf.active_iteration
         ) * prof_cf.repeat
 
         handler = partial(trace_handler, cf)
@@ -868,7 +861,6 @@ class ProfilingTrainer(Trainer):
         # profiler teardown, causing a "Python replay stack is empty" RuntimeError.
         # Therefore, on aarch64 we disable with_stack and skip the memory timeline export.
         # CUDA kernel profiling, FLOPS, shapes, and chrome traces are unaffected.
-        on_aarch64 = platform.machine() == "aarch64"
 
         # Determine profiler setup
         if is_root():
@@ -876,7 +868,7 @@ class ProfilingTrainer(Trainer):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=True,
                 profile_memory=True,
-                with_stack=True, # TODO: ensure pytorch 2.9.1 before merging!
+                with_stack=True,  # TODO: ensure pytorch 2.9.1 before merging!
                 with_modules=True,
                 with_flops=True,
                 schedule=torch.profiler.schedule(
