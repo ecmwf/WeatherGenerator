@@ -21,6 +21,7 @@ from weathergen.datasets.noise_schedule import (
 )
 from weathergen.datasets.tokenizer_utils import precompute_cell_ids
 from weathergen.train.utils import Stage
+from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 logger = logging.getLogger(__name__)
@@ -225,7 +226,7 @@ class Masker:
 
         return cfgs
 
-    def _get_sampling_rate(self, cfg, train_step: int = 0):
+    def _get_sampling_rate(self, cfg, train_step: int = 0, keep_rate_cap: float = 1.0):
         """
         Get the sampling, if requested by sampling it itself
         """
@@ -254,7 +255,12 @@ class Masker:
                 0.0,
                 1.0,
             )
-            rate = rate + (1.0 - rate) * cool_down_progress
+            rate = rate + (keep_rate_cap - rate) * cool_down_progress
+            if is_root() and train_step % 50 == 0 and cool_down_progress > 0:
+                logger.info(
+                    f"Masking cooldown active: step={train_step}, "
+                    f"keep_rate={rate:.4f}, progress={cool_down_progress:.3f}"
+                )
         assert 0.0 <= rate <= 1.0, f"rate out of bounds: {rate}"
 
         return rate
@@ -464,6 +470,14 @@ class Masker:
                 if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
                     source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
                 else:
+                    target_cfg = list(target_cfgs.values())[target_cfg_idx]
+                    teacher_rate = float(
+                        target_cfg.get("masking_strategy_config", {}).get("rate", 1.0)
+                    )
+                    cool_down_teacher_rate_fraction = float(
+                        masking_config.get("cool_down_teacher_rate_fraction", 0.9)
+                    )
+                    keep_rate_cap = teacher_rate * cool_down_teacher_rate_fraction
                     source_mask, mask_params = self._get_mask(
                         num_cells=num_cells,
                         strategy=source_cfg.get("masking_strategy"),
@@ -471,6 +485,7 @@ class Masker:
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
                         channel_names=source_channel_names,
                         train_step=train_step,
+                        keep_rate_cap=keep_rate_cap,
                     )
 
                 corr = target_idx
@@ -520,6 +535,7 @@ class Masker:
         target_relationship_mask: (str, np.typing.NDArray),
         channel_names: list[str] | None = None,
         train_step: int = 0,
+        keep_rate_cap: float = 1.0,
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
 
@@ -565,12 +581,12 @@ class Masker:
 
         # get mask
         mask, params = self._generate_cell_mask(
-            
             num_cells,
             strategy,
             masking_strategy_config,
             channel_names=channel_names,
             train_step=train_step,
+            keep_rate_cap=keep_rate_cap,
         )
 
         # handle cases where mask needs to be combined with target_mask
@@ -595,6 +611,7 @@ class Masker:
         masking_strategy_config: dict,
         channel_names: list[str] | None = None,
         train_step: int = 0,
+        keep_rate_cap: float = 1.0,
     ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
@@ -624,7 +641,7 @@ class Masker:
         # generate cell mask
 
         if strategy == "random":
-            keep_rate = self._get_sampling_rate(masking_strategy_config, train_step)
+            keep_rate = self._get_sampling_rate(masking_strategy_config, train_step, keep_rate_cap)
             mask = self.rng.uniform(0, 1, num_cells) < keep_rate
 
         elif "forecast" in strategy or strategy == "causal":
@@ -635,7 +652,7 @@ class Masker:
 
         elif strategy == "healpix":
             # prepare healpix-based masking
-            keep_rate = self._get_sampling_rate(masking_strategy_config, train_step)
+            keep_rate = self._get_sampling_rate(masking_strategy_config, train_step, keep_rate_cap)
             hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
                 self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
             )
@@ -654,7 +671,7 @@ class Masker:
         # Spatial healpix based cropping, select contiguous region
         elif strategy == "cropping_healpix":
             # prepare healpix-based masking
-            keep_rate = self._get_sampling_rate(masking_strategy_config, train_step)
+            keep_rate = self._get_sampling_rate(masking_strategy_config, train_step, keep_rate_cap)
             hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
                 self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
             )
