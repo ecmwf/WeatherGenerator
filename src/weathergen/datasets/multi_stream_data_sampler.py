@@ -168,6 +168,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
         self.rng = None
+        self.train_step = 0
 
 
     def check_samples(self, fsm: int):
