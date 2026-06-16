@@ -19,7 +19,7 @@ from weathergen.utils.train_logger import Stage
 _logger = logging.getLogger(__name__)
 
 
-class LossLatentCosineMatching(LossModuleBase):
+class LossLatent(LossModuleBase):
     """
     Band hinge on per-token cosine similarity between consecutive FE latent steps.
 
@@ -38,7 +38,7 @@ class LossLatentCosineMatching(LossModuleBase):
         self.cf = cf
         self.stage = stage
         self.device = device
-        self.name = "LossLatentCosineMatching"
+        self.name = "LossLatent"
 
         params = next(iter(loss_fcts.values()), {}) if loss_fcts else {}
         self.cosine_low = params.get("cosine_low", 0.68)

@@ -39,6 +39,7 @@ from weathergen.model.engines import (
 )
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
+from weathergen.train.loss_modules.utils import compute_cos_sim_to_prev
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
 
@@ -398,6 +399,10 @@ class Model(torch.nn.Module):
                 v.type for _, v in cf.validation_config.losses.items() if v.get("enabled", True)
             ]
 
+        # cos_sim_to_prev is only needed by the latent loss; compute it
+        # (and keep prev_tokens around for it) only when that loss is configured.
+        self.compute_cos_sim_to_prev = "LossLatent" in loss_terms
+
         if "LossPhysical" in loss_terms:
             for i_stream, (stream_name, si) in enumerate(self.streams.items()):
                 # skip decoder if channels are empty
@@ -697,17 +702,17 @@ class Model(torch.nn.Module):
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
-                prev_tokens = tokens
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
-            prev_tokens = tokens
+            prev_tokens = tokens if self.compute_cos_sim_to_prev else None
             tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
 
             # per-token cosine similarity between current and previous patch tokens
-            cur = tokens[:, self.num_aux_tokens :].reshape(-1, tokens.shape[-1])
-            prv = prev_tokens[:, self.num_aux_tokens :].reshape(-1, tokens.shape[-1])
-            cos_sim_to_prev = torch.nn.functional.cosine_similarity(cur, prv.detach(), dim=-1)
-            output.add_latent_prediction(step, "cos_sim_to_prev", cos_sim_to_prev)
+            if self.compute_cos_sim_to_prev:
+                cos_sim_to_prev = compute_cos_sim_to_prev(
+                    tokens, prev_tokens, self.num_aux_tokens
+                )
+                output.add_latent_prediction(step, "cos_sim_to_prev", cos_sim_to_prev)
 
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)

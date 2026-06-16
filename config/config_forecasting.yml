@@ -174,9 +174,8 @@ training_config:
         loss_fcts: { "mse": { }, },
         },
      "cosine_matching": {
-        type: LossLatentCosineMatching,
+        type: LossLatent,
         weight: 1.0,
-        target_and_aux_calc: "Physical",
         loss_fcts: {
             "params": {
                 cosine_low: 0.68,
