@@ -131,6 +131,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
             self.teacher_time_offset = 0
 
         self.batch_size = get_batch_size_from_config(mode_cfg)
+        self.num_workers = cf.data_loading.num_workers
         self.shuffle = mode_cfg.shuffle
 
         self.len_timedelta = mode_cfg.time_window_len
@@ -194,8 +195,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         # streamlined calculation of length
         epoch_len = self.samples_per_mini_epoch
-        # adjust len to split loading across all workers and ensure it is multiple of batch_size
-        self.len = ((epoch_len // self.world_size) // self.batch_size) * self.batch_size
+        # adjust len to split loading across all workers and ensure it is multiple of batch_size;
+        # also account for num_workers so per-worker slice is a multiple of batch_size,
+        # preventing the range-loop in __iter__ from yielding extra batches via ceiling division
+        effective_workers = max(1, self.num_workers)
+        self.len = (
+            (epoch_len // self.world_size) // (self.batch_size * effective_workers)
+        ) * (self.batch_size * effective_workers)
 
         n_duplicates = self.len * self.world_size - available_samples
         if not self.repeat_data:
