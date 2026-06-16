@@ -22,7 +22,7 @@ from pathlib import Path
 import weathergen.common.config as config
 import weathergen.utils.cli as cli
 from weathergen.common.logger import init_loggers
-from weathergen.train.trainer import Trainer, ProfilingTrainer
+from weathergen.train.trainer import Trainer, get_trainer
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ def run_inference(args):
 
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_logging)
+    trainer = get_trainer(cf)
     try:
         trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
     except Exception:
@@ -144,7 +144,7 @@ def run_continue(args):
     # track history of run to ensure traceability of results
     cf.general.run_history += [(args.from_run_id, cf.general.istep)]
 
-    trainer = Trainer(cf.train_logging)
+    trainer = get_trainer(cf)
 
     try:
         trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
@@ -184,12 +184,8 @@ def run_train(args):
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
-
-    profiling_cfg = getattr(cf, "profiling", None)
-    if profiling_cfg and profiling_cfg.enabled:
-        trainer = ProfilingTrainer(cf.train_logging)
-    else:
-        trainer = Trainer(cf.train_logging)
+    
+    trainer = get_trainer(cf)
 
     try:
         trainer.run(cf, devices)
