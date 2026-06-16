@@ -195,10 +195,10 @@ def format_cf(config: Config) -> str:
     return stream.getvalue()
 
 
-def save(config: Config, mini_epoch: int | None):
+def save(config: Config, mini_epoch: int | None, private_config_path: Path | None = None):
     """Save current config into the current runs model directory."""
     # save in directory with model files
-    dirname = get_path_model(config)
+    dirname = get_path_model(config, private_config_path=private_config_path)
     dirname.mkdir(exist_ok=True, parents=True)
 
     fname = _get_model_config_file_write_name(get_run_id_from_config(config), mini_epoch)
@@ -208,7 +208,7 @@ def save(config: Config, mini_epoch: int | None):
         f.write(json_str)
 
 
-def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None, private_config_path: Path) -> Config:
+def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None, private_config_path: Path | None = None) -> Config:
     """
     Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
