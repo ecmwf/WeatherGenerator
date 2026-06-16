@@ -449,7 +449,7 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            self._train_batch(batch, bidx)
+            self._train_batch(batch, bidx, mini_epoch)
 
         self.dataset.advance()
 
@@ -584,9 +584,11 @@ class Trainer(TrainerBase):
         else:
             return {}
 
-    def _train_batch(self, batch: ModelBatch, bidx: int):
+    def _train_batch(self, batch: ModelBatch, bidx: int, mini_epoch):
         if self.cf.data_loading.get("memory_pinning", False):
+            # pin memory for faster CPU-GPU transfer
             batch = batch.pin_memory()
+
         batch.to_device(self.device)
 
         with torch.autocast(
@@ -601,7 +603,9 @@ class Trainer(TrainerBase):
 
             targets_and_auxs = {}
             for loss_name, target_aux in self.target_and_aux_calculators.items():
+                # find targets for this target-aux calculator
                 target_idxs = get_target_idxs_from_cfg(self.training_cfg, loss_name)
+                # apply target-aux calculator
                 targets_and_auxs[loss_name] = target_aux.compute(
                     self.cf.general.istep,
                     batch.get_target_samples(target_idxs),
@@ -615,6 +619,12 @@ class Trainer(TrainerBase):
             metadata=extract_batch_metadata(batch),
         )
 
+        # TODO re-enable this, need to think on how to make it compatible with
+        # student-teacher training
+        # if self.cf.latent_noise_kl_weight > 0.0:
+        #     kl = torch.cat([posterior.kl() for posterior in output.latent["posteriors"]])
+        #     loss_values.loss += self.cf.latent_noise_kl_weight * kl.mean()
+
         [
             target_aux.update_state_pre_backward(self.cf.general.istep, batch, self.model)
             for _, target_aux in self.target_and_aux_calculators.items()
@@ -624,23 +634,28 @@ class Trainer(TrainerBase):
             for _, target_aux in self.target_and_aux_calculators_val.items()
         ]
 
+        # backward pass
         self.optimizer.zero_grad()
         self.grad_scaler.scale(loss).backward()
 
+        # gradient clipping
         self.grad_scaler.unscale_(self.optimizer)
         total_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(), max_norm=self.training_cfg.optimizer.grad_clip
         )
 
+        # log gradient norms
         if self.log_grad_norms:
             if bidx % self.train_logging.terminal == 0:
                 self.last_grad_norm = self._get_tensor_item(total_norm)
             if bidx % self.train_logging.metrics == 0:
                 self._log_instant_grad_norms(TRAIN)
 
+        # optimizer step
         self.grad_scaler.step(self.optimizer)
         self.grad_scaler.update()
 
+        # update learning rate
         self.lr_scheduler.step()
 
         batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
@@ -655,17 +670,40 @@ class Trainer(TrainerBase):
             for _, target_aux in self.target_and_aux_calculators_val.items()
         ]
 
+        # EMA update
         if self.validate_with_ema:
             self.ema_model.update(self.cf.general.istep * batch_size_total, batch_size_total)
 
+        self.perf_tracker.step(
+            batch,
+            self.cf.general.istep,
+            log_fn=lambda m: self.train_logger.log_metrics(
+                TRAIN, m, step=self.cf.general.istep
+            ),
+        )
+        # Compute collapse monitoring metrics
+        if self.collapse_monitor.should_compute(self.cf.general.istep):
+            self.collapse_monitor._compute_collapse_metrics(
+                self.cf,
+                batch_size_total,
+                self.target_and_aux_calculators,
+                preds,
+                targets_and_auxs,
+            )
+
+        self._log_terminal(bidx, mini_epoch, TRAIN)
         if bidx % self.train_logging.metrics == 0:
             self._log(TRAIN)
+            # Log collapse metrics
+            if self.collapse_monitor.should_log(self.cf.general.istep):
+                self._log_collapse_metrics(TRAIN)
 
+        # save model checkpoint (with designation _latest)
         if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
             self.save_model(-1)
 
         self.cf.general.istep += 1
-
+    
     def save_model(self, mini_epoch: int, name=None):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
         max_mini_epoch = self.training_cfg.num_mini_epochs
@@ -892,7 +930,7 @@ class ProfilingTrainer(Trainer):
 
         with self.prof:
             for bidx, batch in enumerate(islice(dataset_iter, max_profile_steps)):
-                self._train_batch(batch, bidx)
+                self._train_batch(batch, bidx, mini_epoch)
                 if hasattr(self.prof, "step"):
                     self.prof.step()
 
