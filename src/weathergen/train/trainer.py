@@ -843,8 +843,8 @@ class Trainer(TrainerBase):
             metrics["num_samples"] = self.cf.general.istep
             self.train_logger.log_metrics(stage, metrics)
 
+
 class ProfilingTrainer(Trainer):
-    
     PROFILING_DEFAULTS = {
         "wait_iteration": 1,
         "warmup_iteration": 1,
@@ -854,7 +854,7 @@ class ProfilingTrainer(Trainer):
 
     def init(self, cf: Config, devices: list):
         super().init(cf, devices)
-        
+
         profiling_cfg = OmegaConf.merge(cf.profiling, self.PROFILING_DEFAULTS)
 
         self.max_profile_steps = (
