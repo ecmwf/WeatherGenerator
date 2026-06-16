@@ -220,7 +220,6 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
     def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
         """Load dataset readers for all streams from config."""
         streams_datasets: dict[StreamName, _Stream] = {}
-        breakpoint()
         for stream_name, stream_info in cf.streams.items():
             # list of sources for current stream
             streams_datasets[stream_name] = _Stream(stream_info, [])

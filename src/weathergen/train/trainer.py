@@ -157,7 +157,7 @@ class Trainer(TrainerBase):
             config.get_path_run(cf, private_config_path=private_config_path).mkdir(exist_ok=True, parents=True)
             config.get_path_model(cf, private_config_path=private_config_path).mkdir(exist_ok=True, parents=True)
 
-        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf, private_config_path=private_config_path))
+        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf, private_config_path=private_config_path), private_config_path=private_config_path)
 
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
@@ -235,7 +235,7 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
         if is_root():
-            config.save(self.cf, mini_epoch=0)
+            config.save(self.cf, mini_epoch=0, private_config_path=private_config_path)
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -374,7 +374,7 @@ class Trainer(TrainerBase):
             )
 
         if is_root():
-            config.save(self.cf, None)
+            config.save(self.cf, None, private_config_path=private_config_path)
             logger.info(config.format_cf(self.cf))
 
         # run validation before training if requested

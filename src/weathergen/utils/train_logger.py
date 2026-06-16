@@ -58,9 +58,10 @@ class Metrics:
 
 class TrainLogger:
     #######################################
-    def __init__(self, cf, path_run: Path) -> None:
+    def __init__(self, cf, path_run: Path, private_config_path: Path | None = None) -> None:
         self.cf = cf
         self.path_run = path_run
+        self.private_config_path = private_config_path
 
     def log_metrics(self, stage: Stage, metrics: dict[str, float], step: int | None = None) -> None:
         """
@@ -86,7 +87,7 @@ class TrainLogger:
         # but we can probably do better and rely for example on the logging module.
 
         metrics_path = get_train_metrics_path(
-            base_path=config.get_path_run(self.cf), run_id=self.cf.general.run_id
+            base_path=config.get_path_run(self.cf, private_config_path=self.private_config_path), run_id=self.cf.general.run_id
         )
         with open(metrics_path, "ab") as f:
             s = json.dumps(clean_metrics) + "\n"
