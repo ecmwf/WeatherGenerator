@@ -27,7 +27,7 @@ ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 5
-ae_global_num_heads: 32
+ae_global_num_heads: 16
 ae_global_dropout_rate: 0.1
 ae_global_with_qk_lnorm: True
 # TODO: switching to < 1 triggers triton-related issues.
@@ -35,15 +35,15 @@ ae_global_with_qk_lnorm: True
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 4
-ae_global_trailing_layer_norm: False
+ae_global_trailing_layer_norm: True
 
 ae_aggregation_num_blocks: 5
-ae_aggregation_num_heads: 32
+ae_aggregation_num_heads: 16
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
 ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
-ae_aggregation_mlp_hidden_factor: 2
+ae_aggregation_mlp_hidden_factor: 4
 
 decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
 pred_adapter_kv: False
@@ -51,7 +51,10 @@ pred_self_attention: True
 pred_dyadic_dims: False
 pred_mlp_adaln: True
 num_class_tokens: 0
-num_register_tokens: 8
+num_register_tokens: 64
+
+# noise before predictor in JEPA
+noise_pre_predictor_std: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
@@ -59,7 +62,7 @@ fe_num_blocks: 6
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
 fe_impute_latent_noise_std: 0.0  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
@@ -70,6 +73,8 @@ healpix_level: 5
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
 rope_2D: True 
+mlp_type: swiglu
+use_xsa: True
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -96,8 +101,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg/"
-# streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/pretrain_multi_data_all_years/"
 streams: ???
 
 general:
@@ -122,16 +126,16 @@ general:
 
 # logging frequency in the training loop (in number of batches)
 train_logging:
-  terminal: 10
+  terminal: 50
   metrics: 20
-  checkpoint: 250
+  checkpoint: 500
   log_grad_norms: False
 
   # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
   # Detects representation collapse via various metrics
   # For forecasting, supports sequences of latents with per-step and aggregate metrics
   collapse_monitoring:
-    enabled: true
+    enabled: False
     compute_frequency: 100  # batches between metric computations
     log_frequency: 100      # batches between metric logging
     metrics:
@@ -159,7 +163,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 12
+  num_workers: 6
   rng_seed: ???
 
 
@@ -178,31 +182,31 @@ training_config:
       - local2global               # after local-to-global adapter, before global attention
       - "global:0"                 # after 1st global layer (0-indexed)
       - "global:1"                 # after 2nd global layer
-    fusion_hidden_factor: 2        # MLP hidden dim = factor * dim_embed
+    fusion_hidden_factor: 4        # MLP hidden dim = factor * dim_embed
     level_weights: [0.25, 0.25, 0.25, 0.25]  # per-level loss weights (len = num taps + 1)
 
   # Context loss (V-JEPA 2.1): L1 on context (visible) tokens between student and teacher.
   # Complements the JEPA loss which targets masked tokens.
   context_loss:
     enabled: true
-    weight: 0.2
-    warmup_steps: 6000             # linear warmup from 0 to weight over this many steps
+    weight: 0.4
+    warmup_steps: 10000             # linear warmup from 0 to weight over this many steps
 
-  num_mini_epochs: 64
-  samples_per_mini_epoch: 4096
+  num_mini_epochs: 16
+  samples_per_mini_epoch: 8192
   shuffle: True
 
-  start_date: 1979-01-01T00:00
+  start_date: 1980-01-01T00:00
   end_date: 2022-12-31T00:00
 
-  time_window_step: 06:00:00
+  time_window_step: 01:00:00
   time_window_len: 06:00:00
 
   window_offset_prediction : 0
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 5e-5
+    lr_max: 1e-4
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 512
@@ -213,12 +217,12 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 0.5
+    grad_clip: 0.25
     weight_decay: 0.05
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.975
-      beta2 : 0.9875
+      beta1 : 0.9875 # at B=8 beta1 =0.9
+      beta2 : 0.994 # at B=8 beta1 approx 0.95
       eps : 2e-08
 
   losses : {
@@ -229,14 +233,14 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
+            "num_blocks": 6, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 1024, 
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "subset"} },
         },
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 600000,
+            ema_halflife_in_thousands: 400000,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
@@ -253,7 +257,7 @@ training_config:
       num_steps_input: 1,
       masking_strategy_config : { 
         diffusion_rn : True, 
-        rate : 0.6,
+        rate : 0.2,
         rate_sampling: False
       },
     },
@@ -263,7 +267,7 @@ training_config:
     "random_easy_target" : {
       masking_strategy: "cropping_healpix",
       num_samples: 1,
-      masking_strategy_config : { rate : 0.8, hl_mask: 3, rate_sampling: False },
+      masking_strategy_config : { rate : 0.7, hl_mask: 3, rate_sampling: False },
     },
   }
 
@@ -331,3 +335,4 @@ wgtags:
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null
+

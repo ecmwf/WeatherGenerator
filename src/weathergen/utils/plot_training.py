@@ -313,6 +313,8 @@ def plot_loss_avg(
 
     _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
+    print(runs_data[0].train)
+
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
@@ -800,7 +802,7 @@ def plot_train(args=None):
     model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
-    x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
+    x_types_valid = ["step", "reltime"]  # TODO: add "reltime" support when fix available
     if args.x_type not in x_types_valid:
         raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
 

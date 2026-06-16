@@ -25,11 +25,11 @@ from weathergen.datasets.batch import ModelBatch
 from weathergen.datasets.utils import healpix_verts_rots, r3tos2
 from weathergen.model.encoder import EncoderModule
 from weathergen.model.engines import (
-    MAX_NUMBER_TOKENS_LOCAL_PER_CELL,
     BilinearDecoder,
     DeepSSLFusion,
     EnsPredictionHead,
     ForecastingEngine,
+    IdentityEngine,
     LatentPredictionHeadIdentity,
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
@@ -104,7 +104,7 @@ class ModelParams(torch.nn.Module):
         self.dtype = get_dtype(cf.attention_dtype)
 
         # Positional embeddings
-        self.max_tokens_local_per_cell = MAX_NUMBER_TOKENS_LOCAL_PER_CELL
+        self.max_tokens_local_per_cell = cf.get("ae_local_max_tokens_per_cell", 64)
         self.pe_embed = torch.nn.Parameter(
             torch.zeros(self.max_tokens_local_per_cell, cf.ae_local_dim_embed, dtype=self.dtype),
             requires_grad=False,
@@ -333,7 +333,7 @@ class Model(torch.nn.Module):
 
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
-        self.forecast_engine: ForecastingEngine | None = None
+        self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.stream_names: list[str] = None
@@ -390,9 +390,10 @@ class Model(torch.nn.Module):
         )
 
         mode_cfg = cf.training_config
-        self.forecast_engine = None
         if cf.fe_num_blocks > 0:
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+        else:
+            self.forecast_engine = IdentityEngine()
 
         # embed coordinates yielding one query token for each target token
         dropout_rate = cf.embed_dropout_rate
@@ -566,7 +567,11 @@ class Model(torch.nn.Module):
 
         # Latent heads for losses
         self.latent_heads = nn.ModuleDict()
-        self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+        # Encoder output is normalized inside the encoder via `ae_global_trailing_layer_norm`, so
+        # the physical decoders and the SSL heads/teacher target consume the same normalized
+        # representation. Identity here avoids a redundant second norm.
+        # TODO remove from code entirely
+        self.latent_pre_norm = nn.Identity()
 
         ssl_losses_cfgs = [
             v
@@ -577,7 +582,7 @@ class Model(torch.nn.Module):
         # TODO: support multiple LossLatentSSLStudentTeacher terms
         assert len(ssl_losses_cfgs) <= 1, "To be implemented."
         for ssl_target_losses in ssl_losses_cfgs:
-            self.latent_pre_norm = nn.LayerNorm(cf.ae_global_dim_embed)
+            self.latent_pre_norm = nn.Identity()
             for loss, loss_conf in ssl_target_losses.loss_fcts.items():
                 if loss == "iBOT":
                     self.latent_heads[loss] = self._create_latent_pred_head(
@@ -672,9 +677,7 @@ class Model(torch.nn.Module):
         num_params_latent_heads = get_num_parameters(self.latent_heads)
         num_params_latent_heads += get_num_parameters(self.latent_pre_norm)
 
-        num_params_fe = (
-            get_num_parameters(self.forecast_engine.fe_blocks) if self.forecast_engine else 0
-        )
+        num_params_fe = get_num_parameters(self.forecast_engine.fe_blocks)
 
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
@@ -764,12 +767,18 @@ class Model(torch.nn.Module):
         for i, inter in enumerate(intermediates):
             intermediates[i] = inter.reshape(shape).sum(axis=1)
 
+        # Allow for pushforward trick
+        p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
         # roll-out in latent space, iterate and generate output over requested output steps
         for step in batch.get_output_idxs():
-            # apply forecasting engine (if present)
-            if self.forecast_engine:
-                tokens = self.forecast_engine(tokens, step, coords=model_params.rope_coords)
+            without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
+            if without_grad:
+                # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                continue
 
+            if self.forecast_engine:
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
@@ -792,6 +801,15 @@ class Model(torch.nn.Module):
 
         # safe latent prediction
         tokens_post_norm = self.latent_pre_norm(tokens) if step == 0 else None
+        noise_pre_predictor_std = self.cf.get("noise_pre_predictor_std", 0)
+        if noise_pre_predictor_std > 0 and self.training:
+            tokens_post_norm = (
+                tokens_post_norm
+                + torch.randn_like(tokens_post_norm)
+                * torch.norm(tokens_post_norm)
+                * noise_pre_predictor_std
+            )
+
         latent_state = self.tokens_to_latent_state(tokens_post_norm, tokens)
         output.add_latent_prediction(step, "latent_state", latent_state)
 

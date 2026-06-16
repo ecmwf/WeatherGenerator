@@ -1,0 +1,11 @@
+streams_directory: "./config/streams/jepa_forecast_multi_data_od/"
+
+general:
+
+  # mutable parameters
+  rank: ???
+  world_size: ???
+
+training_config:
+  num_mini_epochs: 32
+  samples_per_mini_epoch: 8192

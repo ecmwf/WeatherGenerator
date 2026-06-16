@@ -265,15 +265,15 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     )
                 ds = dataset(filename=filename, **kwargs)
 
-                stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
-                stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
-                stream_info["target_channel_weights"] = (
-                    ds.target_channel_weights
-                    if ds.target_channel_weights is not None
-                    else [1.0 for _ in ds.target_channels]
-                )
-
                 streams_datasets[stream_info["name"]] += [ds]
+
+            stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
+            stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+            stream_info["target_channel_weights"] = (
+                ds.target_channel_weights
+                if ds.target_channel_weights is not None
+                else [1.0 for _ in ds.target_channels]
+            )
 
         return streams_datasets
 
@@ -431,7 +431,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 )
 
                 # collect data for stream
-                stream_data.add_source(step, rdata, source_cells_lens, source_cells)
+                stream_data.add_source(
+                    self._stage, step, rdata, source_cells_lens, source_cells, rdata.is_spoof
+                )
 
         return stream_data
 
@@ -472,7 +474,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     (time_win_target.start, time_win_target.end),
                     target_mask,
                 )
-                stream_data.add_target_coords(timestep_idx, tc, tc_l, rdata.is_spoof)
+                stream_data.add_target_coords(self._stage, timestep_idx, tc, tc_l, rdata.is_spoof)
 
             if "target_values" in mode:
                 (tt_cells, tt_t, tt_c, idxs_inv) = self.tokenizer.get_target_values(
@@ -483,7 +485,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     target_mask,
                 )
                 stream_data.add_target_values(
-                    timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
+                    self._stage, timestep_idx, tt_cells, tt_c, tt_t, idxs_inv, rdata.is_spoof
                 )
 
         return stream_data
@@ -730,6 +732,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     input_data,
                     source_masks.metadata[sidx],
                     is_student=True,
+                    add_geoinfo_noise="noise_time" in stream_info.get("geoinfo_channels",[]),
                 )
 
                 sdata = self._build_stream_data(
@@ -758,7 +761,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 # Apply self-flow noise to teacher data (handled by masker)
                 input_data_target = self.masker.apply_noise_to_data(
-                    input_data_target_orig, target_masks.metadata[tidx], is_student=False
+                    input_data_target_orig, target_masks.metadata[tidx], is_student=False,
+                    add_geoinfo_noise="noise_time" in stream_info.get("geoinfo_channels",[]),
                 )
 
                 sdata = self._build_stream_data(
@@ -844,7 +848,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
-            assert self.world_size == 1, self.world_size
+            # assert self.world_size == 1, self.world_size
             iter_start = 0
             iter_end = len(self)
 

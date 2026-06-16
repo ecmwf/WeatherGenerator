@@ -1,0 +1,20 @@
+
+streams_directory: "./config/streams/pretrain_multi_data_od/"
+
+general:
+
+  # mutable parameters
+  rank: ???
+  world_size: ???
+
+training_config:
+  start_date: 2016-01-01T00:00
+  end_date: 2022-12-31T00:00
+
+  num_mini_epochs: 20
+  samples_per_mini_epoch: 8192
+
+  context_loss:
+    enabled: true
+    weight: 0.4
+    warmup_steps: 2000             # linear warmup from 0 to weight over this many steps

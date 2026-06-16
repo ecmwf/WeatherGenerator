@@ -52,8 +52,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-        with_2d_rope=False,
         use_xsa=False,
+        with_2d_rope=False,
     ):
         super(MultiSelfAttentionHeadVarlen, self).__init__()
 
@@ -62,8 +62,8 @@ class MultiSelfAttentionHeadVarlen(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
         self.with_residual = with_residual
-        self.with_2d_rope = with_2d_rope
         self.use_xsa = use_xsa
+        self.with_2d_rope = with_2d_rope
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -247,8 +247,8 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-        with_2d_rope=False,
         use_xsa=False,
+        with_2d_rope=False,
     ):
         super(MultiSelfAttentionHeadLocal, self).__init__()
 
@@ -256,8 +256,8 @@ class MultiSelfAttentionHeadLocal(torch.nn.Module):
         self.with_flash = with_flash
         self.softcap = softcap
         self.with_residual = with_residual
-        self.with_2d_rope = with_2d_rope
         self.use_xsa = use_xsa
+        self.with_2d_rope = with_2d_rope
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj
@@ -567,8 +567,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
         dim_aux=None,
         norm_eps=1e-5,
         attention_dtype=torch.bfloat16,
-        with_2d_rope=False,
         use_xsa=False,
+        with_2d_rope=False,
     ):
         super(MultiSelfAttentionHead, self).__init__()
 
@@ -577,8 +577,8 @@ class MultiSelfAttentionHead(torch.nn.Module):
         self.softcap = softcap
         self.dropout_rate = dropout_rate
         self.with_residual = with_residual
-        self.with_2d_rope = with_2d_rope
         self.use_xsa = use_xsa
+        self.with_2d_rope = with_2d_rope
 
         assert dim_embed % num_heads == 0
         self.dim_head_proj = dim_embed // num_heads if dim_head_proj is None else dim_head_proj

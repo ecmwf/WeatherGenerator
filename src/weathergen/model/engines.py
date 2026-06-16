@@ -32,9 +32,6 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
-MAX_NUMBER_TOKENS_LOCAL_PER_CELL = 128
-
-
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
@@ -107,11 +104,18 @@ class EmbeddingEngine(torch.nn.Module):
             # skip empty stream
             if sdata.numel() == 0:
                 continue
-
+            
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
+
+        # if the assert is hit, max_number_tokens_local_per_cell in config needs to be increased
+        max_tokens = self.cf.get("ae_local_max_tokens_per_cell", 64)
+        assert batch.tokens_lens.flatten(0, 2).sum(0).max() <= max_tokens, (
+            "max number of tokens per cell for positional encoding exceeded."
+        )
+        " Increase ae_local_max_tokens_per_cell in config."
 
         if batch.tokens_lens.shape[2] == 1:
             # trivial with one stream
@@ -121,10 +125,6 @@ class EmbeddingEngine(torch.nn.Module):
             scatter_idxs = self.get_scatter_idxs_vectorized(batch)
             scatter_idxs = scatter_idxs.unsqueeze(1).repeat((1, self.cf.ae_local_dim_embed))
 
-            # if the assert is hit, MAX_NUMBER_TOKENS_LOCAL_PER_CELL needs to be increased
-            assert (
-                batch.tokens_lens.flatten(0, 2).sum(0).max() < MAX_NUMBER_TOKENS_LOCAL_PER_CELL
-            ), "max number of tokens per cell for positional encoding exceeded"
             # actual scatter operation and apply per cell positional encoding
             tokens_all.scatter_(0, scatter_idxs, torch.cat(x_embeds))
 
@@ -543,12 +543,28 @@ class GlobalAssimilationEngine(torch.nn.Module):
         intermediates: list[torch.Tensor] = []
         logical_layer = 0
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+            # The optional trailing LayerNorm (ae_global_trailing_layer_norm) takes a single
+            # input, unlike the attention/MLP blocks which also receive coords/aux_info.
+            if isinstance(block, torch.nn.modules.normalization.LayerNorm):
+                tokens = checkpoint(block, tokens, use_reentrant=False)
+            else:
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
             if isinstance(block, MLP):
                 if self.tap_global_layers and logical_layer in self.tap_global_layers:
                     intermediates.append(tokens)
                 logical_layer += 1
         return tokens, intermediates
+
+
+class IdentityEngine(torch.nn.Module):
+    """Identity engine that passes tokens through unchanged."""
+
+    def __init__(self):
+        super().__init__()
+        self.fe_blocks = torch.nn.ModuleList()
+
+    def forward(self, tokens, *args, **kwargs):
+        return tokens
 
 
 class ForecastingEngine(torch.nn.Module):
@@ -1164,6 +1180,7 @@ class LatentPredictionHeadMLP(nn.Module):
             out_dim,
             num_layers,
             hidden_factor,
+            pre_layer_norm=False,
             mlp_type=loss_conf.get("mlp_type", default_mlp_type),
         )
 

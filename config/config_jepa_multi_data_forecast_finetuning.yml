@@ -7,70 +7,25 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-embed_orientation: "channels"
-embed_unembed_mode: "block"
-embed_dropout_rate: 0.1
-
-ae_local_dim_embed: 1024
-ae_local_num_blocks: 4
-ae_local_num_heads: 16
-ae_local_dropout_rate: 0.1
-ae_local_with_qk_lnorm: True
-
-ae_local_num_queries: 1
-ae_local_queries_per_cell: False
-ae_adapter_num_heads: 16
-ae_adapter_embed: 128
-ae_adapter_with_qk_lnorm: True
-ae_adapter_with_residual: True
-ae_adapter_dropout_rate: 0.1
-
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 2
-ae_global_num_heads: 32
-ae_global_dropout_rate: 0.1
-ae_global_with_qk_lnorm: True
-# TODO: switching to < 1 triggers triton-related issues.
-# See https://github.com/ecmwf/WeatherGenerator/issues/1050
-ae_global_att_dense_rate: 1.0
-ae_global_block_factor: 64
-ae_global_mlp_hidden_factor: 2
-ae_global_trailing_layer_norm: False
-
-ae_aggregation_num_blocks: 8
-ae_aggregation_num_heads: 32
-ae_aggregation_dropout_rate: 0.1
-ae_aggregation_with_qk_lnorm: True
-ae_aggregation_att_dense_rate: 1.0
-ae_aggregation_block_factor: 64
-ae_aggregation_mlp_hidden_factor: 2
-
-decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
-pred_adapter_kv: False
-pred_self_attention: True
-pred_dyadic_dims: False
-pred_mlp_adaln: True
-num_class_tokens: 1
-num_register_tokens: 7
-
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 6
+fe_num_blocks: 16
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
-fe_layer_norm_after_blocks: []  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0.0  # 1e-4
+fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
+fe_impute_latent_noise_std: 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
 healpix_level: 5
 
+# performance
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
 with_fsdp: False
-ddp_find_unused_parameters: False
+ddp_find_unused_parameters: False #True
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -80,18 +35,19 @@ latent_noise_kl_weight: 0.0 # 1e-5
 latent_noise_gamma: 2.0
 latent_noise_saturate_encodings: 5 
 latent_noise_use_additive_noise: False
-latent_noise_deterministic_latents: True 
+latent_noise_deterministic_latents: True
 
-
-freeze_modules: ""
+freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
 
 norm_type: "LayerNorm"
+
 # type of zarr_store
 zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/era5_nppatms_synop/"
+streams_directory: "./config/streams/era5_georing_forecast/"
+# streams_directory: "./config/streams/era5_synop_finetuning/"
 streams: ???
 
 general:
@@ -108,7 +64,7 @@ general:
   # run_path, 
   # path_shared_
 
-  multiprocessing_method: "fork"
+  multiprocessing_method: "spawn" # "fork"
 
   desc: ""
   run_id: ???
@@ -126,6 +82,7 @@ data_loading :
 
   num_workers: 12
   rng_seed: ???
+  repeat_data_in_mini_epoch : False
 
   # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
   # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
@@ -137,7 +94,17 @@ data_loading :
 training_config:
   
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["masking", "student_teacher"]
+  # training_mode: ["student_teacher"]
+  training_mode: ["masking"]
+
+  context_loss:
+    enabled: false
+
+  # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
+  # When enabled, intermediate encoder representations are tapped and used as additional
+  # targets/predictions for the SSL loss. Disabled by default (empty tap_after).
+  deep_ssl:
+    enabled: false
 
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
@@ -148,15 +115,13 @@ training_config:
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
-
-  window_offset_prediction : 0
   
   learning_rate_scheduling :
     lr_start: 1e-6
     lr_max: 5e-5
-    lr_final_decay: 1e-6
+    lr_final_decay: 2e-6
     lr_final: 0.0
-    num_steps_warmup: 512
+    num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
@@ -169,87 +134,43 @@ training_config:
     log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
-      beta1 : 0.975
+      beta1 : 0.98125
       beta2 : 0.9875
       eps : 2e-08
 
   losses : {
+    "student-teacher": {
+        enabled: False,
+        type: Disabled,
+        },
     "physical": {
         type: LossPhysical,
-        weight: 0.5,
-        loss_fcts: {
-          "mse": {
-            weight: 0.8,
-            target_source_correspondence: { 0 : { 0 : "complement"} },
-          },
+        loss_fcts: { "mse": { }, },
         },
-        target_and_aux_calc: "Physical",
-    },
-    "student-teacher": {
-        enabled: True,
-        type: LossLatentSSLStudentTeacher,
-        weight: 0.5,
-        loss_fcts : {
-          "JEPA": {
-            'weight': 8, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
-            "dropout_rate": 0.1,
-            target_source_correspondence: {1 : {1 : "subset"} },
-          },
-        },
-        target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : 0.09,
-            ema_halflife_in_thousands: 1e-3,
-            model_param_overrides : { 
-              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
-            },
-          }
-        }
     }
-  }
   
   model_input: {
-    "input_physical" : {
-      # masking strategy: "random", "forecast"
-      masking_strategy: "random",
-      num_samples: 2,
-      num_steps_input: 1,
-      masking_strategy_config : { 
-        diffusion_rn : True, 
-        rate : 0.6,
-        rate_sampling: False
+    "random_easy" : {
+      enabled: False,
+      num_samples: 0,
       },
-    },
-    "input_jepa" : {
-      # masking strategy: "random", "forecast"
-      masking_strategy: "random",
-      num_samples: 1,
-      num_steps_input: 1,
-      masking_strategy_config : { 
-        diffusion_rn : True, 
-        rate : 0.6,
-        rate_sampling: False
+    "forecasting" : {
+      # masking strategy: "random", "healpix", "forecast"
+      masking_strategy: "forecast",
       },
-    },
-  }
+    }
 
   target_input: {
-    "target_physical" : {
-      masking_strategy: "random",
-      num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
-    },
-    "target_jepa" : {
-      masking_strategy: "healpix",
-      num_samples: 1,
-      masking_strategy_config : { rate : 0.2, hl_mask: 0, rate_sampling: False },
-    },
-  }
+    "random_easy_target" : {
+      enabled: False,
+      },
+    }
 
   forecast :
       time_step: 06:00:00
-      num_steps: 0
-      policy: null
+      num_steps: 3
+      offset: 1
+      policy: "fixed"
 
 
 # validation config; full validation config is merge of training and validation config
@@ -267,50 +188,19 @@ validation_config:
     ema_ramp_up_ratio: 0.09
     ema_halflife_in_thousands: 1e-3
 
-  # run validation before training starts (mainly for model development)
-  validate_before_training: 0
-
   # parameters for validation samples that are written to disk
   output : {
     # number of samples that are written
     num_samples: 0,
     # write samples in normalized model space
-    normalized_samples: True,
+    normalized_samples: False,
     # output streams to write; default all
     streams: null,
-    }
-  
-  losses: {
-    "physical": {
-        type: LossPhysical,
-        weight: 1.0,
-        loss_fcts: {
-          "mse": {
-            weight: 1.0,
-          },
-        },
-      },
   }
 
-  # Requires enabled flags
-  # model_input: {
-  #   "random_easy" : {
-  #     enabled : False,
-  #   },
-  #   "random_hard" : {
-  #     enabled : False,
-  #   },
-  #   "strategy1" : {
-  #   # "random", "healpix". Masking strategy to use for model input for masking
-  #     masking_strategy: "forecast",
-  #     num_samples: 1,
-  #     masking_strategy_config : { diffusion_rn : True, rate : 0.4 },
-  #     # relationship: "independent", "subset", "disjoint".
-  #     relationship: "independent",
-  #     num_steps_input: 1,
-  #     }
-  # }
-
+  # run validation before training starts (mainly for model development)
+  validate_before_training: False
+  
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference
 
@@ -341,3 +231,4 @@ wgtags:
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null
+
