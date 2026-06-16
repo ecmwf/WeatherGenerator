@@ -709,9 +709,7 @@ class Model(torch.nn.Module):
 
             # per-token cosine similarity between current and previous patch tokens
             if self.compute_cos_sim_to_prev:
-                cos_sim_to_prev = compute_cos_sim_to_prev(
-                    tokens, prev_tokens, self.num_aux_tokens
-                )
+                cos_sim_to_prev = compute_cos_sim_to_prev(tokens, prev_tokens, self.num_aux_tokens)
                 output.add_latent_prediction(step, "cos_sim_to_prev", cos_sim_to_prev)
 
             # decoder predictions
