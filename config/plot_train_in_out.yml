@@ -40,8 +40,21 @@ train:
       slurm_id: 0      
       description: "cont., t1n6y00g"
 
-    
+    rbaddpwj:
+      slurm_id: 0      
+      description: "1979-, forecast, 6h, in and out, multi stream, surface 512 token"
 
+    yx1tuqtt:
+      slurm_id: 0      
+      description: "1990-, forecast, 6h, in and out, multi stream, surface 512 token"
+
+    tun0qi33:
+      slurm_id: 0      
+      description: "2000-, forecast, 6h, in and out, multi stream, surface 512 token"
+
+    bn9sdlb5:
+      slurm_id: 0      
+      description: "2016-, forecast, 6h, in and out, multi stream, surface 512 token, finetune ufflnrhq"
     
 
     
