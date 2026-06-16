@@ -58,10 +58,10 @@ training_config:
   
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 1e-5
-    lr_final_decay: 2e-6
+    lr_max: 2e-6
+    lr_final_decay: 1e-6
     lr_final: 0.0
-    num_steps_warmup: 8192
+    num_steps_warmup: 256
     num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"

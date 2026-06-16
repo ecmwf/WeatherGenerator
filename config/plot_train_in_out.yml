@@ -59,6 +59,12 @@ train:
     b5cddcqt:
       slurm_id: 0      
       description: "2016-, forecast, 6h, in and out, multi stream, surface 512 token, finetune ufflnrhq, lrmax 1e-5, extend warmup to 8192 samples"
+
+    waop73et:
+      slurm_id: 0      
+      description: "2016-, forecast, 6h, in and out, multi stream, surface 512 token, finetune ufflnrhq, lrmax 5e-6, warmup 256 samples"
+
+
     
 
     
