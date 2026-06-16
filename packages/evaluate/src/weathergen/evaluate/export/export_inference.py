@@ -104,7 +104,7 @@ def parse_args(args: list) -> argparse.Namespace:
     parser.add_argument(
         "--stream",
         type=str,
-        choices=["ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
+        choices=["N320", "ERA5", "CERRA", "MEPS", "NORA3", "IMERG_ANEMOI"],
         help="Stream name to retrieve data for",
     )
 

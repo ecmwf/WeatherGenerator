@@ -5,6 +5,8 @@
 #  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
 #  animation_format: "gif" #options: "mp4", "gif"
+#  log_colorbar: true
+
 #  dpi_val : 300
 #  fps: 2
 #  n_bins: 50 #number of bins for histograms. 
@@ -29,27 +31,37 @@
 # max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
 
 evaluation:
-  metrics  : ["rmse", "mae"]
+  metrics  : 
+  - rmse
+  - mae
+  - psd:
+        psd_method: "sht"                    # "sht" (SHT-based, default) or "fft" (regrid FFT)
+        # psd_regrid_resolution: 1.0           # degrees, only for fft method
+  # metrics  : ["rmse", "mae"]
   # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
   summary_plots : true
   ratio_plots : false
   heat_maps : false
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
-  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation
+  plot_score_animations: false #plot animations of score maps across forecast steps. it slows down score computation
+  plot_score_init_timeseries: true #plot timeseries of scores across forecast steps. 
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
   score_cards: false
   bar_plots: false
-  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
   # baseline: "ar40mckx"
 
 
 default_streams:
   ERA5:
+    #offset: "1h" #optional: specify a timedelta offset to infer init_time when source_interval is missing. Format examples: "1h", "30m", "2h30m".
     regions: ["global"]
     channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+    regrid: True 
+      # target_grid: [1.5, 1.5] #default is [1.5, 1.5], e.g. ["O96"]
     evaluation:
       forecast_step: "all"
       sample: "all"
@@ -99,7 +111,7 @@ run_ids :
     color: "magenta" #optional: if not specified, the color is automatically assigned by the plotting module
     results_base_dir : "./results/"
     epoch: 1 #optional: if not specified epoch 0 (in inference it is always 0) is used
-    rank: 2 #optional: if not specified rank 0 is used
+    rank: "all" #optional: int, "all", or list of ints. Default: "all". Use "all" for multi-rank inference.
     streams:
       ERA5:
         channels: ["2t", "10u", "10v"] 
