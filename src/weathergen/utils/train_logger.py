@@ -140,7 +140,7 @@ class TrainLogger:
             cf = config.load_run_config(run_id=run_id, mini_epoch=mini_epoch, model_path=model_path)
         else:
             cf = config.load_merge_configs(
-                private_home=None, from_run_id=run_id, mini_epoch=mini_epoch
+                private_config_path=None, from_run_id=run_id, mini_epoch=mini_epoch
             )
         run_id = cf.general.run_id
 

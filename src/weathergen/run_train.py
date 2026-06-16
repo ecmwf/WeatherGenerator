@@ -87,7 +87,7 @@ def run_inference(args):
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
-        args.private_config,
+        args.private_config_path,
         args.from_run_id,
         args.mini_epoch,
         args.base_config,
@@ -108,7 +108,7 @@ def run_inference(args):
 
     trainer = Trainer(cf.train_logging)
     try:
-        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch)
+        trainer.inference(cf, devices, args.from_run_id, args.mini_epoch, args.private_config_path)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -125,7 +125,7 @@ def run_continue(args):
 
     cli_overwrite = config.from_cli_arglist(args.options)
     cf = config.load_merge_configs(
-        args.private_config,
+        args.private_config_path,
         args.from_run_id,
         args.mini_epoch,
         args.base_config,
@@ -147,7 +147,7 @@ def run_continue(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices, args.from_run_id, args.mini_epoch)
+        trainer.run(cf, devices, args.from_run_id, args.mini_epoch, args.private_config_path)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
@@ -163,9 +163,8 @@ def run_train(args):
     """
 
     cli_overwrite = config.from_cli_arglist(args.options)
-
     cf = config.load_merge_configs(
-        args.private_config, None, None, args.base_config, *args.config, cli_overwrite
+        args.private_config_path, None, None, args.base_config, *args.config, cli_overwrite
     )
     cf = config.set_run_id(cf, args.run_id, False)
 
@@ -176,7 +175,7 @@ def run_train(args):
 
     # this line should probably come after the processes have been sorted out else we get lots
     # of duplication due to multiple process in the multiGPU case
-    init_loggers(cf.general.run_id)
+    init_loggers(cf.general.run_id, private_config_path=args.private_config_path)
 
     logger.info(f"DDP initialization: rank={cf.rank}, world_size={cf.world_size}")
 
@@ -188,7 +187,7 @@ def run_train(args):
     trainer = Trainer(cf.train_logging)
 
     try:
-        trainer.run(cf, devices)
+        trainer.run(cf, devices, private_config_path=args.private_config_path)
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
