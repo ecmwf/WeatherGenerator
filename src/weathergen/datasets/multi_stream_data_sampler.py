@@ -220,6 +220,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             kwargs = {
                 "tw_handler": self.time_window_handler,
                 "stream_info": stream_info,
+                "stage": self._stage,
             }
             dataset: type[AnyDataReader] | None = None
             match stream_info["type"]:
