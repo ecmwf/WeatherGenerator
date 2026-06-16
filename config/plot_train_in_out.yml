@@ -10,7 +10,11 @@ train:
     
     nfm0jwyx:
       slurm_id: 0      
-      description: "forecast, 6h, in and out"    
+      description: "forecast, 6h, in and out"  
+
+    ufflnrhq:
+      slurm_id: 0      
+      description: "cont., nfm0jwyx"  
 
     aq6ou61c:
       slurm_id: 0      
@@ -20,9 +24,23 @@ train:
       slurm_id: 0      
       description: "2016-, forecast, 6h, in and out"
 
-    ueaolof7:
+    k6d2cgyw:
       slurm_id: 0      
-      description: "2016-, forecast, 6h, in and out, multi stream"
+      description: "cont., a2689i4t"
+
+    # ueaolof7:
+    #   slurm_id: 0      
+    #   description: "2016-, forecast, 6h, in and out, multi stream"
+
+    t1n6y00g:
+      slurm_id: 0      
+      description: "2016-, forecast, 6h, in and out, multi stream, surface 512 token"
+
+    eu0k1guw:
+      slurm_id: 0      
+      description: "cont., t1n6y00g"
+
+    
 
     
 
