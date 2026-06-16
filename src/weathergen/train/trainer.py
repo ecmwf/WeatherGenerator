@@ -64,8 +64,9 @@ from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_loggin
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
-logger = logging.getLogger(__name__)
+PROFILING_DEFAULTS = {"wait_iteration": 1, "warmup_iteration": 1, "active_iteration": 1, "repeat": 1}  
 
+logger = logging.getLogger(__name__)
 
 class Trainer(TrainerBase):
     def __init__(self, train_logging: Config):
@@ -812,13 +813,52 @@ class Trainer(TrainerBase):
             metrics["num_samples"] = self.cf.general.istep
             self.train_logger.log_metrics(stage, metrics)
 
+class ProfilingTrainer(Trainer):  
 
-class ProfilingTrainer(Trainer):
-    def init(self, cf, devices):
-        # create profiler trace directory
+    def __init__(self, train_logging: Config, profiling_cfg: Config | None):
+        super().__init__(train_logging)
+        self.profiling_cfg = profiling_cfg
+
+    def init(self, cf: Config, devices: list):  
         super().init(cf, devices)
+        self.profiling_cfg = OmegaConf.merge(self.profiling_cfg, PROFILING_DEFAULTS)  
+        
+        self.max_profile_steps = (  
+            self.profiling_cfg.wait_iteration + self.profiling_cfg.warmup_iteration + self.profiling_cfg.active_iteration  
+        ) * self.profiling_cfg.repeat  
+
+        self.schedule = torch.profiler.schedule(  
+            wait=self.profiling_cfg.wait_iteration,  
+            warmup=self.profiling_cfg.warmup_iteration,  
+            active=self.profiling_cfg.active_iteration,  
+            repeat=self.profiling_cfg.repeat,  
+        )  
+        wrap_module_forward_with_profiling(self.model, prefix="model")
+
         if is_root():
-            config.get_path_profiler(self.cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_profiler(cf).mkdir(exist_ok=True, parents=True)
+
+        handler = partial(trace_handler, cf)
+
+        # Determine profiler setup
+        if is_root():
+            self.prof = profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                record_shapes=True,
+                profile_memory=True,
+                with_stack=True,
+                with_modules=True,
+                with_flops=True,
+                schedule=torch.profiler.schedule(
+                    wait=cf.profiling.wait_iteration,
+                    warmup=cf.profiling.warmup_iteration,
+                    active=cf.profiling.active_iteration,
+                    repeat=cf.profiling.repeat,
+                ),
+                on_trace_ready=handler,
+            )
+        else:
+            self.prof = nullcontext()
 
     def save_model(self, mini_epoch: int, name=None):
         # Skip save in profiling mode.
@@ -851,82 +891,39 @@ class ProfilingTrainer(Trainer):
         # training loop
         self.t_start = time.time()
 
-        wrap_module_forward_with_profiling(self.model, prefix="model")
-
-        prof_cf = getattr(cf, "profiling", None)
-        if prof_cf is None:
-            raise AttributeError("Missing profiling config: expected cf.profiling")
-
-        max_profile_steps = (
-            prof_cf.wait_iteration
-            + prof_cf.warmup_iteration
-            + prof_cf.active_iteration
-        ) * prof_cf.repeat
-
-        handler = partial(trace_handler, cf)
-
-        # Detect ARM architecture (e.g., NVIDIA GH200 uses aarch64 CPU)
-        # PyTorch's memory timeline profiler (export_memory_timeline) internally requires
-        # with_stack=True, which relies on C++ stack unwinding (record_context_cpp).
-        # This is only supported on Linux x86_64 — on aarch64 it silently fails during
-        # profiler teardown, causing a "Python replay stack is empty" RuntimeError.
-        # Therefore, on aarch64 we disable with_stack and skip the memory timeline export.
-        # CUDA kernel profiling, FLOPS, shapes, and chrome traces are unaffected.
-        on_aarch64 = platform.machine() == "aarch64"
-
-        # Determine profiler setup
-        if is_root():
-            prof = profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                record_shapes=True,
-                profile_memory=True,
-                with_stack=True, # TODO: ensure pytorch 2.9.1 before merging!
-                with_modules=True,
-                with_flops=True,
-                schedule=torch.profiler.schedule(
-                    wait=cf.profiling.wait_iteration,
-                    warmup=cf.profiling.warmup_iteration,
-                    active=cf.profiling.active_iteration,
-                    repeat=cf.profiling.repeat,
-                ),
-                on_trace_ready=handler,
-            )
-        else:
-            prof = nullcontext()
-
         if is_root():
             # Start recording memory snapshot history
             start_record_memory_history()
 
-        with prof:
+        with self.prof:
             for bidx, batch in enumerate(islice(dataset_iter, max_profile_steps)):
                 self._train_batch(batch, bidx)
-                if hasattr(prof, "step"):
-                    prof.step()
+                if hasattr(self.prof, "step"):
+                    self.prof.step()
 
             # Print only on rank 0
-            if is_root() and hasattr(prof, "key_averages"):
+            if is_root() and hasattr(self.prof, "key_averages"):
                 logger.info("\n" + "=" * 80)
                 logger.info("PROFILING SUMMARY")
                 logger.info("=" * 80)
 
                 logger.info("\n--- Top Operations by FLOPs ---")
                 logger.info(
-                    prof.key_averages().table(
+                    self.prof.key_averages().table(
                         sort_by="flops", row_limit=20, top_level_events_only=False
                     )
                 )
 
                 logger.info("\n--- Operations Grouped by Module ---")
                 logger.info(
-                    prof.key_averages(group_by_stack_n=5).table(
+                    self.prof.key_averages(group_by_stack_n=5).table(
                         sort_by="cuda_time_total", row_limit=30
                     )
                 )
 
                 logger.info("\n--- Memory Usage ---")
                 logger.info(
-                    prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=20)
+                    self.prof.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=20)
                 )
 
         if is_root():
@@ -947,3 +944,10 @@ class ProfilingTrainer(Trainer):
 
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
+
+def get_trainer(cf) -> Trainer:  
+    profiling = cf.get("profiling")  
+    if profiling and cf.profiling.enabled:  
+        return ProfilingTrainer(cf.train_logging, profiling)  
+    else:  
+        return Trainer(cf.train_logging)
