@@ -326,6 +326,7 @@ class Model(torch.nn.Module):
         self.embed_target_coords = None
         self.encoder: EncoderModule | None = None
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
+        self.compute_cos_sim_to_prev: bool = False
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
