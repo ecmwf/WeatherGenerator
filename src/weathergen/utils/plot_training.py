@@ -313,6 +313,8 @@ def plot_loss_avg(
 
     _fig = plt.figure(figsize=(10, 7), dpi=PLOT_DPI_VALUE)
 
+    print(runs_data[0].train)
+
     legend_str = []
     for i_run, (run_id, run_data) in enumerate(zip(runs_ids, runs_data, strict=False)):
         run_data_stage = run_data.train if stage == TRAIN else run_data.val
@@ -417,7 +419,7 @@ def plot_loss_per_stream(
                     linestyle = ":" if "stddev" in err else linestyle
                     alpha = 1.0
                     if "train" in modes and "val" in modes:
-                        alpha = 0.35 if "train" in mode else alpha
+                        alpha = 0.35 if mode == "train" else alpha
 
                     for j, run_data in enumerate(runs_data):
                         run_data_mode = run_data.by_mode(mode)
@@ -589,8 +591,10 @@ def plot_loss_per_run(
             linestyle = ":" if "stddev" in err else linestyle
             alpha = 1.0
             if "train" in modes and "val" in modes:
-                alpha = 0.35 if "train" in mode else alpha
+                alpha = 0.35 if mode == "train" else alpha
             run_data_mode = run_data.by_mode(mode)
+            if run_data_mode.is_empty():
+                continue
 
             x_col = [c for _, c in enumerate(run_data_mode.columns) if x_axis in c][0]
             # find the cols of the requested metric (e.g. mse) for all streams
@@ -910,7 +914,7 @@ def plot_train(args=None):
     model_base_dir = Path(args.model_base_dir) if args.model_base_dir else None
     out_dir = Path(args.output_dir)
     streams = list(args.streams)
-    x_types_valid = ["step"]  # TODO: add "reltime" support when fix available
+    x_types_valid = ["step", "reltime"]  # TODO: add "reltime" support when fix available
     if args.x_type not in x_types_valid:
         raise ValueError(f"x_type must be one of {x_types_valid}, but got {args.x_type}")
 
@@ -958,6 +962,9 @@ def plot_train(args=None):
         for run_id in runs_ids
     ]
 
+    # extra validation sets ("val_<name>") discovered in any run's metrics
+    extra_modes = sorted({m for rd in runs_data for m in rd.extra})
+
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
     lines = str(ret.stdout).split("\\n")
@@ -982,7 +989,7 @@ def plot_train(args=None):
 
     # compare different runs
     plot_loss_per_stream(
-        ["train", "val"],
+        ["train", "val", *extra_modes],
         runs_ids,
         runs_data,
         runs_active,
@@ -998,7 +1005,7 @@ def plot_train(args=None):
         plot_dir=out_dir,
     )
     plot_loss_per_stream(
-        ["val"],
+        ["val", *extra_modes],
         runs_ids,
         runs_data,
         runs_active,
@@ -1033,7 +1040,7 @@ def plot_train(args=None):
     # plot all cols for all run_ids
     for run_id, run_data in zip(runs_ids, runs_data, strict=False):
         plot_loss_per_run(
-            ["train", "val"],
+            ["train", "val", *extra_modes],
             run_id,
             runs_ids[run_id],
             run_data,
@@ -1043,7 +1050,7 @@ def plot_train(args=None):
             legend_outside=args.legend_outside,
         )
     plot_loss_per_run(
-        ["val"],
+        ["val", *extra_modes],
         run_id,
         runs_ids[run_id],
         run_data,

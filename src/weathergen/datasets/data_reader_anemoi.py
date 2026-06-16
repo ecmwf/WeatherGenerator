@@ -132,8 +132,10 @@ class DataReaderAnemoi(DataReaderTimestep):
             self.geoinfo_idx = self.select_geoinfo_channels(ds)
             self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
         else:
-            self.geoinfo_channels = stream_info.get("geoinfo_channels")
-            self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
+            self.geoinfo_idx = self.select_geoinfo_channels(ds)
+            self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
+            # self.geoinfo_channels = stream_info.get("geoinfo_channels")
+            # self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
 
         # set geoinfo normalization statistics
         if len(self.geoinfo_idx) > 0:
@@ -257,28 +259,43 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         channels = self.stream_info.get(ch_type)
         channels_exclude = self.stream_info.get(ch_type + "_exclude", [])
+        stream_name = self.stream_info["name"]
         # sanity check
-        is_empty = len(channels) == 0 if channels is not None else False
-        if is_empty:
-            stream_name = self.stream_info["name"]
+        if channels is not None and len(channels) == 0:
             _logger.warning(f"No channel for {stream_name} for {ch_type}.")
 
-        chs_idx = np.sort(
-            [
-                ds0.name_to_index[k]
-                for (k, v) in ds0.typed_variables.items()
-                if (
-                    not v.is_computed_forcing
-                    and not v.is_constant_in_time
-                    and (
-                        np.array([f == k for f in channels]).any() if channels is not None else True
-                    )
-                    and not np.array([f == k for f in channels_exclude]).any()
-                )
-            ]
-        )
+        # Variables eligible for selection: physical fields only (no computed forcings,
+        # no constants-in-time), and not explicitly excluded.
+        eligible = {
+            k
+            for k, v in ds0.typed_variables.items()
+            if not v.is_computed_forcing
+            and not v.is_constant_in_time
+            and not any(ex == k for ex in channels_exclude)
+        }
 
-        return np.array(chs_idx, dtype=np.int64)
+        if channels is not None:
+            # Respect the order given in the stream config so the channel layout is identical
+            # across datasets that share channels (e.g. ERA5 vs operational analysis),
+            # regardless of each dataset's on-disk variable order.
+            seen: set[str] = set()
+            ordered = []
+            for k in channels:
+                if k in eligible and k not in seen:
+                    ordered.append(k)
+                    seen.add(k)
+            missing = [k for k in channels if k not in eligible]
+            if missing:
+                _logger.warning(
+                    f"{stream_name}: requested {ch_type} channels not available "
+                    f"(excluded/forcing/constant-in-time or absent), skipped: {missing}"
+                )
+        else:
+            # No explicit selection: fall back to deterministic lexicographic order so the
+            # layout is still reproducible across datasets.
+            ordered = sorted(eligible)
+
+        return np.array([ds0.name_to_index[k] for k in ordered], dtype=np.int64)
 
     def select_geoinfo_channels(self, ds0: anemoi_datasets) -> NDArray[np.int64]:
         """
@@ -300,19 +317,19 @@ class DataReaderAnemoi(DataReaderTimestep):
         if len(geoinfo_channels) == 0:
             return np.array([], dtype=np.int64)
 
-        # Select channels that match the geoinfo list (exact match required)
-        chs_idx = np.sort(
-            [ds0.name_to_index[k] for k in ds0.typed_variables.keys() if k in geoinfo_channels]
-        )
+        # Select channels that match the geoinfo list (exact match required), preserving the
+        # order requested in the config so the geoinfo layout is dataset-independent.
+        available = set(ds0.typed_variables.keys())
+        ordered = [k for k in geoinfo_channels if k in available]
 
-        if len(chs_idx) == 0 and len(geoinfo_channels) > 0:
+        if len(ordered) == 0:
             stream_name = self.stream_info["name"]
             _logger.warning(
                 f"No matching geoinfo channels found for {stream_name}. "
                 f"Requested: {geoinfo_channels}"
             )
 
-        return np.array(chs_idx, dtype=np.int64)
+        return np.array([ds0.name_to_index[k] for k in ordered], dtype=np.int64)
 
 
 def _clip_lat(lats: NDArray) -> NDArray[np.float32]:

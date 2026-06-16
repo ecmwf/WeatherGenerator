@@ -9,7 +9,6 @@
 
 import copy
 import json
-from typing import Literal
 
 import torch
 from omegaconf import OmegaConf
@@ -17,8 +16,8 @@ from omegaconf import OmegaConf
 from weathergen.common import config
 from weathergen.common.config import Config, merge_configs
 
-# Run stages
-Stage = Literal["train", "val", "test"]
+# Run stages: "train", "val", "test", or "val_<name>" for extra validation sets
+Stage = str
 TRAIN: Stage = "train"
 VAL: Stage = "val"
 TEST: Stage = "test"

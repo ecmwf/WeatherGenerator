@@ -1,0 +1,40 @@
+streams_directory: "./config/streams/jepa_forecast_multi_data_od_ckpt_order/"
+
+freeze_modules: "^(?!.*ERA5)(?=.*(?:encoder|latent_pre_norm|latent_heads)).*$"
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+training_config:
+  start_date: 2016-01-01T00:00
+  # OND-2022 carved out of training so the heldout-train-years extra validation
+  # set below is genuinely held out (was 2022-12-31)
+  end_date: 2022-09-30T00:00
+
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 1e-5
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 32768 
+
+  num_mini_epochs: 6
+  samples_per_mini_epoch: 8192
+
+# # extra validation sets, evaluated each mini-epoch and logged as stage "val_<name>";
+# # each entry overrides the primary validation_config
+# extra_validation_configs:
+#   # held-out slice inside the training years (excluded from training via the
+#   # end_date above), season-matched to the OND-2023 primary val window;
+#   # memorization probe: if its loss tracks val, the train/val gap is memorization,
+#   # if it stays well below val, the gap is distribution shift
+#   heldout-train-years:
+#     start_date: 2022-10-01T00:00
+#     end_date: 2022-12-31T00:00
+#     shuffle: True
+#     samples_per_mini_epoch: 256

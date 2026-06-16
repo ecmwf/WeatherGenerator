@@ -1,0 +1,107 @@
+# ERA5 input stream for temporal JEPA.
+# This mirrors era5_georing_avhrr_forecast_random_inputs/era5.yml, but is not marked
+# forcing so the teacher metadata mask remains populated for SSL targets.
+
+ERA5:
+  type: anemoi
+  filenames : ['aifs-ea-an-oper-0001-mars-o96-1979-2024-1h-v3-with-era51.zarr'] #['aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr']
+  # filenames: ['aifs-od-an-oper-0001-mars-o96-2016-2023-6h-v6.zarr']
+  stream_id: 42
+  source: ['10u', '10v', '2d', '2t', 'msl', 'q_1000', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_600', 'q_700', 'q_850', 'q_925', 't_100', 't_1000', 't_150', 't_200', 't_250', 't_300', 't_400', 't_50', 't_500', 't_600', 't_700', 't_850', 't_925', 'u_100', 'u_1000', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_50', 'u_500', 'u_600', 'u_700', 'u_850', 'u_925', 'v_100', 'v_1000', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_50', 'v_500', 'v_600', 'v_700', 'v_850', 'v_925', 'z_100', 'z_1000', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_50', 'z_500', 'z_600', 'z_700', 'z_850', 'z_925']
+  target: ['10u', '10v', '2d', '2t', 'msl', 'q_1000', 'q_150', 'q_200', 'q_250', 'q_300', 'q_400', 'q_500', 'q_600', 'q_700', 'q_850', 'q_925', 't_100', 't_1000', 't_150', 't_200', 't_250', 't_300', 't_400', 't_50', 't_500', 't_600', 't_700', 't_850', 't_925', 'u_100', 'u_1000', 'u_150', 'u_200', 'u_250', 'u_300', 'u_400', 'u_50', 'u_500', 'u_600', 'u_700', 'u_850', 'u_925', 'v_100', 'v_1000', 'v_150', 'v_200', 'v_250', 'v_300', 'v_400', 'v_50', 'v_500', 'v_600', 'v_700', 'v_850', 'v_925', 'z_100', 'z_1000', 'z_150', 'z_200', 'z_250', 'z_300', 'z_400', 'z_50', 'z_500', 'z_600', 'z_700', 'z_850', 'z_925']
+  geoinfo_channels: ['cos_julian_day', 'cos_local_time', 'insolation', 'lsm', 'noise_time', 'sdor', 'sin_julian_day', 'sin_local_time', 'slor', 'z']
+  loss_weight: 1.0
+  diagnostic: True
+  location_weight: cosine_latitude
+  token_size: 8
+  tokenize_spacetime: False
+  max_num_targets: -1
+  frequency: 01:00:00
+  embed:
+    net: transformer
+    num_tokens: 1
+    num_heads: 8
+    dim_embed: 512
+    num_blocks: 2
+  embed_target_coords:
+    net: linear
+    dim_embed: 256
+  target_readout:
+    num_layers: 2
+    num_heads: 4
+  pred_head:
+    ens_size: 1
+    num_layers: 1
+  channel_weights :
+    q_10: 0.2
+    q_50: 0.2
+    q_100: 0.23
+    q_150: 0.26
+    q_200: 0.29
+    q_250: 0.33
+    q_300: 0.36
+    q_400: 0.42
+    q_500: 0.48
+    q_600: 0.55
+    q_700: 0.61
+    q_850: 0.71
+    q_925: 0.75
+    q_1000: 0.8
+    t_10: 0.2
+    t_50: 0.2
+    t_100: 0.23
+    t_150: 0.26
+    t_200: 0.29
+    t_250: 0.33
+    t_300: 0.36
+    t_400: 0.42
+    t_500: 0.48
+    t_600: 0.55
+    t_700: 0.61
+    t_850: 0.71
+    t_925: 0.75
+    t_1000: 0.8
+    u_10: 0.2
+    u_50: 0.2
+    u_100: 0.23
+    u_150: 0.26
+    u_200: 0.29
+    u_250: 0.33
+    u_300: 0.36
+    u_400: 0.42
+    u_500: 0.48
+    u_600: 0.55
+    u_700: 0.61
+    u_850: 0.71
+    u_925: 0.75
+    u_1000: 0.8
+    v_10: 0.2
+    v_50: 0.2
+    v_100: 0.23
+    v_150: 0.26
+    v_200: 0.29
+    v_250: 0.33
+    v_300: 0.36
+    v_400: 0.42
+    v_500: 0.48
+    v_600: 0.55
+    v_700: 0.61
+    v_850: 0.71
+    v_925: 0.75
+    v_1000: 0.8
+    z_10: 0.2
+    z_50: 0.2
+    z_100: 0.23
+    z_150: 0.26
+    z_200: 0.29
+    z_250: 0.33
+    z_300: 0.36
+    z_400: 0.42
+    z_500: 0.48
+    z_600: 0.55
+    z_700: 0.61
+    z_850: 0.71
+    z_925: 0.75
+    z_1000: 0.8
+
+

@@ -1,0 +1,11 @@
+freeze_modules: ""
+
+
+general:
+
+  # mutable parameters
+  rank: ???
+  world_size: ???
+
+  num_mini_epochs: 32
+  samples_per_mini_epoch: 4096

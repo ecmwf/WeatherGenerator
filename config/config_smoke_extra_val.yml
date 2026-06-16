@@ -1,0 +1,56 @@
+# Minimal smoke-test config for the extra_validation_configs feature:
+# tiny model (1 block per engine, small latent dims), few samples, ERA5 only.
+# Run:
+#   uv run train --config ./config/config_smoke_extra_val.yml
+# Then:
+#   uv run plot_train -fd "{<run_id>: [0, 'smoke extra val']}"
+
+streams_directory: "./config/streams/era5_1deg/"
+
+ae_local_dim_embed: 64
+ae_local_num_blocks: 1
+ae_local_num_heads: 4
+ae_adapter_num_heads: 4
+ae_adapter_embed: 32
+
+ae_global_dim_embed: 64
+ae_global_num_blocks: 1
+ae_global_num_heads: 4
+
+fe_num_blocks: 1
+fe_num_heads: 4
+
+data_loading:
+  num_workers: 4
+
+train_logging:
+  terminal: 2
+  metrics: 2
+  checkpoint: 250
+
+training_config:
+  num_mini_epochs: 2
+  samples_per_mini_epoch: 32
+
+  # tiny run: keep scheduler phases shorter than total steps
+  learning_rate_scheduling:
+    num_steps_warmup: 4
+    num_steps_cooldown: 4
+
+  # end of training range carved to keep OND-2022 held out
+  start_date: 2016-01-01T00:00
+  end_date: 2022-09-30T00:00
+
+validation_config:
+  samples_per_mini_epoch: 4
+
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+
+extra_validation_configs:
+  # held-out slice inside the training years, season-matched to the primary val window
+  heldout-train-years:
+    start_date: 2022-10-01T00:00
+    end_date: 2022-12-31T00:00
+    shuffle: True
+    samples_per_mini_epoch: 4

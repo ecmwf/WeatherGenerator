@@ -394,20 +394,26 @@ class DataReaderFesom(DataReaderTimestep):
         ch_filters: list[str] | None,
         excl: list[str] | None = None,
     ) -> tuple[list[str], NDArray]:
-        if excl and ch_filters:
-            mask = [
-                any(f == c for f in ch_filters) and all(ex not in c for ex in excl)
-                for c in colnames
-            ]
-        elif ch_filters:
-            mask = [any(f == c for f in ch_filters) for c in colnames]
-        elif excl:
-            mask = [all(ex not in c for ex in excl) for c in colnames]
-        else:
-            assert False, "Cannot use select with both ch_filters and excl as None"
+        excl = excl or []
+        name_to_pos = {c: i for i, c in enumerate(colnames)}
 
-        selected_cols_idx = cols_idx[np.where(mask)[0]]
-        selected_colnames = [colnames[i] for i in np.where(mask)[0]]
+        if ch_filters:
+            # Respect config order (exact match) so the channel layout is identical across
+            # datasets that share channels, regardless of each dataset's column order.
+            seen: set[str] = set()
+            ordered = []
+            for f in ch_filters:
+                if f in name_to_pos and f not in seen and all(ex not in f for ex in excl):
+                    ordered.append(f)
+                    seen.add(f)
+        else:
+            assert excl, "Cannot use select with both ch_filters and excl as None"
+            # No explicit selection: deterministic lexicographic order of non-excluded columns.
+            ordered = sorted(c for c in colnames if all(ex not in c for ex in excl))
+
+        positions = [name_to_pos[c] for c in ordered]
+        selected_cols_idx = cols_idx[positions]
+        selected_colnames = [colnames[i] for i in positions]
         return selected_colnames, selected_cols_idx
 
     @override

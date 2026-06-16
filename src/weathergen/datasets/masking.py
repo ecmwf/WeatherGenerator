@@ -9,6 +9,17 @@ import torch
 from numpy.typing import NDArray
 
 from weathergen.datasets.batch import SampleMetaData
+
+# Sample noise levels
+from weathergen.datasets.noise_schedule import (
+    CosineNoiseSchedule,
+    LinearInformationNoiseSchedule,
+    VariableCovarianceLinearInformationNoiseSchedule,
+    apply_self_flow_noise,
+    apply_uniform_noise,
+    sample_noise_coordinates,
+)
+from weathergen.datasets.tokenizer_utils import precompute_cell_ids
 from weathergen.train.utils import Stage
 from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
@@ -344,6 +355,7 @@ class Masker:
         """
 
         stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
+        source_channel_names = stream_info.get(f"{self.stage}_source_channels", [])
 
         # # target and source configs
         target_cfgs = stream_masking_cfg.get("target_input")
@@ -379,6 +391,7 @@ class Masker:
                         strategy=target_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=("independent", None),
+                        channel_names=source_channel_names,
                     )
 
                 # get all losses and flatten
@@ -432,12 +445,40 @@ class Masker:
                         strategy=source_cfg.get("masking_strategy"),
                         masking_strategy_config=masking_config,
                         target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
+                        channel_names=source_channel_names,
                     )
 
                 corr = target_idx
                 source_masks.add_mask(
                     source_mask, mask_params, source_cfg, losses, i_source, corr, relationship
                 )
+
+                # For self-flow: propagate noise params from target to source and
+                # override source metadata.mask so JEPA loss_mask = crop AND noise_mask
+                if relationship == "identity" and target_masks.metadata[target_idx].params.get(
+                    "is_self_flow"
+                ):
+                    sf_params = target_masks.metadata[target_idx].params
+                    source_meta = source_masks.metadata[-1]
+                    self_flow_keys = (
+                        "noise_mask",
+                        "alpha_s",
+                        "sigma_s",
+                        "alpha_t",
+                        "sigma_t",
+                        "is_self_flow",
+                        "noise_seed",
+                        "noise_s",
+                        "noise_t",
+                        "noise_schedule",
+                    )
+                    source_meta.params = {
+                        **source_meta.params,
+                        **{key: sf_params[key] for key in self_flow_keys if key in sf_params},
+                    }
+                    # student_masks for JEPA loss: crop & ~noise_mask
+                    crop_mask = source_masks.masks[-1]
+                    source_meta.mask = crop_mask & ~sf_params["noise_mask"]
 
                 source_target_mapping += [target_idx]
                 i_source += 1
@@ -452,6 +493,7 @@ class Masker:
         strategy: str,
         masking_strategy_config: dict,
         target_relationship_mask: (str, np.typing.NDArray),
+        channel_names: list[str] | None = None,
     ) -> (np.typing.NDArray, dict):
         """Get effective mask, combining with target mask if specified.
 
@@ -496,7 +538,12 @@ class Masker:
             return mask, {}
 
         # get mask
-        mask, params = self._generate_cell_mask(num_cells, strategy, masking_strategy_config)
+        mask, params = self._generate_cell_mask(
+            num_cells,
+            strategy,
+            masking_strategy_config,
+            channel_names=channel_names,
+        )
 
         # handle cases where mask needs to be combined with target_mask
         # without the assert we can fail silently
@@ -518,6 +565,7 @@ class Masker:
         num_cells: int,
         strategy: str,
         masking_strategy_config: dict,
+        channel_names: list[str] | None = None,
     ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
@@ -598,6 +646,13 @@ class Masker:
                     method=method,
                 )
 
+        elif strategy == "self_flow":
+            mask, masking_params = self._generate_self_flow_mask(
+                num_cells,
+                masking_strategy_config,
+                channel_names=channel_names,
+            )
+
         else:
             raise NotImplementedError(
                 f"Cell selection strategy '{strategy}' not supported for keep mask generation."
@@ -606,6 +661,175 @@ class Masker:
         mask = to_bool_tensor(mask)
 
         return (mask, masking_params)
+
+    def _generate_self_flow_mask(
+        self,
+        num_cells: int,
+        masking_strategy_config: dict,
+        channel_names: list[str] | None = None,
+    ) -> tuple[NDArray, dict]:
+        """Generate mask and noise params for the self-flow strategy.
+
+        Returns the spatial crop mask and a dict of noise-level params (``noise_mask``,
+        ``alpha_s``, ``sigma_s``, ``alpha_t``, ``sigma_t``, ``is_self_flow``,
+        ``noise_seed``).
+        """
+        masking_params: dict = {}
+
+        keep_rate = self._get_sampling_rate(masking_strategy_config)
+        hl_mask, num_parent_cells, num_children_per_parent, num_parents_to_keep = (
+            self._prepare_healpix_based_masking(masking_strategy_config, keep_rate)
+        )
+        method = masking_strategy_config.get("method", "geodesic_disk")
+
+        if num_parents_to_keep == 0:
+            mask = np.zeros(num_cells, dtype=bool)
+        else:
+            mask = self._select_spatially_contiguous_cells(
+                healpix_level=hl_mask,
+                num_cells=num_cells,
+                num_cells_to_select=num_parents_to_keep,
+                num_children_per_parent=num_children_per_parent,
+                center_cell=None,
+                method=method,
+            )
+
+        # Noise mask: which cells within the crop get high noise (level t)
+        noise_cfg = masking_strategy_config.get("noise_mask_config", {})
+        noise_rate = noise_cfg.get("rate", 0.4)
+        noise_hl = noise_cfg.get("hl_mask", masking_strategy_config.get("hl_mask", 0))
+        noise_cfg_full = {"hl_mask": noise_hl, "rate": noise_rate}
+        _, noise_npc, noise_ncpp, noise_nptk = self._prepare_healpix_based_masking(
+            noise_cfg_full, noise_rate
+        )
+
+        if noise_nptk == 0:
+            noise_mask = np.zeros(num_cells, dtype=bool)
+        else:
+            noise_mask = self.rng.uniform(0, 1, num_cells) < noise_rate
+        # Intersect noise mask with crop (noise only within visible region)
+        noise_mask = np.asarray(noise_mask) & np.asarray(mask)
+
+        t_min = float(masking_strategy_config.get("t_min", 0.1))
+        t_max = float(masking_strategy_config.get("t_max", 0.9))
+        schedule_name = masking_strategy_config.get("noise_schedule", "linear_information")
+        s_raw, t_raw = sample_noise_coordinates(self.rng, t_min=t_min, t_max=t_max)
+
+        if schedule_name == "linear_information":
+            schedule = LinearInformationNoiseSchedule(t_min=t_min, t_max=t_max)
+            alpha_s, sigma_s = schedule.alpha_sigma(s_raw)
+            alpha_t, sigma_t = schedule.alpha_sigma(t_raw)
+        elif schedule_name == "cosine":
+            schedule = CosineNoiseSchedule()
+            alpha_s, sigma_s = schedule.alpha_sigma(s_raw)
+            alpha_t, sigma_t = schedule.alpha_sigma(t_raw)
+        elif schedule_name == "variable_covariance_linear_information":
+            if not channel_names:
+                raise ValueError(
+                    "variable_covariance_linear_information requires source channel names."
+                )
+            schedule = VariableCovarianceLinearInformationNoiseSchedule(
+                variable_eigenvalues=masking_strategy_config.get("variable_covariance_eigenvalues"),
+                t_min=t_min,
+                t_max=t_max,
+            )
+            alpha_s, sigma_s = schedule.alpha_sigma_for_channels(s_raw, channel_names)
+            alpha_t, sigma_t = schedule.alpha_sigma_for_channels(t_raw, channel_names)
+        else:
+            raise ValueError(f"Unsupported self-flow noise_schedule '{schedule_name}'.")
+
+        masking_params["noise_mask"] = to_bool_tensor(noise_mask)
+        masking_params["alpha_s"] = alpha_s
+        masking_params["sigma_s"] = sigma_s
+        masking_params["alpha_t"] = alpha_t
+        masking_params["sigma_t"] = sigma_t
+        masking_params["is_self_flow"] = True
+        masking_params["noise_seed"] = int(self.rng.integers(0, 2**31))
+        masking_params["noise_s"] = s_raw
+        masking_params["noise_t"] = t_raw
+        masking_params["noise_schedule"] = schedule_name
+
+        return mask, masking_params
+
+    def apply_noise_to_data(
+        self,
+        input_data: list,
+        metadata: SampleMetaData,
+        is_student: bool,
+        add_geoinfo_noise: bool,
+    ) -> list:
+        """Apply self-flow noise to a list of reader-data objects.
+
+        If the mask metadata does not carry ``is_self_flow``, the original
+        ``input_data`` list is returned unchanged.
+
+        Student: per-cell noise (``noise_mask`` True → level t, rest → level s).
+        Teacher: uniform noise at level s.
+        """
+        params = metadata.params
+        if not params.get("is_self_flow"):
+            if add_geoinfo_noise:
+                input_data_geoinfo = []
+                for _, rdata in enumerate(input_data):
+                    rd = copy.copy(rdata)
+                    geoinfos = rd.geoinfos
+                    noise_level_per_cell = torch.zeros(
+                        geoinfos.shape[0], dtype=geoinfos.dtype, device=geoinfos.device
+                    )
+                    rd.geoinfos = torch.cat([geoinfos,noise_level_per_cell.unsqueeze(1)], dim=-1)
+                    input_data_geoinfo.append(rd)
+                input_data = input_data_geoinfo
+            return input_data
+
+        cell_ids_list = (
+            precompute_cell_ids(input_data, self.healpix_level_data) if is_student else None
+        )
+
+        noised = []
+        for step, rdata in enumerate(input_data):
+            if rdata.is_empty():
+                noised.append(rdata)
+                continue
+
+            if is_student:
+                cell_ids = cell_ids_list[step]
+                point_noise_mask = params["noise_mask"][cell_ids]
+                noised_data = apply_self_flow_noise(
+                    rdata.data,
+                    point_noise_mask,
+                    params["alpha_s"],
+                    params["sigma_s"],
+                    params["alpha_t"],
+                    params["sigma_t"],
+                    params["noise_seed"],
+                )
+            else:
+                noised_data = apply_uniform_noise(
+                    rdata.data,
+                    params["alpha_s"],
+                    params["sigma_s"],
+                    params["noise_seed"],
+                )
+
+            rd = copy.copy(rdata)
+            rd.data = noised_data
+
+            # add the noise time to the geoinfos
+            if add_geoinfo_noise:  # TODO figure out whether noise level is in the geoinfos
+                noise_level_per_cell = params["noise_s"] * torch.ones(
+                    rd.geoinfos.shape[0], dtype=noised_data.dtype, device=noised_data.device
+                )
+                if is_student:  # correct the highly noise cells
+                    noise_level_t = params["noise_t"] * torch.ones(
+                        point_noise_mask.shape, dtype=noised_data.dtype, device=noised_data.device
+                    )
+                    noise_level_per_cell = torch.where(
+                        point_noise_mask, noise_level_per_cell, noise_level_t
+                    )
+                rd.geoinfos = torch.cat([rd.geoinfos,noise_level_per_cell.unsqueeze(1)], dim=-1)
+
+            noised.append(rd)
+        return noised
 
     def _select_spatially_contiguous_cells(
         self,

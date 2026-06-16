@@ -775,7 +775,7 @@ def create_filename(
     middle: Iterable[str] = (),
     suffix: Sequence[str] = (),
     sep: str = "_",
-    max_len: int = 255,
+    max_len: int = 196,
 ):
     """
     Join strings as: prefix + middle + suffix, truncating only `middle`
@@ -824,4 +824,4 @@ def create_filename(
             f"to keep length <= {max_len}."
         )
 
-    return sep.join(prefix + truncated_middle + suffix)
+    return sep.join(pref + truncated_middle + suf)

@@ -1,0 +1,29 @@
+
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+streams_directory: "./config/streams/pretrain_multi_data_od/"
+
+general:
+
+  # mutable parameters
+  rank: ???
+  world_size: ???
+
+training_config:
+  start_date: 2016-01-01T00:00
+  end_date: 2022-12-31T00:00
+
+  num_mini_epochs: 20
+  samples_per_mini_epoch: 8192
+
+  context_loss:
+    enabled: true
+    weight: 0.4
+    warmup_steps: 2000             # linear warmup from 0 to weight over this many steps
+

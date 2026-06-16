@@ -1,0 +1,54 @@
+# EXP1 — lr-decay-fix  (targets H3, the optimization amplifier)
+#
+# Stage-4 (operational-analysis forecast finetune) override. Identical to the
+# baseline config/config_jepa_multi_data_ft_forecast.yml EXCEPT:
+#   - policy_decay: constant -> linear   (LR now actually decays instead of being
+#     pinned at lr_max for the whole body; see lr_scheduler.py:119 vs :213)
+#   - lr_max: 1e-5 -> 5e-6               (lower peak, within the notes' 5e-6..1e-5)
+#   - extra_validation_configs enabled   (free H2 kill-shot: heldout 2022-OND)
+#
+# Everything else (window, frozen non-ERA5 encoder, streams dir) is unchanged so
+# the only knobs that move are the LR schedule. Expected: a later, lower val
+# minimum and a smaller train/val separation than the baseline stage 4.
+
+streams_directory: "./config/streams/jepa_forecast_multi_data_od_ckpt_order/"
+
+freeze_modules: "^(?!.*ERA5)(?=.*(?:encoder|latent_pre_norm|latent_heads)).*$"
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+training_config:
+  start_date: 2016-01-01T00:00
+  # OND-2022 carved out of training so the heldout-train-years extra validation
+  # set below is genuinely held out
+  end_date: 2022-09-30T00:00
+
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 5e-6          # was 1e-5
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 32768
+    policy_decay: "linear"  # was inherited "constant" -> THIS is the H3 fix
+
+  num_mini_epochs: 6
+  samples_per_mini_epoch: 8192
+
+# extra validation sets, evaluated each mini-epoch and logged as stage "val_<name>";
+# each entry overrides the primary validation_config.
+# heldout slice inside the training years (excluded from training via end_date
+# above), season-matched to the OND-2023 primary val window. Memorization probe:
+# if its loss tracks val -> the train/val gap is memorization (H1); if it stays
+# well below val -> the gap is distribution shift (H2).
+extra_validation_configs:
+  heldout-train-years:
+    start_date: 2022-10-01T00:00
+    end_date: 2022-12-31T00:00
+    shuffle: True
+    samples_per_mini_epoch: 256

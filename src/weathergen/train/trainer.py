@@ -9,8 +9,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 import copy
+import json
 import logging
 import time
+from collections import deque
 from math import sqrt
 
 import numpy as np
@@ -19,7 +21,7 @@ import tqdm
 from omegaconf import OmegaConf
 
 # FSDP2
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DTensor, distribute_tensor
 
 import weathergen.common.config as config
 from weathergen.common.config import Config
@@ -32,6 +34,7 @@ from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
@@ -53,6 +56,17 @@ from weathergen.utils.validation_io import write_output
 
 logger = logging.getLogger(__name__)
 
+LOSS_SPIKE_DETECTION_DEFAULTS = {
+    "enabled": False,
+    "window_size": 50,
+    "min_history": 20,
+    "ratio_threshold": 5.0,
+    "loss_threshold": 0.0,
+    "skip_batch": True,
+    "max_unique_times_per_step": 8,
+    "file_name": "loss_spikes.jsonl",
+}
+
 # cfg_keys_to_filter = ["losses", "model_input", "target_input"]
 
 
@@ -66,6 +80,13 @@ class Trainer(TrainerBase):
         self.data_loader_validation: torch.utils.data.DataLoader | None = None
         self.dataset: MultiStreamDataSampler | None = None
         self.dataset_val: MultiStreamDataSampler | None = None
+        # extra validation sets, keyed by stage label "val_<name>"
+        self.extra_val_cfgs: dict[str, Config] = {}
+        self.datasets_val_extra: dict[str, MultiStreamDataSampler] = {}
+        self.data_loaders_val_extra: dict[str, torch.utils.data.DataLoader] = {}
+        self.target_and_aux_calculators_val_extra: dict[str, dict] = {}
+        self.loss_calculators_val_extra: dict[str, LossCalculator] = {}
+        self.batch_sizes_val_extra: dict[str, int] = {}
         self.device: torch.device = None
         self.ema_model = None
         self.grad_scaler: torch.amp.GradScaler | None = None
@@ -86,6 +107,9 @@ class Trainer(TrainerBase):
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
         self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
+        self.loss_spike_cfg = None
+        self.loss_spike_file = None
+        self.loss_spike_history = deque()
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -127,6 +151,19 @@ class Trainer(TrainerBase):
             self.validation_cfg, cf.get("test_config", {}), cfg_keys_to_filter
         )
 
+        # extra validation sets, each derived from the validation cfg like test_cfg;
+        # extra sets must only override dates/shuffle/sample-count/batch-size, not
+        # stream/channel selection (samplers share cf.streams)
+        for name, overrides in (cf.get("extra_validation_configs", None) or {}).items():
+            if not (overrides or {}).get("enabled", True):
+                continue  # set disabled, e.g. by a train_continue override
+            stage_label = f"val_{name}"
+            extra_cfg = get_active_stage_config(self.validation_cfg, overrides, cfg_keys_to_filter)
+            # extra sets never write sample output files (would collide with primary val output)
+            extra_cfg.output = {}
+            self.extra_val_cfgs[stage_label] = extra_cfg
+            self.batch_sizes_val_extra[stage_label] = get_batch_size_from_config(extra_cfg)
+
         # batch sizes
         self.batch_size_per_gpu = get_batch_size_from_config(self.training_cfg)
         self.batch_size_validation_per_gpu = get_batch_size_from_config(self.validation_cfg)
@@ -138,6 +175,8 @@ class Trainer(TrainerBase):
             strict=True,
         ):
             config.validate_forecast_policy_and_steps(mode_cfg.get("forecast", {}), mode)
+        for stage_label, extra_cfg in self.extra_val_cfgs.items():
+            config.validate_forecast_policy_and_steps(extra_cfg.get("forecast", {}), stage_label)
 
         self.mixed_precision_dtype = get_dtype(cf.mixed_precision_dtype)
 
@@ -156,6 +195,7 @@ class Trainer(TrainerBase):
             config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
         self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
+        self._init_loss_spike_detection()
 
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
@@ -192,6 +232,7 @@ class Trainer(TrainerBase):
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
+        [stream.update({"max_num_targets": -1}) for stream in cf.streams]
 
         # create data loader
         # only one needed since we only run the validation code path
@@ -241,6 +282,68 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
+    def _check_channel_order_consistency(
+        self,
+        dataset: MultiStreamDataSampler,
+        from_run_id: str,
+        mini_epoch: int | None,
+        stage: Stage,
+    ) -> None:
+        """Guard against silently scrambling the channel<->weight mapping when continuing.
+
+        Compares the source/target/geoinfo channel order resolved for the current data against
+        the order stored in the checkpoint's config and raises if they differ. Streams (or
+        channel lists) absent from the checkpoint config cannot be verified and are skipped with
+        a warning (e.g. geoinfo for checkpoints predating the resolved-geoinfo back-fill).
+        """
+        try:
+            prev_cf = config.load_run_config(from_run_id, mini_epoch, None)
+        except FileNotFoundError:
+            logger.warning(
+                f"Could not load config for run_id '{from_run_id}' to verify channel order; "
+                "skipping channel-order consistency check."
+            )
+            return
+
+        prev_streams = {s["name"]: s for s in prev_cf.get("streams", [])}
+        src_key = f"{stage}_source_channels"
+        tgt_key = f"{stage}_target_channels"
+        geo_key = f"{stage}_geoinfo_channels"
+
+        mismatches: list[str] = []
+        for name, readers in dataset.streams_datasets.items():
+            prev = prev_streams.get(name)
+            if prev is None:
+                continue
+            reader = readers[0]
+            for key, resolved in (
+                (src_key, list(reader.source_channels)),
+                (tgt_key, list(reader.target_channels)),
+                (geo_key, list(reader.geoinfo_channels)),
+            ):
+                stored = prev.get(key)
+                if stored is None:
+                    logger.warning(
+                        f"Checkpoint '{from_run_id}' has no '{key}' for stream '{name}'; "
+                        "cannot verify channel order for it."
+                    )
+                    continue
+                if list(stored) != resolved:
+                    mismatches.append(
+                        f"  [{name}] {key}:\n"
+                        f"    checkpoint: {list(stored)}\n"
+                        f"    current:    {resolved}"
+                    )
+
+        if mismatches:
+            details = "\n".join(mismatches)
+            raise ValueError(
+                f"Channel order/content differs from the checkpoint being continued "
+                f"(run_id='{from_run_id}'). Continuing would scramble the learned "
+                f"channel<->weight mapping. Align the stream configs (channel order matters):\n"
+                f"{details}"
+            )
+
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
         self.init(cf, devices)
@@ -256,6 +359,11 @@ class Trainer(TrainerBase):
         self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
         self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
 
+        if run_id_contd is not None:
+            self._check_channel_order_consistency(
+                self.dataset, run_id_contd, mini_epoch_contd, TRAIN
+            )
+
         loader_params = {
             "batch_size": None,
             "batch_sampler": None,
@@ -263,9 +371,23 @@ class Trainer(TrainerBase):
             "num_workers": cf.data_loading.num_workers,
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
+        # loader_params["num_workers"]=  0
         self.data_loader_validation = torch.utils.data.DataLoader(
             self.dataset_val, **loader_params, sampler=None
         )
+
+        for stage_label, extra_cfg in self.extra_val_cfgs.items():
+            # stage=VAL so masking/loss behave as in validation; the stage label is
+            # only used for logging
+            self.datasets_val_extra[stage_label] = MultiStreamDataSampler(cf, extra_cfg, stage=VAL)
+            # cap workers: each loader spawns its own processes, each re-opening all
+            # stream readers
+            extra_loader_params = loader_params | {
+                "num_workers": min(cf.data_loading.num_workers, 2)
+            }
+            self.data_loaders_val_extra[stage_label] = torch.utils.data.DataLoader(
+                self.datasets_val_extra[stage_label], **extra_loader_params, sampler=None
+            )
 
         self.model, self.model_params = init_model_and_shard(
             cf,
@@ -307,6 +429,14 @@ class Trainer(TrainerBase):
         # get target_aux calculators for different loss terms
         self.target_and_aux_calculators = self.get_target_aux_calculators(self.training_cfg)
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
+        for stage_label, extra_cfg in self.extra_val_cfgs.items():
+            self.target_and_aux_calculators_val_extra[stage_label] = (
+                self.get_target_aux_calculators(extra_cfg)
+            )
+
+        # Restore EMA teacher weights when continuing from a checkpoint
+        if run_id_contd is not None: # and self.cf.general.istep != 0: # To be tested
+            self._load_ema_teacher_state(run_id_contd, mini_epoch_contd)
 
         # --- Point 1: verify sigma is initialised correctly ---
         if is_root():
@@ -379,6 +509,10 @@ class Trainer(TrainerBase):
             self.training_cfg.learning_rate_scheduling,
         )
 
+        # Restore optimizer momentum buffers when continuing from a checkpoint
+        if run_id_contd is not None and self.cf.general.istep != 0:
+            self._load_optimizer_state(run_id_contd, mini_epoch_contd)
+
         if self.cf.general.istep > 0 and is_root():
             logger.info(f"Continuing run with learning rate: {self.lr_scheduler.get_lr()}")
 
@@ -386,6 +520,10 @@ class Trainer(TrainerBase):
         self.loss_calculator = LossCalculator(cf, self.training_cfg, TRAIN, device=self.device)
         val_cfg = self.validation_cfg
         self.loss_calculator_val = LossCalculator(cf, val_cfg, VAL, device=self.device)
+        for stage_label, extra_cfg in self.extra_val_cfgs.items():
+            self.loss_calculators_val_extra[stage_label] = LossCalculator(
+                cf, extra_cfg, VAL, device=self.device
+            )
 
         # recover mini_epoch when continuing run
         if self.world_size_original is None:
@@ -419,6 +557,18 @@ class Trainer(TrainerBase):
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: validate."
             )
             self.validate(mini_epoch, self.validation_cfg, self.batch_size_validation_per_gpu)
+
+            for stage_label, extra_cfg in self.extra_val_cfgs.items():
+                logger.info(
+                    f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: "
+                    f"validate {stage_label}."
+                )
+                self.validate(
+                    mini_epoch,
+                    extra_cfg,
+                    self.batch_sizes_val_extra[stage_label],
+                    stage=stage_label,
+                )
 
             logger.info(
                 f"Mini_epoch {mini_epoch} of {self.training_cfg.num_mini_epochs}: save_model."
@@ -498,7 +648,20 @@ class Trainer(TrainerBase):
                 preds=preds,
                 targets_and_aux=targets_and_auxs,
                 metadata=extract_batch_metadata(batch),
+                istep=self.cf.general.istep,
             )
+            loss_value = self._get_tensor_item(loss.detach())
+            if self._maybe_log_loss_spike(loss_value, batch, mini_epoch, bidx):
+                self._drop_latest_loss_record()
+                self.optimizer.zero_grad()
+                if is_root():
+                    logger.warning(
+                        "Skipping batch %s in mini_epoch %s due to loss spike: %.8E",
+                        bidx,
+                        mini_epoch,
+                        loss_value,
+                    )
+                continue
 
             # TODO re-enable this, need to think on how to make it compatible with
             # student-teacher training
@@ -634,26 +797,36 @@ class Trainer(TrainerBase):
 
         self.dataset.advance()
 
-    def validate(self, mini_epoch, mode_cfg, batch_size):
+    def validate(self, mini_epoch, mode_cfg, batch_size, stage: Stage = VAL):
         """
-        Perform validation / test computation as specified by mode_cfg
+        Perform validation / test computation as specified by mode_cfg.
+
+        stage selects the dataset/loss objects: VAL for the primary validation set,
+        "val_<name>" for an extra validation set; it is also the logging label.
         """
 
         cf = self.cf
         self.model.eval()
 
-        dataset_val_iter = iter(self.data_loader_validation)
+        if stage == VAL:
+            dataset, data_loader = self.dataset_val, self.data_loader_validation
+            target_aux_calcs = self.target_and_aux_calculators_val
+        else:
+            dataset = self.datasets_val_extra[stage]
+            data_loader = self.data_loaders_val_extra[stage]
+            target_aux_calcs = self.target_and_aux_calculators_val_extra[stage]
+        loss_calculator = self._loss_calculator_for(stage)
+
+        dataset_val_iter = iter(data_loader)
 
         num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
-            with tqdm.tqdm(
-                total=len(self.data_loader_validation), disable=self.cf.with_ddp
-            ) as pbar:
+            with tqdm.tqdm(total=len(data_loader), disable=self.cf.with_ddp) as pbar:
                 # --- Point 5: accumulators for spread-skill ratio ---
                 _num_members = self.cf.get("latent_perturbation_num_members", 0)
-                _spread_skill_acc = {}  # stream_name -> {"spread_sum", "rmse_sum", "count"}              
+                _spread_skill_acc = {}  # stream_name -> {"spread_sum", "rmse_sum", "count"}
                 for bidx, batch in enumerate(dataset_val_iter):
                     if cf.data_loading.get("memory_pinning", False):
                         # pin memory for faster CPU-GPU transfer
@@ -679,7 +852,7 @@ class Trainer(TrainerBase):
                             )
 
                         targets_and_auxs = {}
-                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                        for loss_name, target_aux in target_aux_calcs.items():
                             target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
                             targets_and_auxs[loss_name] = target_aux.compute(
                                 self.cf.general.istep,
@@ -688,10 +861,11 @@ class Trainer(TrainerBase):
                                 self.model,
                             )
 
-                    _ = self.loss_calculator_val.compute_loss(
+                    _ = loss_calculator.compute_loss(
                         preds=preds,
                         targets_and_aux=targets_and_auxs,
                         metadata=extract_batch_metadata(batch),
+                        istep=self.cf.general.istep,
                     )
 
                     # --- Point 5: accumulate spread and RMSE for spread-skill ratio ---
@@ -733,7 +907,7 @@ class Trainer(TrainerBase):
                         denormalize_data_fct = (
                             (lambda x0, x1: x1)
                             if mode_cfg.get("output", {}).get("normalized_samples", False)
-                            else self.dataset_val.denormalize_target_channels
+                            else dataset.denormalize_target_channels
                         )
                         # write output
                         write_output(
@@ -753,8 +927,8 @@ class Trainer(TrainerBase):
                     if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                         break
 
-                self._log_terminal(0, mini_epoch, VAL)
-                self._log(VAL)
+                self._log_terminal(0, mini_epoch, stage)
+                self._log(stage)
 
                 # --- Point 5: log spread-skill ratio ---
                 if _num_members > 1 and is_root() and _spread_skill_acc:
@@ -778,7 +952,7 @@ class Trainer(TrainerBase):
                     self.train_logger.log_metrics(VAL, ss_metrics, step=samples)
 
         # avoid that there is a systematic bias in the validation subset
-        self.dataset_val.advance()
+        dataset.advance()
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
@@ -833,7 +1007,9 @@ class Trainer(TrainerBase):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
         max_mini_epoch = self.training_cfg.num_mini_epochs
         assert mini_epoch <= max_mini_epoch, (mini_epoch, max_mini_epoch)
+        # Gather full state dicts (collective ops for FSDP — all ranks must participate)
         model_state_dict = self._get_full_model_state_dict()
+        optim_state_dict = self._get_full_optimizer_state_dict()
 
         if is_root():
             filename = "".join(
@@ -851,25 +1027,163 @@ class Trainer(TrainerBase):
             torch.save(model_state_dict, file_tmp)
             # move file (which is changing the link in the file system and very fast)
             file_tmp.replace(file_out)
-            if is_root():
-                logger.info(f"Saved model to {file_out}")
+            logger.info(f"Saved model to {file_out}")
+
+            # save optimizer state keyed by parameter name for robust resumption
+            param_names = [n for n, _ in self.model.named_parameters()]
+            named_optim_state = {}
+            for idx, pname in enumerate(param_names):
+                if idx in optim_state_dict["state"]:
+                    named_optim_state[pname] = optim_state_dict["state"][idx]
+            if named_optim_state:
+                optim_out = base_path / (filename + ".optim")
+                optim_tmp = base_path / (filename + "_tmp.optim")
+                torch.save(named_optim_state, optim_tmp)
+                optim_tmp.replace(optim_out)
+                logger.info(f"Saved optimizer state to {optim_out}")
+
+            # save EMA teacher state (weights + centering buffers) if present
+            ema_teacher = self._get_ema_teacher()
+            if ema_teacher is not None:
+                ema_state = {
+                    "ema_model": ema_teacher.ema_model.ema_model.state_dict(),
+                    "postprocess_targets": {
+                        name: module.state_dict()
+                        for name, module in ema_teacher.postprocess_targets.items()
+                    },
+                }
+                ema_out = base_path / (filename + ".ema_teacher")
+                ema_tmp = base_path / (filename + "_tmp.ema_teacher")
+                torch.save(ema_state, ema_tmp)
+                ema_tmp.replace(ema_out)
+                logger.info(f"Saved EMA teacher state to {ema_out}")
 
             # save config
             config.save(self.cf, mini_epoch)
+
+    def _get_ema_teacher(self) -> EMATeacher | None:
+        """Return the training EMATeacher calculator if one exists, else None."""
+        if self.target_and_aux_calculators is None:
+            return None
+        for calc in self.target_and_aux_calculators.values():
+            if isinstance(calc, EMATeacher):
+                return calc
+        return None
+
+    @staticmethod
+    def _get_ema_teachers_from(calculators) -> list[EMATeacher]:
+        """Return all EMATeacher instances in *calculators*."""
+        if calculators is None:
+            return []
+        return [c for c in calculators.values() if isinstance(c, EMATeacher)]
+
+    def _load_ema_teacher_state(self, run_id: str, mini_epoch):
+        """Load EMA teacher weights into both training and validation teachers."""
+        all_teachers = self._get_ema_teachers_from(
+            self.target_and_aux_calculators
+        ) + self._get_ema_teachers_from(self.target_and_aux_calculators_val)
+        if not all_teachers:
+            return
+
+        path_run = config.get_path_model(run_id=run_id)
+        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
+        ema_file = path_run / f"{run_id}_{mini_epoch_id}.ema_teacher"
+
+        if not ema_file.exists():
+            if is_root():
+                logger.info(f"No EMA teacher state at {ema_file}, using reset from student.")
+            return
+
+        if is_root():
+            logger.info(f"Loading EMA teacher state from {ema_file}")
+
+        state = torch.load(ema_file, map_location=torch.device("cpu"), weights_only=True)
+
+        for ema_teacher in all_teachers:
+            # Restore EMA model weights
+            mkeys, ukeys = ema_teacher.ema_model.ema_model.load_state_dict(
+                state["ema_model"], strict=False
+            )
+            if is_root():
+                if mkeys:
+                    logger.warning(f"Missing keys in EMA teacher model: {mkeys}")
+                if ukeys:
+                    logger.warning(f"Unused keys in EMA teacher model: {ukeys}")
+
+            # Restore postprocessing state (e.g. DINO/iBOT centering buffers)
+            for name, module in ema_teacher.postprocess_targets.items():
+                if name in state.get("postprocess_targets", {}):
+                    module.load_state_dict(state["postprocess_targets"][name], strict=False)
+
+        if is_root():
+            logger.info(f"EMA teacher state restored into {len(all_teachers)} teacher(s).")
+
+    def _load_optimizer_state(self, run_id: str, mini_epoch):
+        """Load optimizer state from checkpoint if available.
+
+        Restores AdamW momentum buffers (exp_avg, exp_avg_sq) so that training
+        resumes smoothly when chaining jobs via train_continue.
+        """
+        path_run = config.get_path_model(run_id=run_id)
+        mini_epoch_id = f"chkpt{mini_epoch:05d}" if mini_epoch not in (-1, None) else "latest"
+        optim_file = path_run / f"{run_id}_{mini_epoch_id}.optim"
+
+        if not optim_file.exists():
+            if is_root():
+                logger.info(f"No optimizer state found at {optim_file}, starting fresh.")
+            return
+
+        if is_root():
+            logger.info(f"Loading optimizer state from {optim_file}")
+
+        named_state = torch.load(
+            optim_file, map_location=torch.device("cpu"), mmap=True, weights_only=True
+        )
+        is_model_sharded = self.cf.with_ddp and self.cf.with_fsdp
+
+        loaded = 0
+        for name, param in self.model.named_parameters():
+            if name not in named_state:
+                continue
+            entry = named_state[name]
+            new_entry = {}
+            for key, val in entry.items():
+                if isinstance(val, torch.Tensor) and val.dim() > 0 and is_model_sharded:
+                    new_entry[key] = distribute_tensor(val, param.device_mesh, param.placements)
+                elif isinstance(val, torch.Tensor):
+                    new_entry[key] = val.to(device=param.device)
+                else:
+                    new_entry[key] = val
+            self.optimizer.state[param] = new_entry
+            loaded += 1
+
+        if is_root():
+            total = sum(1 for _ in self.model.parameters())
+            logger.info(f"Loaded optimizer state for {loaded}/{total} parameters.")
+
+    def _loss_calculator_for(self, stage: Stage) -> LossCalculator:
+        """
+        Get the loss calculator for the given stage (TRAIN, VAL or "val_<name>").
+        """
+        if stage == TRAIN:
+            return self.loss_calculator
+        if stage == VAL:
+            return self.loss_calculator_val
+        return self.loss_calculators_val_extra[stage]
 
     def _log(self, stage: Stage):
         """
         Logs training or validation metrics.
 
         Args:
-            stage: Stage Is it's VAL, logs are treated as validation logs.
-                        If TRAIN, logs are treated as training logs
+            stage: Stage If TRAIN, logs are treated as training logs.
+                        Otherwise (VAL or "val_<name>"), as validation logs.
 
         Notes:
             - This method only executes logging on the main process (rank 0).
             - After logging, historical loss and standard deviation records are cleared.
         """
-        loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
+        loss_calculator = self._loss_calculator_for(stage)
         avg_loss, losses_all, stddev_all = prepare_losses_for_logging(
             loss_calculator.loss_hist,
             loss_calculator.losses_unweighted_hist,
@@ -880,7 +1194,7 @@ class Trainer(TrainerBase):
 
         if is_root():
             # plain logger
-            if stage == VAL:
+            if stage != TRAIN:
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.general.istep >= 0:
@@ -904,6 +1218,147 @@ class Trainer(TrainerBase):
         """
         return tensor.full_tensor().item() if isinstance(tensor, DTensor) else tensor.item()
 
+    def _init_loss_spike_detection(self) -> None:
+        configured_loss_spike_cfg = self.cf.train_logging.get("loss_spike_detection", {}) or {}
+        self.loss_spike_cfg = OmegaConf.merge(
+            OmegaConf.create(LOSS_SPIKE_DETECTION_DEFAULTS),
+            configured_loss_spike_cfg,
+        )
+        window_size = int(self.loss_spike_cfg.window_size)
+        self.loss_spike_history = deque(maxlen=window_size)
+        self.loss_spike_file = None
+
+        if not self.loss_spike_cfg.enabled:
+            return
+
+        self.loss_spike_file = config.get_path_run(self.cf) / self.loss_spike_cfg.file_name
+
+    def _serialize_datetimes(self, datetimes) -> list[str]:
+        if datetimes is None:
+            return []
+
+        datetimes_arr = np.asarray(datetimes).reshape(-1)
+        if datetimes_arr.size == 0:
+            return []
+
+        max_unique = int(self.loss_spike_cfg.max_unique_times_per_step)
+        return [str(dt) for dt in np.unique(datetimes_arr)[:max_unique]]
+
+    @staticmethod
+    def _to_python_indices(indices):
+        if hasattr(indices, "astype") and hasattr(indices, "tolist"):
+            return indices.astype(int).tolist()
+        if isinstance(indices, list):
+            return [int(idx) for idx in indices]
+        if indices is None:
+            return None
+        return int(indices)
+
+    @staticmethod
+    def _to_bool_list(value) -> list[bool]:
+        if isinstance(value, list):
+            return [bool(item) for item in value]
+        return [bool(value)]
+
+    def _collect_sample_debug_info(self, sample, matching_indices) -> dict:
+        streams = {}
+        for stream_name, stream_data in sample.streams_data.items():
+            if stream_data is None:
+                continue
+
+            source_raw = getattr(stream_data, "source_raw", [])
+            target_times_raw = getattr(stream_data, "target_times_raw", [])
+            source_start_idx = int(stream_data.sample_idx) - len(source_raw) + 1
+
+            streams[stream_name] = {
+                "sample_idx": int(stream_data.sample_idx),
+                "source_is_spoof": self._to_bool_list(stream_data.source_is_spoof),
+                "target_is_spoof": self._to_bool_list(stream_data.target_is_spoof),
+                "source_step_indices": [source_start_idx + step for step in range(len(source_raw))],
+                "target_step_indices": list(range(len(target_times_raw))),
+                "source_step_datetimes": [
+                    self._serialize_datetimes(getattr(raw_data, "datetimes", None))
+                    for raw_data in source_raw
+                ],
+                "target_step_datetimes": [
+                    self._serialize_datetimes(datetimes) for datetimes in target_times_raw
+                ],
+            }
+
+        return {
+            "matching_indices": self._to_python_indices(matching_indices),
+            "streams": streams,
+        }
+
+    def _write_loss_spike_record(
+        self, loss_value, baseline, ratio, batch, mini_epoch, bidx
+    ) -> None:
+        if self.loss_spike_file is None:
+            return
+
+        record = {
+            "run_id": str(self.cf.general.run_id),
+            "mini_epoch": int(mini_epoch),
+            "batch_index": int(bidx),
+            "global_step": int(self.cf.general.istep),
+            "loss": float(loss_value),
+            "loss_repr": f"{loss_value:.8E}",
+            "baseline_median": float(baseline),
+            "ratio_to_baseline": float(ratio),
+            "skip_batch": bool(self.loss_spike_cfg.skip_batch),
+            "source_samples": [
+                self._collect_sample_debug_info(sample, batch.source2target_matching_idxs[sidx])
+                for sidx, sample in enumerate(batch.source_samples.get_samples())
+            ],
+            "target_samples": [
+                self._collect_sample_debug_info(sample, batch.target2source_matching_idxs[tidx])
+                for tidx, sample in enumerate(batch.target_samples.get_samples())
+            ],
+        }
+
+        with self.loss_spike_file.open("a", encoding="utf-8") as file_out:
+            file_out.write(json.dumps(record) + "\n")
+
+    def _sync_loss_spike_skip(self, should_skip: bool) -> bool:
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            skip_flag = torch.tensor(
+                [int(should_skip)], dtype=torch.int32, device=self.device or torch.device("cpu")
+            )
+            torch.distributed.broadcast(skip_flag, src=0)
+            should_skip = bool(skip_flag.item())
+
+        return should_skip
+
+    def _drop_latest_loss_record(self) -> None:
+        for hist_name in ("loss_hist", "losses_unweighted_hist", "stddev_unweighted_hist"):
+            hist = getattr(self.loss_calculator, hist_name)
+            if hist:
+                hist.pop()
+
+    def _maybe_log_loss_spike(self, loss_value: float, batch, mini_epoch: int, bidx: int) -> bool:
+        if not self.loss_spike_cfg.enabled:
+            return False
+
+        should_skip = False
+        if not is_root():
+            return self._sync_loss_spike_skip(should_skip)
+
+        is_finite = np.isfinite(loss_value)
+        min_history = int(self.loss_spike_cfg.min_history)
+        if len(self.loss_spike_history) >= min_history:
+            baseline = float(np.median(self.loss_spike_history))
+            ratio = loss_value / baseline if baseline > 0 else np.inf
+            is_large_enough = loss_value >= float(self.loss_spike_cfg.loss_threshold)
+            is_spike = ratio >= float(self.loss_spike_cfg.ratio_threshold)
+            if (is_finite and is_large_enough and is_spike) or not is_finite:
+                self._write_loss_spike_record(loss_value, baseline, ratio, batch, mini_epoch, bidx)
+                should_skip = bool(self.loss_spike_cfg.skip_batch)
+
+        if is_finite and not should_skip:
+            self.loss_spike_history.append(float(loss_value))
+
+        return self._sync_loss_spike_skip(should_skip)
+
     def _log_instant_grad_norms(self, stage: Stage):
         """
         Log instantaneous grad norms, we do not average because of the cost and because we want to
@@ -921,9 +1376,9 @@ class Trainer(TrainerBase):
 
     def _log_terminal(self, bidx: int, mini_epoch: int, stage: Stage):
         print_freq = self.train_logging.terminal
-        if bidx % print_freq == 0 and bidx > 0 or stage == VAL:
+        if bidx % print_freq == 0 and bidx > 0 or stage != TRAIN:
             # compute from last iteration
-            loss_calculator = self.loss_calculator_val if stage == VAL else self.loss_calculator
+            loss_calculator = self._loss_calculator_for(stage)
             avg_loss, losses_all, _ = prepare_losses_for_logging(
                 loss_calculator.loss_hist,
                 loss_calculator.losses_unweighted_hist,
@@ -931,9 +1386,9 @@ class Trainer(TrainerBase):
             )
 
             if is_root():
-                if stage == VAL:
+                if stage != TRAIN:
                     logger.info(
-                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
+                        f"""validation {stage} ({self.cf.general.run_id}) : {mini_epoch:03d} :
                         {np.nanmean(avg_loss)}"""
                     )
 

@@ -1,0 +1,34 @@
+# Base eval config template used by scripts/run_inference_and_eval.sh
+# Edit this file to change evaluation settings for all future runs.
+# The script will copy this, inject run_ids, and pass it to `uv run evaluate`.
+
+evaluation:
+  metrics: ["rmse", "froct"]
+  regions: ["global"]
+  summary_plots: true
+  ratio_plots: false
+  heat_maps: false
+  summary_dir: "./plots/"
+  plot_ensemble: "members"
+  plot_score_maps: false
+  print_summary: false
+  log_scale: false
+  add_grid: true
+  score_cards: false
+  bar_plots: false
+
+default_streams:
+  ERA5:
+    channels: ["2t", "10u", "10v", "z_500", "t_850", "u_850", "v_850", "q_850"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: "all"
+    plotting:
+      sample: [0]
+      forecast_step: "all"
+      plot_maps: true
+      plot_histograms: false
+      plot_animations: false
+
+# run_ids: injected by the script

@@ -86,6 +86,15 @@ training_config:
   # training_mode: ["student_teacher"]
   training_mode: ["masking"]
 
+  context_loss:
+    enabled: false
+
+  # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
+  # When enabled, intermediate encoder representations are tapped and used as additional
+  # targets/predictions for the SSL loss. Disabled by default (empty tap_after).
+  deep_ssl:
+    enabled: false
+
   num_mini_epochs: 32
   samples_per_mini_epoch: 4096
   shuffle: True
@@ -124,23 +133,6 @@ training_config:
     "student-teacher": {
         enabled: False,
         type: Disabled,
-        weight: 1.0,
-        loss_fcts : {
-          "JEPA": {
-            'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 12, "with_qk_lnorm": True, "intermediate_dim": 768, 
-            "dropout_rate": 0.1,
-            target_source_correspondence: {0 : {0 : "subset"} },
-        },
-        },
-        target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : 0.09,
-            ema_halflife_in_thousands: 1e-3,
-            model_param_overrides : { 
-              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
-            },
-          }
-        }
       },
       "physical": {
         type: LossPhysical,
@@ -226,7 +218,7 @@ validation_config:
   }
 
   # run validation before training starts (mainly for model development)
-  validate_before_training: 8
+  validate_before_training: 0
   
 # test config; full test config is merge of validation and test config
 # test config is used by default when running inference

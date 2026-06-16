@@ -1,0 +1,81 @@
+# Combined overfitting-followup pipeline: shared pretrain, then BRANCH into the
+# three experiments so the expensive upstream runs ONCE.
+#
+#   pretrain ──► pretrain-ft ──┬─► finetune-forecast ──┬─► exp1  lr-decay-fix
+#                              │   (ERA5 frozen, stage3)└─► exp3  unfreeze-lowlr-reg
+#                              └─► exp2  era5-size-control   (alternative stage 3)
+#
+# Branching is native to launch-slurm-sophie.py: each stage's `from:` names its
+# parent, multiple stages may share a parent, and the cleanup job waits on all
+# leaves (exp1, exp2, exp3). All stages share one run_id; a child continues from
+# <run_id>-<parent>, so exp1/exp3 continue from the SAME finetune-forecast
+# checkpoint and exp2 from the SAME pretrain-ft checkpoint.
+#
+# Budget: 6 stages (<=8) and 2+2+4+4+3+3 = 18 chained jobs (<=24). Streams dirs
+# unchanged (referenced inside each stage config).
+#
+# Usage:
+#   ../WeatherGenerator-private/hpc/launch-slurm-sophie.py \
+#       config/experiments/combined_overfitting_pipeline.yml                 # dry-run
+#   ../WeatherGenerator-private/hpc/launch-slurm-sophie.py --no-dry-run \
+#       config/experiments/combined_overfitting_pipeline.yml                 # submit
+
+nodes: 1
+register: true
+cleanup-scripts: yes
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  # ---- shared upstream (runs once) ----
+  - name: pretrain
+    command: train
+    base-config: ./config/config_jepa_multi_data_all_years.yml
+    config: ./config/config_jepa_multi_data_all_years.yml
+    options: []
+    chain: 2
+    nodes: 2
+
+  - name: pretrain-ft
+    command: train
+    from: pretrain
+    config: ./config/config_jepa_multi_data_all_years_ft.yml
+    options: []
+    chain: 2
+    nodes: 2
+
+  # ERA5 frozen-encoder forecast finetune (the good forecaster exp1/exp3 build on)
+  - name: finetune-forecast
+    command: train-continue
+    from: pretrain-ft
+    config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
+    chain: 4
+    nodes: 2
+
+  # ---- branches ----
+  # EXP2 — H1 control: alternative stage 3, ERA5 restricted to the oper-sized
+  # window. Branches from pretrain-ft (sibling of finetune-forecast), NOT a
+  # continuation of it. No oper stage 4: the signal is at this stage.
+  - name: exp2-era5-size-control
+    command: train-continue
+    from: pretrain-ft
+    config: ./config/experiments/exp2_era5_size_control/ft_forecast_era5_2yr.yml
+    chain: 4
+    nodes: 2
+
+  # EXP1 — H3 fix: oper forecast finetune with decaying LR. From finetune-forecast.
+  - name: exp1-lr-decay-fix
+    command: train-continue
+    from: finetune-forecast
+    config: ./config/experiments/exp1_lr_decay_fix/ft_forecast_lr_decay.yml
+    chain: 3
+    nodes: 2
+
+  # EXP3 — H1 amplifier: full-unfreeze oper finetune at sane LR + reg. From
+  # finetune-forecast (same parent as exp1 -> direct frozen-vs-unfrozen comparison).
+  - name: exp3-unfreeze-lowlr-reg
+    command: train-continue
+    from: finetune-forecast
+    config: ./config/experiments/exp3_unfreeze_lowlr_reg/ft_forecast_unfreeze_lowlr.yml
+    chain: 3
+    nodes: 2
