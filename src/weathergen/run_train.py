@@ -184,7 +184,7 @@ def run_train(args):
 
     if cf.with_flash_attention:
         assert cf.with_mixed_precision
-    
+
     trainer = get_trainer(cf)
 
     try:

@@ -63,9 +63,16 @@ from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_loggin
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
-PROFILING_DEFAULTS = {"wait_iteration": 1, "warmup_iteration": 1, "active_iteration": 1, "repeat": 1}  
+
+PROFILING_DEFAULTS = {
+    "wait_iteration": 1,
+    "warmup_iteration": 1,
+    "active_iteration": 1,
+    "repeat": 1,
+}
 
 logger = logging.getLogger(__name__)
+
 
 class Trainer(TrainerBase):
     def __init__(self, train_logging: Config):
@@ -584,7 +591,7 @@ class Trainer(TrainerBase):
         else:
             return {}
 
-    def _train_batch(self, batch: ModelBatch, bidx: int, mini_epoch):
+    def _train_batch(self, batch: ModelBatch, bidx: int, mini_epoch: int):
         if self.cf.data_loading.get("memory_pinning", False):
             # pin memory for faster CPU-GPU transfer
             batch = batch.pin_memory()
@@ -677,9 +684,7 @@ class Trainer(TrainerBase):
         self.perf_tracker.step(
             batch,
             self.cf.general.istep,
-            log_fn=lambda m: self.train_logger.log_metrics(
-                TRAIN, m, step=self.cf.general.istep
-            ),
+            log_fn=lambda m: self.train_logger.log_metrics(TRAIN, m, step=self.cf.general.istep),
         )
         # Compute collapse monitoring metrics
         if self.collapse_monitor.should_compute(self.cf.general.istep):
@@ -703,7 +708,7 @@ class Trainer(TrainerBase):
             self.save_model(-1)
 
         self.cf.general.istep += 1
-    
+
     def save_model(self, mini_epoch: int, name=None):
         # Saving at mini_epoch == max_mini_epoch means that we are saving the latest checkpoint.
         max_mini_epoch = self.training_cfg.num_mini_epochs
@@ -846,22 +851,24 @@ class Trainer(TrainerBase):
             metrics["num_samples"] = self.cf.general.istep
             self.train_logger.log_metrics(stage, metrics)
 
-class ProfilingTrainer(Trainer):  
 
-    def init(self, cf: Config, devices: list):  
+class ProfilingTrainer(Trainer):
+    def init(self, cf: Config, devices: list):
         super().init(cf, devices)
-        profiling_cfg = OmegaConf.merge(cf.profiling, PROFILING_DEFAULTS)  
+        profiling_cfg = OmegaConf.merge(cf.profiling, PROFILING_DEFAULTS)
 
-        self.max_profile_steps = (  
-            profiling_cfg.wait_iteration + profiling_cfg.warmup_iteration + profiling_cfg.active_iteration  
-        ) * profiling_cfg.repeat  
+        self.max_profile_steps = (
+            profiling_cfg.wait_iteration
+            + profiling_cfg.warmup_iteration
+            + profiling_cfg.active_iteration
+        ) * profiling_cfg.repeat
 
-        self.schedule = torch.profiler.schedule(  
-            wait=profiling_cfg.wait_iteration,  
-            warmup=profiling_cfg.warmup_iteration,  
-            active=profiling_cfg.active_iteration,  
-            repeat=profiling_cfg.repeat,  
-        )  
+        self.schedule = torch.profiler.schedule(
+            wait=profiling_cfg.wait_iteration,
+            warmup=profiling_cfg.warmup_iteration,
+            active=profiling_cfg.active_iteration,
+            repeat=profiling_cfg.repeat,
+        )
         if is_root():
             config.get_path_profiler(cf).mkdir(exist_ok=True, parents=True)
 
@@ -924,7 +931,7 @@ class ProfilingTrainer(Trainer):
             start_record_memory_history()
 
         with self.prof:
-            for bidx, batch in enumerate(islice(dataset_iter, max_profile_steps)):
+            for bidx, batch in enumerate(islice(dataset_iter, self.max_profile_steps)):
                 self._train_batch(batch, bidx, mini_epoch)
                 if hasattr(self.prof, "step"):
                     self.prof.step()
@@ -973,9 +980,10 @@ class ProfilingTrainer(Trainer):
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
 
-def get_trainer(cf) -> Trainer:  
-    profiling = cf.get("profiling")  
-    if profiling and cf.profiling.enabled:  
-        return ProfilingTrainer(cf.train_logging)  
-    else:  
+
+def get_trainer(cf) -> Trainer:
+    profiling = cf.get("profiling")
+    if profiling and cf.profiling.enabled:
+        return ProfilingTrainer(cf.train_logging)
+    else:
         return Trainer(cf.train_logging)
