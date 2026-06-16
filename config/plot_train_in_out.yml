@@ -64,6 +64,14 @@ train:
       slurm_id: 0      
       description: "2016-, forecast, 6h, in and out, multi stream, surface 512 token, finetune ufflnrhq, lrmax 5e-6, warmup 256 samples"
 
+    m9o7wp1e:
+      slurm_id: 0      
+      description: "2016-, forecast, 6h, in and out, multi stream, surface 512 token, finetune ufflnrhq, lrmax 2e-6, warmup 256 samples"
+
+    s709m095:
+      slurm_id: 0      
+      description: "2016-, forecast, 6h, in and out, ERA5-only, finetune ufflnrhq"
+
 
     
 
