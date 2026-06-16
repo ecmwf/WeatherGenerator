@@ -63,14 +63,6 @@ from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_loggin
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
 
-
-PROFILING_DEFAULTS = {
-    "wait_iteration": 1,
-    "warmup_iteration": 1,
-    "active_iteration": 1,
-    "repeat": 1,
-}
-
 logger = logging.getLogger(__name__)
 
 
@@ -851,11 +843,19 @@ class Trainer(TrainerBase):
             metrics["num_samples"] = self.cf.general.istep
             self.train_logger.log_metrics(stage, metrics)
 
-
 class ProfilingTrainer(Trainer):
+    
+    PROFILING_DEFAULTS = {
+        "wait_iteration": 1,
+        "warmup_iteration": 1,
+        "active_iteration": 1,
+        "repeat": 1,
+    }
+
     def init(self, cf: Config, devices: list):
         super().init(cf, devices)
-        profiling_cfg = OmegaConf.merge(cf.profiling, PROFILING_DEFAULTS)
+        
+        profiling_cfg = OmegaConf.merge(cf.profiling, self.PROFILING_DEFAULTS)
 
         self.max_profile_steps = (
             profiling_cfg.wait_iteration
@@ -870,7 +870,7 @@ class ProfilingTrainer(Trainer):
             repeat=profiling_cfg.repeat,
         )
         if is_root():
-            config.get_path_profiler(cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_profiling_traces(cf).mkdir(exist_ok=True, parents=True)
 
         handler = partial(trace_handler, cf)
 

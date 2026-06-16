@@ -34,7 +34,7 @@ def export_memory_snapshot(cfg: dict | OmegaConf) -> None:
         logger.info("CUDA unavailable. Not exporting memory snapshot")
         return
 
-    base_path = config.get_path_profiler(cfg)
+    base_path = config.get_path_profiling_traces(cfg)
 
     timestamp = datetime.now().strftime(TIME_FORMAT_STR)
 
@@ -50,7 +50,7 @@ def export_memory_snapshot(cfg: dict | OmegaConf) -> None:
 
 def trace_handler(cfg: dict | OmegaConf, prof: torch.profiler.profile) -> None:
     # Prefix for file names.
-    base_path = config.get_path_profiler(cfg)
+    base_path = config.get_path_profiling_traces(cfg)
 
     timestamp = datetime.now().strftime(TIME_FORMAT_STR)
 
