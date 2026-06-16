@@ -313,8 +313,6 @@ def _apply_fixes(config: Config) -> Config:
     config = _check_time_interpolation(config)
     config = _check_datasets(config)
     config = _check_streams(config)
-    config = _check_profiling(config)
-
     return config
 
 
@@ -378,28 +376,6 @@ def _check_streams(config: Config) -> Config:
         stream_conf = OmegaConf.create({conf["name"]: conf for conf in stream_conf})
 
     config["streams"] = stream_conf
-    return config
-
-
-def _check_profiling(config: Config) -> Config:
-    """
-    Apply fixes to profiling config. If profiling section is missing, inject defaults.
-    If profiling exists but some fields are missing, fill in defaults.
-    Always forces enabled=True since this is called from run_profile.
-    """
-    config = config.copy()
-
-    if config.get("profiling"):
-        defaults = {
-            "wait_iteration": 1,
-            "warmup_iteration": 1,
-            "active_iteration": 1,
-            "repeat": 1,
-        }
-        for key, value in defaults.items():
-            if not config.profiling.get(key):
-                config.profiling[key] = value
-
     return config
 
 
@@ -711,7 +687,7 @@ def get_path_run(config: Config) -> Path:
 
 def get_path_profiler(config: Config) -> Path:
     """Get the path for storing profiling logs."""
-    return _get_shared_wg_path() / "profiler_logs" / get_run_id_from_config(config)
+    return _get_shared_wg_path() / "logs" / get_run_id_from_config(config) / "profiler"
 
 
 def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
