@@ -845,6 +845,14 @@ class Trainer(TrainerBase):
 
 
 class ProfilingTrainer(Trainer):
+
+    def __init__(self, train_logging: Config):
+        super().__init__(train_logging)
+        
+        self.max_profile_steps: int = 0
+        self.schedule = None
+        self.prof = nullcontext()
+
     PROFILING_DEFAULTS = {
         "wait_iteration": 1,
         "warmup_iteration": 1,
