@@ -848,26 +848,20 @@ class Trainer(TrainerBase):
 
 class ProfilingTrainer(Trainer):  
 
-    def __init__(self, train_logging: Config, profiling_cfg: Config | None):
-        super().__init__(train_logging)
-        self.profiling_cfg = profiling_cfg
-
     def init(self, cf: Config, devices: list):  
         super().init(cf, devices)
-        self.profiling_cfg = OmegaConf.merge(self.profiling_cfg, PROFILING_DEFAULTS)  
-        
+        profiling_cfg = OmegaConf.merge(cf.profiling, PROFILING_DEFAULTS)  
+
         self.max_profile_steps = (  
-            self.profiling_cfg.wait_iteration + self.profiling_cfg.warmup_iteration + self.profiling_cfg.active_iteration  
-        ) * self.profiling_cfg.repeat  
+            profiling_cfg.wait_iteration + profiling_cfg.warmup_iteration + profiling_cfg.active_iteration  
+        ) * profiling_cfg.repeat  
 
         self.schedule = torch.profiler.schedule(  
-            wait=self.profiling_cfg.wait_iteration,  
-            warmup=self.profiling_cfg.warmup_iteration,  
-            active=self.profiling_cfg.active_iteration,  
-            repeat=self.profiling_cfg.repeat,  
+            wait=profiling_cfg.wait_iteration,  
+            warmup=profiling_cfg.warmup_iteration,  
+            active=profiling_cfg.active_iteration,  
+            repeat=profiling_cfg.repeat,  
         )  
-        wrap_module_forward_with_profiling(self.model, prefix="model")
-
         if is_root():
             config.get_path_profiler(cf).mkdir(exist_ok=True, parents=True)
 
@@ -883,10 +877,10 @@ class ProfilingTrainer(Trainer):
                 with_modules=True,
                 with_flops=True,
                 schedule=torch.profiler.schedule(
-                    wait=cf.profiling.wait_iteration,
-                    warmup=cf.profiling.warmup_iteration,
-                    active=cf.profiling.active_iteration,
-                    repeat=cf.profiling.repeat,
+                    wait=profiling_cfg.wait_iteration,
+                    warmup=profiling_cfg.warmup_iteration,
+                    active=profiling_cfg.active_iteration,
+                    repeat=profiling_cfg.repeat,
                 ),
                 on_trace_ready=handler,
             )
@@ -900,6 +894,7 @@ class ProfilingTrainer(Trainer):
     def _training_loop(self, mini_epoch_base: int):
         # run validation before training if requested
         self.validate_before_training()
+        wrap_module_forward_with_profiling(self.model, prefix="model")
 
         end = min(mini_epoch_base + 1, self.training_cfg.num_mini_epochs)
         for mini_epoch in range(mini_epoch_base, end):
@@ -981,6 +976,6 @@ class ProfilingTrainer(Trainer):
 def get_trainer(cf) -> Trainer:  
     profiling = cf.get("profiling")  
     if profiling and cf.profiling.enabled:  
-        return ProfilingTrainer(cf.train_logging, profiling)  
+        return ProfilingTrainer(cf.train_logging)  
     else:  
         return Trainer(cf.train_logging)
