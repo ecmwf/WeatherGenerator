@@ -137,6 +137,8 @@ def run_continue(args):
 
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
+    if not isinstance(devices, list):
+        devices = [devices]
     cf = Trainer.init_ddp(cf)
 
     init_loggers(cf.general.run_id)
@@ -151,8 +153,8 @@ def run_continue(args):
     except Exception:
         extype, value, tb = sys.exc_info()
         traceback.print_exc()
-        if cf.world_size == 1:
-            pdb.post_mortem(tb)
+        # if cf.world_size == 1:
+        #     pdb.post_mortem(tb)
 
 
 def run_train(args):
@@ -172,6 +174,8 @@ def run_train(args):
     cf.data_loading.rng_seed = int(time.time())
     mp_method = cf.general.get("multiprocessing_method", "fork")
     devices = Trainer.init_torch(multiprocessing_method=mp_method)
+    if not isinstance(devices, list):
+        devices = [devices]
     cf = Trainer.init_ddp(cf)
 
     # this line should probably come after the processes have been sorted out else we get lots
@@ -186,14 +190,15 @@ def run_train(args):
         assert cf.with_mixed_precision
 
     trainer = Trainer(cf.train_logging)
+    trainer.run(cf, devices)
 
-    try:
-        trainer.run(cf, devices)
-    except Exception:
-        extype, value, tb = sys.exc_info()
-        traceback.print_exc()
-        if cf.world_size == 1:
-            pdb.post_mortem(tb)
+    # try:
+    #     trainer.run(cf, devices)
+    # except Exception:
+    #     extype, value, tb = sys.exc_info()
+    #     traceback.print_exc()
+    #     if cf.world_size == 1:
+    #         pdb.post_mortem(tb)
 
 
 if __name__ == "__main__":

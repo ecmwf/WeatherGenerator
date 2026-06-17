@@ -796,7 +796,7 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
-                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
+                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} :
                         {np.nanmean(avg_loss)}"""
                     )
 
