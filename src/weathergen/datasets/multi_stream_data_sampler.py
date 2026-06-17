@@ -119,7 +119,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # finetuning/inference (where it would shift all target times by one window).
         training_mode = mode_cfg.get("training_mode", [])
         if "student_teacher" in training_mode:
-            self.teacher_time_offset = mode_cfg.get("teacher_time_offset", 0)
+            self.teacher_time_offset = int(mode_cfg.get("teacher_time_offset", 0))
         else:
             configured_offset = mode_cfg.get("teacher_time_offset", 0)
             if configured_offset != 0:
