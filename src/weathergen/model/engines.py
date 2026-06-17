@@ -390,6 +390,7 @@ class QueryAggregationEngine(torch.nn.Module):
         super(QueryAggregationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+
         self.ae_aggregation_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.ae_aggregation_att_dense_rate)
@@ -465,6 +466,7 @@ class GlobalAssimilationEngine(torch.nn.Module):
         super(GlobalAssimilationEngine, self).__init__()
         self.cf = cf
         self.num_healpix_cells = num_healpix_cells
+
         self.ae_global_blocks = torch.nn.ModuleList()
 
         global_rate = int(1 / self.cf.ae_global_att_dense_rate)
