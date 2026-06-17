@@ -12,7 +12,7 @@ stages:
     stage: train
     from_run_id: kyd1djdc
     config_files:
-      - ./config/config_jepa_multi_data_ft_forecast_all_years_2step_6h_tws.yml
+      - ./config/config_jepa_multi_data_ft_forecast_all_years_2step_6h_tws_increase_grad_clip.yml
     options: []
     chain_jobs: 4
     nodes: 2
@@ -23,7 +23,7 @@ stages:
     stage: train
     from_run_id: STAGE.forecast
     config_files:
-      - ./config/config_jepa_multi_data_ft_forecast_2step_6h_tws.yml
+      - ./config/config_jepa_multi_data_ft_forecast.yml
     options: []
     chain_jobs: 3
     nodes: 2

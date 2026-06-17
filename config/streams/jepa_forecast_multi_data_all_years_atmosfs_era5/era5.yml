@@ -16,20 +16,20 @@ ERA5:
   token_size: 8
   tokenize_spacetime: False
   max_num_targets: -1
-  frequency: 06:00:00
-  embed : 
-    net : transformer
-    num_tokens : 1
-    num_heads : 8
-    dim_embed : 512
-    num_blocks : 2
-  embed_target_coords :
-    net : linear
-    dim_embed : 512
-  target_readout :
-    num_layers : 2
-    num_heads : 4
-  pred_head :
-    ens_size : 1
-    num_layers : 1
+  frequency: 01:00:00
+  embed:
+    net: transformer
+    num_tokens: 1
+    num_heads: 8
+    dim_embed: 512
+    num_blocks: 2
+  embed_target_coords:
+    net: linear
+    dim_embed: 256
+  target_readout:
+    num_layers: 2
+    num_heads: 4
+  pred_head:
+    ens_size: 1
+    num_layers: 1
 
