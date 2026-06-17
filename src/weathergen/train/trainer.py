@@ -245,14 +245,9 @@ class Trainer(TrainerBase):
         # general initalization
         self.init(cf, devices)
         cf = self.cf
-        assert cf is not None
 
         device_type = torch.accelerator.current_accelerator()
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
-        logger.info("Training config: %s", self.training_cfg)
-
-        # # Update collapse monitor device
-        # self.collapse_monitor.device = self.device
 
         # Update collapse monitor device
         self.collapse_monitor.device = self.device
@@ -384,8 +379,6 @@ class Trainer(TrainerBase):
         self.validate_before_training()
 
         # training loop
-
-        logger.info("Training config: %s", self.training_cfg)
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             if is_root():
