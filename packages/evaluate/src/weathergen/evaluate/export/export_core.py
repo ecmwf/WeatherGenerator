@@ -252,16 +252,29 @@ def get_source_info(fname_zarr, stream, samples) -> tuple[list[np.datetime64], l
     source_starts = []
     source_ends = []
     with zarrio_reader(fname_zarr) as zio:
+        fstep0 = sorted(int(s) for s in zio.forecast_steps)[0]
         for sample in tqdm(samples, desc="Getting source info"):
             group_path = f"{sample}/{stream}/0/source"
             source_group = zio.data_root.get(group_path)
 
-            if source_group is None:
-                raise FileNotFoundError(f"Zarr group '{group_path}' not found in {fname_zarr}")
-
-            times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
-            source_start = np.min(times_arr)
-            source_end = np.max(times_arr)
+            if source_group is not None:
+                times_arr = np.asarray(source_group["times"]).astype("datetime64[ns]")
+                source_start = np.min(times_arr)
+                source_end = np.max(times_arr)
+            else:
+                # No step-0 source group: derive the interval from the
+                # source_interval attribute stored on the prediction/target group.
+                grp = zio.data_root.get(
+                    f"{sample}/{stream}/{fstep0}/prediction"
+                ) or zio.data_root.get(f"{sample}/{stream}/{fstep0}/target")
+                if grp is None:
+                    raise FileNotFoundError(
+                        f"Neither '{group_path}' nor a fstep-{fstep0} prediction/target "
+                        f"group found for sample {sample} in {fname_zarr}"
+                    )
+                interval = dict(grp.attrs)["source_interval"]
+                source_start = np.datetime64(interval["start"]).astype("datetime64[ns]")
+                source_end = np.datetime64(interval["end"]).astype("datetime64[ns]")
 
             _logger.debug(f"Sample {sample}: source_interval=[{source_start} .. {source_end}]")
             source_starts.append(source_start)
