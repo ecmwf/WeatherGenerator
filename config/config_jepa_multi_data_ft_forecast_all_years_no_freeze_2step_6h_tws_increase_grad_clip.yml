@@ -18,6 +18,8 @@ fe_impute_latent_noise_std: 0
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
 
+ae_local_max_tokens_per_cell : 512
+
 healpix_level: 5
 
 # performance
