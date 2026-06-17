@@ -11,6 +11,7 @@
 
 import logging
 import math
+import typing
 import warnings
 
 import astropy_healpix as hp
@@ -37,11 +38,6 @@ from weathergen.model.engines import (
     TargetPredictionEngineClassic,
 )
 from weathergen.model.layers import MLP, NamedLinear
-from weathergen.model.positional_encoding import (
-    build_spherical_rope_coeff_tensors,
-    get_rope_mode,
-    get_rope_spherical_band,
-)
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype, is_stream_forcing
@@ -114,8 +110,8 @@ class ModelParams(torch.nn.Module):
         self.pe_global = torch.nn.Parameter(pe, requires_grad=False)
 
         # RoPE coordinates
-        self.rope_mode = get_rope_mode(cf, logger)
-        if self.rope_mode != "none":
+        self.rope_2D = cf.get("rope_2D", False)
+        if self.rope_2D:
             self.num_extra_tokens = cf.num_register_tokens + cf.num_class_tokens
             total_tokens = (
                 self.num_healpix_cells + self.num_extra_tokens
@@ -137,31 +133,9 @@ class ModelParams(torch.nn.Module):
                     dtype=self.dtype,
                 ),
             )
-            if self.rope_mode == "spherical":
-                rope_spherical_band = get_rope_spherical_band(cf)
-                num_modes = 2 * int(rope_spherical_band) + 1
-                self.register_buffer(
-                    "rope_spherical_coeffs",
-                    torch.zeros(1, total_tokens, num_modes, 2, dtype=self.dtype),
-                )
-                self.register_buffer(
-                    "rope_spherical_cell_coeffs",
-                    torch.zeros(self.num_healpix_cells, num_modes, 2, dtype=self.dtype),
-                )
-                self.register_buffer(
-                    "rope_spherical_extra_coeffs",
-                    torch.zeros(self.num_extra_tokens, num_modes, 2, dtype=self.dtype),
-                )
-            else:
-                self.rope_spherical_coeffs = None
-                self.rope_spherical_cell_coeffs = None
-                self.rope_spherical_extra_coeffs = None
         else:
             self.rope_coords = None
             self.rope_cell_coords = None
-            self.rope_spherical_coeffs = None
-            self.rope_spherical_cell_coeffs = None
-            self.rope_spherical_extra_coeffs = None
 
         # HEALPix neighbours
         hlc = self.healpix_level
@@ -226,45 +200,18 @@ class ModelParams(torch.nn.Module):
 
         dim_embed = cf.ae_global_dim_embed
 
-        if self.rope_mode != "none":
+        if self.rope_2D:
+            # Precompute per-cell center coordinates (lat, lon in radians) for 2D RoPE.
+            # Shape: (num_healpix_cells, ae_local_num_queries, 2)
             verts, _ = healpix_verts_rots(self.healpix_level, 0.5, 0.5)
             coords = r3tos2(verts.to(self.rope_coords.device)).to(self.rope_coords.dtype)
+            # Per-cell coords for QueryAggregationEngine (no query expansion)
             self.rope_cell_coords.data.copy_(coords)
             coords = coords.unsqueeze(1).repeat(1, cf.ae_local_num_queries, 1)
             coords_flat = coords.flatten(0, 1).unsqueeze(0)
             offset = self.num_extra_tokens * cf.ae_local_num_queries
             self.rope_coords.data.fill_(0.0)
             self.rope_coords.data[:, offset : offset + coords_flat.shape[1], :].copy_(coords_flat)
-
-            if self.rope_mode == "spherical":
-                band = int(get_rope_spherical_band(cf))
-                (
-                    (cell_real, cell_imag),
-                    (extra_real, extra_imag),
-                    (packed_extra_real, packed_extra_imag),
-                    (packed_real, packed_imag),
-                ) = build_spherical_rope_coeff_tensors(
-                    nside=2**self.healpix_level,
-                    band=band,
-                    num_local_queries=cf.ae_local_num_queries,
-                    num_extra_tokens=self.num_extra_tokens,
-                    device=self.rope_spherical_coeffs.device,
-                    dtype=self.rope_spherical_coeffs.dtype,
-                )
-                self.rope_spherical_cell_coeffs.data[..., 0].copy_(cell_real)
-                self.rope_spherical_cell_coeffs.data[..., 1].copy_(cell_imag)
-                self.rope_spherical_extra_coeffs.data[..., 0].copy_(extra_real)
-                self.rope_spherical_extra_coeffs.data[..., 1].copy_(extra_imag)
-
-                self.rope_spherical_coeffs.data.fill_(0.0)
-                self.rope_spherical_coeffs.data[:, :offset, :, 0].copy_(packed_extra_real)
-                self.rope_spherical_coeffs.data[:, :offset, :, 1].copy_(packed_extra_imag)
-                self.rope_spherical_coeffs.data[
-                    :, offset : offset + packed_real.shape[1], :, 0
-                ].copy_(packed_real)
-                self.rope_spherical_coeffs.data[
-                    :, offset : offset + packed_imag.shape[1], :, 1
-                ].copy_(packed_imag)
 
         # pe_global: always initialized. RoPE handles relative position in Q/K, but pe_global
         # provides per-cell token identity which is critical for masked cells that have no
@@ -380,7 +327,7 @@ class Model(torch.nn.Module):
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
-        self.stream_names: list[str] = None
+        self.streams: dict[str, typing.Any] = cf.streams
         self.target_token_engines = None
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
@@ -443,11 +390,6 @@ class Model(torch.nn.Module):
         self.pred_heads = torch.nn.ModuleDict()
 
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
-
-        for i_stream, _ in enumerate(cf.streams):
-            stream_name = self.stream_names[i_stream]
-
         loss_terms = [
             v.type for _, v in cf.training_config.losses.items() if v.get("enabled", True)
         ]
@@ -457,9 +399,7 @@ class Model(torch.nn.Module):
             ]
 
         if "LossPhysical" in loss_terms:
-            for i_stream, si in enumerate(cf.streams):
-                stream_name = self.stream_names[i_stream]
-
+            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
@@ -550,16 +490,14 @@ class Model(torch.nn.Module):
                     )
 
             # iterate again to setup shared spatial pred heads if specified in config
-            for i_stream, si in enumerate(cf.streams):
-                stream_name = self.stream_names[i_stream]
-
+            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
 
                 pred_spatial_shared = si.get("pred_spatial_shared")
                 if pred_spatial_shared is not None:
-                    if pred_spatial_shared not in self.stream_names:
+                    if pred_spatial_shared not in self.streams.keys():
                         msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
                         msg += " but no stream with that name found."
                         raise ValueError(msg)
@@ -578,11 +516,8 @@ class Model(torch.nn.Module):
                         pred_spatial_shared
                     ]
 
-                    idx_shared_s = [
-                        i for i, so in enumerate(cf.streams) if so["name"] == pred_spatial_shared
-                    ]
-                    assert (len(idx_shared_s)) == 1
-                    si_other = cf.streams[idx_shared_s[0]]
+                    assert pred_spatial_shared in self.streams.keys()
+                    si_other = self.streams[pred_spatial_shared]
                     dims_embed = [
                         si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
                     ]
@@ -657,9 +592,9 @@ class Model(torch.nn.Module):
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
-        cf = self.cf
         num_params_embed = [
-            get_num_parameters(self.encoder.embed_engine.embeds[name]) for name in self.stream_names
+            get_num_parameters(self.encoder.embed_engine.embeds[name])
+            for name in self.streams.keys()
         ]
         num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)
@@ -682,17 +617,17 @@ class Model(torch.nn.Module):
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
         mdict = self.target_token_engines
         num_params_tte = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
         mdict = self.pred_heads
         num_params_preds = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
 
         print("-----------------")
@@ -701,7 +636,7 @@ class Model(torch.nn.Module):
         print("  Embedding networks:")
         [
             print("    {} : {:,}".format(si["name"], np))
-            for si, np in zip(cf.streams, num_params_embed, strict=False)
+            for si, np in zip(self.streams.values(), num_params_embed, strict=False)
         ]
         print(f" Local assimilation engine: {num_params_ae_local:,}")
         print(f" Local-global adapter: {num_params_ae_adapter:,}")
@@ -712,16 +647,14 @@ class Model(torch.nn.Module):
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
-            cf.streams,
+            self.streams.keys(),
             num_params_embed_tcs,
             num_params_tte,
             num_params_preds,
             strict=False,
         )
-        [
-            print("   {} : {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2))
-            for si, np0, np1, np2 in zps
-        ]
+        for stream_name, np0, np1, np2 in zps:
+            print(f"   {stream_name} : {np0:,} / {np1:,} / {np2:,}")
         print("-----------------")
 
     def tokens_to_latent_state(self, tokens_post_norm, tokens) -> LatentState:
@@ -757,12 +690,6 @@ class Model(torch.nn.Module):
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
-        rope_data = (
-            model_params.rope_spherical_coeffs.unbind(dim=-1)
-            if model_params.rope_spherical_coeffs is not None
-            else model_params.rope_coords
-        )
-
         # Allow for pushforward trick
         p_fwd = self.cf.training_config.get("forecast", {}).get("pushforward", False)
         # roll-out in latent space, iterate and generate output over requested output steps
@@ -770,10 +697,10 @@ class Model(torch.nn.Module):
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
-                tokens = self.forecast_engine(tokens, step, coords=rope_data)
+                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
                 continue
 
-            tokens = self.forecast_engine(tokens, step, coords=rope_data)
+            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
@@ -847,7 +774,7 @@ class Model(torch.nn.Module):
         tokens_nbors_lens[0] = 0
 
         # pair with tokens from assimilation engine to obtain target tokens
-        for stream_name in self.stream_names:
+        for stream_name in self.streams.keys():
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
                 batch.samples[i_b].streams_data[stream_name].target_coords[step]

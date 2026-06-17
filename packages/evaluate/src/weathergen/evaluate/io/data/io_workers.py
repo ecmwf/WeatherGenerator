@@ -91,6 +91,7 @@ def _read_sample(
     is_zip: bool,
     read_coords: bool = False,
     is_gridded: bool = True,
+    regrid_opts: dict | None = None,
 ) -> tuple[list[NDArray], list[NDArray], list[NDArray], dict]:
     """
     Read all forecast steps for one sample via direct zarr array access.
@@ -146,7 +147,9 @@ def _read_sample(
     n_substeps = []  # track how many sub-steps per fstep
     source_interval = None
 
-    # Derive source interval from the source group's times at fstep 0.
+    # Recover the source interval once per sample. Older outputs store source
+    # timestamps under ``.../0/source/times``; newer ones persist the same
+    # metadata in the target/prediction group attrs.
     try:
         source_times = np.asarray(ds[f"{sample}/{stream}/0/source/times"])
         source_window_start = str(np.min(source_times))
@@ -154,6 +157,20 @@ def _read_sample(
         source_interval = {"start": source_window_start, "end": source_window_end}
     except (KeyError, AttributeError):
         source_interval = {}
+        for fs in fsteps:
+            base = f"{sample}/{stream}/{fs}"
+            for group_name in ("target", "prediction"):
+                try:
+                    group = ds[f"{base}/{group_name}"]
+                except KeyError:
+                    continue
+
+                source_interval_attr = group.attrs.get("source_interval")
+                if source_interval_attr:
+                    source_interval = dict(source_interval_attr)
+                    break
+            if source_interval:
+                break
 
     for fs in fsteps:
         base = f"{sample}/{stream}/{fs}"
