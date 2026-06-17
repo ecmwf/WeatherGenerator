@@ -241,50 +241,35 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            # use anemoi_config only if it's defined and anemoi data reader is selected
-            anemoi_config = stream_info.get("anemoi_config")
-            if anemoi_config and stream_info["type"] == "anemoi":
-                # Convert OmegaConf DictConfig to a plain dict for anemoi.open_dataset.
-                filename = OmegaConf.to_container(anemoi_config, resolve=True)
+            for fname in stream_info["filenames"]:
+                fname = pathlib.Path(fname)
+                # dont check if file exists since zarr stores might be directories
+                if fname.exists():
+                    # check if fname is a valid path to allow for simple overwriting
+                    filename = fname
+                else:
+                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
+
+                    if not any(filename.exists() for filename in filenames):  # see above
+                        msg = (
+                            f"Did not find input data for {stream_info['type']} "
+                            f"stream '{stream_name}': {filenames}."
+                        )
+                        raise FileNotFoundError(msg)
+
+                    # The same dataset can exist on different locations in the filesystem,
+                    # so we need to choose here.
+                    filename = filenames[0]
+
                 ds_type = stream_info["type"]
                 if is_root():
                     logger.info(
                         f"Opening dataset with type: {ds_type}"
                         + f" from stream config {stream_name}.",
                     )
-                ds = dataset(filename=filename, data_paths=cf.data_paths, **kwargs)
+                ds = dataset(filename=filename, **kwargs)
 
                 streams_datasets[stream_name].readers += [ds]
-            else:
-                for fname in stream_info["filenames"]:
-                    fname = pathlib.Path(fname)
-                    # dont check if file exists since zarr stores might be directories
-                    if fname.exists():
-                        # check if fname is a valid path to allow for simple overwriting
-                        filename = fname
-                    else:
-                        filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
-
-                        if not any(filename.exists() for filename in filenames):  # see above
-                            msg = (
-                                f"Did not find input data for {stream_info['type']} "
-                                f"stream '{stream_name}': {filenames}."
-                            )
-                            raise FileNotFoundError(msg)
-
-                        # The same dataset can exist on different locations in the filesystem,
-                        # so we need to choose here.
-                        filename = filenames[0]
-
-                    ds_type = stream_info["type"]
-                    if is_root():
-                        logger.info(
-                            f"Opening dataset with type: {ds_type}"
-                            + f" from stream config {stream_name}.",
-                        )
-                    ds = dataset(filename=filename, **kwargs)
-
-                    streams_datasets[stream_name].readers += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
