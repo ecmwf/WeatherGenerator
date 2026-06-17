@@ -402,7 +402,6 @@ def run_score_map_pipeline(
         "fig_size": cfg.get("fig_size", None),
         "animation_format": cfg.get("animation_format", "gif"),
         "fps": cfg.get("fps", 2),
-        "log_colorbar": cfg.get("log_colorbar", False),
     }
     output_basedir = str(reader.runplot_dir)
     run_id = reader.run_id
