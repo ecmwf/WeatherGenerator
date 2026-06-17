@@ -137,6 +137,7 @@ class Plotter:
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.fig_size = plotter_cfg.get("fig_size")
         self.fps = plotter_cfg.get("fps")
+        self.log_colorbar = plotter_cfg.get("log_colorbar", False)
         self.regions = plotter_cfg.get("regions")
         self.log_x = plotter_cfg.get("log_x", False)
         self.log_y = plotter_cfg.get("log_y", False)
@@ -626,6 +627,7 @@ class Plotter:
             "vmax": kw.pop("vmax", None),
             "cmap": plt.get_cmap(kw.pop("colormap", "coolwarm")),
             "use_datashader": kw.pop("use_datashader", False),
+            "levels": kw.pop("levels", None),
             # HEALPix grid
             "add_healpix_grid": kw.pop("add_healpix_grid", False),
             "healpix_nside": kw.pop("healpix_nside", 4),
@@ -634,16 +636,6 @@ class Plotter:
             "healpix_step": kw.pop("healpix_step", 64),
             "healpix_linestyle": kw.pop("healpix_linestyle", "-"),
         }
-
-        # Colour normalisation
-        if isinstance(kw.get("levels", False), oc.listconfig.ListConfig):
-            parsed["norm"] = mpl.colors.BoundaryNorm(
-                kw.pop("levels", None), parsed["cmap"].N, extend="both"
-            )
-        else:
-            parsed["norm"] = mpl.colors.Normalize(
-                vmin=parsed["vmin"], vmax=parsed["vmax"], clip=False
-            )
 
         parsed["extra"] = kw  # remaining kwargs forwarded to scatter
         return parsed
@@ -916,10 +908,18 @@ class Plotter:
                     opts["vmin"] = float(p_lo)
                 if opts["vmax"] is None:
                     opts["vmax"] = float(p_hi)
-                # Rebuild norm with the robust limits
-                opts["norm"] = mpl.colors.Normalize(
-                    vmin=opts["vmin"], vmax=opts["vmax"], clip=False
+
+        if isinstance(opts["levels"], oc.listconfig.ListConfig):
+            opts["norm"] = mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
+        elif self.log_colorbar and opts["vmin"] is not None and opts["vmin"] > 0:
+            opts["norm"] = mpl.colors.LogNorm(vmin=opts["vmin"], vmax=opts["vmax"])
+        else:
+            if self.log_colorbar:
+                _logger.warning(
+                    "log_colorbar=True but vmin=%.3g <= 0; falling back to linear norm.",
+                    opts["vmin"],
                 )
+            opts["norm"] = mpl.colors.Normalize(vmin=opts["vmin"], vmax=opts["vmax"], clip=False)
 
         if regionname == "global":
             ax.set_global()
