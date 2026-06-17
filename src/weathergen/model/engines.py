@@ -93,6 +93,9 @@ class EmbeddingEngine(torch.nn.Module):
         # iterate over all streams
         x_embeds = []
         for stream_name in self.streams.keys():
+            if type(self.embeds[stream_name]) is torch.nn.Identity:
+                continue
+
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -109,6 +112,10 @@ class EmbeddingEngine(torch.nn.Module):
 
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
+
+        if x_embeds == []:
+            # if all streams are empty, return empty tensor with correct shape and dtype
+            return tokens_all
 
         # switch from stream to cell-based ordering and apply per cell positional encoding
 
@@ -184,10 +191,15 @@ class EmbeddingEngine(torch.nn.Module):
         Vectorized version
         """
 
+        streams_active = [
+            i for i, stream_name in enumerate(self.streams.keys())
+            if type(self.embeds[stream_name]) is not torch.nn.Identity
+        ]
+
         dev = batch.get_device()
         # batch.tokens_lens : (num_steps_input, num_samples, num_streams, num_cells)
         # flatten leasds to streams x tokens per cell (across all cells for input steps and samples)
-        tok_counts = batch.tokens_lens.permute([2, 0, 1, 3]).flatten(1, -1)
+        tok_counts = batch.tokens_lens[:, :, streams_active].permute([2, 0, 1, 3]).flatten(1, -1)
 
         # partial sums for per cell offsets
         pad = torch.zeros((1, tok_counts.shape[1]), dtype=torch.int64, device=dev)
