@@ -245,11 +245,17 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             anemoi_config = stream_info.get("anemoi_config")
             if anemoi_config and stream_info["type"] == "anemoi":
                 # Convert OmegaConf DictConfig to a plain dict for anemoi.open_dataset.
-                filenames = [OmegaConf.to_container(anemoi_config, resolve=True)]
-                dataset_kwargs = {"data_paths": cf.data_paths}
+                filename = OmegaConf.to_container(anemoi_config, resolve=True)
+                ds_type = stream_info["type"]
+                if is_root():
+                    logger.info(
+                        f"Opening dataset with type: {ds_type}"
+                        + f" from stream config {stream_name}.",
+                    )
+                ds = dataset(filename=filename, data_paths=cf.data_paths, **kwargs)
+
+                streams_datasets[stream_name].readers += [ds]
             else:
-                filenames = []
-                dataset_kwargs = {}
                 for fname in stream_info["filenames"]:
                     fname = pathlib.Path(fname)
                     # dont check if file exists since zarr stores might be directories
@@ -257,31 +263,28 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         # check if fname is a valid path to allow for simple overwriting
                         filename = fname
                     else:
-                        candidates = [pathlib.Path(path) / fname for path in cf.data_paths]
+                        filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
-                        if not any(filename.exists() for filename in candidates):  # see above
+                        if not any(filename.exists() for filename in filenames):  # see above
                             msg = (
                                 f"Did not find input data for {stream_info['type']} "
-                                f"stream '{stream_name}': {candidates}."
+                                f"stream '{stream_name}': {filenames}."
                             )
                             raise FileNotFoundError(msg)
 
                         # The same dataset can exist on different locations in the filesystem,
                         # so we need to choose here.
-                        filename = candidates[0]
+                        filename = filenames[0]
 
-                    filenames.append(filename)
+                    ds_type = stream_info["type"]
+                    if is_root():
+                        logger.info(
+                            f"Opening dataset with type: {ds_type}"
+                            + f" from stream config {stream_name}.",
+                        )
+                    ds = dataset(filename=filename, **kwargs)
 
-            for filename in filenames:
-                ds_type = stream_info["type"]
-                if is_root():
-                    logger.info(
-                        f"Opening dataset with type: {ds_type}"
-                        + f" from stream config {stream_name}.",
-                    )
-                ds = dataset(filename=filename, **dataset_kwargs, **kwargs)
-
-                streams_datasets[stream_name].readers += [ds]
+                    streams_datasets[stream_name].readers += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
