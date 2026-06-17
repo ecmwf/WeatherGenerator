@@ -12,6 +12,7 @@ import shutil
 
 import astropy_healpix as hp
 import numpy as np
+import numpy.typing as npt
 import torch
 
 import weathergen.common.config as config
@@ -288,14 +289,16 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
                     for extra_name, extra_array in extra_components.items():
                         _write_array(group, extra_name, extra_array)
                         _logger.debug(
-                            f"Wrote {extra_name} shape {extra_array.shape} for sample {global_sample_idx}"
+                            f"Wrote {extra_name} shape {extra_array.shape} "
+                            f"for sample {global_sample_idx}"
                         )
                     extra_written = True
 
                 try:
                     _write_array(group, latent_name, latent_array)
                     _logger.debug(
-                        f"Wrote latent {latent_name} shape {latent_array.shape} for sample {global_sample_idx}"
+                        f"Wrote latent {latent_name} shape {latent_array.shape} "
+                        f"for sample {global_sample_idx}"
                     )
                 except Exception as e:
                     _logger.warning(
@@ -336,7 +339,7 @@ def _infer_latent_points_for_metadata(latents_for_sample: dict) -> int | None:
     return None
 
 
-def _write_array(group, name: str, data: np.ndarray) -> None:
+def _write_array(group, name: str, data: npt.NDArray) -> None:
     if name in group:
         # ZipStore cannot truly delete; overwriting creates duplicate entries.
         _logger.debug(f"Array {name} already exists in group, skipping write.")
@@ -345,11 +348,11 @@ def _write_array(group, name: str, data: np.ndarray) -> None:
 
 
 def _split_extra_tokens(
-    latent_array: np.ndarray,
+    latent_array: npt.NDArray,
     coords_len: int | None,
     num_register_tokens: int,
     num_class_tokens: int,
-) -> tuple[dict[str, np.ndarray] | None, np.ndarray]:
+) -> tuple[dict[str, npt.NDArray] | None, npt.NDArray]:
     num_extra_tokens = num_register_tokens + num_class_tokens
     if (
         coords_len is not None
@@ -357,7 +360,7 @@ def _split_extra_tokens(
         and latent_array.ndim >= 1
         and latent_array.shape[0] == coords_len + num_extra_tokens
     ):
-        extra_components: dict[str, np.ndarray] = {}
+        extra_components: dict[str, npt.NDArray] = {}
         offset = 0
         if num_register_tokens > 0:
             extra_components["extra_register_tokens"] = latent_array[offset:num_register_tokens]
@@ -368,10 +371,10 @@ def _split_extra_tokens(
     return None, latent_array
 
 
-_HEALPIX_COORDS_CACHE: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+_HEALPIX_COORDS_CACHE: dict[int, tuple[npt.NDArray, npt.NDArray]] = {}
 
 
-def _get_healpix_coords(cf) -> tuple[np.ndarray, np.ndarray] | None:
+def _get_healpix_coords(cf) -> tuple[npt.NDArray, npt.NDArray] | None:
     if cf is None or not hasattr(cf, "healpix_level"):
         return None
     healpix_level = int(cf.healpix_level)
