@@ -20,11 +20,11 @@ ERA5_in:
     "6" : 11 # 09:00:00
     "12" : 17 #16:30:00
     "18" : 23 #21:00:00
-  masking_override:
-    model_input:
-      masking_strategy: random
-      masking_strategy_config:
-        rate: 0.6
+  # masking_override:
+  #   model_input:
+  #     masking_strategy: random
+  #     masking_strategy_config:
+  #       rate: 0.6
   embed:
     net: transformer
     num_tokens: 1
