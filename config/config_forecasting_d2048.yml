@@ -96,7 +96,8 @@ qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
+# streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
+streams_directory: "./config/streams/era5_georing_avhrr_synop_lowres/"
 streams: ???
 
 # type of zarr_store
@@ -191,7 +192,7 @@ training_config:
   forecast :
       time_step: 06:00:00
       offset: 1
-      num_steps: 3
+      num_steps: 2
       policy: "fixed"
 
 

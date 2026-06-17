@@ -12,10 +12,11 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 2048
-ae_local_num_blocks: 0
+ae_local_num_blocks: 4
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
+ae_local_max_tokens_per_cell: 128
 
 ae_local_num_queries: 1
 ae_local_queries_per_cell: False
@@ -55,7 +56,7 @@ num_register_tokens: 0
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 12
+fe_num_blocks: 10
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
@@ -64,7 +65,7 @@ fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
 fe_diffusion_model_conditioning_type: "cross_attn" # options: "cross_attn", "concatenate", ..., "ada_ln"
-fe_layer_norm_after_blocks: [11]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
+fe_layer_norm_after_blocks: [9]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
 fe_impute_latent_noise_std: 0.0  # 1e-4
 fe_impute_latent_diffusion_noise_std: 1e-3  # 1e-4
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
