@@ -277,9 +277,11 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
             else:
                 _logger.debug(f"Latent group already exists at {group_path}, skipping creation.")
             extra_written = False
+            latent_names = set(latents_for_sample)
             for latent_name, latent_data in latents_for_sample.items():
                 latent_array = np.asarray(latent_data)
                 extra_components, latent_array = _split_extra_tokens(
+                    latent_name,
                     latent_array,
                     coords_len,
                     num_register_tokens,
@@ -287,6 +289,8 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
                 )
                 if extra_components is not None and not extra_written:
                     for extra_name, extra_array in extra_components.items():
+                        if extra_name in latent_names:
+                            continue
                         _write_array(group, extra_name, extra_array)
                         _logger.debug(
                             f"Wrote {extra_name} shape {extra_array.shape} "
@@ -348,6 +352,7 @@ def _write_array(group, name: str, data: npt.NDArray) -> None:
 
 
 def _split_extra_tokens(
+    latent_name: str,
     latent_array: npt.NDArray,
     coords_len: int | None,
     num_register_tokens: int,
@@ -356,17 +361,19 @@ def _split_extra_tokens(
     num_extra_tokens = num_register_tokens + num_class_tokens
     if (
         coords_len is not None
-        and num_extra_tokens > 0
         and latent_array.ndim >= 1
         and latent_array.shape[0] == coords_len + num_extra_tokens
+        and latent_name == "latent_state"
     ):
         extra_components: dict[str, npt.NDArray] = {}
         offset = 0
-        if num_register_tokens > 0:
-            extra_components["extra_register_tokens"] = latent_array[offset:num_register_tokens]
-            offset += num_register_tokens
-        if num_class_tokens > 0:
-            extra_components["extra_class_token"] = latent_array[offset : offset + num_class_tokens]
+        extra_components[f"{latent_name}_register_tokens"] = latent_array[
+            offset : offset + num_register_tokens
+        ]
+        offset += num_register_tokens
+        extra_components[f"{latent_name}_class_token"] = latent_array[
+            offset : offset + num_class_tokens
+        ]
         return extra_components, latent_array[num_extra_tokens:]
     return None, latent_array
 
