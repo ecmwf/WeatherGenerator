@@ -71,7 +71,7 @@ dev = [
 # uv and python can only filter dependencies by platform, not by capability.
 # Following the recommendations from https://docs.astral.sh/uv/guides/integration/pytorch
 # We need to support:
-# x86_64: cpu (unit tests) + gpu 
+# x86_64: cpu (unit tests) + gpu
 # aarch64: gpu
 [project.optional-dependencies]
 
@@ -162,14 +162,18 @@ enable = ["W0201", "W0141"]
 # Most work is done a distributed filesystem, where hardlink is not always possible.
 # Also, trying to resolve some permissions issue, see 44.
 link-mode = "symlink"
-# This guarantees that the build is deterministic and will not be impacted 
-# by future releases of dependencies or sub-dependencies. 
+# This guarantees that the build is deterministic and will not be impacted
+# by future releases of dependencies or sub-dependencies.
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
 exclude-newer = "2026-04-27T00:00:00Z"
 
+# torch 2.9.1 pulls nvidia-nccl-cu12==2.27.5. Override
+# torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
+override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]
+
 # The minimum version of uv required.
-# It is tightly controlled because the format of uv.lock has changed 
+# It is tightly controlled because the format of uv.lock has changed
 # over revisions, causing reformats to happen without reason.
 # Also, relatively recent versions are required to support workspaces.
 required-version = ">=0.7.0"
