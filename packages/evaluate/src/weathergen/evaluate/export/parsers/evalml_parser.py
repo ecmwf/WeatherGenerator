@@ -145,9 +145,7 @@ class EvalmlParser(CfParser):
 
                 values = self.scale_data(da_sub.sel(channel=var), var).values
                 if accumulated:
-                    cumulative[var] = (
-                        values if var not in cumulative else cumulative[var] + values
-                    )
+                    cumulative[var] = values if var not in cumulative else cumulative[var] + values
                     values = cumulative[var]
 
                 self._write_field(
