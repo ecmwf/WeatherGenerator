@@ -301,7 +301,14 @@ class Model(torch.nn.Module):
         coordinates to its physical space.
     """
 
-    def __init__(self, cf: Config, sources_size, targets_num_channels, targets_coords_size):
+    def __init__(
+        self,
+        cf: Config,
+        sources_size,
+        targets_num_channels,
+        targets_coords_size,
+        condition_num_channels,
+    ):
         """
         Args:
             cf : Configuration with model parameters
@@ -328,7 +335,10 @@ class Model(torch.nn.Module):
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
         self.streams: dict[str, typing.Any] = cf.streams
+        self.data_stream_names = None
         self.target_token_engines = None
+        self.data_streams: list = None
+        self.forecast_aux_infos = condition_num_channels
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
             "Local attention not adapted for register tokens"
@@ -379,7 +389,12 @@ class Model(torch.nn.Module):
 
         mode_cfg = cf.training_config
         if cf.fe_num_blocks > 0:
-            self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
+            self.forecast_engine = ForecastingEngine(
+                cf,
+                mode_cfg,
+                self.num_healpix_cells,
+                self.forecast_aux_infos if self.forecast_aux_infos > 0 else None,
+            )
         else:
             self.forecast_engine = IdentityEngine()
 
@@ -390,6 +405,21 @@ class Model(torch.nn.Module):
         self.pred_heads = torch.nn.ModuleDict()
 
         # determine stream names once so downstream components use consistent keys
+        self.data_stream_names = [
+            stream_name
+            for stream_name, stream_cfg in cf.streams.items()
+            if stream_cfg.get("type") != "condition"
+        ]
+
+        self.data_streams = [
+            stream_cfg
+            for stream_cfg in cf.streams.values()
+            if stream_cfg.get("type") != "condition"
+        ]
+
+        for i_stream, _ in enumerate(self.data_streams):
+            stream_name = self.data_stream_names[i_stream]
+
         loss_terms = [
             v.type for _, v in cf.training_config.losses.items() if v.get("enabled", True)
         ]
@@ -399,7 +429,9 @@ class Model(torch.nn.Module):
             ]
 
         if "LossPhysical" in loss_terms:
-            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
+            for i_stream, si in enumerate(self.data_streams):
+                stream_name = self.data_stream_names[i_stream]
+
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
@@ -490,7 +522,9 @@ class Model(torch.nn.Module):
                     )
 
             # iterate again to setup shared spatial pred heads if specified in config
-            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
+            for i_stream, si in enumerate(self.data_streams):
+                stream_name = self.data_stream_names[i_stream]
+
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
@@ -594,7 +628,7 @@ class Model(torch.nn.Module):
 
         num_params_embed = [
             get_num_parameters(self.encoder.embed_engine.embeds[name])
-            for name in self.streams.keys()
+            for name in self.data_stream_names
         ]
         num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)
@@ -697,10 +731,12 @@ class Model(torch.nn.Module):
             without_grad = p_fwd and self.training and step != max(batch.get_output_idxs())
             if without_grad:
                 # Pushforward mode: advance tokens without grad; no decoding with torch.no_grad():
-                tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+                tokens = self.forecast_engine(
+                    tokens, batch.conditions[step], coords=model_params.rope_coords
+                )
                 continue
 
-            tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
+            tokens = self.forecast_engine(tokens, batch.conditions[step], model_params.rope_coords)
             # decoder predictions
             output = self.predict_decoders(model_params, step, tokens, batch, output)
             # latent predictions (raw and with SSL heads)
@@ -774,7 +810,7 @@ class Model(torch.nn.Module):
         tokens_nbors_lens[0] = 0
 
         # pair with tokens from assimilation engine to obtain target tokens
-        for stream_name in self.streams.keys():
+        for stream_name in self.data_stream_names:
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
                 batch.samples[i_b].streams_data[stream_name].target_coords[step]

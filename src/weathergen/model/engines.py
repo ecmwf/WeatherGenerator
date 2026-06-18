@@ -48,9 +48,21 @@ class EmbeddingEngine(torch.nn.Module):
         self.dtype = get_dtype(self.cf.mixed_precision_dtype)
         self.sources_size = sources_size  # KCT:iss130, what is this?
         self.embeds = torch.nn.ModuleDict()
-        self.streams = cf.streams
+        self.data_stream_names = [
+            stream_name
+            for stream_name, stream_cfg in cf.streams.items()
+            if stream_cfg.get("type") != "condition"
+        ]
 
-        for i, (stream_name, si) in enumerate(self.streams.items()):
+        self.data_streams = [
+            stream_cfg
+            for stream_cfg in cf.streams.values()
+            if stream_cfg.get("type") != "condition"
+        ]
+
+        for i, (si, stream_name) in enumerate(
+            zip(self.data_streams, self.data_stream_names, strict=True)
+        ):
             if si.get("diagnostic", False) or self.sources_size[i] == 0:
                 self.embeds[stream_name] = torch.nn.Identity()
                 continue
@@ -89,7 +101,7 @@ class EmbeddingEngine(torch.nn.Module):
 
         # iterate over all streams
         x_embeds = []
-        for stream_name in self.streams.keys():
+        for stream_name in self.data_stream_names:
             # collect all source tokens from all input_steps and all samples in the batch
             sdata = []
             for istep in range(num_steps_input):
@@ -628,7 +640,8 @@ class ForecastingEngine(torch.nn.Module):
             if noise_std > 0.0:
                 tokens = tokens + torch.randn_like(tokens) * torch.norm(tokens) * noise_std
 
-        aux_info = None
+        aux_info = None if len(fstep) == 0 else fstep.to(dtype=tokens.dtype)
+
         for _b_idx, block in enumerate(self.fe_blocks):
             if isinstance(block, torch.nn.modules.normalization.LayerNorm):
                 tokens = checkpoint(block, tokens, use_reentrant=False)

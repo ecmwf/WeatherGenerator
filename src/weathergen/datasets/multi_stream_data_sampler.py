@@ -32,6 +32,7 @@ from weathergen.datasets.tokenizer_masking import TokenizerMasking
 from weathergen.datasets.utils import (
     get_tokens_lens,
 )
+from weathergen.readers_extra.data_reader_condition import DataReaderCondition
 from weathergen.readers_extra.registry import get_extra_reader
 from weathergen.train.utils import Stage, get_batch_size_from_config
 from weathergen.utils.distributed import is_root
@@ -100,6 +101,10 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mini_epoch = 0
         self.mask_value = 0.0
+        # self.streams, self.condition_streams = (
+        #    [s for s in cf.streams if s.get("type") != "condition"],
+        #    [s for s in cf.streams if s.get("type") == "condition"],
+        # )
         self.rank = cf.rank
         self.world_size = cf.world_size
         self.repeat_data = cf.data_loading.get("repeat_data_in_mini_epoch", False)
@@ -144,8 +149,8 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
         self.check_samples(self._get_fsm())
-        self.streams_datasets = self._init_stream_datasets(cf)
-
+        self.streams_datasets = self._init_data_streams(cf)
+        self.condition_datasets = self._init_condition_streams(cf)
         # RNG seed setup
         rs = cf.data_loading.rng_seed
         nw = cf.data_loading.num_workers
@@ -217,11 +222,40 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return np.arange(self.max_input_steps, perms_len)
 
-    def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
-        """Load dataset readers for all streams from config."""
+    def _get_dataset_class(self, stream_info: dict, stream_name: str) -> type[AnyDataReader]:
+        """Resolve the reader class for a non-condition stream type."""
+        match stream_info["type"]:
+            case "obs":
+                return DataReaderObs
+            case "anemoi":
+                return DataReaderAnemoi
+            case "fesom":
+                return DataReaderFesom
+            case type_name:
+                dataset = get_extra_reader(type_name)
+                if dataset is None:
+                    raise ValueError(
+                        f"Unsupported stream type {stream_info['type']}"
+                        f" for stream name '{stream_name}'."
+                    )
+                return dataset
+
+    def _register_stream_channels(self, stream_info: dict, ds: AnyDataReader) -> None:
+        """Write source/target channel metadata from an instantiated reader into stream_info."""
+        stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
+        stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+        stream_info["target_channel_weights"] = (
+            ds.target_channel_weights
+            if ds.target_channel_weights is not None
+            else [1.0 for _ in ds.target_channels]
+        )
+
+    def _init_data_streams(self, cf) -> dict[StreamName, _Stream]:
+        """Return all the data streams from the config."""
         streams_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
-            # list of sources for current stream
+            if stream_info["type"] == "condition":
+                continue
             streams_datasets[stream_name] = _Stream(stream_info, [])
 
             kwargs = {
@@ -229,18 +263,8 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 "stream_info": stream_info,
                 "stage": self._stage,
             }
-            dataset: type[AnyDataReader] | None = None
-            match stream_info["type"]:
-                case "obs":
-                    dataset = DataReaderObs
-                case "anemoi":
-                    dataset = DataReaderAnemoi
-                case type_name:
-                    dataset = get_extra_reader(type_name)
-                    if dataset is None:
-                        msg = f"Unsupported stream type {stream_info['type']}"
-                        f"for stream name '{stream_name}'."
-                        raise ValueError(msg)
+
+            dataset = self._get_dataset_class(stream_info, stream_name)
 
             for fname in stream_info["filenames"]:
                 fname = pathlib.Path(fname)
@@ -269,18 +293,25 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         + f" from stream config {stream_name}.",
                     )
                 ds = dataset(filename=filename, **kwargs)
-
                 streams_datasets[stream_name].readers += [ds]
-
-            stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
-            stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
-            stream_info["target_channel_weights"] = (
-                ds.target_channel_weights
-                if ds.target_channel_weights is not None
-                else [1.0 for _ in ds.target_channels]
-            )
+                self._register_stream_channels(stream_info, ds)
 
         return streams_datasets
+
+    def _init_condition_streams(self, cf) -> dict[StreamName, _Stream]:
+        """Instantiate and register a condition stream (no backing files required)."""
+        condition_datasets: dict[StreamName, _Stream] = {}
+        for stream_name, stream_info in cf.streams.items():
+            if stream_info["type"] != "condition":
+                continue
+            condition_datasets[stream_name] = _Stream(stream_info, [])
+            if is_root():
+                logger.info(f"Opening condition dataset from stream config {stream_info['name']}.")
+            ds = DataReaderCondition(
+                tw_handler=self.time_window_handler, stream_info=stream_info, filename=None
+            )
+            condition_datasets[stream_name].readers += [ds]
+        return condition_datasets
 
     def reset(self) -> tuple[Sequence[int], Sequence[int]]:
         """
@@ -362,6 +393,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             + self.tokenizer.get_size_time_embedding()
             for ds in self.streams_datasets.values()
         ]
+
+    def get_condition_num_channels(self):
+        return sum([ds.readers[0].num_channels for ds in self.condition_datasets.values()])
 
     def get_sources_num_channels(self):
         return [ds.readers[0].get_source_num_channels() for ds in self.streams_datasets.values()]
@@ -561,6 +595,36 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return stream_data
 
+    def _build_condition_data(
+        self,
+        batch: ModelBatch,
+        condition_ds: AnyDataReader,
+        base_idx: TIndex,
+        num_output_steps: int,
+    ):
+        """
+        Collect encoded condition values for every forecast step.
+
+        Parameters
+        ----------
+        condition_ds :
+            The condition reader (DataReaderCondition instance).
+        base_idx :
+            Base time index for this sample.
+        num_output_steps :
+            Total number of output/forecast steps.
+
+        Returns
+        -------
+        np.ndarray of shape (num_output_steps - output_offset, num_channels)
+        """
+
+        for i in range(num_output_steps):
+            condition_data = condition_ds.get_condition(
+                base_idx + (self.time_step * i) // self.step_timedelta
+            )
+            batch.get_source_samples().conditions[i] += condition_data
+
     def _get_data_windows(self, base_idx, num_forecast_steps, num_steps_input_max, stream_ds):
         """
         Collect all data needed for current stream to potentially amortize costs by
@@ -685,7 +749,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             num_output_steps,
         )
 
-        # for all streams
+        # for all data streams
         for stream_name, stream_data in self.streams_datasets.items():
             stream_info, stream_ds = stream_data.info, stream_data.readers
             (target_masks, source_masks, source_to_target) = masks_streams[stream_name]
@@ -753,6 +817,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     s_idx for s_idx, tid in enumerate(source_to_target) if tid == tidx
                 ]
                 batch.add_target_stream(tidx, student_indices, stream_name, sdata, target_metadata)
+
+        # for condition streams
+        for _, condition_data in self.condition_datasets.items():
+            condition_ds = condition_data.readers
+            self._build_condition_data(batch, condition_ds[0], idx, num_output_steps)
 
         source_in_steps = input_steps.max().item()
         target_in_steps = np.array([tc.get("num_steps_input", 1) for _, tc in target_cfgs.items()])

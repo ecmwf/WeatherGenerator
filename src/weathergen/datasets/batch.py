@@ -154,6 +154,7 @@ class BatchSamples:
         self.output_steps = output_steps
         self.output_idxs = output_idxs
         self.device = None
+        self.conditions = [[] for i in range(output_steps)]
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -165,6 +166,11 @@ class BatchSamples:
         self.tokens_lens = (
             self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
         )
+
+        self.conditions = [
+            torch.tensor(cond, dtype=torch.float32, device=device) if len(cond) > 0 else cond
+            for cond in self.conditions
+        ]
 
         self.device = device
 

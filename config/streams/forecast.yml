@@ -7,26 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# logging config
-train_logging:
-
-  # performance metrics:
-  track_performance_metrics: True
-
-# config for training
-training_config:
-
-  metrics: 2
-
-
-  num_mini_epochs: 10
-  samples_per_mini_epoch: 4096
-  shuffle: True
-
-  model_input: {
-    "forecasting" : {
-      # masking strategy: "random", "healpix", "forecast"
-      masking_strategy: "forecast",
-      num_samples: 8
-      },
-    }
+Forecast_conditions :
+  type : condition
+  filenames : []
+  variables : ['start_day', 'start_time', 'end_day', 'end_time']
+  transform : "absolute"  # absolute, cos_sin, fourier
+  entry_point : "forecast_engine"
+  emb_dimension : None 
