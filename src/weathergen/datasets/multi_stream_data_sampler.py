@@ -242,12 +242,12 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            if stream_info["type"] == "anemoi" and stream_info.get("anemoi_config"):
-                stream_filenames = [pathlib.Path()]
-            else:
-                stream_filenames = stream_info["filenames"]
+            #if stream_info["type"] == "anemoi" and stream_info.get("anemoi_config"):
+            #    stream_filenames = [pathlib.Path()]
+            #else:
+            #    stream_filenames = stream_info["filenames"]
 
-            for fname in stream_filenames:
+            for fname in stream_info.get("filenames", [pathlib.Path()]):
                 fname = pathlib.Path(fname)
                 # dont check if file exists since zarr stores might be directories
                 if fname.exists():
