@@ -816,18 +816,23 @@ class TargetPredictionEngineClassic(nn.Module):
         tokens_lens = latent_lens
         tcs_aux = coordinates
 
+        # Per-block activation checkpointing must be OFF when this decoder is reused per
+        # ensemble member under DDP: each checkpoint recompute re-fires the reducer's grad
+        # hooks for the reused params → "marked ready twice". Plain (un-checkpointed) reuse
+        # is DDP-safe. Gated by decoder_checkpointing (default True preserves old behaviour).
+        use_ckpt = self.cf.get("decoder_checkpointing", True)
+
+        def run_block(block, *args):
+            if use_ckpt:
+                return checkpoint(block, *args, use_reentrant=False)
+            return block(*args)
+
         for ib, block in enumerate(self.tte):
             if self.cf.pred_self_attention and ib % 3 == 1:
-                tc_tokens = checkpoint(block, tc_tokens, tcs_lens, tcs_aux, use_reentrant=False)
+                tc_tokens = run_block(block, tc_tokens, tcs_lens, tcs_aux)
             else:
-                tc_tokens = checkpoint(
-                    block,
-                    tc_tokens,
-                    tokens_stream,
-                    tcs_lens,
-                    tokens_lens,
-                    tcs_aux,
-                    use_reentrant=False,
+                tc_tokens = run_block(
+                    block, tc_tokens, tokens_stream, tcs_lens, tokens_lens, tcs_aux
                 )
         return tc_tokens
 

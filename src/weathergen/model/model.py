@@ -1038,23 +1038,25 @@ class Model(torch.nn.Module):
                     assert pred.shape[0] == M * P
                     pred = pred.reshape(M, P, pred.shape[-1])
                 else:
-                    # Process each member independently to avoid exceeding the CUDA grid
-                    # dimension limit (gridDim.y/z max = 65535).  Batching all M members
-                    # together gives M*B*H groups; with M=10 and H=12288 this is 122880 > 65535.
-                    kv_per_member = B * H * 9 * Q
-                    # Lens for a single member: [0, 9, 9, ..., 9] with B*H+1 entries
-                    tokens_nbors_lens_single = tokens_nbors_lens[: B * H + 1]
-                    tc_tokens_outs = []
-                    for m in range(M):
-                        tc_tokens_out_m = self.target_token_engines[stream_name](
-                            latent=tokens_nbors[m * kv_per_member : (m + 1) * kv_per_member],
-                            output=tc_tokens,
-                            latent_lens=tokens_nbors_lens_single,
-                            output_lens=tcs_lens,
-                            coordinates=t_coords,
-                        )
-                        tc_tokens_outs.append(tc_tokens_out_m)
-                    tc_tokens_out = torch.cat(tc_tokens_outs, dim=0)  # [M*P, embed_dim]
+                    # Decode all M members in a SINGLE varlen call. Both query groups
+                    # (tcs_lens_in) and KV groups (tokens_nbors_lens) are M-major with N=B*H
+                    # groups per member, so member m's queries pair with member m's KVs. The
+                    # decoder params are therefore used exactly ONCE per forward — no per-member
+                    # reuse — which keeps the per-block activation checkpointing inside the
+                    # engine DDP-safe (reuse + checkpointing is what trips "marked ready twice").
+                    # The single call launches M*B*H attention groups; this must stay under the
+                    # CUDA grid-dim cap (65535), which holds for M<=4 at healpix-5 with B=1.
+                    assert M * N <= 65535, (
+                        f"M*B*H={M * N} exceeds the CUDA grid-dim limit (65535); "
+                        f"lower latent_perturbation_num_members"
+                    )
+                    tc_tokens_out = self.target_token_engines[stream_name](
+                        latent=tokens_nbors,
+                        output=tc_tokens_in,
+                        latent_lens=tokens_nbors_lens,
+                        output_lens=tcs_lens_in,
+                        coordinates=t_coords.repeat(M, 1),
+                    )  # [M*P, embed_dim]
                     pred = self.pred_heads[stream_name](tc_tokens_out)
                     # pred: [E, M*P, C]
                     # The M blocks in dim-1 are contiguous (repeat(M,1) ordering), so we can
