@@ -224,10 +224,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Compute sigma from noise_level_rn.
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
         # log_uniform: noise_level_rn is log_sigma directly; sigma = exp(noise_level_rn)
-        if self.noise_distribution == "log_uniform":
+        # during validation, noise_level_rn is set to a fixed value (default: 0.0), so sigma = exp(0) = 1.0 (no noise) by default
+        if self.noise_distribution == "log_uniform" or not self.training:
             sigma = noise_level_rn.exp()
-        else:
+        elif self.noise_distribution == "log_normal":
             sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
+        else:
+            raise ValueError(f"Unsupported noise_distribution: {self.noise_distribution}")
         n = torch.randn_like(y) * sigma
 
         self._noised_tokens = (y + n).detach()
