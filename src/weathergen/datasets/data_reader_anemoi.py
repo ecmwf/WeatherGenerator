@@ -58,7 +58,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         """
 
         # use anemoi_config if it's defined; ignore filename in this case
-        data_paths = stream_info.pop("data_paths", [])
+        data_paths = stream_info.get("data_paths", [])
         anemoi_config = stream_info.get("anemoi_config")
         if anemoi_config:
             # convert OmegaConf DictConfig to a plain dict for anemoi.open_dataset.
