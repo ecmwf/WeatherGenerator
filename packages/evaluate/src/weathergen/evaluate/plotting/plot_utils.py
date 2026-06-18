@@ -390,6 +390,9 @@ def plot_metric_region(
 
                 title = f"{metric.upper()} | {stream} | {ch}"
 
+                ref_line_dict = {"ssr_adj": 1.0}
+                line = ref_line_dict.get(metric)
+
                 plotter.plot(
                     selected_data,
                     labels,
@@ -399,6 +402,7 @@ def plot_metric_region(
                     print_summary=print_summary,
                     title=title,
                     colors=colors,
+                    line=line,
                 )
 
 

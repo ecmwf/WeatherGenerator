@@ -70,10 +70,10 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"'{self.conditioning}' (got offset={_offset})"
         )
         _input_num_steps = self.cf.get("training_config", {}).get("model_input", {}).get("forecasting", {}).get("num_steps_input", 0)
-        # assert self.conditioning != "forecast" or _input_num_steps == 2, (
-        #     f"forecast.input_num_steps must be 2 when fe_diffusion_model_conditioning is "
-        #     f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
-        # )
+        assert self.conditioning != "forecast" or _input_num_steps == 2, (
+            f"forecast.input_num_steps must be 2 when fe_diffusion_model_conditioning is "
+            f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
+        )
         assert self.conditioning not in ["date_time", "date", "time"] or _input_num_steps == 1, (
             f"forecast.input_num_steps must be 1 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
