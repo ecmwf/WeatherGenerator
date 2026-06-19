@@ -260,7 +260,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                     # The same dataset can exist on different locations in the filesystem,
                     # so we need to choose here.
-                    filename = filenames[0]
+                    filename = next(f for f in filenames if f.exists())
 
                 ds_type = stream_info["type"]
                 if is_root():
