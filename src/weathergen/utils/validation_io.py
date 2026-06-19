@@ -141,14 +141,10 @@ def write_output(
     else:
         output_stream_names = stream_names
 
-    # Allow a pseudo-stream name 'latent' to enable latent writing while
-    # skipping it from the physical streams mapping.
-    # None means latent
-    output_streams: dict[str, int | None] = {
+    write_latents = io.LATENT_STREAM in output_stream_names
+    output_streams: dict[str, int] = {
         name: stream_names.index(name) for name in output_stream_names if name != io.LATENT_STREAM
     }
-    if io.LATENT_STREAM in output_stream_names:
-        output_streams[io.LATENT_STREAM] = None
     _logger.debug(f"Using output streams: {output_streams} from streams: {stream_names}")
 
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
@@ -173,13 +169,7 @@ def write_output(
     source_windows = (twh.window(idx) for idx in sample_idxs)
     source_intervals = [TimeRange(window.start, window.end) for window in source_windows]
 
-    latents_all = (
-        get_latent_output(batch, model_output) if io.LATENT_STREAM in output_streams else None
-    )
-
-    # Create output_streams dict without latent for passing to OutputBatchData
-    # (latent is handled separately)
-    output_streams_physical = {k: v for k, v in output_streams.items() if v is not None}
+    latents_all = get_latent_output(batch, model_output) if write_latents else None
 
     data = io.OutputBatchData(
         sources,
@@ -189,7 +179,7 @@ def write_output(
         targets_coords_all,
         targets_times_all,
         targets_lens,
-        output_streams_physical,
+        output_streams,
         target_channels,
         source_channels,
         geoinfo_channels,
