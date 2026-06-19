@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-import shutil
 
 import astropy_healpix as hp
 import numpy as np
@@ -188,15 +187,7 @@ def write_output(
         forecast_offset=forecast_offset,
     )
 
-    # Delete existing store on first batch to avoid "Group already exists" errors
-    # when re-running inference
     store_path = config.get_path_results(cf, mini_epoch)
-    if batch_idx == 0 and store_path.exists():
-        _logger.info(f"Removing existing output store from previous run: {store_path}")
-        if store_path.is_dir():
-            shutil.rmtree(store_path)
-        else:
-            store_path.unlink()
 
     with zarrio_writer(store_path) as zio:
         for subset in data.items():
