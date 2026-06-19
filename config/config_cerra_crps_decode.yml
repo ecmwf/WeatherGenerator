@@ -107,7 +107,9 @@ general:
 
   with_ddp: True
 
-  multiprocessing_method: "fork"
+  # zarr-v3's asyncio event loop is not fork-safe; forked DataLoader workers abort
+  # during CERRA validation. "spawn" gives each worker a fresh interpreter + event loop.
+  multiprocessing_method: "spawn"
 
   desc: ""
   run_id: ???
@@ -126,6 +128,9 @@ data_loading :
   rng_seed: ???
   repeat_data_in_mini_epoch : False
   memory_pinning: True
+  # keep spawned workers alive across mini-epochs / validation calls to avoid paying
+  # the (expensive) spawn startup + reader re-open every time.
+  persistent_workers: True
 
 
 # config for training

@@ -663,103 +663,6 @@ def plot_loss_per_run(
     plt.close()
 
 
-def plot_scalar_metrics(
-    runs_ids: dict[str, list],
-    runs_data: list[Metrics],
-    runs_active: list[bool],
-    metric_patterns: list[str],
-    plot_dir: Path,
-    stage: str = "train",
-    x_axis: str = "samples",
-    legend_outside: bool = False,
-):
-    """
-    Plot arbitrary scalar metrics stored in the metrics log file.
-
-    Groups columns by their first path segment (the part before the first '/') and
-    produces one figure per group.  For example, the keys
-
-        latent_perturbation/sigma
-        latent_perturbation/log_sigma
-        latent_perturbation/log_sigma_grad_norm
-
-    all belong to the group ``latent_perturbation`` and are drawn in a single figure,
-    one subplot per metric.  Similarly all ``spread_skill/*`` keys land in one figure.
-
-    Parameters
-    ----------
-    metric_patterns : list[str]
-        Substrings used to select column names (e.g. ``["latent_perturbation", "spread_skill"]``).
-    stage : str
-        ``"train"`` or ``"val"``; selects which DataFrame to read from.
-    """
-    prop_cycle = plt.rcParams["axes.prop_cycle"]
-    colors = prop_cycle.by_key()["color"] + ["r", "g", "b", "k", "y", "m"]
-
-    # Collect all matching column names across all runs (union), grouped by prefix.
-    groups: dict[str, list[str]] = {}
-    for run_data in runs_data:
-        df = run_data.train if stage == "train" else run_data.val
-        if df is None or df.is_empty():
-            continue
-        for col in df.columns:
-            if not any(pat in col for pat in metric_patterns):
-                continue
-            prefix = col.split("/")[0]
-            groups.setdefault(prefix, [])
-            if col not in groups[prefix]:
-                groups[prefix].append(col)
-
-    if not groups:
-        _logger.warning(
-            f"plot_scalar_metrics: no columns matched patterns {metric_patterns} in stage={stage}"
-        )
-        return
-
-    x_col_hint = x_axis  # substring to identify the x-axis column
-
-    for group_name, cols in groups.items():
-        for col in cols:
-            fig, ax = plt.subplots(1, 1, figsize=(10, 4), dpi=PLOT_DPI_VALUE)
-
-            legend_str = []
-            for j, run_data in enumerate(runs_data):
-                df = run_data.train if stage == "train" else run_data.val
-                if df is None or df.is_empty() or col not in df.columns:
-                    continue
-                x_col = next(
-                    (c for c in df.columns if x_col_hint in c),
-                    None,
-                )
-                if x_col is None:
-                    continue
-                x_vals = np.array(df[x_col])
-                y_vals = np.array(df[col], dtype=float)
-                mask = ~np.isnan(y_vals)
-                run_id = run_data.run_id
-                ax.plot(x_vals[mask], y_vals[mask], "-", color=colors[j % len(colors)])
-                legend_str.append(
-                    ("R" if runs_active[j] else "X") + " : " + run_id + " : " + list(runs_ids.values())[j][1]
-                )
-
-            ax.set_title(f"{col} ({stage})")
-            ax.set_xlabel(x_axis)
-            ax.grid(True, which="both", ls="-")
-            if legend_str:
-                _add_legend(legend_str, ax=ax, legend_outside=legend_outside)
-
-            fig.tight_layout()
-
-            safe_col = col.replace("/", "_")
-            rstr = "".join([f"{r}_" for r in runs_ids])
-            if len(rstr) + len(safe_col) + 10 > MAX_FILENAME_LEN:
-                rstr = rstr[: MAX_FILENAME_LEN - len(safe_col) - 10]
-            plt_fname = plot_dir / f"{rstr}{safe_col}_{stage}.png"
-            _logger.info(f"Saving scalar metrics plot to '{plt_fname}'")
-            fig.savefig(plt_fname, bbox_inches="tight")
-            plt.close(fig)
-
-
 def plot_train(args=None):
     # Example usage:
     # When providing a YAML for configuring the run IDs:
@@ -876,19 +779,6 @@ def plot_train(args=None):
         action="store_true",
         help="Use log scale for the x-axis (produces log-log plots)",
     )
-    parser.add_argument(
-        "--scalar-metrics",
-        dest="scalar_metrics",
-        default=[],
-        type=str,
-        nargs="+",
-        help=(
-            "Substrings to match against logged metric keys for scalar-metric plots. "
-            "E.g. --scalar-metrics latent_perturbation spread_skill  "
-            "will produce one figure per prefix group (latent_perturbation_train.png, "
-            "spread_skill_val.png, …)."
-        ),
-    )
 
     run_id_group = parser.add_mutually_exclusive_group()
     run_id_group.add_argument(
@@ -954,11 +844,10 @@ def plot_train(args=None):
         # remove "all" key that is a special flag and not an actual stream name
         streams.remove("all")
 
-    scalar_metrics = list(args.scalar_metrics) if args.scalar_metrics else []
+    # read logged data
 
-    # read logged data — include scalar metric patterns so those columns are also loaded
     runs_data = [
-        TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams + scalar_metrics)
+        TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
         for run_id in runs_ids
     ]
 
@@ -1059,20 +948,6 @@ def plot_train(args=None):
         plot_dir=out_dir,
         legend_outside=args.legend_outside,
     )
-
-    # plot scalar metrics (latent_perturbation/sigma, spread_skill/…, etc.)
-    if scalar_metrics:
-        for stage in ("train", "val"):
-            plot_scalar_metrics(
-                runs_ids,
-                runs_data,
-                runs_active,
-                metric_patterns=scalar_metrics,
-                plot_dir=out_dir,
-                stage=stage,
-                x_axis="weathergen.step",
-                legend_outside=args.legend_outside,
-            )
 
 
 if __name__ == "__main__":

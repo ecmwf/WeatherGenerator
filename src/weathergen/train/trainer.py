@@ -369,11 +369,16 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": cf.data_loading.num_workers,
+            # persistent_workers requires num_workers > 0; guard so num_workers=0 (debug) works
+            "persistent_workers": (
+                cf.data_loading.get("persistent_workers", False) and cf.data_loading.num_workers > 0
+            ),
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         # loader_params["num_workers"]=  0
+        val_loader_params = loader_params | {"num_workers": min(cf.data_loading.num_workers, 6)}
         self.data_loader_validation = torch.utils.data.DataLoader(
-            self.dataset_val, **loader_params, sampler=None
+            self.dataset_val, **val_loader_params, sampler=None
         )
 
         for stage_label, extra_cfg in self.extra_val_cfgs.items():
@@ -383,7 +388,7 @@ class Trainer(TrainerBase):
             # cap workers: each loader spawns its own processes, each re-opening all
             # stream readers
             extra_loader_params = loader_params | {
-                "num_workers": min(cf.data_loading.num_workers, 2)
+                "num_workers": min(cf.data_loading.num_workers, 6)
             }
             self.data_loaders_val_extra[stage_label] = torch.utils.data.DataLoader(
                 self.datasets_val_extra[stage_label], **extra_loader_params, sampler=None
@@ -832,9 +837,6 @@ class Trainer(TrainerBase):
                 _num_members = self.cf.get("latent_perturbation_num_members", 0)
                 _spread_skill_acc = {}  # stream_name -> {"spread_sum", "rmse_sum", "count"}
                 for bidx, batch in enumerate(dataset_val_iter):
-                    if cf.data_loading.get("memory_pinning", False):
-                        # pin memory for faster CPU-GPU transfer
-                        batch = batch.pin_memory()
 
                     batch.to_device(self.device)
 

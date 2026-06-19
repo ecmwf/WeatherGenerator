@@ -93,6 +93,15 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self._stage = stage
 
         self.mini_epoch = 0
+        # Effective epoch as seen *inside a worker process*. Under persistent_workers the
+        # template's mini_epoch (bumped by advance() in the main process) never reaches the
+        # live workers, so we cannot key the seed / curriculum on self.mini_epoch there.
+        # Instead each worker tracks its own counter: initialised from the inherited
+        # mini_epoch on its first __iter__, then +1 per subsequent __iter__ (one __iter__ ==
+        # one mini_epoch for every loader call site). Matches mini_epoch exactly in the
+        # non-persistent case, and stays correct when workers outlive a mini_epoch.
+        self._effective_epoch = 0
+        self._worker_iter_started = False
         self.mask_value = 0.0
         self.streams = cf.streams
         self.rank = cf.rank
@@ -156,7 +165,11 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # RNG seed setup
         rs = cf.data_loading.rng_seed
         nw = cf.data_loading.num_workers
+        # Immutable base seed. The per-(rank, worker, epoch) seed is derived from this in
+        # worker_workset() into self._worker_rng_seed; this base is never mutated so the
+        # derivation cannot compound across mini_epochs under persistent_workers.
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
+        self._worker_rng_seed = self.data_loader_rng_seed
 
         self.rng = None
 
@@ -293,7 +306,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         Returns: permutation index, forecast steps index
         """
-        self.rng = np.random.default_rng(self.data_loader_rng_seed)
+        self.rng = np.random.default_rng(self._worker_rng_seed)
         fsm = self._get_fsm()
         self.check_samples(fsm)
         perms = self._calc_baseperms(fsm)
@@ -339,7 +352,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """Obtain maximum number of forecast steps for current mini epoch."""
         # fixed number of forecast steps for this run
         if self.forecast_policy != "random":
-            idx = min(self.mini_epoch, len(self.list_num_forecast_steps) - 1)
+            idx = min(self._effective_epoch, len(self.list_num_forecast_steps) - 1)
             fsm = self.list_num_forecast_steps[idx]
         else:
             fsm = self.list_num_forecast_steps.max()
@@ -811,6 +824,16 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         Return :
             batch of data
         """
+        # Track the effective epoch *within this process*. The first __iter__ adopts the
+        # inherited mini_epoch (correct at worker-birth); each later __iter__ (one per
+        # mini_epoch) advances it by one, so persistent workers stay in step with the
+        # main-process advance() they never observe directly.
+        if self._worker_iter_started:
+            self._effective_epoch += 1
+        else:
+            self._effective_epoch = self.mini_epoch
+            self._worker_iter_started = True
+
         iter_start, iter_end = self.worker_workset()
         logger.info(f"iter_start={iter_start}, iter_end={iter_end}, len={self.len}")
 
@@ -860,19 +883,21 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             # assert self.world_size == 1, self.world_size
             iter_start = 0
             iter_end = len(self)
+            # single-process (e.g. num_workers=0 debug): no per-worker fan-out, seed off base.
+            self._worker_rng_seed = self.data_loader_rng_seed
 
         else:
-            # ensure the rng seed is fully unique across workers and mini_epochs
-            # the worker processes are generated as bit-wise copy of the "template" (the actual
-            # instance of the present class that is created) whenever __iter__ is started. This
-            # happens for each mini_epoch, for train and validation, and independently for each DDP
-            # worker. After the bit-wise copy, the rng seed needs to be made unique for
-            # DDP workers, loader process, mini_epoch.
+            # Make the rng seed unique across DDP ranks, loader workers, and mini_epochs.
+            # Derive (do NOT mutate the base) so this cannot compound when a persistent
+            # worker runs worker_workset() once per mini_epoch. _effective_epoch (not
+            # mini_epoch) is the per-epoch component so it advances even in live workers.
+            # Numerically identical to the previous base *= f(...) in the non-persistent
+            # case, where _effective_epoch == mini_epoch.
             dist = torch.distributed
-            self.data_loader_rng_seed *= (
+            self._worker_rng_seed = self.data_loader_rng_seed * (
                 (((dist.get_rank() + 1) * 73) if dist.is_initialized() else 1)
                 * ((worker_info.id + 1) * 37)
-                * (self.mini_epoch + 13)
+                * (self._effective_epoch + 13)
                 * 7
             )
             # split workload
