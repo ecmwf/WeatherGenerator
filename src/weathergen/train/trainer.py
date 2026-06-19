@@ -682,6 +682,10 @@ class Trainer(TrainerBase):
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
 
+            for idx, (name, param) in enumerate(self.model.named_parameters()):
+                if param.requires_grad and param.grad is None:
+                    logger.warning(f"[rank={self.cf.rank}] no grad: {idx} {name} {tuple(param.shape)}")
+
             # --- Point 2: verify sigma gradient on the very first backward pass ---
             if self.cf.general.istep == 0 and is_root():
                 _log_sigma = getattr(self.model, "latent_perturbation_log_sigma", None)

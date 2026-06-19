@@ -85,7 +85,8 @@ latent_perturbation_sigma_learnable: True
 
 # ASSUMPTION: freeze the whole encoder (probe the frozen representation). Set to "" to
 # fine-tune end-to-end, or narrow the regex to unfreeze parts.
-freeze_modules: ".*encoder.*|^(?!.*CERRA).*$"
+freeze_modules: ".*encoder.*|.*deep_ssl_fusion.*" # |^(?!.*CERRA).*$" 
+# freeze_modules: "^(encoder|forecast_engine|latent_heads|latent_pre_norm|deep_ssl_fusion|deep_ssl_level_projections|embed_target_coords_(?!CERRA$).+|TargetPredictionEngine_(?!CERRA$).+|TargetPredictionEngineClassic_(?!CERRA$).+|BilinearDecoder_(?!CERRA$).+|EnsPredictionHead_(?!CERRA$).+)$"
 
 norm_type: "LayerNorm"
 
