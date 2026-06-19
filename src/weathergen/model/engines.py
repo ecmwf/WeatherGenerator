@@ -750,7 +750,8 @@ class ForecastingEngine(torch.nn.Module):
                     tokens = checkpoint(block, tokens, coords, conditioning, use_reentrant=False)
 
         if self.out_proj is not None:
-            tokens = self.out_proj(tokens)  # (B, H, 2D) -> (B, H, D)
+            # tokens = self.out_proj(tokens)  # (B, H, 2D) -> (B, H, D)
+            tokens = checkpoint(self.out_proj, tokens, use_reentrant=False)
 
         return tokens if not forecast_residual else (tokens_in + tokens)
 

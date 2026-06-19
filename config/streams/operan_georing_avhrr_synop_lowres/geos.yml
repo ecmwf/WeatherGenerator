@@ -16,11 +16,12 @@ METEOSAT_SEVIRI_IR :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   loss_weight : 1.0
   location_weight : cosine_latitude
-  masking_override :
-    model_input :
-      masking_strategy: 'random'
-      masking_strategy_config :
-        rate: 1.0
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
@@ -51,11 +52,12 @@ GOES_ABI_IR :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day','zenith', 'cos_sza']
   loss_weight : 1.0
   location_weight : cosine_latitude
-  masking_override :
-    model_input :
-      masking_strategy: 'random'
-      masking_strategy_config :
-        rate: 1.0
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
@@ -86,11 +88,12 @@ HIMAWARI_AHI_IR :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza']
   loss_weight : 1.0
   location_weight : cosine_latitude
-  masking_override :
-    model_input :
-      masking_strategy: 'random'
-      masking_strategy_config :
-        rate: 1.0
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
@@ -121,11 +124,12 @@ GOES_ABI_VIS :
   geoinfo_channels : ['zenith']
   loss_weight : 1.0
   location_weight : cosine_latitude
-  masking_override :
-    model_input :
-      masking_strategy: 'random'
-      masking_strategy_config :
-        rate: 1.0
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
@@ -156,11 +160,12 @@ HIMAWARI_AHI_VIS :
   geoinfo_channels : ['zenith']
   loss_weight : 1.0
   location_weight : cosine_latitude
-  masking_override :
-    model_input :
-      masking_strategy: 'random'
-      masking_strategy_config :
-        rate: 1.0
+  # masking_override :
+  #   model_input :
+  #     masking_strategy: 'random'
+  #     masking_strategy_config :
+  #       # rate: 1.0
+  #       rate: 0.5
   token_size : 1024
   tokenize_spacetime : False
   max_num_targets: 131072
