@@ -258,9 +258,10 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
             else:
                 _logger.debug(f"Latent group already exists at {group_path}, skipping creation.")
             extra_written = False
-            latent_names = set(latents_in_sample)
+            latent_names = {_latent_output_name(name) for name in latents_in_sample}
             for latent_name, latent_data in latents_in_sample.items():
                 latent_array = np.asarray(latent_data)
+                output_name = _latent_output_name(latent_name)
                 extra_components, latent_array = _split_extra_tokens(
                     latent_name,
                     latent_array,
@@ -280,14 +281,14 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
                     extra_written = True
 
                 try:
-                    _write_array(group, latent_name, latent_array)
+                    _write_array(group, output_name, latent_array)
                     _logger.debug(
-                        f"Wrote latent {latent_name} shape {latent_array.shape} "
+                        f"Wrote latent {output_name} shape {latent_array.shape} "
                         f"for sample {global_sample_idx}"
                     )
                 except Exception as e:
                     _logger.warning(
-                        f"Failed to write latent {latent_name} for sample {global_sample_idx}: {e}"
+                        f"Failed to write latent {output_name} for sample {global_sample_idx}: {e}"
                     )
 
             if coords_array is not None and times_array is not None:
@@ -308,9 +309,9 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
 def _infer_latent_points_for_metadata(latents_for_sample: dict) -> int | None:
     """
     Infer latent spatial length for metadata.
-    Prefer z_pre_norm if present, else patch tokens, else first available array.
+    Prefer tokens if present, else patch tokens, else first available array.
     """
-    preferred_keys = ("z_pre_norm", "patch_tokens")
+    preferred_keys = ("tokens", "latent_state", "z_pre_norm", "patch_tokens")
     for key in latents_for_sample.keys():
         if any(pref in key for pref in preferred_keys):
             arr = np.asarray(latents_for_sample[key])
@@ -332,6 +333,14 @@ def _write_array(group, name: str, data: npt.NDArray) -> None:
     group.create_array(name, data=data)
 
 
+def _latent_output_name(name: str) -> str:
+    return {
+        "latent_state": "tokens",
+        "latent_state_class_token": "class_token",
+        "latent_state_register_tokens": "register_tokens",
+    }.get(name, name)
+
+
 def _split_extra_tokens(
     latent_name: str,
     latent_array: npt.NDArray,
@@ -344,17 +353,13 @@ def _split_extra_tokens(
         coords_len is not None
         and latent_array.ndim >= 1
         and latent_array.shape[0] == coords_len + num_extra_tokens
-        and latent_name == "latent_state"
+        and latent_name in ("latent_state", "tokens")
     ):
         extra_components: dict[str, npt.NDArray] = {}
         offset = 0
-        extra_components[f"{latent_name}_register_tokens"] = latent_array[
-            offset : offset + num_register_tokens
-        ]
+        extra_components["register_tokens"] = latent_array[offset : offset + num_register_tokens]
         offset += num_register_tokens
-        extra_components[f"{latent_name}_class_token"] = latent_array[
-            offset : offset + num_class_tokens
-        ]
+        extra_components["class_token"] = latent_array[offset : offset + num_class_tokens]
         return extra_components, latent_array[num_extra_tokens:]
     return None, latent_array
 
@@ -444,15 +449,14 @@ def get_latent_output(batch, model_output):
             for lname, lval in latent_pred.items():
                 if isinstance(lval, LatentState):
                     fields = {
-                        "": lval.z_pre_norm,
+                        "tokens": lval.z_pre_norm,
                         "register_tokens": lval.register_tokens,
                         "class_token": lval.class_token,
                     }
                     for field_name, tensor in fields.items():
                         if tensor is not None:
                             sample_tensor = tensor[i_sample]
-                            output_name = lname if field_name == "" else f"{lname}_{field_name}"
-                            per_sample[output_name] = sample_tensor.detach().to(fp32).cpu().numpy()
+                            per_sample[field_name] = sample_tensor.detach().to(fp32).cpu().numpy()
                 else:
                     per_sample[lname] = lval[i_sample].detach().to(fp32).cpu().numpy()
             latents_all[-1].append(per_sample)
