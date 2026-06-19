@@ -216,9 +216,9 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
     sample_start = batch_idx * batch_size
 
     # Iterate over latent data
-    for t_idx, latents_for_step in enumerate(data.latents):
-        for sample_idx_in_batch, latents_for_sample in enumerate(latents_for_step):
-            if not latents_for_sample:
+    for t_idx, latents_in_step in enumerate(data.latents):
+        for sample_idx_in_batch, latents_in_sample in enumerate(latents_in_step):
+            if not latents_in_sample:
                 continue
 
             # Calculate global sample index
@@ -227,7 +227,7 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
             # Create group path: sample/latent/forecast_step
             group_path = f"{global_sample_idx}/{io.LATENT_STREAM}/{t_idx}"
 
-            npoints = _infer_latent_points_for_metadata(latents_for_sample)
+            npoints = _infer_latent_points_for_metadata(latents_in_sample)
             (
                 coords_array,
                 geoinfo_array,
@@ -258,8 +258,8 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
             else:
                 _logger.debug(f"Latent group already exists at {group_path}, skipping creation.")
             extra_written = False
-            latent_names = set(latents_for_sample)
-            for latent_name, latent_data in latents_for_sample.items():
+            latent_names = set(latents_in_sample)
+            for latent_name, latent_data in latents_in_sample.items():
                 latent_array = np.asarray(latent_data)
                 extra_components, latent_array = _split_extra_tokens(
                     latent_name,
