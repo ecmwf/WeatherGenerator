@@ -218,7 +218,7 @@ training_config:
 
   optimizer:
     grad_clip: 0.25
-    weight_decay: 0.05
+    weight_decay: 0.1
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.9875 # at B=8 beta1 =0.9
@@ -226,6 +226,12 @@ training_config:
       eps : 2e-08
 
   losses : {
+    "physical": {
+        enabled: True,
+        type: LossPhysical,
+        weight: 0.2,
+        loss_fcts: { "mse": { target_source_correspondence: {0 : {0 : "identity"} },}, },
+    },
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
@@ -233,8 +239,8 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 1024, 
-            "dropout_rate": 0.1,
+            "num_blocks": 6, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 2048, 
+            "dropout_rate": 0.2,
             target_source_correspondence: {0 : {0 : "subset"} },
         },
         },

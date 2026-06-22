@@ -144,10 +144,10 @@ training_config:
         enabled: False,
         type: Disabled,
         },
-    # "physical": {
-    #     enabled: False,
-    #     type: Disabled,
-    #     },
+    "physical": {
+        enabled: False,
+        type: Disabled,
+        },
     "forecast": {
         type: LossPhysical,
         loss_fcts: { "mse": { }, },

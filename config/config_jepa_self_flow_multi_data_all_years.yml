@@ -59,7 +59,7 @@ num_class_tokens: 0
 num_register_tokens: 64
 
 # noise before predictor in JEPA
-noise_pre_predictor_std: 0
+noise_pre_predictor_std: 1e-4
 
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
@@ -176,7 +176,7 @@ data_loading :
 training_config:
 
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["student_teacher"]
+  training_mode: ["student_teacher", "masking"]
 
   # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
   # When enabled, intermediate encoder representations are tapped and used as additional
@@ -211,7 +211,7 @@ training_config:
 
   learning_rate_scheduling :
     lr_start: 1e-6
-    lr_max: 1e-4
+    lr_max: 8e-5
     lr_final_decay: 1e-6
     lr_final: 0.0
     num_steps_warmup: 512
@@ -223,14 +223,20 @@ training_config:
 
   optimizer:
     grad_clip: 0.25
-    weight_decay: 0.05
+    weight_decay: 0.1
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.9875 # at B=8 beta1 =0.9
-      beta2 : 0.994 # at B=8 beta1 approx 0.95
+      beta2 : 0.99875 # at B=8 beta1 approx 0.99
       eps : 2e-08
 
   losses : {
+    "physical": {
+        enabled: True,
+        type: LossPhysical,
+        weight: 0.2,
+        loss_fcts: { "mse": { target_source_correspondence: {0 : {0 : "identity"} },}, },
+    },
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
@@ -238,14 +244,14 @@ training_config:
         loss_fcts : {
           "JEPA": {
             'weight': 4, "loss_extra_args": {}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 1024,
+            "num_blocks": 6, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 2048,
             "dropout_rate": 0.1,
             target_source_correspondence: {0 : {0 : "identity"} },
         },
         },
         target_and_aux_calc: { "EMATeacher" :
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 400000,
+            ema_halflife_in_thousands: 300000,
             model_param_overrides : {
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
