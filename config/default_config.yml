@@ -225,7 +225,6 @@ validation_config:
     streams: null,
     # filter channels
     filter_output_channels: {
-      "allow": False,
       "ERA5": []
       }
     }
