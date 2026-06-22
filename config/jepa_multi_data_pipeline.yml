@@ -58,12 +58,20 @@ stages:
     nodes: 2
 
   # Stage 3: Forecasting finetuning (freezes encoder)
-  - name: finetune-forecast-ft
+  - name: finetune-forecast-noise
     command: train-continue
-    from: finetune-forecast
-    config: ./config/config_jepa_multi_data_ft_forecast.yml
-    chain: 2
+    from: pretrain-ft
+    config: ./config/config_jepa_multi_data_ft_forecast_all_years_noise.yml
+    chain: 4
     nodes: 2
+
+  # # Stage 3: Forecasting finetuning (freezes encoder)
+  # - name: finetune-forecast-ft
+  #   command: train-continue
+  #   from: finetune-forecast
+  #   config: ./config/config_jepa_multi_data_ft_forecast.yml
+  #   chain: 2
+  #   nodes: 2
 
   # # Stage 3: Forecasting finetuning (unfreezes encoder)
   # - name: finetune-forecast-2

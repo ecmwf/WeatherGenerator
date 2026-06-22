@@ -1,5 +1,5 @@
 
-streams_directory: "./config/streams/pretrain_multi_data_od/"
+streams_directory: "./config/streams/pretrain_multi_data_all_years/"
 
 general:
 
