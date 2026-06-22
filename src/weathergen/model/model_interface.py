@@ -187,6 +187,12 @@ def init_model_and_shard(
             model.to_empty(device="cuda")
             if with_fsdp:
                 model.reset_parameters()
+        else:
+            # Non-FSDP path: model weights are real tensors (not meta), but
+            # reset_parameters must still be called to apply sigma_init etc.
+            # Unwrap DDP if present — reset_parameters is a custom method not forwarded by DDP.
+            reset_target = model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
+            reset_target.reset_parameters()
 
     # model params
     model_params = ModelParams(cf).create(cf)
@@ -222,13 +228,19 @@ def load_model(cf, model, device, run_id: str, mini_epoch=-1):
             if sharded_meta_param is None:
                 logger.warning(f"Parameter {param_name} from checkpoint not found in model.")
                 continue
-            sharded_tensor = distribute_tensor(
-                full_tensor,
-                sharded_meta_param.device_mesh,
-                sharded_meta_param.placements,
-            )
-            # maybe_sharded_sd[param_name.replace("module.", "")] = nn.Parameter(sharded_tensor)
-            maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+            if hasattr(sharded_meta_param, "device_mesh"):
+                # FSDP-sharded parameter (DTensor) — distribute and wrap as Parameter
+                sharded_tensor = distribute_tensor(
+                    full_tensor,
+                    sharded_meta_param.device_mesh,
+                    sharded_meta_param.placements,
+                )
+                maybe_sharded_sd[param_name] = torch.nn.Parameter(sharded_tensor)
+            else:
+                # Plain buffer (e.g. register_buffer) — FSDP does not shard buffers,
+                # so load directly without distribute_tensor. Move to the correct
+                # device since the checkpoint was loaded onto CPU.
+                maybe_sharded_sd[param_name] = full_tensor.to(device)
         # choose `assign=True` for sharded model since we cannot call `copy_` on meta tensor
         mkeys, ukeys = model.load_state_dict(maybe_sharded_sd, strict=False, assign=True)
 

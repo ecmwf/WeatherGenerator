@@ -369,11 +369,16 @@ class Trainer(TrainerBase):
             "batch_sampler": None,
             "shuffle": False,
             "num_workers": cf.data_loading.num_workers,
+            # persistent_workers requires num_workers > 0; guard so num_workers=0 (debug) works
+            "persistent_workers": (
+                cf.data_loading.get("persistent_workers", False) and cf.data_loading.num_workers > 0
+            ),
         }
         self.data_loader = torch.utils.data.DataLoader(self.dataset, **loader_params, sampler=None)
         # loader_params["num_workers"]=  0
+        val_loader_params = loader_params | {"num_workers": min(cf.data_loading.num_workers, 6)}
         self.data_loader_validation = torch.utils.data.DataLoader(
-            self.dataset_val, **loader_params, sampler=None
+            self.dataset_val, **val_loader_params, sampler=None
         )
 
         for stage_label, extra_cfg in self.extra_val_cfgs.items():
@@ -383,7 +388,7 @@ class Trainer(TrainerBase):
             # cap workers: each loader spawns its own processes, each re-opening all
             # stream readers
             extra_loader_params = loader_params | {
-                "num_workers": min(cf.data_loading.num_workers, 2)
+                "num_workers": min(cf.data_loading.num_workers, 6)
             }
             self.data_loaders_val_extra[stage_label] = torch.utils.data.DataLoader(
                 self.datasets_val_extra[stage_label], **extra_loader_params, sampler=None
@@ -438,6 +443,17 @@ class Trainer(TrainerBase):
         if run_id_contd is not None: # and self.cf.general.istep != 0: # To be tested
             self._load_ema_teacher_state(run_id_contd, mini_epoch_contd)
 
+        # --- Point 1: verify sigma is initialised correctly ---
+        if is_root():
+            _log_sigma = getattr(self.model, "latent_perturbation_log_sigma", None)
+            if _log_sigma is not None:
+                _s = _log_sigma.exp().item()
+                logger.info(
+                    f"[latent_perturbation] sigma at init: {_s:.6f}  "
+                    f"(log_sigma={_log_sigma.item():.4f}, "
+                    f"learnable={_log_sigma.requires_grad})"
+                )
+
         # if with_fsdp then parameter count is unreliable
         if is_root():
             # ddp-wrapped model does not expose this function
@@ -454,8 +470,28 @@ class Trainer(TrainerBase):
         beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
         eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
+        # Optionally give log_sigma a separate, higher LR to counteract decoder collapse.
+        # Set latent_perturbation_sigma_lr in config (e.g. 1e-2); 0.0 disables the feature.
+        self._sigma_lr = cf.get("latent_perturbation_sigma_lr", 0.0)
+        if self._sigma_lr > 0.0:
+            sigma_param_names = {n for n, _ in self.model.named_parameters() if "log_sigma" in n}
+            sigma_params = [p for n, p in self.model.named_parameters() if n in sigma_param_names]
+            other_params = [p for n, p in self.model.named_parameters() if n not in sigma_param_names]
+            param_groups = [
+                {"params": other_params},
+                {"params": sigma_params, "name": "log_sigma"},
+            ]
+            if is_root():
+                logger.info(
+                    f"[latent_perturbation] Separate sigma LR={self._sigma_lr:.2e} "
+                    f"(main lr_max={self.training_cfg.learning_rate_scheduling.lr_max:.2e}x"
+                    f"{cf.world_size ** 0.5:.1f}sqrt_scale)"
+                )
+        else:
+            param_groups = list(self.model.parameters())
+
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
+            param_groups,
             lr=self.training_cfg.learning_rate_scheduling.lr_start,
             weight_decay=self.training_cfg.optimizer.weight_decay,
             betas=(beta1, beta2),
@@ -651,6 +687,26 @@ class Trainer(TrainerBase):
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
 
+            for idx, (name, param) in enumerate(self.model.named_parameters()):
+                if param.requires_grad and param.grad is None:
+                    logger.warning(f"[rank={self.cf.rank}] no grad: {idx} {name} {tuple(param.shape)}")
+
+            # --- Point 2: verify sigma gradient on the very first backward pass ---
+            if self.cf.general.istep == 0 and is_root():
+                _log_sigma = getattr(self.model, "latent_perturbation_log_sigma", None)
+                if _log_sigma is not None:
+                    _g = _log_sigma.grad
+                    if _g is None:
+                        logger.warning(
+                            "[latent_perturbation] log_sigma.grad is None after first backward! "
+                            "Sigma will not be learned. Check that kernel_crps is the active loss "
+                            "and that num_members > 1."
+                        )
+                    else:
+                        logger.info(
+                            f"[latent_perturbation] log_sigma.grad after first backward: {_g.item():.6f}"
+                        )
+
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
             total_norm = torch.nn.utils.clip_grad_norm_(
@@ -670,6 +726,11 @@ class Trainer(TrainerBase):
 
             # update learning rate
             self.lr_scheduler.step()
+            # Re-apply sigma's independent LR; the scheduler overwrites all param groups
+            if self._sigma_lr > 0.0:
+                for g in self.optimizer.param_groups:
+                    if g.get("name") == "log_sigma":
+                        g["lr"] = self._sigma_lr
 
             batch_size_total = self.get_batch_size_total(self.batch_size_per_gpu)
             step = batch_size_total * self.cf.general.istep
@@ -710,6 +771,32 @@ class Trainer(TrainerBase):
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
+                # --- Points 3 & 4: log sigma value and its gradient norm ---
+                if is_root():
+                    _log_sigma = getattr(self.model, "latent_perturbation_log_sigma", None)
+                    if _log_sigma is not None:
+                        _metrics = {
+                            "latent_perturbation/sigma": _log_sigma.exp().item(),
+                            "latent_perturbation/log_sigma": _log_sigma.item(),
+                        }
+                        if _log_sigma.grad is not None:
+                            _metrics["latent_perturbation/log_sigma_grad_norm"] = (
+                                _log_sigma.grad.norm().item()
+                            )
+                        self.train_logger.log_metrics(
+                            TRAIN, _metrics, step=self.cf.general.istep
+                        )
+                        _gstr = (
+                            f", grad_norm={_metrics['latent_perturbation/log_sigma_grad_norm']:.6f}"
+                            if "latent_perturbation/log_sigma_grad_norm" in _metrics
+                            else ""
+                        )
+                        logger.info(
+                            f"[latent_perturbation] step={self.cf.general.istep}: "
+                            f"sigma={_metrics['latent_perturbation/sigma']:.6f}, "
+                            f"log_sigma={_metrics['latent_perturbation/log_sigma']:.4f}"
+                            f"{_gstr}"
+                        )
 
             # save model checkpoint (with designation _latest)
             if bidx % self.train_logging.checkpoint == 0 and bidx > 0:
@@ -746,10 +833,10 @@ class Trainer(TrainerBase):
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
             with tqdm.tqdm(total=len(data_loader), disable=self.cf.with_ddp) as pbar:
+                # --- Point 5: accumulators for spread-skill ratio ---
+                _num_members = self.cf.get("latent_perturbation_num_members", 0)
+                _spread_skill_acc = {}  # stream_name -> {"spread_sum", "rmse_sum", "count"}
                 for bidx, batch in enumerate(dataset_val_iter):
-                    if cf.data_loading.get("memory_pinning", False):
-                        # pin memory for faster CPU-GPU transfer
-                        batch = batch.pin_memory()
 
                     batch.to_device(self.device)
 
@@ -787,6 +874,39 @@ class Trainer(TrainerBase):
                         istep=self.cf.general.istep,
                     )
 
+                    # --- Point 5: accumulate spread and RMSE for spread-skill ratio ---
+                    if _num_members > 1 and is_root():
+                        for loss_name, t_aux in targets_and_auxs.items():
+                            if not hasattr(t_aux, "physical"):
+                                continue
+                            for step_idx, (pred_step, tgt_step) in enumerate(
+                                zip(preds.physical, t_aux.physical, strict=False)
+                            ):
+                                for stream_name, pred_list in pred_step.items():
+                                    tgt_dict = tgt_step.get(stream_name)
+                                    if tgt_dict is None:
+                                        continue
+                                    tgt_list = tgt_dict.get("target", [])
+                                    for pred_s, tgt_s in zip(pred_list, tgt_list, strict=False):
+                                        # pred_s: [ens, pts, C], tgt_s: [pts, C]
+                                        if pred_s.numel() == 0 or tgt_s.numel() == 0:
+                                            continue
+                                        p = pred_s.float()
+                                        t = tgt_s.float()
+                                        ens_mean = p.mean(0)  # [pts, C]
+                                        rmse = (ens_mean - t).pow(2).mean(0).sqrt()  # [C]
+                                        spread = p.std(0).mean(0)  # [C]
+                                        key = f"{stream_name}/step{step_idx}"
+                                        if key not in _spread_skill_acc:
+                                            _spread_skill_acc[key] = {
+                                                "spread": torch.zeros_like(spread),
+                                                "rmse": torch.zeros_like(rmse),
+                                                "n": 0,
+                                            }
+                                        _spread_skill_acc[key]["spread"] += spread.detach()
+                                        _spread_skill_acc[key]["rmse"] += rmse.detach()
+                                        _spread_skill_acc[key]["n"] += 1
+
                     # log output
                     if bidx < num_samples_write:
                         # denormalization function for data
@@ -816,6 +936,27 @@ class Trainer(TrainerBase):
                 self._log_terminal(0, mini_epoch, stage)
                 self._log(stage)
 
+                # --- Point 5: log spread-skill ratio ---
+                if _num_members > 1 and is_root() and _spread_skill_acc:
+                    ss_metrics = {}
+                    for key, acc in _spread_skill_acc.items():
+                        n = acc["n"]
+                        mean_spread = (acc["spread"] / n).mean().item()
+                        mean_rmse = (acc["rmse"] / n).mean().item()
+                        ratio = mean_spread / (mean_rmse + 1e-8)
+                        ss_metrics[f"spread_skill/{key}/spread"] = mean_spread
+                        ss_metrics[f"spread_skill/{key}/rmse"] = mean_rmse
+                        ss_metrics[f"spread_skill/{key}/ratio"] = ratio
+                        logger.info(
+                            f"[spread-skill] {key}: spread={mean_spread:.4f}, "
+                            f"rmse={mean_rmse:.4f}, ratio={ratio:.3f} "
+                            f"(target≈1.0)"
+                        )
+                    samples = self.cf.general.istep * self.get_batch_size_total(
+                        self.batch_size_per_gpu
+                    )
+                    self.train_logger.log_metrics(VAL, ss_metrics, step=samples)
+
         # avoid that there is a systematic bias in the validation subset
         dataset.advance()
 
@@ -826,7 +967,10 @@ class Trainer(TrainerBase):
         if self.cf.with_ddp and self.cf.with_fsdp:
             cpu_state_dict = {}
             for param_name, sharded_param in maybe_sharded_sd.items():
-                full_param = sharded_param.full_tensor()
+                if isinstance(sharded_param, DTensor):
+                    full_param = sharded_param.full_tensor()
+                else:
+                    full_param = sharded_param
                 if is_root():
                     cpu_state_dict[param_name] = full_param.cpu()
                 else:

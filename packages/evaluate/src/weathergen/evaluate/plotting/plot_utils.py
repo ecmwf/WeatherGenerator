@@ -370,6 +370,7 @@ def plot_metric_region(
             selected_data, labels, run_ids, colors = [], [], [], []
 
             for run_id, data in scores_dict[metric][region].get(stream, {}).items():
+                print(f"{run_id}: dims={data.dims}, sizes={dict(data.sizes)}")
                 # skip if channel is missing or contains NaN
                 if ch not in np.atleast_1d(data.channel.values) or data.isnull().all():
                     continue

@@ -58,6 +58,7 @@ class LossPhysical(LossModuleBase):
         self.name = "LossPhysical"
 
         # dynamically load loss functions based on configuration and stage
+        # A null entry (params is None) means "remove this loss from the parent config"
         self.loss_fcts = [
             [
                 getattr(loss_fns, name),
@@ -65,6 +66,7 @@ class LossPhysical(LossModuleBase):
                 name,
             ]
             for name, params in loss_fcts.items()
+            if params is not None
         ]
 
     def _get_weights(self, stream_info):

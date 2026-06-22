@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 2048
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2 
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -66,13 +66,7 @@ forecast_att_dense_rate: 1.0
 
 healpix_level: 5
 
-# Generalized RoPE selector.
-rope_mode: none  # one of: none, 2d, spherical
-# Optional spherical harmonic band for spherical RoPE. If null, the model picks one
-# conservative shared band that fits all spherical-RoPE attention modules.
-rope_spherical_band: null
-mlp_type: swiglu
-use_xsa: True
+rope_2D: False
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -90,14 +84,13 @@ latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
 freeze_modules: ""
-load_chkpt: {}
+#load_chkpt: {'run_id': 'qgnvcrky', 'mini_epoch': -1}
 
 norm_type: "LayerNorm"
-qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting/"
+#streams_directory: "./config/streams/era5_cerra/" #"./config/streams/era5_cerra/" set to "./config/streams/era5_1deg/"  for era5 training only
 streams: ???
 
 # type of zarr_store
@@ -111,7 +104,7 @@ general:
   world_size: ???
 
   # local_rank, 
-  # with_ddp,
+  with_ddp: True
   # data_path_*, 
   # model_path, 
   # run_path, 
@@ -132,7 +125,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 12
+  num_workers: 6
   rng_seed: ???
   repeat_data_in_mini_epoch : False
 
@@ -143,11 +136,11 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 196
+  num_mini_epochs: 64
   samples_per_mini_epoch: 4096
   shuffle: True
 
-  start_date: 1979-01-01T00:00
+  start_date: 1985-01-01T00:00
   end_date: 2022-12-31T00:00
 
   time_window_step: 06:00:00
@@ -190,7 +183,7 @@ training_config:
     }
 
   forecast :
-      # time_step: 01:00:00
+      time_step: 06:00:00
       offset: 1
       num_steps: 3
       policy: "fixed"
@@ -209,7 +202,7 @@ validation_config:
   validate_with_ema: 
     enabled : True
     ema_ramp_up_ratio: 0.09
-    ema_halflife_in_thousands: 600
+    ema_halflife_in_thousands: 1e-3
 
   # parameters for validation samples that are written to disk
   output : {
@@ -239,7 +232,7 @@ wgtags:
   # The name of the organization of the person running the experiment.
   # This may be autofilled in the future. Expected values are lowercase strings 
   # e.g. "ecmwf", "cmcc", "metnor", "jsc", "escience"
-  org: null
+  org: "knmi-mf"
   # The Github issue corresponding to this run (number such as 1234)
   # Github issues are the central point when running experiment and contain 
   # links to hedgedocs, code branches, pull requests etc.
@@ -250,7 +243,7 @@ wgtags:
   # issue number.
   # Expected values are lowercase strings with no spaces, just underscores:
   # Examples: "rollout_ablation_grid"  
-  exp: null
+  exp: ""
   # *** Experiment-specific tags ***
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.

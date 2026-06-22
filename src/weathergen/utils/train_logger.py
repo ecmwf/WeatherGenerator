@@ -156,7 +156,7 @@ class TrainLogger:
 
         # define cols for training
         cols_train = ["dtime", "samples", "mse", "lr"]
-        cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
+        cols1 = [_weathergen_timestamp, "weathergen.step", "num_samples", "loss_avg_mean", "learning_rate"]
         cols1_patterns = ["loss_avg"] + cols_patterns
 
         # read training log data
@@ -200,7 +200,7 @@ class TrainLogger:
 
         # define cols for validation
         cols_val = ["dtime", "samples"]
-        cols2 = [_weathergen_timestamp, "num_samples"]
+        cols2 = [_weathergen_timestamp, "weathergen.step", "num_samples"]
         cols2_patterns = ["loss_avg"] + cols_patterns
 
         # read validation log data

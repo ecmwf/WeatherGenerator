@@ -12,7 +12,7 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 2048
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
 ae_local_with_qk_lnorm: True
@@ -37,7 +37,7 @@ ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
 ae_global_trailing_layer_norm: False
 
-ae_aggregation_num_blocks: 0
+ae_aggregation_num_blocks: 2
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
 ae_aggregation_with_qk_lnorm: True
@@ -66,13 +66,7 @@ forecast_att_dense_rate: 1.0
 
 healpix_level: 5
 
-# Generalized RoPE selector.
-rope_mode: none  # one of: none, 2d, spherical
-# Optional spherical harmonic band for spherical RoPE. If null, the model picks one
-# conservative shared band that fits all spherical-RoPE attention modules.
-rope_spherical_band: null
-mlp_type: swiglu
-use_xsa: True
+rope_2D: False
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -89,11 +83,16 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True 
 
+# Latent Gaussian perturbation for probabilistic forecasting (CRPS training)
+# Set num_members > 1 to enable; use kernel_crps loss.
+latent_perturbation_num_members: 5    # 0 / 1 = disabled; >1 = number of ensemble members
+latent_perturbation_sigma_init: 0.05  # initial noise standard deviation
+latent_perturbation_sigma_learnable: True  # true = nn.Parameter; false = fixed buffer
+
 freeze_modules: ""
 load_chkpt: {}
 
 norm_type: "LayerNorm"
-qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
@@ -111,7 +110,7 @@ general:
   world_size: ???
 
   # local_rank, 
-  # with_ddp,
+  with_ddp: False,
   # data_path_*, 
   # model_path, 
   # run_path, 
@@ -143,9 +142,9 @@ training_config:
   # training_mode: "masking", "student_teacher", "latent_loss"
   training_mode: ["masking"]
 
-  num_mini_epochs: 196
-  samples_per_mini_epoch: 4096
-  shuffle: True
+  num_mini_epochs: 100
+  samples_per_mini_epoch: 1
+  shuffle: False
 
   start_date: 1979-01-01T00:00
   end_date: 2022-12-31T00:00
@@ -178,7 +177,7 @@ training_config:
   losses : {
     "physical": {
         type: LossPhysical,
-        loss_fcts: { "mse": { }, },
+        loss_fcts: {"kernel_crps": { }, },
         },
     }
   
@@ -190,7 +189,7 @@ training_config:
     }
 
   forecast :
-      # time_step: 01:00:00
+      time_step: 06:00:00
       offset: 1
       num_steps: 3
       policy: "fixed"
@@ -199,7 +198,7 @@ training_config:
 # validation config; full validation config is merge of training and validation config
 validation_config: 
 
-  samples_per_mini_epoch: 256
+  samples_per_mini_epoch: 8
   shuffle: False
 
   start_date: 2023-10-01T00:00
@@ -207,9 +206,9 @@ validation_config:
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
-    enabled : True
+    enabled : False
     ema_ramp_up_ratio: 0.09
-    ema_halflife_in_thousands: 600
+    ema_halflife_in_thousands: 1e-3
 
   # parameters for validation samples that are written to disk
   output : {

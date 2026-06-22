@@ -26,13 +26,15 @@ from numpy.typing import NDArray
 class EnsembleSelect:
     """Pre-resolved ensemble selection.
 
-    Use :meth:`mean` for the ensemble-mean sentinel, or :meth:`from_names`
-    to resolve requested member names against the full list stored in zarr.
+    Use :meth:`mean` for the ensemble-mean sentinel, :meth:`std` for the
+    ensemble-std sentinel, or :meth:`from_names` to resolve requested member
+    names against the full list stored in zarr.
     """
 
     labels: list[str]
     indices: list[int]
     is_mean: bool = False
+    is_std: bool = False
 
     # ------ factories ------
 
@@ -40,6 +42,11 @@ class EnsembleSelect:
     def mean(cls) -> EnsembleSelect:
         """Sentinel: average over the ensemble axis and drop it."""
         return cls(labels=[], indices=[], is_mean=True)
+
+    @classmethod
+    def std(cls) -> EnsembleSelect:
+        """Sentinel: compute std over the ensemble axis and drop it."""
+        return cls(labels=[], indices=[], is_std=True)
 
     @classmethod
     def from_names(
@@ -54,6 +61,7 @@ class EnsembleSelect:
         requested : list[str]
             Requested ensemble members (e.g. ``["ens0", "ens2"]``).
             Pass ``["mean"]`` to get the mean sentinel.
+            Pass ``["std"]`` to get the std sentinel.
         all_ens : list[str] | None
             All ensemble member names from the zarr store.
 
@@ -63,6 +71,8 @@ class EnsembleSelect:
         """
         if requested == ["mean"]:
             return cls.mean()
+        if requested == ["std"]:
+            return cls.std()
         if all_ens is not None:
             indices = [all_ens.index(e) for e in requested]
         else:
@@ -308,6 +318,9 @@ def _build_dataarray(
         if ens_select is None or ens_select.is_mean:
             # Average over ensemble axis, drop ens coordinate
             data = data.mean(axis=-1)
+        elif ens_select.is_std:
+            # Standard deviation over ensemble axis, drop ens coordinate
+            data = data.std(axis=-1)
         else:
             idx = tuple([slice(None)] * n_base + [ens_select.indices])
             data = data[idx]

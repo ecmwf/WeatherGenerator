@@ -1,0 +1,8 @@
+test_config:
+  start_date: 2023-10-01T00:00
+  output:
+    num_samples: 16
+  samples_per_mini_epoch: 16
+  forecast:
+    num_steps: 9
+streams_directory: ./config/inference/streams/era5_o96_cerra/
