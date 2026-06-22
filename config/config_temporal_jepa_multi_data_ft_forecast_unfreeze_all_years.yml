@@ -37,7 +37,7 @@ latent_noise_saturate_encodings: 5
 latent_noise_use_additive_noise: False
 latent_noise_deterministic_latents: True
 
-freeze_modules: ".*encoder.*|.*latent_pre_norm.*|.*latent_heads.*"
+freeze_modules: ""
 
 norm_type: "LayerNorm"
 

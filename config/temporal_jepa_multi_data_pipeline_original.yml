@@ -1,0 +1,57 @@
+# Temporal JEPA deep-SSL pipeline for launch-slurm-sophie.py
+#
+# Three stages:
+#   1. pretrain          — temporal JEPA with EMA teacher (teacher t+6h, full-field latent loss)
+#   2. pretrain-od       — continue temporal JEPA on the OD subset
+#   3. finetune-forecast — 2-step physical forecasting finetuning (freezes encoder)
+#
+# Sweep parameters (pretrain only) via --stage-options:
+#   - training_config.learning_rate_scheduling.lr_max
+#   - training_config.losses.student-teacher.target_and_aux_calc.EMATeacher.ema_halflife_in_thousands
+#
+# Usage:
+#   ./hpc/launch-slurm-sophie.py config/temporal_jepa_multi_data_pipeline_original.yml
+#   ./hpc/launch-slurm-sophie.py --no-dry-run config/temporal_jepa_multi_data_pipeline_original.yml
+
+# nodes: 1
+# register: true
+# cleanup-scripts: yes
+# results-dir: shared
+# mini-epoch: -1
+
+parallelize: false
+
+stages:
+  - name: multipretrain
+    stage: train
+    config_files:
+      - ./config/config_temporal_jepa_multi_data_all_years.yml
+    chain_jobs: 4
+    nodes: 2
+
+  # - name: mltiprtrnft
+  #   stage: train
+  #   from_run_id: STAGE.multipretrain
+  #   config_files:
+  #     - ./config/config_temporal_jepa_multi_data_all_years.yml
+  #     - ./config/config_temporal_jepa_multi_data_all_years_ft.yml
+  #   chain_jobs: 3
+  #   nodes: 2
+
+  # Stage 3: Forecasting finetuning (freezes encoder)
+  - name: finetuneft
+    stage: train
+    from_run_id: STAGE.multipretrain
+    config_files:
+      - ./config/config_temporal_jepa_multi_data_ft_forecast_all_years.yml
+    chain_jobs: 4
+    nodes: 2
+
+  # Stage 3: Forecasting finetuning (freezes encoder)
+  - name: finetuneftft
+    stage: train
+    from_run_id: STAGE.finetuneft
+    config_files:
+      - ./config/config_temporal_jepa_multi_data_ft_forecast.yml
+    chain_jobs: 3
+    nodes: 2
