@@ -5,6 +5,13 @@ description = "Prefect flows for the WeatherGenerator project."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "prefect>=3.7.0",
+    # Prefect 3.7.0 is not compatible with the FastAPI 0.135 / Starlette 1.0
+    # routing rewrite (its PrefectRouter relies on internals those versions
+    # removed, causing "'PrefectRouter' object has no attribute 'routes'" on
+    # every API request). Pin to the last known-good range until Prefect
+    # supports the new stack.
+    "fastapi<0.116",
+    "starlette<0.42",
     "paramiko>=3.1",
     "pyfirecrest>=3.7",
     "dacite",
@@ -19,6 +26,12 @@ dev = [
  "pyrefly==0.36.0",
 ]
 
+
+[tool.basedpyright]
+# Do not require third-party/internal packages to ship type stub files.
+reportMissingTypeStubs = false
+# Allow `from ... import *` (used in example scripts for convenience).
+reportWildcardImportFromLibrary = false
 
 [tool.pyrefly]
 project-includes = ["src/"]

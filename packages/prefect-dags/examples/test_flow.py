@@ -116,4 +116,4 @@ def test_run_cmd_flow2(
 
 
 if __name__ == "__main__":
-    test_run_cmd_flow2()
+    test_run_cmd_flow2(rerun_token="my-experiment")

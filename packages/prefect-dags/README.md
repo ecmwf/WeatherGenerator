@@ -44,7 +44,7 @@ Prerequisites on your local machine:
 Note: you do not need to install Prefect locally, `uv` will handle that.
 
 ```sh
-uvx --with "prefect==3.7.0" prefect server start
+uvx --with "prefect==3.7.0,fastapi<0.116,starlette<0.42,paramiko>=3.1" prefect server start
 ```
 
 **2. Run the hello-world flow** ([source](https://github.com/ecmwf/WeatherGenerator/blob/tjh/dev/prefect-test/packages/prefect-dags/examples/hello_world.py))
