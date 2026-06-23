@@ -635,7 +635,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         ranks_skipped = len(self.rank_files) - ranks_loaded
         _logger.info(
             f"RUN {self.run_id}: Multi-rank load complete. "
-            f"{len(global_sample_coords)} samples × {len(merged_targets)} fsteps "
+            f"{len(global_sample_coords)} samples × {len(merged_targets)} sub-steps "
             f"from {ranks_loaded}/{len(self.rank_files)} ranks "
             f"({ranks_skipped} skipped)."
         )

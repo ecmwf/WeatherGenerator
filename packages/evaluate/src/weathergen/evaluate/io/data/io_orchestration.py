@@ -435,6 +435,7 @@ def _assemble_substep(
             forecast_step_val,
             state.ens_select,
             regrid_opts=state.regrid_opts,
+            run_id=state.run_id,
         )
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
@@ -610,7 +611,8 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     _logger.info(
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
         f"Loading {len(state.samples)} samples × "
-        f"{len(state.fsteps)} fsteps = {n_total} items via ZipStore-parallel zarr I/O "
+        f"{len(state.fsteps)} steps (before sub-steps) = {n_total} items \n"
+        f"via ZipStore-parallel zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
 
