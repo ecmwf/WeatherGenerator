@@ -19,9 +19,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import xarray as xr
+import earthkit.regrid.db as ekr_db
 from earthkit.regrid.gridspec import GridSpec as EkGridSpec
 from numpy.typing import NDArray
-
+from earthkit.data import from_source
 
 @dataclass(frozen=True, slots=True)
 class EnsembleSelect:
@@ -372,23 +373,19 @@ def _detect_grid(n_ipoints: int, regrid_opts: dict) -> str:
 
 
 class Regridder:
-    """Caches sparse interpolation matrices and applies them to numpy arrays.
-
-    Each unique ``(original_grid, target_grid)`` pair triggers one matrix load
-    from disk (~0.1–0.3 s).  Subsequent calls reuse the cached matrix, reducing
-    the per-field cost to a sparse matrix–vector product (<1 ms).
-
+    """
+    Caches sparse interpolation matrices and applies them to numpy arrays.
     Different streams may have different grids — the cache handles them all.
     """
 
     def __init__(self) -> None:
         self._matrices: dict[tuple[str, str], tuple] = {}
+        self._coords: dict[str, tuple[NDArray, NDArray]] = {}
         self._logged: set[str] = set()
 
     def _get_matrix(self, original_grid: str, target_grid: list | str):
         """Load or retrieve the cached interpolation matrix."""
-        import earthkit.regrid.db as ekr_db
-
+  
         cache_key = (str(original_grid), str(target_grid))
         if cache_key not in self._matrices:
             in_grid = {"grid": original_grid}
@@ -425,7 +422,7 @@ class Regridder:
         if not isinstance(target_grid, str):
             target_grid = list(target_grid)
 
-        matrix, _out_shape = self._get_matrix(original_grid, target_grid)
+        matrix, _ = self._get_matrix(original_grid, target_grid)
 
         if data.ndim == 2:
             return matrix.dot(data)
@@ -435,6 +432,33 @@ class Regridder:
             regridded = matrix.dot(flat)
             return regridded.reshape(-1, n_channels, n_ens)
         raise ValueError(f"Unexpected data shape for regridding: {data.shape}")
+
+    def _get_output_coords(self, target_grid, out_shape) -> tuple[NDArray, NDArray]:
+        """Compute (or retrieve cached) output lat/lon for the target grid.
+
+        Supports regular lat-lon grids (target_grid as list, e.g. [1.5, 1.5])
+        and named grids (target_grid as string, e.g. "O96", "N320").
+        """
+        key = str(target_grid)
+        if key not in self._coords:
+            if isinstance(target_grid, str):
+                # Named grid — use earthkit-data to enumerate grid points
+                ds = from_source("empty", {"grid": target_grid})
+                lat = np.asarray(ds[0].metadata("latitudes"))
+                lon = np.asarray(ds[0].metadata("longitudes"))
+            else:
+                # Regular lat-lon grid [dy, dx]
+                out_spec = {"grid": list(target_grid)}
+                gs = EkGridSpec.from_dict(out_spec)
+                ymax, xmin, ymin, xmax = gs["area"]
+                n_lat, n_lon = out_shape
+                lat_1d = np.linspace(ymin, ymax, n_lat)
+                lon_1d = np.linspace(xmin, xmax, n_lon)
+                lat_grid, lon_grid = np.meshgrid(lat_1d, lon_1d, indexing="ij")
+                lat = lat_grid.ravel()
+                lon = lon_grid.ravel()
+            self._coords[key] = (lat, lon)
+        return self._coords[key]
 
     def regrid_dataarrays(self, tars_list, preds_list, regrid_opts, run_id: str = ""):
         """Regrid lists of target/prediction arrays and compute output lat/lon.
@@ -460,23 +484,17 @@ class Regridder:
             target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
             logger.info(
                 f"[{run_id}] Regridding: {shape_before} -> {shape_after} "
-                f"(target_grid={list(target_grid)})"
+                f"(target_grid={list(target_grid) if not isinstance(target_grid, str) else target_grid})"
             )
             self._logged.add(run_id)
 
-        # Compute output lat/lon (regular lat-lon grids only for now)
+        # Resolve output coordinates (cached per target_grid)
+        n_ipoints = tars_list[0].shape[0]
+        original_grid = _detect_grid(shape_before[0], regrid_opts)
         target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
-        out_spec = {"grid": list(target_grid)}
-        gs = EkGridSpec.from_dict(out_spec)
-        ymax, xmin, ymin, xmax = gs["area"]
-        dy, dx = gs["grid"]
-        n_lat_out = round((ymax - ymin) / dy) + 1
-        n_lon_out = round((xmax - xmin) / dx) + 1
-
-        lat_1d = np.linspace(ymin, ymax, n_lat_out)
-        lon_1d = np.linspace(xmin, xmax, n_lon_out)
-        lat_grid, lon_grid = np.meshgrid(lat_1d, lon_1d, indexing="ij")
-        lat = lat_grid.ravel()
-        lon = lon_grid.ravel()
+        if not isinstance(target_grid, str):
+            target_grid = list(target_grid)
+        _, out_shape = self._get_matrix(original_grid, target_grid)
+        lat, lon = self._get_output_coords(target_grid, out_shape)
 
         return tars_list, preds_list, lat, lon
