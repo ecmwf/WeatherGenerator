@@ -194,24 +194,31 @@ def nvtx_range(name):
     finally:
         torch.cuda.nvtx.range_pop()
 
-def _nvtx_push(module, args, name: str):
+def _nvtx_push(name: str):
     torch.cuda.nvtx.range_push(name)
 
 
-def _nvtx_pop(module, args, output):
+def _nvtx_pop():
     torch.cuda.nvtx.range_pop()
 
 
-def register_nvtx_hooks(model, depth: int | None = None):
-    hooks = []
-    for name, module in model.named_modules():
-        if depth and name.count(".") >= depth:  # skip below this nesting level
-            continue
-        h1 = module.register_forward_pre_hook(
-            lambda m, args, n=name: _nvtx_push(m, args, n)
-        )
-        h2 = module.register_forward_hook(
-            lambda m, inp, out: _nvtx_pop(m, inp, out)
-        )
-        hooks.extend([h1, h2])
-    return hooks
+def register_nvtx_hooks(model, scope: str = "local"):
+    if scope=="global":
+        torch.nn.modules.module.register_module_pre_forward_hook(lambda m, args: _nvtx_push(f"{m.__class__.__name__}.forward"))
+        torch.nn.modules.module.register_module_forward_hook(lambda m, input, output: _nvtx_pop())
+        torch.nn.modules.module.register_module_pre_backward_hook(lambda m, args: _nvtx_push(f"{m.__class__.__name__}.backward"))
+        torch.nn.modules.module.register_module_backward_hook(lambda m, input, output: _nvtx_pop())
+    else:
+        for name, module in model.named_modules():
+            module.register_forward_pre_hook(
+                lambda m, args, n=name: _nvtx_push(f"{n}.forward")
+            )
+            module.register_forward_hook(
+                lambda m, inp, out: _nvtx_pop()
+            )
+            module.register_backward_pre_hook(
+                lambda m, grad_out, n=name: _nvtx_push(f"{n}.backward")
+            )
+            module.register_backward_hook(
+                lambda m, grad_in, grad_out: _nvtx_pop()
+            )
