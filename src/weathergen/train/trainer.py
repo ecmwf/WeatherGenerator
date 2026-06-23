@@ -46,7 +46,7 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range
+from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range, register_nvtx_hooks
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -440,6 +440,7 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
+            hooks = register_nvtx_hooks(self.model)
             with nvtx_range(f"batch_{bidx}"):
                 if cf.data_loading.get("memory_pinning", False):
                     # pin memory for faster CPU-GPU transfer
@@ -525,6 +526,9 @@ class Trainer(TrainerBase):
                     target_aux.update_state_post_opt_step(step, batch, self.model)
                     for _, target_aux in self.target_and_aux_calculators_val.items()
                 ]
+
+            for h in hooks:
+                h.remove()
 
             # EMA update
             if self.validate_with_ema:
