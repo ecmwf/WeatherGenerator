@@ -36,6 +36,28 @@ from weathergen.model.engines import ForecastingEngine
 logger = logging.getLogger(__name__)
 
 
+def compute_sigma(
+    noise_level_rn: torch.Tensor,
+    noise_distribution: str,
+    p_std: float,
+    p_mean: float,
+    validation: bool = False,
+) -> torch.Tensor:
+    """
+    Compute the diffusion noise level sigma from noise_level_rn.
+
+    During validation/inference (training=False), noise_level_rn is interpreted as a fixed
+    log_sigma directly, so sigma = exp(noise_level_rn) (default 0.0 -> sigma = 1.0).
+    """
+    if noise_distribution == "log_uniform" or validation:
+        sigma = noise_level_rn.exp()
+    elif noise_distribution == "log_normal":
+        sigma = (noise_level_rn * p_std + p_mean).exp()
+    else:
+        raise ValueError(f"Unsupported noise_distribution: {noise_distribution}")
+    return sigma
+
+
 class DiffusionForecastEngine(torch.nn.Module):
     # Adopted from https://github.com/NVlabs/edm/blob/main/training/loss.py#L72
 
@@ -225,12 +247,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
         # log_uniform: noise_level_rn is log_sigma directly; sigma = exp(noise_level_rn)
         # during validation, noise_level_rn is set to a fixed value (default: 0.0), so sigma = exp(0) = 1.0 (no noise) by default
-        if self.noise_distribution == "log_uniform" or not self.training:
-            sigma = noise_level_rn.exp()
-        elif self.noise_distribution == "log_normal":
-            sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
-        else:
-            raise ValueError(f"Unsupported noise_distribution: {self.noise_distribution}")
+        sigma = compute_sigma(
+            noise_level_rn,
+            noise_distribution=self.noise_distribution,
+            p_std=self.p_std,
+            p_mean=self.p_mean,
+            validation=not self.training,
+        )
         n = torch.randn_like(y) * sigma
 
         self._noised_tokens = (y + n).detach()

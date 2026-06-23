@@ -16,6 +16,7 @@ from omegaconf import DictConfig
 from torch import Tensor
 
 import weathergen.train.loss_modules.loss_functions as loss_fns
+from weathergen.model.diffusion import compute_sigma
 from weathergen.train.loss_modules.loss_module_base import LossModuleBase, LossValues
 from weathergen.utils.train_logger import Stage
 
@@ -59,11 +60,14 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.random_target = None
 
-    def _get_noise_weight(self, noise_level_rn):
-        if self.noise_distribution == "log_uniform":
-            sigma = noise_level_rn.exp()
-        else:
-            sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
+    def _get_noise_weight(self, noise_level_rn, validation=False):
+        sigma = compute_sigma(
+            noise_level_rn,
+            noise_distribution=self.noise_distribution,
+            p_std=self.p_std,
+            p_mean=self.p_mean,
+            validation=validation,
+        )
         return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
 
     def _get_fstep_weights(self, forecast_steps):
@@ -117,7 +121,7 @@ class LossLatentDiffusion(LossModuleBase):
         fsteps = len(target_tokens_all)
 
         # During validation, use unweighted loss (no noise-level scaling)
-        noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta)
+        noise_weight = 1.0 if self.stage == "val" else self._get_noise_weight(eta, validation=self.stage == "val")
         fstep_loss_weights = self._get_fstep_weights(fsteps)
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
