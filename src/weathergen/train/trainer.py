@@ -453,8 +453,8 @@ class Trainer(TrainerBase):
                     enabled=cf.with_mixed_precision,
                 ):
                     preds = self.model(
-                        self.model_params,
-                        batch.get_source_samples(),
+                        model_params=self.model_params,
+                        batch=batch.get_source_samples(),
                     )
 
                     targets_and_auxs = {}
