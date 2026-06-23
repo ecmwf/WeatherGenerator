@@ -651,6 +651,11 @@ class Trainer(TrainerBase):
             self.optimizer.zero_grad()
             self.grad_scaler.scale(loss).backward()
 
+            #Comment in this code when trying to debug DDP errors, it will find the offending params
+            # for name, param in self.model.named_parameters():
+            #       if param.requires_grad and param.grad is None:
+            #           print(f"UNUSED (no grad): {name}")
+
             # gradient clipping
             self.grad_scaler.unscale_(self.optimizer)
             total_norm = torch.nn.utils.clip_grad_norm_(

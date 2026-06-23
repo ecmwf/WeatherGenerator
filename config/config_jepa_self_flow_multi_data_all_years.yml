@@ -234,7 +234,7 @@ training_config:
     "physical": {
         enabled: True,
         type: LossPhysical,
-        weight: 0.2,
+        weight: 1.0,
         loss_fcts: { "mse": { target_source_correspondence: {0 : {0 : "identity"} },}, },
     },
     "student-teacher": {
