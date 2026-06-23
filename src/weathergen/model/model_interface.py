@@ -32,6 +32,7 @@ from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
+from weathergen.utils.performance import register_nvtx_hooks
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ def init_model_and_shard(
     model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
+
+    register_nvtx_hooks(model)
 
     # freeze request model part
     apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)

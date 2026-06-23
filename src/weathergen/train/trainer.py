@@ -46,7 +46,7 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range, register_nvtx_hooks
+from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -82,7 +82,6 @@ class Trainer(TrainerBase):
         self.validate_with_ema_cfg = None
         self.validate_with_ema: bool = False
         self.batch_size_per_gpu = -1
-        self._nvtx_hooks: list = []
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
@@ -278,8 +277,6 @@ class Trainer(TrainerBase):
             cf.with_ddp,
             cf.with_fsdp,
         )
-
-        self._nvtx_hooks = register_nvtx_hooks(self.model)
 
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
         if validate_with_ema_cfg is not None:
