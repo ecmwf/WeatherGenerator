@@ -31,6 +31,7 @@ from numpy.typing import NDArray
 
 from weathergen.evaluate.io.data.dataarray_builders import (
     EnsembleSelect,
+    Regridder,
     build_gridded_dataarrays,
     build_scatter_dataarrays,
 )
@@ -78,6 +79,7 @@ class IOState:
     lon: NDArray
     n_workers: int
     regrid_opts: dict  # options for regridding gridded DataArrays; ignored for scatter
+    regridder: Regridder | None = None  # shared Regridder instance (caches matrices)
     backend: str = "loky"
     rank: str = "0000"
     offset: np.timedelta64 | None = (
@@ -278,6 +280,8 @@ def _build_io_state(
     if isinstance(regrid_opts, bool) and regrid_opts:
         regrid_opts = {"target_grid": [1.5, 1.5]}
 
+    regridder = Regridder() if regrid_opts else None
+
     return IOState(
         run_id=run_id,
         zarr_path=zarr_path,
@@ -299,6 +303,7 @@ def _build_io_state(
         rank=rank,
         offset=offset,
         regrid_opts=regrid_opts,
+        regridder=regridder,
     )
 
 
@@ -423,7 +428,6 @@ def _assemble_substep(
 
     """
     if state.is_gridded:
-        shape_before = tars_list[0].shape if state.regrid_opts else None
         da_tar, da_pred = build_gridded_dataarrays(
             tars_list,
             preds_list,
@@ -436,14 +440,9 @@ def _assemble_substep(
             forecast_step_val,
             state.ens_select,
             regrid_opts=state.regrid_opts,
+            regridder=state.regridder,
+            run_id=state.run_id,
         )
-        if shape_before is not None and not state.regrid_opts.get("_logged"):
-            shape_after = (da_tar.sizes["ipoint"], da_tar.sizes["channel"])
-            _logger.info(
-                f"[{state.run_id}] Regridding applied: {shape_before} -> {shape_after} "
-                f"(target_grid={list(state.regrid_opts.get('target_grid', [1.5, 1.5]))})"
-            )
-            state.regrid_opts["_logged"] = True
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
         # Extract the coords for the current fstep_idx from each sample's result.
@@ -618,7 +617,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     _logger.info(
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: "
         f"Loading {len(state.samples)} samples × "
-        f"{len(state.fsteps)} steps (before sub-steps) = {n_total} items \n"
+        f"{len(state.fsteps)} windows = {n_total} items \n"
         f"via ZipStore-parallel zarr I/O "
         f"(workers={state.n_workers}, backend={state.backend})..."
     )
