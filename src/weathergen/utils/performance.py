@@ -12,6 +12,7 @@
 import logging
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 
 import torch
 
@@ -184,3 +185,11 @@ def compute_source_bytes(source_samples) -> int:
             for t in stream_data.source_tokens_cells:
                 total += t.nbytes
     return total
+
+@contextmanager
+def nvtx_range(name):
+    torch.cuda.nvtx.range_push(name)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
