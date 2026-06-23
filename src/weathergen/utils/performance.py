@@ -206,8 +206,8 @@ def register_nvtx_hooks(model, scope: str = "local"):
     if scope=="global":
         torch.nn.modules.module.register_module_pre_forward_hook(lambda m, args: _nvtx_push(f"{m.__class__.__name__}.forward"))
         torch.nn.modules.module.register_module_forward_hook(lambda m, input, output: _nvtx_pop(), always_call=True)
-        torch.nn.modules.module.register_module_pre_backward_hook(lambda m, args: _nvtx_push(f"{m.__class__.__name__}.backward"))
-        torch.nn.modules.module.register_module_backward_hook(lambda m, input, output: _nvtx_pop(), always_call=True)
+        torch.nn.modules.module.register_module_full_backward_pre_hook(lambda m, args: _nvtx_push(f"{m.__class__.__name__}.backward"))
+        torch.nn.modules.module.register_module_full_backward_hook(lambda m, input, output: _nvtx_pop(), always_call=True)
     else:
         for name, module in model.named_modules():
             module.register_forward_pre_hook(
@@ -216,9 +216,9 @@ def register_nvtx_hooks(model, scope: str = "local"):
             module.register_forward_hook(
                 lambda m, inp, out: _nvtx_pop(), always_call=True
             )
-            module.register_backward_pre_hook(
+            module.register_full_backward_pre_hook(
                 lambda m, grad_out, n=name: _nvtx_push(f"{n}.backward")
             )
-            module.register_backward_hook(
+            module.register_full_backward_hook(
                 lambda m, grad_in, grad_out: _nvtx_pop(), always_call=True
             )
