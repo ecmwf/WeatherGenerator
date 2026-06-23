@@ -200,7 +200,7 @@ def register_nvtx_hooks(model, depth: int | None = None):
         if depth and name.count(".") >= depth:  # skip below this nesting level
             continue
         h1 = module.register_forward_pre_hook(
-            lambda m, inp, n=name: torch.cuda.nvtx.range_push(n)
+            lambda m, inp, n=name: torch.cuda.nvtx.range_push(n)  # noqa: B023,n=name default captures value at definition time
         )
         h2 = module.register_forward_hook(
             lambda m, inp, out: torch.cuda.nvtx.range_pop()

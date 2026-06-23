@@ -82,6 +82,7 @@ class Trainer(TrainerBase):
         self.validate_with_ema_cfg = None
         self.validate_with_ema: bool = False
         self.batch_size_per_gpu = -1
+        self._nvtx_hooks: list = []
         self.batch_size_validation_per_gpu = -1
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
@@ -278,6 +279,8 @@ class Trainer(TrainerBase):
             cf.with_fsdp,
         )
 
+        self._nvtx_hooks = register_nvtx_hooks(self.model)
+
         validate_with_ema_cfg = self.validation_cfg.get("validate_with_ema")
         if validate_with_ema_cfg is not None:
             # if the config is specified and enabled not specified, then assume it is to be used
@@ -440,7 +443,6 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            hooks = register_nvtx_hooks(self.model)
             with nvtx_range(f"batch_{bidx}"):
                 if cf.data_loading.get("memory_pinning", False):
                     # pin memory for faster CPU-GPU transfer
@@ -526,9 +528,6 @@ class Trainer(TrainerBase):
                     target_aux.update_state_post_opt_step(step, batch, self.model)
                     for _, target_aux in self.target_and_aux_calculators_val.items()
                 ]
-
-            for h in hooks:
-                h.remove()
 
             # EMA update
             if self.validate_with_ema:
