@@ -423,6 +423,7 @@ def _assemble_substep(
 
     """
     if state.is_gridded:
+        shape_before = tars_list[0].shape if state.regrid_opts else None
         da_tar, da_pred = build_gridded_dataarrays(
             tars_list,
             preds_list,
@@ -435,8 +436,14 @@ def _assemble_substep(
             forecast_step_val,
             state.ens_select,
             regrid_opts=state.regrid_opts,
-            run_id=state.run_id,
         )
+        if shape_before is not None and not state.regrid_opts.get("_logged"):
+            shape_after = (da_tar.sizes["ipoint"], da_tar.sizes["channel"])
+            _logger.info(
+                f"[{state.run_id}] Regridding applied: {shape_before} -> {shape_after} "
+                f"(target_grid={list(state.regrid_opts.get('target_grid', [1.5, 1.5]))})"
+            )
+            state.regrid_opts["_logged"] = True
     else:
         # meta["coords"] is a list[NDArray | None] with one entry per fstep.
         # Extract the coords for the current fstep_idx from each sample's result.
