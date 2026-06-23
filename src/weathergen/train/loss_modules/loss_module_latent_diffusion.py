@@ -54,13 +54,13 @@ class LossLatentDiffusion(LossModuleBase):
 
         self.random_target = None
 
-    def _get_noise_weight(self, noise_level_rn, validation=False):
+    def _get_noise_weight(self, eta, training=True):
         sigma = compute_sigma(
-            noise_level_rn,
+            eta,
             noise_distribution=self.noise_distribution,
             p_std=self.p_std,
             p_mean=self.p_mean,
-            validation=validation,
+            training=training,
         )
         return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
 

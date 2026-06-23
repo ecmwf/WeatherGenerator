@@ -13,29 +13,32 @@ import torch
 from omegaconf import DictConfig
 from torch import Tensor
 
+from weathergen.model.diffusion import compute_sigma
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.utils import TRAIN, Stage
 
 _logger = logging.getLogger(__name__)
 
 
-def edm_noise_weight(
-    noise_level_rn: Tensor,
-    sigma_data: float,
-    p_mean: float,
+def noise_weight(
+    eta: Tensor,
+    noise_distribution: str,
     p_std: float,
-    noise_distribution: str = "log_normal",
+    p_mean: float,
+    sigma_data: float,
+    training: bool = True,
 ) -> Tensor:
     """EDM loss weight λ(σ) = (σ² + σ_data²) / (σ·σ_data)².
 
-    σ is reconstructed from the per-sample noise level:
-      - ``log_uniform``: ``noise_level_rn`` is log σ directly → σ = exp(noise_level_rn)
-      - otherwise (``log_normal``): ``noise_level_rn`` is η ~ N(0,1) → σ = exp(η·p_std + p_mean)
+    σ is reconstructed from the per-sample noise level eta via :func:`compute_sigma`.
     """
-    if noise_distribution == "log_uniform":
-        sigma = noise_level_rn.exp()
-    else:
-        sigma = (noise_level_rn * p_std + p_mean).exp()
+    sigma = compute_sigma(
+        eta,
+        noise_distribution=noise_distribution,
+        p_std=p_std,
+        p_mean=p_mean,
+        training=training,
+    )
     return (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
 
 
@@ -79,13 +82,13 @@ class DiffusionLossCalculator(LossCalculator):
         # λ(σ) weights all loss terms equally in diffusion training (latent + physical). Since the
         # loss modules now return raw losses, this is the single point where λ(σ) is applied.
         # No target carries noise_level_rn → non-diffusion training → no scaling (base behavior).
-        noise_level_rn = self._find_noise_level(targets_and_aux)
-        if noise_level_rn is None:
+        eta = self._find_noise_level(targets_and_aux)
+        if eta is None:
             return 1.0
 
-        eta = torch.tensor([noise_level_rn], device=self.device, dtype=torch.float32)
-        return edm_noise_weight(
-            eta, self.sigma_data, self.p_mean, self.p_std, self.noise_distribution
+        eta = torch.tensor([eta], device=self.device, dtype=torch.float32)
+        return noise_weight(
+            eta, self.noise_distribution, self.p_std, self.p_mean, self.sigma_data, self.stage == TRAIN
         )
 
 
