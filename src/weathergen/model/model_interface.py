@@ -56,7 +56,7 @@ def init_model_and_shard(
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
 
-    register_nvtx_hooks(model)
+    nvtx_hooks = register_nvtx_hooks(model)
 
     # freeze request model part
     apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)

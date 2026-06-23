@@ -194,16 +194,24 @@ def nvtx_range(name):
     finally:
         torch.cuda.nvtx.range_pop()
 
+def _nvtx_push(module, args, name: str):
+    torch.cuda.nvtx.range_push(name)
+
+
+def _nvtx_pop(module, args, output):
+    torch.cuda.nvtx.range_pop()
+
+
 def register_nvtx_hooks(model, depth: int | None = None):
     hooks = []
     for name, module in model.named_modules():
         if depth and name.count(".") >= depth:  # skip below this nesting level
             continue
         h1 = module.register_forward_pre_hook(
-            lambda m, args: torch.cuda.nvtx.range_push(m.__class__.__name__)
+            lambda m, args, n=name: _nvtx_push(m, args, n)
         )
         h2 = module.register_forward_hook(
-            lambda m, inp, out: torch.cuda.nvtx.range_pop()
+            lambda m, inp, out: _nvtx_pop(m, inp, out)
         )
         hooks.extend([h1, h2])
     return hooks
