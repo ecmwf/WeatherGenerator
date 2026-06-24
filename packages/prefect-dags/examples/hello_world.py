@@ -7,7 +7,10 @@
 #
 # [tool.uv.sources]
 # # Directly pull the package from Github.
-# weathergen-prefect-dags = { git = "https://github.com/ecmwf/WeatherGenerator", branch = "tjh/dev/prefect-test", subdirectory = "packages/prefect-dags" }
+# # weathergen-prefect-dags = { git = "https://github.com/ecmwf/WeatherGenerator", branch = "tjh/dev/prefect-test", subdirectory = "packages/prefect-dags" }
+#
+# # When developing locally, swap the source above for the line below:
+# weathergen-prefect-dags = { path = "../", editable = true }
 # ///
 from weathergen.prefect_dags import flow, run, sbatch
 from weathergen.prefect_dags.cmd_runners import SimpleSshContext
@@ -32,8 +35,7 @@ def hello_world(rerun_token=None):
         ctx,
         job_name="hello_world_job",
         command=command,
-        # You may need to adapt to your HPC, see test_flow.py on an example.
-        working_directory="/home/ecm8774",
+        working_directory="~",
         time_limit="00:01:00",
         fetch_output=True,
     )
@@ -42,4 +44,4 @@ def hello_world(rerun_token=None):
 
 
 if __name__ == "__main__":
-    hello_world(rerun_token="my_experiment")
+    hello_world(rerun_token=None)

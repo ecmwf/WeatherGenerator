@@ -10,10 +10,11 @@ The only primitives are calling sbatch and sacct.
 
 import asyncio
 import logging
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal, cast, get_args
 
 from weathergen.prefect_dags.cmd_runners import (
     CmdContext,
@@ -22,6 +23,7 @@ from weathergen.prefect_dags.cmd_runners import (
     run_cmd,
     slurm_account,
 )
+from weathergen.prefect_dags.cmd_runners._types import quote_path
 from weathergen.prefect_dags.result import OpError, Result, is_err
 
 
@@ -146,6 +148,14 @@ _TERMINAL_STATES: frozenset[SlurmJobState] = frozenset(
     }
 )
 
+# A path that starts with "~" or "~user" and is resolved by the remote shell.
+_TILDE_ABSOLUTE_RE = re.compile(r"^~[A-Za-z0-9._-]*(?:/|$)")
+
+
+def _is_absolute_or_remote_home_path(path: str | Path) -> bool:
+    path_str = str(path)
+    return Path(path_str).is_absolute() or _TILDE_ABSOLUTE_RE.match(path_str) is not None
+
 
 def is_terminal_state(state: SlurmJobState) -> bool:
     """Return True if the given Slurm state is terminal (job will not transition further).
@@ -214,7 +224,7 @@ async def get_slurm_job_states(
             return OpError(
                 err=ValueError(f"unrecognised slurm state for job {job_id!r}: {raw_state!r}")
             )
-        states[job_id] = token  # type: ignore[assignment]
+        states[job_id] = cast(SlurmJobState, token)
 
     missing = [jid for jid in slurm_job_ids if jid not in states]
     # TODO: happens when job is very new. Add as unknown state.
@@ -282,7 +292,8 @@ async def submit_slurm(
     This is necessary to fully capture the final state of the job.
 
     Requirements:
-    If the working directory and the submission directories are provided, they must be absolute.
+    If the working directory is provided, it must be absolute or start with a remote-home
+    reference (`~` or `~user`). If the submission directory is provided, it must be absolute.
     If the working directory is not provided, the script path must be absolute.
     If stdout is not provided, it defaults to
     "{working_directory}/slurm_job_{job_name}_%j.out" if working_directory is
@@ -300,7 +311,10 @@ async def submit_slurm(
     # rather try again for a certain amount of time (up to hours for this specific case).
 
     # Validate path requirements.
-    if job.working_directory is not None and not Path(job.working_directory).is_absolute():
+    if job.working_directory is not None and not _is_absolute_or_remote_home_path(
+        job.working_directory
+    ):
+        logger.error(f"working_directory must be absolute: {job.working_directory}")
         return OpError(
             err=ValueError(f"working_directory must be absolute: {job.working_directory}")
         )
@@ -338,13 +352,20 @@ async def submit_slurm(
     # is set). Only emit --error if the caller asked for a separate file.
     stderr_path = Path(job.stderr) if job.stderr is not None else stdout_path
 
-    # Construct sbatch command.
-    cmd_parts = ["sbatch", f"--job-name={job.job_name}", f"--output={stdout_path}"]
+    # Construct sbatch command. Path-valued options are passed as separate
+    # shell words (`--chdir ~` rather than `--chdir=~`) so the remote shell can
+    # expand leading-tilde paths before `sbatch` receives them.
+    cmd_parts = [
+        "sbatch",
+        f"--job-name={shlex.quote(job.job_name)}",
+        "--output",
+        quote_path(stdout_path),
+    ]
     if job.stderr is not None:
-        cmd_parts.append(f"--error={stderr_path}")
+        cmd_parts.extend(["--error", quote_path(stderr_path)])
 
     if job.working_directory is not None:
-        cmd_parts.append(f"--chdir={job.working_directory}")
+        cmd_parts.extend(["--chdir", quote_path(job.working_directory)])
 
     if job.time_limit is not None:
         cmd_parts.append(f"--time={job.time_limit}")
@@ -360,7 +381,7 @@ async def submit_slurm(
             cmd_parts.append(f"--{option}={value}")
 
     if job.script_path:
-        cmd_parts.append(str(job.script_path))
+        cmd_parts.append(quote_path(job.script_path))
     elif job.command:
         # list[str] follows subprocess argv semantics: each element is one
         # token, joined into a shell line via shlex. Then shlex.quote wraps
