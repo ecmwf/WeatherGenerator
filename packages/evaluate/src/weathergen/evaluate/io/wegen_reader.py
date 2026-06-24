@@ -528,14 +528,25 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     def _merge_fsteps(self, all_das: dict, global_sample_coords) -> dict:
         """Merge lists of DataArrays for each forecast step across ranks.
-        Concatenates along the sample dimension and re-indexes to global samples.
+
+        For gridded data (dims include 'sample'), concatenates along 'sample'
+        and re-indexes to global sample coordinates.
+        For scatter data (no 'sample' dim), concatenates along 'ipoint'
+        and re-indexes to a contiguous range.
         """
         merged = {}
         for fstep, das in all_das.items():
-            combined = xr.concat(das, dim="sample") if len(das) > 1 else das[0]
-            merged[fstep] = combined.assign_coords(
-                sample=global_sample_coords[: len(combined.sample)]
-            )
+            if len(das) > 1:
+                concat_dim = "sample" if "sample" in das[0].dims else "ipoint"
+                combined = xr.concat(das, dim=concat_dim)
+            else:
+                combined = das[0]
+
+            if "sample" in combined.dims:
+                combined = combined.assign_coords(
+                    sample=global_sample_coords[: len(combined.sample)]
+                )
+            merged[fstep] = combined
         return merged
 
     def get_data(
@@ -717,6 +728,14 @@ class WeatherGenZarrReader(WeatherGenReader):
     def _compute_is_gridded(self, stream: str) -> bool:
         """is_gridded_data logic, called once per stream and cached."""
         _logger.debug(f"Checking regular spacing for stream {stream}...")
+
+        max_num_target = self.get_inference_stream_attr(stream, "max_num_targets", -1)
+        if max_num_target != -1:
+            _logger.warning(
+                f"WARNING: Stream '{stream}' has max_num_targets={max_num_target} (!= -1), "
+                "indicating variable-length observations (scatter data)."
+            )
+            return False
 
         with self._open_any_rank_for_metadata() as zio:
             dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
