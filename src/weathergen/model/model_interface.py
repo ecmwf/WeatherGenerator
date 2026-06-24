@@ -136,6 +136,14 @@ def init_model_and_shard(
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             assert tensor.device == torch.device("meta")
 
+        # For reasons we do not yet fully understand, when using train continue in some
+        # instances, FSDP2 does not register the forward_channels and forward_columns
+        # functions in the embedding engine as forward functions. Thus, yielding a crash
+        # because the input tensors are not converted to DTensors. This seems to primarily
+        # occur during validation.
+        for embed in model.encoder.embed_engine.embeds.values():
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward")
+
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is not None:
         if is_root():
