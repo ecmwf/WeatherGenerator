@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import numpy as np
 import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -49,7 +48,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         self.num_tokens = num_tokens
         self.token_size = token_size
         self.num_channels = num_channels
-        self.dim_in = token_size if mode == "channels" else num_channels
+        self.dim_in = token_size
         self.dim_embed = dim_embed
         self.dim_out = dim_out
         self.num_blocks = num_blocks
@@ -97,7 +96,7 @@ class StreamEmbedTransformer(torch.nn.Module):
                 [norm(dim_embed, eps=1e-6) for _ in range(num_channels)]
             )
         else:
-                raise ValueError(f"Unknown unembed mode: {unembed_mode}")
+            raise ValueError(f"Unknown unembed mode: {unembed_mode}")
 
         self.dropout_final = torch.nn.Dropout(0.1)
 
@@ -128,6 +127,7 @@ class StreamEmbedTransformer(torch.nn.Module):
         out = self.dropout_final(out.reshape(-1, self.num_tokens, self.dim_out))
 
         return out
+
 
 class StreamEmbedLinear(torch.nn.Module):
     def __init__(self, dim_in, dim_out, stream_name="stream_embed"):
