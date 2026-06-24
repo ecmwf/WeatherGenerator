@@ -37,6 +37,7 @@ from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
     TRAIN,
     VAL,
+    NoOpGradScaler,
     Stage,
     cfg_keys_to_filter,
     extract_batch_metadata,
@@ -44,7 +45,6 @@ from weathergen.train.utils import (
     get_active_stage_config,
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
-    NoOpGradScaler,
 )
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
