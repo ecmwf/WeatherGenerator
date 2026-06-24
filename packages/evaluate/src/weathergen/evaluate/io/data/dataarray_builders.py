@@ -495,5 +495,3 @@ class Regridder:
         lat, lon = self._get_output_coords(self._target_grid, out_shape)
 
         return tars_list, preds_list, lat, lon
-
-        return tars_list, preds_list, lat, lon

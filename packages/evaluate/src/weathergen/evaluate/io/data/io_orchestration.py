@@ -241,7 +241,7 @@ def dispatch_parallel(
     return results
 
 
-def _build_io_state(
+def build_io_state(
     run_id: str,
     fname_zarr: Path,
     stream: str,

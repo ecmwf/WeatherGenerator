@@ -27,7 +27,7 @@ from weathergen.common.config import (
 from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.data.dataarray_builders import EnsembleSelect
 from weathergen.evaluate.io.data.io_orchestration import (
-    _build_io_state,
+    build_io_state,
     get_data_dirstore,
     get_data_zipstore,
     get_num_workers,
@@ -602,7 +602,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 f"global samples {sorted(rank_globals & requested_globals)}"
             )
 
-            state = _build_io_state(
+            state = build_io_state(
                 self.run_id,
                 rank_file,
                 stream,
