@@ -7,6 +7,7 @@ from typing import Literal
 import prefect.runtime.flow_run
 import prefect.runtime.task_run
 from prefect.artifacts import acreate_markdown_artifact
+from prefect.utilities.asyncutils import run_coro_as_sync
 
 from weathergen.prefect_dags._sbatch import (
     SlurmJobResult,
@@ -173,62 +174,122 @@ def _parse_launch_summary(output: str) -> tuple[str, list[SlurmJobId], str] | No
     return run_id, job_ids, work_dir
 
 
-@task
-async def launch_slurm(
-    ctx: CmdContext,
+@dataclass(frozen=True)
+class _LaunchSlurmOptions:
+    """Options for the WeatherGenerator launch-slurm command."""
+
     # Can be relative or absolute from the working dir.
-    # If working_dir is specified, the wg_private_path can be relative from this path
-    wg_private_path: str,
+    # If working_dir is specified, the wg_private_path can be relative from this path.
+    wg_private_path: str
     # --stage: train, inference, or evaluation. Ignored when `pipeline` is set.
-    stage: Literal["train", "inference", "evaluation"] = "train",
+    stage: Literal["train", "inference", "evaluation"] = "train"
     # --from-run-id: run id to continue (training) or trained model to use
     # (inference, required there).
-    from_run_id: str | None = None,
+    from_run_id: str | None = None
     # The working directory. All the config paths will be relative to this directory.
-    # By default, it is wg_private_path
-    working_dir: str | None = None,
-    *,
+    # By default, it is wg_private_path.
+    working_dir: str | None = None
     # --slurm-script: path to the slurm script (must be in
     # WeatherGenerator-private/hpc/).
-    slurm_script: str | None = None,
+    slurm_script: str | None = None
     # --results-dir: "shared" (script default), "local", or a directory path.
-    results_dir: str | None = None,
+    results_dir: str | None = None
     # --run-ids: inference run ids to evaluate (evaluation stage only;
     # required in single-stage evaluation mode).
-    run_ids: list[str] | None = None,
+    run_ids: list[str] | None = None
     # --dir: root directory for slurm job artifacts and copies.
-    root_dir: str | None = None,
+    root_dir: str | None = None
     # --link-venv: link the current venv instead of creating a fresh one.
-    link_venv: bool = False,
+    link_venv: bool = False
     # --config: experiment-specific config files, ascending precedence.
-    config: list[str] | None = None,
+    config: list[str] | None = None
     # --options: individual config overrides (parent_obj.nested_obj=value);
     # takes precedence over --config.
-    options: list[str] | None = None,
+    options: list[str] | None = None
     # --base-config: base config for fresh training (script defaults to
     # ./config/default_config.yml).
-    base_config: str | None = None,
+    base_config: str | None = None
     # --eval-config: evaluation yaml config passed to run_evaluation.py
     # (evaluation stage only).
-    eval_config: str | None = None,
+    eval_config: str | None = None
     # --mini-epoch: mini-epoch for continuing training / loading a model for
     # inference (script default -1 = latest checkpoint).
-    mini_epoch: int | None = None,
+    mini_epoch: int | None = None
     # --register / --no-register: None keeps the script default (register),
     # True forces --register, False passes --no-register.
-    register: bool | None = None,
+    register: bool | None = None
     # --cleanup-scripts: "yes" (script default) or "no".
-    cleanup_scripts: Literal["yes", "no"] | None = None,
+    cleanup_scripts: Literal["yes", "no"] | None = None
     # --nodes: number of nodes (1-8); ignored for evaluation (always 1).
-    nodes: int | None = None,
+    nodes: int | None = None
     # --chain-jobs: consecutive training jobs to chain (training only).
-    chain_jobs: Literal[1, 2, 3, 4] | None = None,
+    chain_jobs: Literal[1, 2, 3, 4] | None = None
     # --account: slurm account; falls back to BUDGET_ACCOUNTS env var.
-    account: str | None = None,
+    account: str | None = None
     # --nsys-profiling: enables nsys profiling in the job environment.
-    nsys_profiling: bool = False,
+    nsys_profiling: bool = False
     # --time: walltime limit for the slurm jobs.
+    time: str | None = None
+
+
+@task
+def launch_slurm(
+    ctx: CmdContext,
+    wg_private_path: str,
+    stage: Literal["train", "inference", "evaluation"] = "train",
+    from_run_id: str | None = None,
+    working_dir: str | None = None,
+    *,
+    slurm_script: str | None = None,
+    results_dir: str | None = None,
+    run_ids: list[str] | None = None,
+    root_dir: str | None = None,
+    link_venv: bool = False,
+    config: list[str] | None = None,
+    options: list[str] | None = None,
+    base_config: str | None = None,
+    eval_config: str | None = None,
+    mini_epoch: int | None = None,
+    register: bool | None = None,
+    cleanup_scripts: Literal["yes", "no"] | None = None,
+    nodes: int | None = None,
+    chain_jobs: Literal[1, 2, 3, 4] | None = None,
+    account: str | None = None,
+    nsys_profiling: bool = False,
     time: str | None = None,
+) -> Result[LaunchSlurm]:
+    """Blocking task facade for `launch-slurm.py`; async work stays in the helper below."""
+    launch = _LaunchSlurmOptions(
+        wg_private_path=wg_private_path,
+        stage=stage,
+        from_run_id=from_run_id,
+        working_dir=working_dir,
+        slurm_script=slurm_script,
+        results_dir=results_dir,
+        run_ids=run_ids,
+        root_dir=root_dir,
+        link_venv=link_venv,
+        config=config,
+        options=options,
+        base_config=base_config,
+        eval_config=eval_config,
+        mini_epoch=mini_epoch,
+        register=register,
+        cleanup_scripts=cleanup_scripts,
+        nodes=nodes,
+        chain_jobs=chain_jobs,
+        account=account,
+        nsys_profiling=nsys_profiling,
+        time=time,
+    )
+    logger = get_run_logger()
+    return run_coro_as_sync(_launch_slurm_async(logger, ctx, launch))
+
+
+async def _launch_slurm_async(
+    logger: logging.Logger,
+    ctx: CmdContext,
+    launch: _LaunchSlurmOptions,
 ) -> Result[LaunchSlurm]:
     """
     Launch a sequence of slurm jobs using the weathergenerator
@@ -246,65 +307,69 @@ async def launch_slurm(
     """
     # Do not attempt to run expanduser() or resolve(), it runs on the remote HPC
     # and python will not have the appropriate file system information.
-    if working_dir is not None:
+    if launch.working_dir is not None:
         # The command runs from working_dir: wg_private_path may be relative to it.
-        cwd = working_dir
-        script = str(Path(wg_private_path) / "hpc" / "launch-slurm.py")
+        cwd = launch.working_dir
+        script = str(Path(launch.wg_private_path) / "hpc" / "launch-slurm.py")
     else:
         # Default: run from wg_private_path itself, with the script path
         # relative to it (avoids double-prefixing when wg_private_path is
         # itself relative, e.g. to the remote home).
-        cwd = wg_private_path
+        cwd = launch.wg_private_path
         script = "hpc/launch-slurm.py"
-    cmd = [script, "--stage", stage]
-    if from_run_id:
-        cmd += ["--from-run-id", from_run_id]
-    if slurm_script:
-        cmd += ["--slurm-script", slurm_script]
-    if results_dir:
-        cmd += ["--results-dir", results_dir]
-    if run_ids:
-        cmd += ["--run-ids", *run_ids]
-    if root_dir:
-        cmd += ["--dir", root_dir]
-    if link_venv:
+    cmd = [script, "--stage", launch.stage]
+    if launch.from_run_id:
+        cmd += ["--from-run-id", launch.from_run_id]
+    if launch.slurm_script:
+        cmd += ["--slurm-script", launch.slurm_script]
+    if launch.results_dir:
+        cmd += ["--results-dir", launch.results_dir]
+    if launch.run_ids:
+        cmd += ["--run-ids", *launch.run_ids]
+    if launch.root_dir:
+        cmd += ["--dir", launch.root_dir]
+    if launch.link_venv:
         cmd += ["--link-venv"]
-    if config:
-        cmd += ["--config", *config]
-    if options:
-        cmd += ["--options", *options]
-    if base_config:
-        cmd += ["--base-config", base_config]
-    if eval_config:
-        cmd += ["--eval-config", eval_config]
-    if mini_epoch is not None:
-        cmd += ["--mini-epoch", str(mini_epoch)]
-    if register is not None:
-        cmd += ["--register" if register else "--no-register"]
-    if cleanup_scripts:
-        cmd += ["--cleanup-scripts", cleanup_scripts]
-    if nodes is not None:
-        cmd += ["--nodes", str(nodes)]
-    if chain_jobs is not None:
-        cmd += ["--chain-jobs", str(chain_jobs)]
-    if account:
-        cmd += ["--account", account]
-    if nsys_profiling:
+    if launch.config:
+        cmd += ["--config", *launch.config]
+    if launch.options:
+        cmd += ["--options", *launch.options]
+    if launch.base_config:
+        cmd += ["--base-config", launch.base_config]
+    if launch.eval_config:
+        cmd += ["--eval-config", launch.eval_config]
+    if launch.mini_epoch is not None:
+        cmd += ["--mini-epoch", str(launch.mini_epoch)]
+    if launch.register is not None:
+        cmd += ["--register" if launch.register else "--no-register"]
+    if launch.cleanup_scripts:
+        cmd += ["--cleanup-scripts", launch.cleanup_scripts]
+    if launch.nodes is not None:
+        cmd += ["--nodes", str(launch.nodes)]
+    if launch.chain_jobs is not None:
+        cmd += ["--chain-jobs", str(launch.chain_jobs)]
+    if launch.account:
+        cmd += ["--account", launch.account]
+    if launch.nsys_profiling:
         cmd += ["--nsys-profiling"]
-    if time:
-        cmd += ["--time", time]
-    logger = get_run_logger()
+    if launch.time:
+        cmd += ["--time", launch.time]
     res = await run_cmd(ctx, Command(cmd, working_directory=cwd), logger)
     if is_err(res):
         await _publish_launch_error_artifact(
-            logger, stage, from_run_id, f"command failed: {res.err}", res.stdout, res.stderr
+            logger,
+            launch.stage,
+            launch.from_run_id,
+            f"command failed: {res.err}",
+            res.stdout,
+            res.stderr,
         )
         return res
     if res.return_code != 0:
         await _publish_launch_error_artifact(
             logger,
-            stage,
-            from_run_id,
+            launch.stage,
+            launch.from_run_id,
             f"launch_slurm.py exited with return code {res.return_code}",
             res.stdout,
             res.stderr,
@@ -322,14 +387,19 @@ async def launch_slurm(
         parsed = _parse_launch_summary(res.stdout) or _parse_launch_summary(res.stderr)
     except ValueError as e:
         await _publish_launch_error_artifact(
-            logger, stage, from_run_id, f"malformed summary block: {e}", res.stdout, res.stderr
+            logger,
+            launch.stage,
+            launch.from_run_id,
+            f"malformed summary block: {e}",
+            res.stdout,
+            res.stderr,
         )
         return OpError(err=e, stdout=res.stdout, stderr=res.stderr, return_code=res.return_code)
     if parsed is None:
         await _publish_launch_error_artifact(
             logger,
-            stage,
-            from_run_id,
+            launch.stage,
+            launch.from_run_id,
             "could not find a summary block in launch_slurm.py output",
             res.stdout,
             res.stderr,
@@ -367,8 +437,8 @@ async def launch_slurm(
     launch_md = (
         f"## WeatherGenerator launch-slurm\n\n"
         f"- **Run ID:** `{run_id}`\n"
-        f"- **Stage:** `{stage}`\n"
-        f"- **From run ID:** `{from_run_id}`\n"
+        f"- **Stage:** `{launch.stage}`\n"
+        f"- **From run ID:** `{launch.from_run_id}`\n"
         f"- **Work dir:** `{wg_work_dir}`\n\n"
         f"### Jobs\n\n"
         f"| part | job id | stdout | stderr | output log |\n"
@@ -380,12 +450,12 @@ async def launch_slurm(
     await acreate_markdown_artifact(
         key=f"wg-{_artifact_key_part(run_id)}-launch",
         markdown=launch_md,
-        description=f"wg run {run_id} stage {stage} launch",
+        description=f"wg run {run_id} stage {launch.stage} launch",
     )
 
     return LaunchSlurm(
         wg_run_id=run_id,
-        stage=stage,
+        stage=launch.stage,
         slurm_jobs=slurm_jobs,
         wg_work_dir=wg_work_dir,
         output_logs=output_logs,

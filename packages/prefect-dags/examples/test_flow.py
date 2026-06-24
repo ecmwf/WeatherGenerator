@@ -15,7 +15,7 @@
 
 from weathergen.launch_slurm import launch_slurm, wait_for_completion
 from weathergen.prefect_dags import SlurmJobResult, flow, run, sbatch_try, task
-from weathergen.prefect_dags.cmd_runners import *
+from weathergen.prefect_dags.cmd_runners import *  # noqa: F403
 from weathergen.prefect_dags.result import is_err
 
 # ctx: CmdContext = LocalContext()
@@ -101,17 +101,17 @@ def test_run_cmd_flow2(
     # wgp = "/users/thunter/work/WeatherGenerator-private/"
     working_dir = "~/work/"
     wgp = "./WeatherGenerator-private/"
-    jobs = launch_slurm.submit(
+    jobs = launch_slurm(
         ctx,
         wgp,
         working_dir=working_dir,
         stage="train",
         time="10",
         # base_config="WeatherGenerator/config/default_config.yml",
-    ).result()
+    )
     print(jobs)
     assert not is_err(jobs)
-    final_status = wait_for_completion.submit(ctx, jobs).result()
+    final_status = wait_for_completion(ctx, jobs)
     print(final_status)
 
 

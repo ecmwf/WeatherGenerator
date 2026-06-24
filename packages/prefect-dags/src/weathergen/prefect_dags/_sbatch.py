@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 import httpx
 import prefect.runtime.flow_run
@@ -379,7 +380,7 @@ async def _sbatch_try(
         f"- **stdout:** `{sub_res.stdout}`\n"
         f"- **stderr:** `{sub_res.stderr}`\n"
     )
-    await acreate_markdown_artifact(
+    _ = await acreate_markdown_artifact(
         key=artifact_key,
         markdown=submission_md,
         description=artifact_description,
@@ -402,7 +403,7 @@ async def _sbatch_try(
         # Re-create the artifact with the same key: Prefect supersedes the previous
         # version, so the task-run page shows the submission info plus the captured
         # output as a single artifact.
-        await acreate_markdown_artifact(
+        _ = await acreate_markdown_artifact(
             key=artifact_key,
             markdown=submission_md + "\n" + _format_output_section(output),
             description=artifact_description,
@@ -415,7 +416,7 @@ async def _sbatch_try(
     )
 
 
-def _format_output_section(output: dict) -> str:
+def _format_output_section(output: dict[str, str]) -> str:
     # Use 4-backtick fences so log content containing ``` doesn't break the block.
     def section(title: str, body: str | None) -> str:
         if body is None:
@@ -474,12 +475,12 @@ async def _set_status(
     tags = [f"hpc:{hpc}", "status:active"]
     # Tag with the flow currently running this task, to ease tracing a status
     # variable back to its flow in the UI. May be absent (e.g. unit tests).
-    flow_name = prefect.runtime.flow_run.flow_name
+    flow_name: str = prefect.runtime.flow_run.flow_name
     if flow_name:
         tags.append(f"flow:{flow_name}")
     if flow_run_id:
         tags.append(f"flow_run:{flow_run_id}")
-    await Variable.aset(
+    _ = await Variable.aset(
         name=_status_var_name(hpc, job_id),
         value=_STATUS_ADAPTER.dump_python(payload),
         tags=tags,
@@ -506,7 +507,7 @@ async def _read_status(
 
 
 async def _delete_status(hpc: str, job_id: SlurmJobId) -> None:
-    await Variable.aunset(name=_status_var_name(hpc, job_id))
+    _ = await Variable.aunset(name=_status_var_name(hpc, job_id))
 
 
 async def _list_status_payloads(hpc: str, logger: logging.Logger) -> list[_SlurmJobPrefectStatus]:
@@ -560,7 +561,7 @@ async def _write_lease(hpc: str) -> None:
         hpc=hpc,
         lease_expires_at=(_now_utc() + _LEASE_DURATION).isoformat(),
     )
-    await Variable.aset(
+    _ = await Variable.aset(
         name=_lease_var_name(hpc),
         value=_LOCK_ADAPTER.dump_python(lock),
         overwrite=True,
@@ -695,7 +696,7 @@ async def _flow_cancellation_guard(
     "no signal": a network blip must not cancel real work.
     """
     no_signal = CancelledSlurmJobs(cancelled=[])
-    flow_run_id = prefect.runtime.flow_run.id
+    flow_run_id: UUID | None = prefect.runtime.flow_run.id
     if not flow_run_id:
         # Not running inside a flow run (e.g. unit tests): nothing to guard.
         return no_signal
