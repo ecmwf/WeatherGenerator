@@ -87,9 +87,21 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.conditioning and (self.conditioning in ["date_time", "date", "time"]):
             self.datetime_embedder = DateTimeEncoder(self.conditioning)
 
+        # Optional MLP projections for an expanded diffusion latent space:
+        # projects encoder tokens (ae_global_dim_embed -> fe_diffusion_latent_dim) before denoising
+        # and back (fe_diffusion_latent_dim -> ae_global_dim_embed) after.
+        # When fe_diffusion_latent_dim == ae_global_dim_embed (default), these are None (no-op).
+        _enc_dim = self.cf.ae_global_dim_embed
+        _lat_dim = self.cf.get("fe_diffusion_latent_dim", _enc_dim)
+        if _lat_dim != _enc_dim:
+            self.latent_proj_up = torch.nn.Linear(_enc_dim, _lat_dim, bias=False)
+            self.latent_proj_down = torch.nn.Linear(_lat_dim, _enc_dim, bias=False)
+        else:
+            self.latent_proj_up = None
+            self.latent_proj_down = None
+
         if self.conditioning_type == "concatenate_hdMLP":
-            _D = self.cf.ae_global_dim_embed
-            self.concat_hd_proj = torch.nn.Linear(2 * _D, _D, bias=False)
+            self.concat_hd_proj = torch.nn.Linear(2 * _lat_dim, _lat_dim, bias=False)
 
         # Parameters
         self.sigma_min = self.cf.sigma_min
@@ -224,10 +236,13 @@ class DiffusionForecastEngine(torch.nn.Module):
         # Compute sigma from noise_level_rn.
         # log_normal: noise_level_rn is eta ~ N(0,1); sigma = exp(eta * p_std + p_mean)
         # log_uniform: noise_level_rn is log_sigma directly; sigma = exp(noise_level_rn)
-        if self.noise_distribution == "log_uniform":
+        # during validation, noise_level_rn is set to a fixed value (default: 0.0), so sigma = exp(0) = 1.0 (no noise) by default
+        if self.noise_distribution == "log_uniform" or not self.training:
             sigma = noise_level_rn.exp()
-        else:
+        elif self.noise_distribution == "log_normal":
             sigma = (noise_level_rn * self.p_std + self.p_mean).exp()
+        else:
+            raise ValueError(f"Unsupported noise_distribution: {self.noise_distribution}")
         n = torch.randn_like(y) * sigma
 
         self._noised_tokens = (y + n).detach()
@@ -264,34 +279,47 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         net_input = c_in * x
 
+        # Project input tokens and (where applicable) conditioning tokens from the encoder
+        # latent space (ae_global_dim_embed) up to the diffusion latent space (fe_diffusion_latent_dim).
+        # For ada_ln, `c` is an embedded scalar signal, not encoder tokens — skip its projection.
+        if self.latent_proj_up is not None:
+            net_input = self.latent_proj_up(net_input)
+            if c is not None and self.conditioning_type not in {"ada_ln"}:
+                c = self.latent_proj_up(c)
+
         if self.conditioning_type == "concatenate":
-            # Concatenate conditioning tokens along sequence dim: (B, H, D) cat (B, H, D) -> (B, 2H, D)
+            # Concatenate conditioning tokens along sequence dim: (B, H, D') cat (B, H, D') -> (B, 2H, D')
             # Also double coords so 2D RoPE matches the doubled sequence length
             combined = torch.cat([net_input, c], dim=1)
             coords_combined = torch.cat([coords, coords], dim=1) if coords is not None else None
             raw_out = self.net(combined, fstep=fstep, coords=coords_combined, noise_emb=noise_emb, conditioning=None)
-            raw_out = raw_out[:, : x.shape[1], :]  # Slice back to (B, H, D)
+            raw_out = raw_out[:, : x.shape[1], :]  # Slice back to (B, H, D')
+            if self.latent_proj_down is not None:
+                raw_out = self.latent_proj_down(raw_out)
             return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
 
         if self.conditioning_type == "concatenate_hiddendim":
-            # Concatenate along hidden dim: (B, H, D) cat (B, H, D) -> (B, H, 2D)
-            # ForecastingEngine runs at 2D throughout and projects back to D via out_proj
+            # Concatenate along hidden dim: (B, H, D') cat (B, H, D') -> (B, H, 2D')
+            # ForecastingEngine runs at 2D' throughout and projects back to D' via out_proj
             combined = torch.cat([net_input, c], dim=2)
-            return c_skip * x + c_out * self.net(
-                combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
-            )  # Eq. (7) in EDM paper
+            raw_out = self.net(combined, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None)
+            if self.latent_proj_down is not None:
+                raw_out = self.latent_proj_down(raw_out)
+            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
 
         if self.conditioning_type == "concatenate_hdMLP":
-            # Concatenate along hidden dim then project back: (B, H, D) cat (B, H, D) -> (B, H, 2D) -> Linear -> (B, H, D)
+            # Concatenate along hidden dim then project back: (B, H, D') cat (B, H, D') -> (B, H, 2D') -> Linear -> (B, H, D')
             combined = torch.cat([net_input, c], dim=2)
             projected = self.concat_hd_proj(combined)
-            return c_skip * x + c_out * self.net(
-                projected, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None
-            )  # Eq. (7) in EDM paper
+            raw_out = self.net(projected, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None)
+            if self.latent_proj_down is not None:
+                raw_out = self.latent_proj_down(raw_out)
+            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
 
-        return c_skip * x + c_out * self.net(
-            net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c
-        )  # Eq. (7) in EDM paper
+        raw_out = self.net(net_input, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=c)
+        if self.latent_proj_down is not None:
+            raw_out = self.latent_proj_down(raw_out)
+        return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
 
     def inference_forward(
         self,

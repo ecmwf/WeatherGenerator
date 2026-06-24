@@ -232,6 +232,7 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path) / run_id
 
+        # mini_epoch = -1
         config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
         config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
 

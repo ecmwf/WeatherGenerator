@@ -61,6 +61,7 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
+fe_diffusion_latent_dim: 2560
 fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
@@ -110,9 +111,9 @@ latent_noise_deterministic_latents: True
 
 
 #below for FE training only
-freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 #below for DECODER training only
-# freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*fe.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*fe.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 #below for FE and DECODER training
 # freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
 
@@ -220,7 +221,7 @@ training_config:
   shuffle: True
  
   # start_date: 1979-01-01T00:00
-  start_date: 2016-01-01T00:00  # 2014, 2000 or 1990 if overfitting too much
+  start_date: 2014-01-01T00:00  # 2014, 2000 or 1990 if overfitting too much
   end_date: 2022-12-31T18:00
 
   time_window_step: 06:00:00
@@ -300,12 +301,12 @@ training_config:
 validation_config: 
 
   # Noise levels (eta values in standard normal space) at which to evaluate the
-  # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
+  # diffusion model during validation. During validation sigma = exp(eta) directly (log-sigma interpretation).
   # Each value produces a separate validation pass with independently logged metrics.
   validation_noise_levels: [1.0, 2.0, 3.0, 4.0]
 
   samples_per_mini_epoch: 256
-  shuffle: True
+  shuffle: False
 
   start_date: 2023-10-01T00:00
   end_date: 2023-12-31T18:00

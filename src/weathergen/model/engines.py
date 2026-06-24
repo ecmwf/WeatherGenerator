@@ -583,7 +583,8 @@ class ForecastingEngine(torch.nn.Module):
         self.fe_blocks = torch.nn.ModuleList()
 
         _concat_hd = self.cf.get("fe_diffusion_model_conditioning_type", None) == "concatenate_hiddendim"
-        _inner_dim = 2 * self.cf.ae_global_dim_embed if _concat_hd else self.cf.ae_global_dim_embed
+        _diffusion_latent_dim = self.cf.get("fe_diffusion_latent_dim", self.cf.ae_global_dim_embed)
+        _inner_dim = 2 * _diffusion_latent_dim if _concat_hd else _diffusion_latent_dim
 
         global_rate = int(1 / self.cf.forecast_att_dense_rate)
         if mode_cfg.get("forecast", {}).get("policy") is not None:
@@ -633,8 +634,8 @@ class ForecastingEngine(torch.nn.Module):
                 if self.cf.get("fe_diffusion_model_conditioning_type", None) == "cross_attn":
                     self.fe_blocks.append(
                         MultiCrossAttentionHead(
-                            dim_embed_q=self.cf.ae_global_dim_embed,
-                            dim_embed_kv=self.cf.ae_global_dim_embed,
+                            dim_embed_q=_diffusion_latent_dim,
+                            dim_embed_kv=_diffusion_latent_dim,
                             num_heads=self.cf.fe_num_heads,
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_residual=True,
@@ -680,7 +681,7 @@ class ForecastingEngine(torch.nn.Module):
 
         # For concatenate_hiddendim: project 2D -> D after the full forward pass
         self.out_proj = (
-            torch.nn.Linear(_inner_dim, self.cf.ae_global_dim_embed, bias=False)
+            torch.nn.Linear(_inner_dim, _diffusion_latent_dim, bias=False)
             if _concat_hd else None
         )
 

@@ -582,7 +582,7 @@ def _build_single_animation(
     # We match files by checking a fixed prefix and suffix, allowing any
     # valid_time (or none) in between — no glob wildcards needed.
     region_part = region if region else ""
-    head = "_".join(filter(None, [prefix, run_id, tag, str(sa)]))
+    head = "_".join(filter(None, [prefix, run_id, tag, str(sample)]))
     tail = "_".join(filter(None, [stream, region_part, var]))
     suffix = f".{image_format}"
     fstep_strs = {str(f).zfill(3) for f in fsteps}

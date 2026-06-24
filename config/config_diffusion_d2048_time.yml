@@ -288,7 +288,7 @@ training_config:
 validation_config: 
 
   # Noise levels (eta values in standard normal space) at which to evaluate the
-  # diffusion model during validation. sigma = exp(eta * p_std + p_mean).
+  # diffusion model during validation. During validation sigma = exp(eta) directly (log-sigma interpretation).
   # Each value produces a separate validation pass with independently logged metrics.
   validation_noise_levels: [1.0, 2.0, 3.0, 4.0]
 

@@ -234,7 +234,7 @@ class Trainer(TrainerBase):
         # create data loader
         # only one needed since we only run the validation code path
         # Force full maps during inference by disabling target subsampling
-        for stream_info in cf.streams:
+        for stream_info in cf.streams.values():
             stream_info["max_num_targets"] = -1
 
         self.dataset = MultiStreamDataSampler(

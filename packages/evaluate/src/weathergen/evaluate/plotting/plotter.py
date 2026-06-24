@@ -453,9 +453,8 @@ class Plotter:
             valid_time = None
         else:
             valid_time = (
-                target_data["valid_time"][0]
-                .values.astype("datetime64[m]")
-                .astype(datetime.datetime)
+                np.datetime64(target_data["valid_time"].values.flat[0], "m")
+                .item()
                 .strftime("%Y-%m-%dT%H%M")
             )
 
