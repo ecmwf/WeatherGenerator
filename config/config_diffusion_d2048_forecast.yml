@@ -59,11 +59,12 @@ fe_num_blocks: 12
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
+fe_diffusion_latent_dim: null  # set to an int > ae_global_dim_embed to inflate the diffusion latent space; null = use ae_global_dim_embed
 fe_diffusion_model: True
 fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
-fe_diffusion_model_conditioning_type: "cross_attn" # options: "cross_attn", "concatenate", ..., "ada_ln"
+fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "concatenate", ..., "ada_ln"
 fe_layer_norm_after_blocks: [11]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
 fe_impute_latent_noise_std: 0.0  # 1e-4
 fe_impute_latent_diffusion_noise_std: 1e-3  # 1e-4
@@ -73,7 +74,7 @@ with_step_conditioning: True # False
 # Diffusion related parameters
 frequency_embedding_dim: 256
 embedding_dim: 512
-noise_distribution: &noise_distribution "log_normal"  # "log_uniform" or "log_normal"
+noise_distribution: &noise_distribution "log_uniform"  # "log_uniform" or "log_normal"
 sigma_min: &sigma_min 0.002
 sigma_max: &sigma_max 80
 sigma_data: 1.0
