@@ -78,8 +78,7 @@ class IOState:
     lat: NDArray
     lon: NDArray
     n_workers: int
-    regrid_opts: dict  # options for regridding gridded DataArrays; ignored for scatter
-    regridder: Regridder | None = None  # shared Regridder instance (caches matrices)
+    regridder: Regridder | None = None  # shared Regridder instance (caches matrices + opts)
     backend: str = "loky"
     rank: str = "0000"
     offset: np.timedelta64 | None = (
@@ -280,7 +279,7 @@ def _build_io_state(
     if isinstance(regrid_opts, bool) and regrid_opts:
         regrid_opts = {"target_grid": [1.5, 1.5]}
 
-    regridder = Regridder() if regrid_opts else None
+    regridder = Regridder(regrid_opts) if regrid_opts else None
 
     return IOState(
         run_id=run_id,
@@ -302,7 +301,6 @@ def _build_io_state(
         n_workers=n_io_workers,
         rank=rank,
         offset=offset,
-        regrid_opts=regrid_opts,
         regridder=regridder,
     )
 
@@ -319,7 +317,6 @@ def _parallel_read(
     n_workers: int,
     backend: str,
     label: str,
-    regrid_opts: dict,
 ) -> tuple[list, bool]:
     """Dispatch _read_sample over samples, with parallel→sequential fallback.
 
@@ -337,7 +334,6 @@ def _parallel_read(
         is_zip=is_zip,
         read_coords=need_coords,
         is_gridded=is_gridded,
-        regrid_opts=regrid_opts,
     )
 
     calls = [delayed(_read_sample)(sample=s, **kwargs) for s in samples]
@@ -439,7 +435,6 @@ def _assemble_substep(
             init_times,
             forecast_step_val,
             state.ens_select,
-            regrid_opts=state.regrid_opts,
             regridder=state.regridder,
             run_id=state.run_id,
         )
@@ -556,7 +551,6 @@ def get_data_dirstore(state: IOState) -> ReaderOutput:
             n_workers=n_workers,
             backend=state.backend,
             label=f"RUN {state.run_id} [rank {state.rank}] - {state.stream} fstep {fs}",
-            regrid_opts=state.regrid_opts,
         )
         # If _parallel_read fell back to sequential, honour that for the rest
         if fell_back:
@@ -630,7 +624,6 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
         is_zip=state.is_zip,
         read_coords=not state.is_gridded,
         is_gridded=state.is_gridded,
-        regrid_opts=state.regrid_opts,
     )
     calls = [
         delayed(_read_sample)(sample=s, fsteps=[fs], **kwargs)

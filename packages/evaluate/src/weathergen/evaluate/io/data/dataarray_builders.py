@@ -87,7 +87,6 @@ def build_gridded_dataarrays(
     init_times: NDArray,
     forecast_step_val: int,
     ens_select: EnsembleSelect,
-    regrid_opts: dict,
     regridder: Regridder | None = None,
     run_id: str = "",
 ) -> tuple[xr.DataArray, xr.DataArray]:
@@ -120,19 +119,18 @@ def build_gridded_dataarrays(
     ens_select : EnsembleSelect
         Pre-resolved ensemble selection (from :meth:`EnsembleSelect.from_names`).
         ``EnsembleSelect.mean()`` → mean; otherwise selects members.
-    regrid_opts : dict
-        Regrid each sample from its original grid to a regular
-        lat/lon grid before stacking.  Must contain 'target_grid' (e.g. [1.5, 1.5]).
-        Optionally 'original_grid' to skip auto-detection.
+    regridder : Regridder | None
+        If provided, regrid each sample before stacking.  The Regridder
+        holds the grid options (original_grid, target_grid) internally.
 
     Returns
     -------
     da_tar, da_pred : xr.DataArray
     """
     # Regrid each sample individually (correct n_ipoints per sub-step)
-    if regrid_opts and regridder is not None:
+    if regridder is not None:
         tars_list, preds_list, lat, lon = regridder.regrid_dataarrays(
-            tars_list, preds_list, regrid_opts, run_id=run_id
+            tars_list, preds_list, run_id=run_id
         )
 
     n_samples = len(samples)
@@ -382,7 +380,11 @@ class Regridder:
     Different streams may have different grids — the cache handles them all.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, regrid_opts: dict) -> None:
+        self._regrid_opts = regrid_opts
+        self._target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
+        if not isinstance(self._target_grid, str):
+            self._target_grid = list(self._target_grid)
         self._matrices: dict[tuple[str, str], tuple] = {}
         self._coords: dict[str, tuple[NDArray, NDArray]] = {}
         self._logged: set[str] = set()
@@ -403,7 +405,7 @@ class Regridder:
             self._matrices[cache_key] = (matrix, out_shape)
         return self._matrices[cache_key]
 
-    def regrid_array(self, data: NDArray, regrid_opts: dict) -> NDArray:
+    def regrid_array(self, data: NDArray) -> NDArray:
         """Regrid a numpy array using a cached sparse matrix.
 
         Parameters
@@ -411,9 +413,6 @@ class Regridder:
         data : NDArray
             Input array of shape ``(n_ipoints, n_channels)`` or
             ``(n_ipoints, n_channels, n_ens)``.
-        regrid_opts : dict
-            Must contain 'target_grid' (e.g. [1.5, 1.5]).  Optionally
-            'original_grid' to skip auto-detection.
 
         Returns
         -------
@@ -421,12 +420,9 @@ class Regridder:
             Regridded array of shape ``(n_lat * n_lon, n_channels[, n_ens])``.
         """
         n_ipoints = data.shape[0]
-        original_grid = _detect_grid(n_ipoints, regrid_opts)
-        target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
-        if not isinstance(target_grid, str):
-            target_grid = list(target_grid)
+        original_grid = _detect_grid(n_ipoints, self._regrid_opts)
 
-        matrix, _ = self._get_matrix(original_grid, target_grid)
+        matrix, _ = self._get_matrix(original_grid, self._target_grid)
 
         if data.ndim == 2:
             return matrix.dot(data)
@@ -464,7 +460,7 @@ class Regridder:
             self._coords[key] = (lat, lon)
         return self._coords[key]
 
-    def regrid_dataarrays(self, tars_list, preds_list, regrid_opts, run_id: str = ""):
+    def regrid_dataarrays(self, tars_list, preds_list, run_id: str = ""):
         """Regrid lists of target/prediction arrays and compute output lat/lon.
 
         Logs the regridding info once per *run_id*.
@@ -476,14 +472,17 @@ class Regridder:
 
         shape_before = tars_list[0].shape
 
-        tars_list = [self.regrid_array(t, regrid_opts) for t in tars_list]
-        preds_list = [self.regrid_array(p, regrid_opts) for p in preds_list]
+        tars_list = [self.regrid_array(t) for t in tars_list]
+        preds_list = [self.regrid_array(p) for p in preds_list]
 
         shape_after = tars_list[0].shape
 
         if run_id and run_id not in self._logged:
-            target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
-            target_grid_str = list(target_grid) if not isinstance(target_grid, str) else target_grid
+            target_grid_str = (
+                list(self._target_grid)
+                if not isinstance(self._target_grid, str)
+                else self._target_grid
+            )
             _logger.info(
                 f"[{run_id}] Regridding: {shape_before} -> {shape_after} "
                 f"(target_grid={target_grid_str})"
@@ -491,11 +490,10 @@ class Regridder:
             self._logged.add(run_id)
 
         # Resolve output coordinates (cached per target_grid)
-        original_grid = _detect_grid(shape_before[0], regrid_opts)
-        target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
-        if not isinstance(target_grid, str):
-            target_grid = list(target_grid)
-        _, out_shape = self._get_matrix(original_grid, target_grid)
-        lat, lon = self._get_output_coords(target_grid, out_shape)
+        original_grid = _detect_grid(shape_before[0], self._regrid_opts)
+        _, out_shape = self._get_matrix(original_grid, self._target_grid)
+        lat, lon = self._get_output_coords(self._target_grid, out_shape)
+
+        return tars_list, preds_list, lat, lon
 
         return tars_list, preds_list, lat, lon
