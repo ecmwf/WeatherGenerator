@@ -44,6 +44,7 @@ from weathergen.train.utils import (
     get_active_stage_config,
     get_batch_size_from_config,
     get_target_idxs_from_cfg,
+    NoOpGradScaler,
 )
 from weathergen.utils.distributed import is_root
 from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker
@@ -68,7 +69,7 @@ class Trainer(TrainerBase):
         self.dataset_val: MultiStreamDataSampler | None = None
         self.device: torch.device = None
         self.ema_model = None
-        self.grad_scaler: torch.amp.GradScaler | None = None
+        self.grad_scaler: torch.amp.GradScaler | NoOpGradScaler = NoOpGradScaler()
         self.last_grad_norm = None
         self.loss_calculator: LossCalculator | None = None
         self.loss_calculator_val: LossCalculator | None = None
@@ -331,8 +332,8 @@ class Trainer(TrainerBase):
             betas=(beta1, beta2),
             eps=eps,
         )
-        self.grad_scaler = torch.amp.GradScaler("cuda")
-
+        if cf.grad_scaling:
+            self.grad_scaler = torch.amp.GradScaler("cuda")
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"
 
         # lr is updated after each batch so account for this
