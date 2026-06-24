@@ -15,14 +15,18 @@ Extracted here so that the reader module stays focused on I/O orchestration.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
+import earthkit.regrid.db as ekr_db
 import numpy as np
 import xarray as xr
-import earthkit.regrid.db as ekr_db
+from earthkit.data import from_source
 from earthkit.regrid.gridspec import GridSpec as EkGridSpec
 from numpy.typing import NDArray
-from earthkit.data import from_source
+
+_logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class EnsembleSelect:
@@ -385,7 +389,7 @@ class Regridder:
 
     def _get_matrix(self, original_grid: str, target_grid: list | str):
         """Load or retrieve the cached interpolation matrix."""
-  
+
         cache_key = (str(original_grid), str(target_grid))
         if cache_key not in self._matrices:
             in_grid = {"grid": original_grid}
@@ -469,9 +473,6 @@ class Regridder:
         -------
         tars_list, preds_list, lat, lon
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
 
         shape_before = tars_list[0].shape
 
@@ -482,14 +483,14 @@ class Regridder:
 
         if run_id and run_id not in self._logged:
             target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
-            logger.info(
+            target_grid_str = list(target_grid) if not isinstance(target_grid, str) else target_grid
+            _logger.info(
                 f"[{run_id}] Regridding: {shape_before} -> {shape_after} "
-                f"(target_grid={list(target_grid) if not isinstance(target_grid, str) else target_grid})"
+                f"(target_grid={target_grid_str})"
             )
             self._logged.add(run_id)
 
         # Resolve output coordinates (cached per target_grid)
-        n_ipoints = tars_list[0].shape[0]
         original_grid = _detect_grid(shape_before[0], regrid_opts)
         target_grid = regrid_opts.get("target_grid", [1.5, 1.5])
         if not isinstance(target_grid, str):

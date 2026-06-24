@@ -705,7 +705,7 @@ def get_data_zipstore(state: IOState) -> ReaderOutput:
     if state.n_workers > 1:
         get_reusable_executor().shutdown(wait=True)
 
-    _logger.info(
+    _logger.debug(
         f"RUN {state.run_id} [rank {state.rank}] - {state.stream}: ZipStore-parallel I/O complete. "
         f"{len(da_tars_dict)} forecast entries loaded."
     )
