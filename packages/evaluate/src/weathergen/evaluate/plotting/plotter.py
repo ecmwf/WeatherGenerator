@@ -707,10 +707,6 @@ class Plotter:
     def _resolve_norm(opts: dict, tag: str) -> mpl.colors.Normalize:
         """Resolve the colorbar scale and build color normalisation.
 
-        Bias maps (``tag`` starting with ``"bias"``) are signed, so a non-linear
-        scale is coerced to ``"symlog"``. Explicit ``levels`` always take
-        precedence and yield a BoundaryNorm.
-
         Parameters
         ----------
         opts : dict
@@ -724,21 +720,22 @@ class Plotter:
             LogNorm, SymLogNorm, BoundaryNorm or linear Normalize.
         """
 
+        is_bias = str(tag).startswith("bias")
+        vmin, vmax = opts["vmin"], opts["vmax"]
+
         scale = opts["colorbar_scale"]
         if scale not in {"linear", "log", "symlog"}:
             _logger.warning("Unknown colorbar_scale=%r. Falling back to linear.", scale)
             scale = "linear"
 
         # Bias maps are always signed, use symlog instead of plain log
-        if str(tag).startswith("bias") and scale != "linear":
+        if scale != "linear" and is_bias:
             scale = "symlog"
 
-        vmin, vmax = opts["vmin"], opts["vmax"]
-
-        # Explicit levels override continuous norm for preds and targets
-        if isinstance(opts["levels"], oc.listconfig.ListConfig) and not str(tag).startswith("bias"):
+        # Explicit levels override continuous norm (preds/targets only)
+        if isinstance(opts["levels"], oc.listconfig.ListConfig) and not is_bias:
             return mpl.colors.BoundaryNorm(opts["levels"], opts["cmap"].N, extend="both")
-        # Log only if vmin > 0; otherwise fall back to linear with warning
+
         if scale == "log" and vmin is not None and vmin > 0:
             return mpl.colors.LogNorm(vmin=vmin, vmax=vmax)
         elif scale == "log" and vmin is not None and vmin <= 0:
@@ -746,10 +743,13 @@ class Plotter:
                 "colorbar_scale='log' but vmin=%.3g <= 0; falling back to linear norm.",
                 vmin,
             )
+
         # Symlog (default for bias maps with non-linear scale)
         if scale == "symlog" and vmin is not None and vmax is not None:
             vmax_abs = max(abs(float(vmin)), abs(float(vmax)))
-            return mpl.colors.SymLogNorm(linthresh=max(vmax_abs * 1e-3, 1e-8), vmin=vmin, vmax=vmax)
+            linthresh = max(vmax_abs * 1e-3, 1e-8)
+            return mpl.colors.SymLogNorm(linthresh=linthresh, vmin=vmin, vmax=vmax)
+
         return mpl.colors.Normalize(vmin=vmin, vmax=vmax, clip=False)
 
     # rendering backends
