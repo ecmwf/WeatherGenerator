@@ -334,6 +334,7 @@ class Trainer(TrainerBase):
             weight_decay=self.training_cfg.optimizer.weight_decay,
             betas=(beta1, beta2),
             eps=eps,
+            fused=True,
         )
         self.grad_scaler = torch.amp.GradScaler("cuda")
 
