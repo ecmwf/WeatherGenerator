@@ -308,11 +308,8 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
-            tokens_global_c = block(
-                tokens_global_c,
-                tokens_c,
-                q_cells_lens_c,
-                cell_lens_c,
+            tokens_global_c = checkpoint(
+                block, tokens_global_c, tokens_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
             )
         return tokens_global_c
 
@@ -685,7 +682,7 @@ class EnsPredictionHead(torch.nn.Module):
         for pred_head in self.pred_heads:
             cpred = toks
             for block in pred_head:
-                cpred = block(cpred)
+                cpred = checkpoint(block, cpred, use_reentrant=False)
             preds.append(cpred)
         preds = torch.stack(preds, 0)
 
