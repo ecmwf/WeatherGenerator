@@ -169,7 +169,7 @@ class Trainer(TrainerBase):
                 warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
                 batch_size_per_gpu=self.batch_size_per_gpu,
             )
-        if cf.get("nvtx_annotate"):
+        if cf.get("profiling", {}).get("nvtx_annotate", False):
             self.training_loop_annotation_context = nvtx_range
 
     def get_target_aux_calculators(self, mode_cfg):
