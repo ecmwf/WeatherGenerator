@@ -31,8 +31,8 @@ from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype
 from weathergen.utils.performance import register_nvtx_hooks
+from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
 

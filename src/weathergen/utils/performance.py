@@ -186,6 +186,7 @@ def compute_source_bytes(source_samples) -> int:
                 total += t.nbytes
     return total
 
+
 @contextmanager
 def nvtx_range(name):
     torch.cuda.nvtx.range_push(name)
@@ -193,6 +194,7 @@ def nvtx_range(name):
         yield
     finally:
         torch.cuda.nvtx.range_pop()
+
 
 def _nvtx_push(name: str):
     torch.cuda.nvtx.range_push(name)
@@ -203,7 +205,13 @@ def _nvtx_pop():
 
 
 def register_nvtx_hooks(model, scope: str = "global"):
-    torch.nn.modules.module.register_module_forward_pre_hook(lambda m, args: _nvtx_push(f"{m.__class__.__name__}.forward"))
-    torch.nn.modules.module.register_module_forward_hook(lambda m, input, output: _nvtx_pop(), always_call=True)
-    torch.nn.modules.module.register_module_full_backward_pre_hook(lambda m, args: _nvtx_push(f"{m.__class__.__name__}.backward"))
+    torch.nn.modules.module.register_module_forward_pre_hook(
+        lambda m, args: _nvtx_push(f"{m.__class__.__name__}.forward")
+    )
+    torch.nn.modules.module.register_module_forward_hook(
+        lambda m, input, output: _nvtx_pop(), always_call=True
+    )
+    torch.nn.modules.module.register_module_full_backward_pre_hook(
+        lambda m, args: _nvtx_push(f"{m.__class__.__name__}.backward")
+    )
     torch.nn.modules.module.register_module_full_backward_hook(lambda m, input, output: _nvtx_pop())
