@@ -8,6 +8,7 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+import contextlib
 import copy
 import logging
 import time
@@ -86,6 +87,7 @@ class Trainer(TrainerBase):
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
         self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
+        self.training_loop_annotation_context = contextlib.nullcontext
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
         """
@@ -167,6 +169,8 @@ class Trainer(TrainerBase):
                 warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
                 batch_size_per_gpu=self.batch_size_per_gpu,
             )
+        if cf.nvtx_annotate:
+            self.training_loop_annotation_context = nvtx_range
 
     def get_target_aux_calculators(self, mode_cfg):
         """
@@ -440,7 +444,7 @@ class Trainer(TrainerBase):
         # training loop
         self.t_start = time.time()
         for bidx, batch in enumerate(dataset_iter):
-            with nvtx_range(f"batch_{bidx}"):
+            with self.training_loop_annotation_context(f"batch_{bidx}"):
                 if cf.data_loading.get("memory_pinning", False):
                     # pin memory for faster CPU-GPU transfer
                     batch = batch.pin_memory()
