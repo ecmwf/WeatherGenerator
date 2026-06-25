@@ -57,7 +57,6 @@ class EmbeddingEngine(torch.nn.Module):
 
             if si["embed"]["net"] == "transformer":
                 self.embeds[stream_name] = StreamEmbedTransformer(
-                    mode=self.cf.embed_orientation,
                     num_tokens=si["embed"]["num_tokens"],
                     token_size=si["token_size"],
                     num_channels=self.sources_size[i],
