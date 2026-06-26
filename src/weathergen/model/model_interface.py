@@ -142,8 +142,7 @@ def init_model_and_shard(
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
         for embed in model.encoder.embed_engine.embeds.values():
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward")
 
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is not None:
