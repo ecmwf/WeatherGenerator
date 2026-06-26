@@ -87,6 +87,7 @@ class Trainer(TrainerBase):
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
         self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
+        self.t_training_start: float = 0
         self.training_loop_annotation_context = contextlib.nullcontext
 
     def get_batch_size_total(self, batch_size_per_gpu) -> int:
@@ -325,7 +326,7 @@ class Trainer(TrainerBase):
         # aiming for beta1 = 0.9 at one node, ie kappa=B=4
         beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
         # aiming for beta2 = 0.95 at one node, ie B=4
-        beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
+        beta2 = max(0.9, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2))
         eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
 
         self.optimizer = torch.optim.AdamW(
@@ -366,7 +367,7 @@ class Trainer(TrainerBase):
             mini_epoch_base = int(self.cf.general.istep / len(self.data_loader))
         else:
             len_per_rank = (
-                len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu)
+                max(1, len(self.dataset) // (self.world_size_original * self.batch_size_per_gpu))
             ) * self.batch_size_per_gpu
             mini_epoch_base = int(
                 self.cf.general.istep
@@ -384,6 +385,7 @@ class Trainer(TrainerBase):
         self.validate_before_training()
 
         # training loop
+        self.t_training_start = time.time()
 
         for mini_epoch in range(mini_epoch_base, self.training_cfg.num_mini_epochs):
             if is_root():
@@ -753,6 +755,7 @@ class Trainer(TrainerBase):
                 self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
 
             elif self.cf.general.istep >= 0:
+                elapsed_time = time.time() - self.t_training_start
                 self.train_logger.add_logs(
                     stage,
                     samples,
@@ -760,6 +763,7 @@ class Trainer(TrainerBase):
                     stddev_all,
                     avg_loss=avg_loss,
                     lr=self.lr_scheduler.get_lr(),
+                    elapsed_training_time_seconds=elapsed_time,
                 )
 
         loss_calculator.loss_hist = []
