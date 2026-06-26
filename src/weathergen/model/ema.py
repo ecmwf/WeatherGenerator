@@ -75,7 +75,9 @@ class EMAModel:
             p_src = self._resolve_src_param(name)
             if p_src is None:
                 # EMA-only param or intentionally excluded
-                raise AssertionError(f"{name}: All parameters of the EMA model must be in the base model.")
+                raise AssertionError(
+                    f"{name}: All parameters of the EMA model must be in the base model."
+                )
             ema_params.append(p_ema)
             src_params.append(p_src)
 
@@ -105,14 +107,14 @@ class EMAModel:
     def update(self, cur_step: int, batch_size: int):
         # ensure model remains sharded
         if self.is_model_sharded:
-            self.ema_model.reshard()\
-            
+            self.ema_model.reshard()
+
         # determine correct interpolation params
         beta = self.get_current_beta(cur_step, batch_size)
 
         torch._foreach_mul_(self._ema_update_params, beta)
         torch._foreach_add_(self._ema_update_params, self._src_update_params, alpha=1.0 - beta)
-    
+
     @torch.no_grad()
     def forward_eval(self, *args, **kwargs):
         self.ema_model.eval()
