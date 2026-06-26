@@ -28,6 +28,8 @@ from weathergen.prefect_dags.slurm import SlurmJobId, SlurmSubmissionResult
 
 _logger = logging.getLogger(__name__)
 
+__all__ = ["launch_slurm", "LaunchSlurm", "wait_for_completion"]
+
 
 @dataclass
 class LaunchSlurm:
@@ -463,7 +465,7 @@ async def _launch_slurm_async(
 
 
 @task
-async def wait_for_completion(
+def wait_for_completion(
     ctx: CmdContext, ls: LaunchSlurm, fetch_output: bool = True
 ) -> Result[list[SlurmJobResult]]:
     """
@@ -484,7 +486,7 @@ async def wait_for_completion(
         logger.info(
             f"Waiting for slurm job {sub.job_id} (run_id={ls.wg_run_id}) on hpc {_runner.hpc}"
         )
-        state = await wait_completion_single(logger, ctx, sub.job_id, _runner)
+        state = run_coro_as_sync(wait_completion_single(logger, ctx, sub.job_id, _runner))
         if is_err(state):
             return state
         logger.info(f"Slurm job {sub.job_id} (run_id={ls.wg_run_id}) finished: {state}")
@@ -526,10 +528,12 @@ async def wait_for_completion(
                     + _output_md_section("output log (head)", py_output.get("head_out"))
                     + _output_md_section("output log (tail)", py_output.get("tail_out"))
                 )
-        await acreate_markdown_artifact(
-            key=artifact_key,
-            markdown=job_md,
-            description=f"wg run {ls.wg_run_id} stage {ls.stage} part {n + 1}",
+        run_coro_as_sync(
+            acreate_markdown_artifact(
+                key=artifact_key,
+                markdown=job_md,
+                description=f"wg run {ls.wg_run_id} stage {ls.stage} part {n + 1}",
+            )
         )
 
         results.append(SlurmJobResult(job_id=sub.job_id, status=state, submission=sub))
