@@ -11,6 +11,7 @@
 
 import logging
 import math
+import typing
 import warnings
 
 import astropy_healpix as hp
@@ -326,7 +327,7 @@ class Model(torch.nn.Module):
         self.forecast_engine: ForecastingEngine | IdentityEngine | None = None
         self.pred_heads = None
         self.q_cells: torch.Tensor | None = None
-        self.stream_names: list[str] = None
+        self.streams: dict[str, typing.Any] = cf.streams
         self.target_token_engines = None
 
         assert cf.get("forecast", {}).get("att_dense_rate", 1.0) == 1.0, (
@@ -389,11 +390,6 @@ class Model(torch.nn.Module):
         self.pred_heads = torch.nn.ModuleDict()
 
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
-
-        for i_stream, _ in enumerate(cf.streams):
-            stream_name = self.stream_names[i_stream]
-
         loss_terms = [
             v.type for _, v in cf.training_config.losses.items() if v.get("enabled", True)
         ]
@@ -403,9 +399,7 @@ class Model(torch.nn.Module):
             ]
 
         if "LossPhysical" in loss_terms:
-            for i_stream, si in enumerate(cf.streams):
-                stream_name = self.stream_names[i_stream]
-
+            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
@@ -496,16 +490,14 @@ class Model(torch.nn.Module):
                     )
 
             # iterate again to setup shared spatial pred heads if specified in config
-            for i_stream, si in enumerate(cf.streams):
-                stream_name = self.stream_names[i_stream]
-
+            for i_stream, (stream_name, si) in enumerate(self.streams.items()):
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
                     continue
 
                 pred_spatial_shared = si.get("pred_spatial_shared")
                 if pred_spatial_shared is not None:
-                    if pred_spatial_shared not in self.stream_names:
+                    if pred_spatial_shared not in self.streams.keys():
                         msg = f"Stream {stream_name} has pred_spatial_shared={pred_spatial_shared}"
                         msg += " but no stream with that name found."
                         raise ValueError(msg)
@@ -524,11 +516,8 @@ class Model(torch.nn.Module):
                         pred_spatial_shared
                     ]
 
-                    idx_shared_s = [
-                        i for i, so in enumerate(cf.streams) if so["name"] == pred_spatial_shared
-                    ]
-                    assert (len(idx_shared_s)) == 1
-                    si_other = cf.streams[idx_shared_s[0]]
+                    assert pred_spatial_shared in self.streams.keys()
+                    si_other = self.streams[pred_spatial_shared]
                     dims_embed = [
                         si_other["embed_target_coords"]["dim_embed"] for _ in range(num_layers + 1)
                     ]
@@ -603,9 +592,9 @@ class Model(torch.nn.Module):
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
 
-        cf = self.cf
         num_params_embed = [
-            get_num_parameters(self.encoder.embed_engine.embeds[name]) for name in self.stream_names
+            get_num_parameters(self.encoder.embed_engine.embeds[name])
+            for name in self.streams.keys()
         ]
         num_params_total = get_num_parameters(self)
         num_params_ae_local = get_num_parameters(self.encoder.ae_local_engine.ae_local_blocks)
@@ -628,17 +617,17 @@ class Model(torch.nn.Module):
         mdict = self.embed_target_coords
         num_params_embed_tcs = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
         mdict = self.target_token_engines
         num_params_tte = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
         mdict = self.pred_heads
         num_params_preds = [
             get_num_parameters(mdict[name]) if mdict and name in mdict else 0
-            for name in self.stream_names
+            for name in self.streams.keys()
         ]
 
         print("-----------------")
@@ -647,7 +636,7 @@ class Model(torch.nn.Module):
         print("  Embedding networks:")
         [
             print("    {} : {:,}".format(si["name"], np))
-            for si, np in zip(cf.streams, num_params_embed, strict=False)
+            for si, np in zip(self.streams.values(), num_params_embed, strict=False)
         ]
         print(f" Local assimilation engine: {num_params_ae_local:,}")
         print(f" Local-global adapter: {num_params_ae_adapter:,}")
@@ -658,16 +647,14 @@ class Model(torch.nn.Module):
         print(f" Forecast engine: {num_params_fe:,}")
         print(" coordinate embedding, prediction networks and prediction heads:")
         zps = zip(
-            cf.streams,
+            self.streams.keys(),
             num_params_embed_tcs,
             num_params_tte,
             num_params_preds,
             strict=False,
         )
-        [
-            print("   {} : {:,} / {:,} / {:,}".format(si["name"], np0, np1, np2))
-            for si, np0, np1, np2 in zps
-        ]
+        for stream_name, np0, np1, np2 in zps:
+            print(f"   {stream_name} : {np0:,} / {np1:,} / {np2:,}")
         print("-----------------")
 
     def tokens_to_latent_state(self, tokens_post_norm, tokens) -> LatentState:
@@ -787,7 +774,7 @@ class Model(torch.nn.Module):
         tokens_nbors_lens[0] = 0
 
         # pair with tokens from assimilation engine to obtain target tokens
-        for stream_name in self.stream_names:
+        for stream_name in self.streams.keys():
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
                 batch.samples[i_b].streams_data[stream_name].target_coords[step]
