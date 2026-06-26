@@ -589,7 +589,7 @@ class Trainer(TrainerBase):
             return {}
 
     def _train_batch(self, batch: ModelBatch, bidx: int, mini_epoch: int):
-        with self.training_loop_annotation_context(f"batch_{bidx}"):    
+        with self.training_loop_annotation_context(f"batch_{bidx}"):
             if self.cf.data_loading.get("memory_pinning", False):
                 # pin memory for faster CPU-GPU transfer
                 batch = batch.pin_memory()
@@ -849,10 +849,9 @@ class Trainer(TrainerBase):
 
 
 class ProfilingTrainer(Trainer):
-
     def __init__(self, train_logging: Config):
         super().__init__(train_logging)
-        
+
         self.max_profile_steps: int = 0
         self.schedule = None
         self.prof = nullcontext()
