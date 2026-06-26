@@ -117,6 +117,11 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         self._noise = None
 
+        # Log-space bounds of the training noise distribution (log_uniform).
+        # noise_level_rn ~ Uniform[log(sigma_min), log(sigma_max)], so sigma = exp(noise_level_rn).
+        self.train_log_min = math.log(self.sigma_min)
+        self.train_log_max = math.log(self.sigma_max)
+
     def forward(
         self,
         tokens: torch.Tensor = None,
@@ -477,6 +482,39 @@ class DiffusionForecastEngine(torch.nn.Module):
         # t_steps = torch.cat(
         #     [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
         # )  # t_N = 0
+
+        # # --- Training-distribution-aligned sigma_max ---
+        # # For log-uniform, there is no 3-sigma tail. The distribution ends abruptly.
+        # sigma_max_train = math.exp(self.train_log_max)
+        # sigma_max_eff = min(self.sigma_max, sigma_max_train)
+
+        # # --- Training-distribution-aligned sigma_min ---
+        # # Quantiles in a uniform distribution are perfectly linear in log-space.
+        # sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
+        
+        # # Linear interpolation between min and max log boundaries
+        # log_quantile = self.train_log_min + sigma_min_quantile * (self.train_log_max - self.train_log_min)
+        # sigma_min_from_dist = math.exp(log_quantile)
+
+        # sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
+
+        # if log_diagnostics:
+        #     logger.info(
+        #         f"Inference LU sigma schedule: "
+        #         f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
+        #         f"sigma_min_eff={sigma_min_eff:.4f} "
+        #         f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f})"
+        #     )
+
+        # # --- Time step discretization (EDM Eq. 5 remains identical) ---
+        # step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
+        # t_steps = (
+        #     sigma_max_eff ** (1 / self.rho)
+        #     + step_indices
+        #     / (num_steps - 1)
+        #     * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
+        # ) ** self.rho
+        # t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])
 
         # --- Per-step tracking for diagnostics ---
         track = {
