@@ -1387,7 +1387,11 @@ class Scores:
 
     def calc_spread(self, p: xr.DataArray, **kwargs) -> xr.DataArray:
         """
-        Calculate the spread of the forecast ensemble
+        Calculate the spread of the forecast ensemble.
+
+        Uses the unbiased (sample) standard deviation (ddof=1) across the ensemble
+        dimension, then averages over the aggregation dimensions.
+
         Parameters
         ----------
         p: xr.DataArray
@@ -1398,13 +1402,17 @@ class Scores:
         xr.DataArray
             Spread of the forecast ensemble
         """
-        ens_std = p.std(dim=self._ens_dim)
-
-        return self._mean(np.sqrt(ens_std**2))
+        return self._mean(p.std(dim=self._ens_dim, ddof=1))
 
     def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
-        Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
+        Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data.
+
+        SSR = spread / RMSE(ensemble_mean, truth)
+
+        A perfectly calibrated ensemble has SSR = 1.  The RMSE is computed from
+        the ensemble mean (not from individual members) so that spread and skill
+        measure the same quantity in expectation.
 
         Parameters
         ----------
@@ -1417,7 +1425,8 @@ class Scores:
         xr.DataArray
             Spread-Skill Ratio (SSR)
         """
-        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)  # spread/rmse
+        ens_mean = p.mean(dim=self._ens_dim)
+        ssr = self.calc_spread(p) / self.calc_rmse(ens_mean, gt)
 
         return ssr
 
