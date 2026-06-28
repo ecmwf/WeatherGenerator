@@ -61,7 +61,7 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
-fe_diffusion_latent_dim: 2560
+fe_diffusion_latent_dim: 2048
 fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
@@ -163,8 +163,8 @@ norm_type: "LayerNorm"
 #####################################
 
 # streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
-streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres/"
-# streams_directory: "./config/streams/era5_1deg_forecasting_z500/"
+# streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres/"
+streams_directory: "./config/streams/era5_georing_avhrr_synop_lowres/"
 streams: ???
 
 # type of zarr_store

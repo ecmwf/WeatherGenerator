@@ -96,8 +96,8 @@ qk_norm_type: null  # if null, defaults to norm_type
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
-# streams_directory: "./config/streams/era5_georing_avhrr_synop_lowres/"
+# streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
+streams_directory: "./config/streams/era5_georing_avhrr_synop_lowres/"
 # streams_directory: "./config/streams/operan_georing_avhrr_synop_lowres/"
 streams: ???
 
