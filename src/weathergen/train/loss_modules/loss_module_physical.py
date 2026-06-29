@@ -69,7 +69,6 @@ class DynamicLossEMA:
         return weights_channels
 
     def update(self, stream_name: str, loss_lfct_chs: torch.Tensor):
-        # print(f"Updating dynamic loss EMA for stream {stream_name} with loss {loss_lfct_chs}")
         if not self.enabled:
             return
 
@@ -293,6 +292,10 @@ class LossPhysical(LossModuleBase):
             losses_all[stream_name] = defaultdict(dict)
 
             stream_loss_weight, weights_channels = self._get_weights(stream_name, stream_info)
+            if self.dynamic_loss_ema.enabled and weights_channels is not None:
+                losses_all[stream_name]["0"]["ema_weight"] = {}
+                for ch_n, w in zip(target_channels, weights_channels, strict=True):
+                    losses_all[stream_name]["0"]["ema_weight"][ch_n] = w.item()
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
