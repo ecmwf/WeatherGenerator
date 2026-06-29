@@ -545,7 +545,9 @@ class WeatherGenZarrReader(WeatherGenReader):
                 das = [self._promote_scalar_sample(da) for da in das]
 
             combined = (
-                xr.concat(das, dim=concat_dim, coords="different") if len(das) > 1 else das[0]
+                xr.concat(das, dim=concat_dim, coords="different", compat="equals")
+                if len(das) > 1
+                else das[0]
             )
 
             if "sample" in combined.dims:
