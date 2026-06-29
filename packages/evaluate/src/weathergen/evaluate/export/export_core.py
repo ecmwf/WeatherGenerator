@@ -314,13 +314,16 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     fsteps = get_fsteps(fsteps, fname_zarr)
     samples = get_samples(samples, fname_zarr)
     streams = get_streams(stream, fname_zarr)
+    _logger.info(f"Streams to process: {streams}")
     for stream in streams:
         grid_type = get_grid_type(data_type, stream, fname_zarr)
-        channels = get_channels(channels, stream, fname_zarr)
+        stream_channels = get_channels(channels, stream, fname_zarr)
         source_starts, source_ends = get_source_info(fname_zarr, stream, samples)
+        # prevent overwritting of channels between streams
         kwargs["grid_type"] = grid_type
-        kwargs["channels"] = channels
+        kwargs["channels"] = stream_channels
         kwargs["data_type"] = data_type
+        kwargs["stream"] = stream
 
         parser = CfParserFactory.get_parser(config=config, **kwargs)
 

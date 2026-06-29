@@ -70,7 +70,7 @@ class NetcdfParser(CfParser):
         da_fs = []
 
         for result in fstep_iterator_results:
-            if result is None:
+            if result is None or (isinstance(result, xr.DataArray) and result.size == 0):
                 continue
 
             # result is already a materialized xarray DataArray (built in the worker).
@@ -139,19 +139,22 @@ class NetcdfParser(CfParser):
         # Original logic
         var_dict = find_pl(data.channel.values)
         data_vars = {}
-
+        #order of appending upoints should be ipoint, pressure_level, mem (if mem exists)
         for new_var, pls in var_dict.items():
             data_dims = ["ipoint"]
-            if "mem" in data.dims:
-                data_dims.append("mem")
             if pls[0] is not None:
+                data_dims.append("pressure_level")
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 old_vars = [f"{new_var}_{p}" for p in pls]
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=old_vars).values,
-                    dims=[*data_dims, "pressure_level"],
+                    dims=data_dims,
                     coords={"pressure_level": pls},
                 )
             else:
+                if "mem" in data.dims:
+                    data_dims.append("mem")
                 data_vars[new_var] = xr.DataArray(
                     data.sel(channel=new_var).values,
                     dims=data_dims,
