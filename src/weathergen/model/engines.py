@@ -79,7 +79,7 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, batch, pe_embed):
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
 
         num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(

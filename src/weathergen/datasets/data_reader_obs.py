@@ -48,7 +48,7 @@ class DataReaderObs(DataReaderBase):
         # To read idx convert to a string, format e.g.: 197001010000
         base_date_str = dt_obj.strftime("%Y%m%d%H%M")
         self.hrly_index = self.z[f"idx_{base_date_str}_1"]
-        self.colnames = self.data.attrs["colnames"]
+        self.colnames = list(self.data.attrs["colnames"])
 
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
         data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
@@ -74,7 +74,20 @@ class DataReaderObs(DataReaderBase):
         self.target_idx = np.array(self.target_idx, dtype=np.int64)
 
         # determine idx for coords and geoinfos
-        self.coords_idx = [self.colnames.index("lat"), self.colnames.index("lon")]
+        coords_channels = stream_info.get("coords_channels", ["lat", "lon"])
+        assert len(coords_channels) == 2, (
+            f"{stream_info['name']}: 'coords_channels' must be a list of exactly two "
+            f"names [lat, lon], got {coords_channels!r}."
+        )
+        lat_name, lon_name = coords_channels
+        for name in (lat_name, lon_name):
+            n = self.colnames.count(name)
+            assert n == 1, (
+                f"{stream_info['name']}: coordinate column not found in {self.filename}. "
+                f"Looked for '{lat_name}'/'{lon_name}'; available colnames: {self.colnames}. "
+                f"Set 'coords_channels' in the stream config to match data."
+            )
+        self.coords_idx = [self.colnames.index(lat_name), self.colnames.index(lon_name)]
 
         # geoinfo channels
         sname = stream_info["name"]
