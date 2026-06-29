@@ -34,6 +34,7 @@ from weathergen.model.engines import (
     LatentPredictionHeadMLP,
     LatentPredictionHeadTransformer,
     LatentState,
+    LinearProbeDecoder,
     TargetPredictionEngine,
     TargetPredictionEngineClassic,
 )
@@ -454,6 +455,22 @@ class Model(torch.nn.Module):
                             cf.ae_global_dim_embed,
                             self.targets_num_channels[i_stream],
                         )
+                    elif cf.decoder_type == "LinearProbe":
+                        tte = LinearProbeDecoder(
+                            stream_name,
+                            dims_embed[0],
+                            cf.ae_global_dim_embed,
+                            self.targets_num_channels[i_stream],
+                            with_layer_norm=False,
+                        )
+                    elif cf.decoder_type == "LinearProbeNorm":
+                        tte = LinearProbeDecoder(
+                            stream_name,
+                            dims_embed[0],
+                            cf.ae_global_dim_embed,
+                            self.targets_num_channels[i_stream],
+                            with_layer_norm=True,
+                        )
                     else:
                         # target prediction engines
                         tte_version = (
@@ -814,7 +831,7 @@ class Model(torch.nn.Module):
                 )
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
 
-                if self.cf.decoder_type == "Linear":
+                if self.cf.decoder_type in ("Linear", "LinearProbe", "LinearProbeNorm"):
                     pred = self.target_token_engines[stream_name](
                         tc_tokens,
                         tokens.reshape(-1, s[-1]),  # collapse the batch and token dimensions
