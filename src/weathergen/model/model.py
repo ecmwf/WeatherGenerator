@@ -686,7 +686,7 @@ class Model(torch.nn.Module):
         output.add_latent_prediction(0, "posteriors", posteriors)
 
         # recover batch dimension and separate input_steps
-        shape = (len(batch), batch.get_num_steps(), *tokens.shape[1:])
+        shape = (len(batch), batch.get_num_source_steps(), *tokens.shape[1:])
         # collapse along input step dimension
         tokens = tokens.reshape(shape).sum(axis=1)
 
