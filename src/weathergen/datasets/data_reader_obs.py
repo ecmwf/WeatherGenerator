@@ -75,20 +75,18 @@ class DataReaderObs(DataReaderBase):
 
         # determine idx for coords and geoinfos
         coords_channels = stream_info.get("coords_channels", ["lat", "lon"])
-        if len(coords_channels) != 2:
-            raise ValueError(
-                f"{stream_info['name']}: 'coords_channels' must be a list of exactly two "
-                f"names [lat, lon], got {coords_channels!r}."
-            )
+        assert len(coords_channels) == 2, (
+            f"{stream_info['name']}: 'coords_channels' must be a list of exactly two "
+            f"names [lat, lon], got {coords_channels!r}."
+        )
         lat_name, lon_name = coords_channels
         for name in (lat_name, lon_name):
             n = self.colnames.count(name)
-            if n != 1:
-                raise ValueError(
-                    f"{stream_info['name']}: coordinate column not found in {self.filename}. "
-                    f"Looked for '{lat_name}'/'{lon_name}'; available colnames: {self.colnames}. "
-                    f"Set 'coords_channels' in the stream config to match data."
-                )
+            assert n == 1, (
+                f"{stream_info['name']}: coordinate column not found in {self.filename}. "
+                f"Looked for '{lat_name}'/'{lon_name}'; available colnames: {self.colnames}. "
+                f"Set 'coords_channels' in the stream config to match data."
+            )
         self.coords_idx = [self.colnames.index(lat_name), self.colnames.index(lon_name)]
 
         # geoinfo channels
