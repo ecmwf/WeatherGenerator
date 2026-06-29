@@ -99,6 +99,9 @@ class NetcdfParser(CfParser):
             da_fs = self.add_metadata(da_fs)
             da_fs = self.add_encoding(da_fs)
             da_fs = self.regrid(da_fs)
+            if kwargs.get("region"):
+                lat_min, lat_max, lon_min, lon_max = kwargs["region"]
+                da_fs = da_fs.sel(latitude=slice(lat_min, lat_max), longitude=slice(lon_min, lon_max))
             self.save(da_fs, ref_time)
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:

@@ -304,6 +304,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
     n_processes = kwargs.n_processes
     epoch = kwargs.epoch
     rank = kwargs.rank
+    region = kwargs.region
 
     if data_type not in ["target", "prediction"]:
         raise ValueError(f"Invalid type: {data_type}. Must be 'target' or 'prediction'.")
@@ -396,6 +397,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
                             ref_time=source_end,
                             source_interval_start=source_start,
                             source_interval_end=source_end,
+                            region=region,
                         )
                         processed_samples.append(processed)
 

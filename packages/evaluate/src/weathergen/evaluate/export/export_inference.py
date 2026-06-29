@@ -222,6 +222,14 @@ def parse_args(args: list) -> argparse.Namespace:
         "streams, variable, method, date, and run ID",
     )
 
+    parser.add_argument(
+        "--region",
+        type=list,
+        default=None,
+        help="Region to subset the data to, specified as a list of [lat_min, lat_max, lon_min, lon_max]. " \
+        "If not provided, no subsetting is performed.",
+    )
+
     args, unknown_args = parser.parse_known_args(args)
     if unknown_args:
         _logger.warning(f"Unknown arguments: {unknown_args}")
