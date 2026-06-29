@@ -25,7 +25,7 @@ ERA5 :
   tokenize_spacetime : False
   max_num_targets: -1 # 131072
   diagnostic: True
-  frequency : 06:00:00
+  # frequency : 06:00:00
   embed : 
     net : transformer
     num_tokens : 1
