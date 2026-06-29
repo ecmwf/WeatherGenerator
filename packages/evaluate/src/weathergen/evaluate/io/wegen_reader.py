@@ -532,20 +532,49 @@ class WeatherGenZarrReader(WeatherGenReader):
         For gridded data (dims include 'sample'), concatenates along 'sample'
         and re-indexes to global sample coordinates.
         For scatter data (no 'sample' dim), concatenates along 'ipoint'
-        and re-indexes to a contiguous range.
+        and promotes the scalar 'sample' coord to a per-ipoint coordinate
+        so that downstream groupby("sample") works correctly.
         """
         merged = {}
         for fstep, das in all_das.items():
+            concat_dim = "sample" if "sample" in das[0].dims else "ipoint"
+
             if len(das) > 1:
-                concat_dim = "sample" if "sample" in das[0].dims else "ipoint"
-                combined = xr.concat(das, dim=concat_dim)
+                if concat_dim == "ipoint":
+                    # Scatter path: promote scalar 'sample' coord to per-ipoint
+                    # so it survives concatenation and enables groupby("sample").
+                    promoted = []
+                    for da in das:
+                        if "sample" in da.coords and da.coords["sample"].ndim == 0:
+                            sample_val = da.coords["sample"].item()
+                            n_ip = da.sizes["ipoint"]
+                            da = da.drop_vars("sample").assign_coords(
+                                sample=("ipoint", np.full(n_ip, sample_val))
+                            )
+                        promoted.append(da)
+                    combined = xr.concat(promoted, dim="ipoint")
+                else:
+                    combined = xr.concat(das, dim=concat_dim)
             else:
                 combined = das[0]
+                # Single-DA scatter: also promote scalar 'sample' to per-ipoint
+                if (
+                    concat_dim == "ipoint"
+                    and "sample" in combined.coords
+                    and combined.coords["sample"].ndim == 0
+                ):
+                    sample_val = combined.coords["sample"].item()
+                    n_ip = combined.sizes["ipoint"]
+                    combined = combined.drop_vars("sample").assign_coords(
+                        sample=("ipoint", np.full(n_ip, sample_val))
+                    )
 
             if "sample" in combined.dims:
                 combined = combined.assign_coords(
                     sample=global_sample_coords[: len(combined.sample)]
                 )
+            if concat_dim == "ipoint" and "ipoint" in combined.dims:
+                combined = combined.assign_coords(ipoint=np.arange(combined.sizes["ipoint"]))
             merged[fstep] = combined
         return merged
 
@@ -602,6 +631,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             rank_local_to_load = [
                 local_samples[g - global_offset] for g in sorted(rank_globals & requested_globals)
             ]
+            rank_global_labels = sorted(rank_globals & requested_globals)
 
             _logger.info(
                 f"RUN {self.run_id} [rank {rank_file.stem.split('rank')[-1]}]: "
@@ -627,6 +657,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 self._num_io_workers,
                 ens_select,
                 rank=rank_file.stem.split("rank")[-1],
+                sample_labels=rank_global_labels,
             )
             get_data_fn = get_data_zipstore if state.is_zip else get_data_dirstore
             result = get_data_fn(state)

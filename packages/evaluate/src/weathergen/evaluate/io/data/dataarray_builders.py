@@ -271,9 +271,19 @@ def build_scatter_dataarrays(
         )
         per_sample_preds.append(da_p)
 
+    # Promote scalar 'sample' to a per-ipoint coordinate before concatenation
+    # so that groupby("sample") works downstream.
+    for i, (da_t, da_p) in enumerate(zip(per_sample_tars, per_sample_preds, strict=False)):
+        if "sample" in da_t.coords and da_t.coords["sample"].ndim == 0:
+            sample_val = da_t.coords["sample"].item()
+            n_ip = da_t.sizes["ipoint"]
+            sample_arr = ("ipoint", np.full(n_ip, sample_val))
+            per_sample_tars[i] = da_t.drop_vars("sample").assign_coords(sample=sample_arr)
+            per_sample_preds[i] = da_p.drop_vars("sample").assign_coords(sample=sample_arr)
+
     # Concatenate along ipoint (like get_data() does for non-gridded)
-    da_tar = xr.concat(per_sample_tars, dim="ipoint", coords="different", compat="equals")
-    da_pred = xr.concat(per_sample_preds, dim="ipoint", coords="different", compat="equals")
+    da_tar = xr.concat(per_sample_tars, dim="ipoint")
+    da_pred = xr.concat(per_sample_preds, dim="ipoint")
 
     return da_tar, da_pred
 
