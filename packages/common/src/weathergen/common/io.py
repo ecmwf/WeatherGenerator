@@ -358,9 +358,9 @@ class OutputItem:
     def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
             self.datasets.append(dataset)
-        else:
-            msg = f"Missing {name} dataset for item: {self.key.path}"
-            raise ValueError(msg)
+        # else:
+        #     msg = f"Missing {name} dataset for item: {self.key.path}"
+        #     raise ValueError(msg)
 
 
 class ZarrIO:
@@ -736,11 +736,13 @@ class OutputBatchData:
 
     def _extract_sources(
         self, sample: int, stream_idx: int, key: ItemKey, source_interval: TimeRange
-    ) -> OutputDataset:
+    ) -> OutputDataset | None:
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
         source: IOReaderData = self.sources[sample][stream_idx]
+        if source is None:
+            return None
 
         assert source.data.shape[1] == len(channels), (
             f"Number of source channel names {len(channels)} does not align with source data."
