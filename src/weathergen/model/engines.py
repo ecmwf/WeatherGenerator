@@ -1150,3 +1150,33 @@ class BilinearDecoder(nn.Module):
         """
         latent_md = torch.repeat_interleave(latent_nd, tcs_lens_n1[1:], 0)
         return self.bilin(coords_md, latent_md)
+
+
+class LinearProbeDecoder(nn.Module):
+    """Linear map from latent tokens to target channels.
+
+    Same forward signature as :class:`BilinearDecoder`; ``coords_md`` is unused.
+    """
+
+    def __init__(
+        self,
+        stream_name,
+        coord_dim,
+        latent_dim,
+        out_dim,
+        with_layer_norm: bool = False,
+    ):
+        super().__init__()
+
+        self.name = f"LinearProbeDecoder_{stream_name}"
+        self.latent_dim = latent_dim
+        self.with_layer_norm = with_layer_norm
+        # Submodule name must not match ``freeze_modules`` regex patterns.
+        self.input_norm = nn.LayerNorm(latent_dim) if with_layer_norm else nn.Identity()
+        self.linear = nn.Linear(latent_dim, out_dim)
+
+    def forward(self, coords_md, latent_nd, tcs_lens_n1):
+        del coords_md
+        latent_md = torch.repeat_interleave(latent_nd, tcs_lens_n1[1:], 0)
+        latent_md = self.input_norm(latent_md)
+        return self.linear(latent_md)
