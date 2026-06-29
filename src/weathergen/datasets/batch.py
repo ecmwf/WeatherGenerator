@@ -143,7 +143,7 @@ class Sample:
             for _, stream in self.streams_data.items()
             if stream is not None
         ]
-        return min(lens) if lens else 0
+        return min(lens) if len(lens) > 0 else 0
 
     def get_num_target_steps(self) -> int:
         """
@@ -154,7 +154,7 @@ class Sample:
             for _, stream in self.streams_data.items()
             if stream is not None
         ]
-        return min(lens) if lens else 0
+        return min(lens) if len(lens) > 0 else 0
 
 
 
