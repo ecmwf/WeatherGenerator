@@ -539,35 +539,14 @@ class WeatherGenZarrReader(WeatherGenReader):
         for fstep, das in all_das.items():
             concat_dim = "sample" if "sample" in das[0].dims else "ipoint"
 
-            if len(das) > 1:
-                if concat_dim == "ipoint":
-                    # Scatter path: promote scalar 'sample' coord to per-ipoint
-                    # so it survives concatenation and enables groupby("sample").
-                    promoted = []
-                    for da in das:
-                        if "sample" in da.coords and da.coords["sample"].ndim == 0:
-                            sample_val = da.coords["sample"].item()
-                            n_ip = da.sizes["ipoint"]
-                            da = da.drop_vars("sample").assign_coords(
-                                sample=("ipoint", np.full(n_ip, sample_val))
-                            )
-                        promoted.append(da)
-                    combined = xr.concat(promoted, dim="ipoint")
-                else:
-                    combined = xr.concat(das, dim=concat_dim)
-            else:
-                combined = das[0]
-                # Single-DA scatter: also promote scalar 'sample' to per-ipoint
-                if (
-                    concat_dim == "ipoint"
-                    and "sample" in combined.coords
-                    and combined.coords["sample"].ndim == 0
-                ):
-                    sample_val = combined.coords["sample"].item()
-                    n_ip = combined.sizes["ipoint"]
-                    combined = combined.drop_vars("sample").assign_coords(
-                        sample=("ipoint", np.full(n_ip, sample_val))
-                    )
+            if concat_dim == "ipoint":
+                # Scatter: promote scalar 'sample' to per-ipoint so it
+                # survives concatenation and enables groupby("sample").
+                das = [self._promote_scalar_sample(da) for da in das]
+
+            combined = (
+                xr.concat(das, dim=concat_dim, coords="different") if len(das) > 1 else das[0]
+            )
 
             if "sample" in combined.dims:
                 combined = combined.assign_coords(
@@ -577,6 +556,15 @@ class WeatherGenZarrReader(WeatherGenReader):
                 combined = combined.assign_coords(ipoint=np.arange(combined.sizes["ipoint"]))
             merged[fstep] = combined
         return merged
+
+    @staticmethod
+    def _promote_scalar_sample(da: xr.DataArray) -> xr.DataArray:
+        """Promote a scalar 'sample' coordinate to a per-ipoint array."""
+        if "sample" in da.coords and da.coords["sample"].ndim == 0:
+            sample_val = da.coords["sample"].item()
+            n_ip = da.sizes["ipoint"]
+            da = da.drop_vars("sample").assign_coords(sample=("ipoint", np.full(n_ip, sample_val)))
+        return da
 
     def get_data(
         self,
