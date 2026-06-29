@@ -69,6 +69,7 @@ class DynamicLossEMA:
         return weights_channels
 
     def update(self, stream_name: str, loss_lfct_chs: torch.Tensor):
+        # print(f"Updating dynamic loss EMA for stream {stream_name} with loss {loss_lfct_chs}")
         if not self.enabled:
             return
 
@@ -108,6 +109,7 @@ class LossPhysical(LossModuleBase):
 
         # Dynamic Loss state (extract it before parsing the actual loss functions)
         self.dynamic_loss_cfg = loss_fcts.get("dynamic_loss")
+        self.forecast_offset = self.mode_cfg.forecast.offset
 
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -392,7 +394,7 @@ class LossPhysical(LossModuleBase):
                         # Update EMA for dynamic loss if enabled
                         if (
                             self.dynamic_loss_ema.enabled
-                            and timestep_idx == 0
+                            and timestep_idx == self.forecast_offset
                             and loss_fct_name == "mse"
                             and not is_spoof
                         ):
