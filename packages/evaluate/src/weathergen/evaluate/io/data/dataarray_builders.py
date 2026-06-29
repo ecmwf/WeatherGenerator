@@ -282,8 +282,9 @@ def build_scatter_dataarrays(
             per_sample_preds[i] = da_p.drop_vars("sample").assign_coords(sample=sample_arr)
 
     # Concatenate along ipoint (like get_data() does for non-gridded)
-    da_tar = xr.concat(per_sample_tars, dim="ipoint")
-    da_pred = xr.concat(per_sample_preds, dim="ipoint")
+    # Keep behavior stable across xarray default changes.
+    da_tar = xr.concat(per_sample_tars, dim="ipoint", coords="different", compat="equals")
+    da_pred = xr.concat(per_sample_preds, dim="ipoint", coords="different", compat="equals")
 
     return da_tar, da_pred
 
