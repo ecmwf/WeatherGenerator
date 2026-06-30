@@ -55,8 +55,8 @@ class Timeseries:
             preds_steps.append(da_p.mean(dim="ipoint").assign_coords(valid_time=vt))
             tars_steps.append(da_t.mean(dim="ipoint").assign_coords(valid_time=vt))
         da_preds_ts, da_tars_ts = (
-            xr.concat(preds_steps, dim="forecast_step"),
-            xr.concat(tars_steps, dim="forecast_step"),
+            xr.concat(preds_steps, dim="forecast_step", coords="different", compat="equals"),
+            xr.concat(tars_steps, dim="forecast_step", coords="different", compat="equals"),
         )
         return da_preds_ts, da_tars_ts
 
