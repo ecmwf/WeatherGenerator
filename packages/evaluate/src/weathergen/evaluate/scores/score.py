@@ -16,8 +16,8 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.scores.score_utils import to_list
 from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
+from weathergen.evaluate.scores.score_utils import to_list
 
 # from common.io import MockIO
 
@@ -1864,9 +1864,7 @@ class Scores:
         # If the aggregation dim is "sample" or "ens" (e.g. from score map pipeline),
         # PSD is not applicable — return NaN gracefully.
         if spatial_dim in ("sample", "ens"):
-            _logger.debug(
-                f"PSD: aggregation dim is '{spatial_dim}' (not spatial). Skipping."
-            )
+            _logger.debug(f"PSD: aggregation dim is '{spatial_dim}' (not spatial). Skipping.")
             return xr.DataArray(np.nan)
 
         n_points = gt.sizes[spatial_dim]
