@@ -1,7 +1,7 @@
 from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
-from weathergen.evaluate.export.parsers.netcdf_parser import NetcdfParser, GribParser
+from weathergen.evaluate.export.parsers.netcdf_parser import GribParser, NetcdfParser
 from weathergen.evaluate.export.parsers.quaver_parser import QuaverParser
 from weathergen.evaluate.export.parsers.verif_parser import VerifParser
 
@@ -31,8 +31,8 @@ class CfParserFactory:
         _parser_map = {
             "netcdf": (NetcdfParser, ["grid_type"]),
             "quaver": (QuaverParser, ["grid_type", "channels", "template"]),
-            "verif": (VerifParser, ["obs", "method", "verif_template"]),
-            "grib": (GribParser, ["grid_type"])
+            "verif": (VerifParser, ["obs", "method", "file_template"]),
+            "grib": (GribParser, ["grid_type"]),
         }
 
         fmt = kwargs.get("output_format")

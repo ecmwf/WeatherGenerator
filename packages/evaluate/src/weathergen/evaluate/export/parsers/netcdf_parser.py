@@ -1,17 +1,13 @@
 # pylint: disable=bad-builtin
 
-import contextlib
-from itertools import product
 import logging
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from weathergen.evaluate.export.verif_interpolator import InterpolatorFactory
-from weathergen.evaluate.io import data
 import xarray as xr
-from omegaconf import OmegaConf
 from cfgrib.xarray_to_grib import to_grib
+from omegaconf import OmegaConf
 
 from weathergen.evaluate.export.cf_utils import CfParser
 from weathergen.evaluate.export.reshape import Regridder, find_pl, get_grid_points
@@ -26,8 +22,7 @@ uv run export --run-id ciga1p9c --stream ERA5
 --output-dir ./test_output1 
 --format netcdf --samples 1 2  --fsteps 1 2 3
 """
-import cfgrib
-print(cfgrib.__version__)
+
 
 class NetcdfParser(CfParser):
     """
@@ -73,8 +68,6 @@ class NetcdfParser(CfParser):
         -------
             None
         """
-        print(kwargs["region"])
-        print(self.region)
         da_fs = []
 
         for result in fstep_iterator_results:
@@ -99,6 +92,7 @@ class NetcdfParser(CfParser):
                     "Grid points between forecast steps are not consistent."
                     "Check that inference was not performed with masking"
                 )
+            self.zarr_coords = get_grid_points(da_fs[0])
             da_fs = self.concatenate(da_fs)
             da_fs = self.assign_frt(da_fs, ref_time)
             da_fs = self.add_attrs(da_fs)
@@ -120,12 +114,20 @@ class NetcdfParser(CfParser):
         -------
             Full path to the output file.
         """
-
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
-        out_fname = (
-            Path(self.output_dir)
-            / f"{self.data_type}_{frt}_{self.run_id}_{self.stream}.{self.file_extension}"
-        )
+        if self.file_template is None:
+            out_fname = (
+                Path(self.output_dir)
+                / f"{self.data_type}_{frt}_{self.run_id}_{self.stream}.{self.file_extension}"
+            )
+        else:
+            out_fname = Path(
+                self.file_template.replace("%S", self.stream)
+                .replace("%D", self.data_type)
+                .replace("%R", self.run_id)
+                .replace("%T", frt)
+            )
+            out_fname = (Path(self.output_dir) / out_fname).with_suffix(f".{self.file_extension}")
         return out_fname
 
     def reshape(self, data: xr.DataArray) -> xr.Dataset:
@@ -199,16 +201,28 @@ class NetcdfParser(CfParser):
         -------
             Regridded xarray Dataset.
         """
-        print(self.region)
         if self.regrid_degree is None or self.regrid_type is None:
             _logger.info("No regridding specified, skipping regridding step.")
             if self.region is not None:
                 lat_min, lat_max, lon_min, lon_max = self.region
-                ds = ds.sel(latitude=slice(lat_min, lat_max), longitude=slice(lon_min, lon_max))
-                return ds
+                # get closest points in original dataset with some buffer
+                region_mask = (
+                    (ds.latitude >= lat_min - 1)
+                    & (ds.latitude <= lat_max + 1)
+                    & (ds.longitude >= lon_min - 1)
+                    & (ds.longitude <= lon_max + 1)
+                )
+                region_ds = ds.where(region_mask, drop=True)
+                return region_ds
             return ds
         else:
-            nc_regridder = Regridder(ds, output_grid_type=self.regrid_type, degree=self.regrid_degree, region=self.region)
+            nc_regridder = Regridder(
+                ds,
+                output_grid_type=self.regrid_type,
+                degree=self.regrid_degree,
+                region=self.region,
+                zarr_coords=self.zarr_coords,
+            )
             regrid_ds = nc_regridder.regrid_ds()
             return regrid_ds
 
@@ -356,7 +370,7 @@ class NetcdfParser(CfParser):
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
             attributes = {
-                "GRIB_shortName": mapped_name, # if GRIB
+                "GRIB_shortName": mapped_name,  # if GRIB
                 "standard_name": mapped_info.get("std", var_name),
                 "units": mapped_info.get("std_unit", "unknown"),
             }
@@ -571,6 +585,7 @@ class GribParser(NetcdfParser):
     Child class for handling GRIB output format.
     Important to note it must be used with regridding to regular_ll
     """
+
     def gribify(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Convert dataset to use GRIB data variable names.
@@ -583,7 +598,7 @@ class GribParser(NetcdfParser):
         if "forecast_period" in ds.coords:
             ds = ds.rename({"forecast_period": "step"})
         return ds
-    
+
     def _attrs_gaussian_grid(self, ds: xr.Dataset) -> xr.Dataset:
         """
         Assign CF-compliant attributes to variables in a Gaussian grid dataset.
@@ -606,21 +621,26 @@ class GribParser(NetcdfParser):
             coords = self._build_coordinate_mapping(ds, mapped_info, ds_attrs)
 
             # parse grib specifc short names
-            GRIB_shortnames = {"t2m": "2t",
-             "u10": "10u",
-             "v10": "10v",
-             "d2m" : "2d",}
-            GRIB_levels_special = {"t2m": 2, "u10": 10, "v10": 10, "d2m": 2}
+            grib_shortnames = {
+                "t2m": "2t",
+                "u10": "10u",
+                "v10": "10v",
+                "d2m": "2d",
+            }
+            grib_levels_special = {"t2m": 2, "u10": 10, "v10": 10, "d2m": 2}
 
             attributes = {
-                "GRIB_shortName": GRIB_shortnames.get(mapped_name, mapped_name), # if GRIB
+                "GRIB_shortName": grib_shortnames.get(mapped_name, mapped_name),  # if GRIB
                 "standard_name": mapped_info.get("std", var_name),
                 "units": mapped_info.get("std_unit", "unknown"),
             }
-            if mapped_name in GRIB_shortnames.keys():
-                attributes.update({
-                "GRIB_typeOfLevel": "heightAboveGround",
-                "GRIB_level": GRIB_levels_special[mapped_name],})
+            if mapped_name in grib_shortnames.keys():
+                attributes.update(
+                    {
+                        "GRIB_typeOfLevel": "heightAboveGround",
+                        "GRIB_level": grib_levels_special[mapped_name],
+                    }
+                )
             if "long" in mapped_info:
                 attributes["long_name"] = mapped_info["long"]
             variables[mapped_name] = xr.DataArray(
@@ -650,6 +670,5 @@ class GribParser(NetcdfParser):
         out_fname = self.get_output_filename(forecast_ref_time)
         _logger.info(f"Saving to {out_fname}.")
         ds = self.gribify(ds)
-        print(ds)
         to_grib(ds, out_fname)
         _logger.info(f"Saved GRIB file to {out_fname}.")

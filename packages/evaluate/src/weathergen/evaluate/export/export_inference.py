@@ -215,11 +215,14 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--verif-template",
-        default="verif/%S/%V/%R_%S_%V_%M_%D.nc",
-        help="Template for the output nc filenames, default will be to create output/verif/%S/%V \
-              repertories where %S, %V, %M, %D, %R are replaced by the "
-        "streams, variable, method, date, and run ID",
+        "--file-template",
+        default=None,
+        help="Template for the output nc filenames, "
+        "default for VERIF files will be to create verif/%S/%V/%R_%S_%V_%M_%D.nc"
+        "default for netcdf/grib will be %D_%T_%R_%S.nc"
+        "where %S, %V, %M, %D, %R, %T are replaced by the "
+        "streams, variable, method, data type, run ID, and timestamp"
+        "%T timestamp option only available for netcdf/grib",
     )
 
     parser.add_argument(
@@ -227,7 +230,8 @@ def parse_args(args: list) -> argparse.Namespace:
         type=float,
         nargs=4,
         default=None,
-        help="Region to subset the data to, specified as a list of [lat_min, lat_max, lon_min, lon_max]. " \
+        help="Region to subset the data to, specified as a list of"
+        "[lat_min, lat_max, lon_min, lon_max]. "
         "If not provided, no subsetting is performed.",
     )
 

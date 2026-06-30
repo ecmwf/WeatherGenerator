@@ -66,7 +66,7 @@ class VerifParser(CfParser):
         # add extra attributes
         self.obs = xr.open_dataset(self.obs)
         lat, lon, _ = get_obs_coordinates(self.obs)
-        self.obs_coords = np.round(value / 0.025) * 0.025
+        self.obs_coords = np.column_stack((lat.values, lon.values))
         self.zarr_coords = None
         obs_data_channels = ["10u", "10v", "sp", "2t", "msl", "tp"]
         self.channels = list(set(self.channels) & set(obs_data_channels))
@@ -78,6 +78,7 @@ class VerifParser(CfParser):
         ref_time: np.datetime64,
         source_interval_start: np.datetime64 = None,
         source_interval_end: np.datetime64 = None,
+        **kwargs,
     ):
         """
         Process results from get_data_worker: reshape, concatenate, add metadata, and save.
@@ -171,8 +172,10 @@ class VerifParser(CfParser):
         Outputs:
             None
         """
+        if self.file_template is None:
+            self.file_template = "verif/%S/%V/%R_%S_%V_%M_%D.nc"
         outfile = Path(
-            self.verif_template.replace("%S", self.stream)
+            self.file_template.replace("%S", self.stream)
             .replace("%V", variable)
             .replace("%M", self.method)
             .replace("%D", self.data_type)
