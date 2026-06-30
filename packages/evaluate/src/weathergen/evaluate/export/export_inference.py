@@ -215,7 +215,7 @@ def parse_args(args: list) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--file-template",
+        "--filename-template",
         default=None,
         help="Template for the output nc filenames, "
         "default for VERIF files will be to create verif/%S/%V/%R_%S_%V_%M_%D.nc"

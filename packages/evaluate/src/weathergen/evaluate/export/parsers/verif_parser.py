@@ -172,10 +172,10 @@ class VerifParser(CfParser):
         Outputs:
             None
         """
-        if self.file_template is None:
-            self.file_template = "verif/%S/%V/%R_%S_%V_%M_%D.nc"
+        if self.filename_template is None:
+            self.filename_template = "verif/%S/%V/%R_%S_%V_%M_%D.nc"
         outfile = Path(
-            self.file_template.replace("%S", self.stream)
+            self.filename_template.replace("%S", self.stream)
             .replace("%V", variable)
             .replace("%M", self.method)
             .replace("%D", self.data_type)

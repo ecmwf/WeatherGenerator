@@ -115,14 +115,14 @@ class NetcdfParser(CfParser):
             Full path to the output file.
         """
         frt = np.datetime_as_string(forecast_ref_time, unit="h")
-        if self.file_template is None:
+        if self.filename_template is None:
             out_fname = (
                 Path(self.output_dir)
                 / f"{self.data_type}_{frt}_{self.run_id}_{self.stream}.{self.file_extension}"
             )
         else:
             out_fname = Path(
-                self.file_template.replace("%S", self.stream)
+                self.filename_template.replace("%S", self.stream)
                 .replace("%D", self.data_type)
                 .replace("%R", self.run_id)
                 .replace("%T", frt)
