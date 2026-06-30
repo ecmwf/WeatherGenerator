@@ -224,7 +224,8 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--region",
-        type=list,
+        type=float,
+        nargs=4,
         default=None,
         help="Region to subset the data to, specified as a list of [lat_min, lat_max, lon_min, lon_max]. " \
         "If not provided, no subsetting is performed.",

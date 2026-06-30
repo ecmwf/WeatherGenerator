@@ -66,7 +66,7 @@ class VerifParser(CfParser):
         # add extra attributes
         self.obs = xr.open_dataset(self.obs)
         lat, lon, _ = get_obs_coordinates(self.obs)
-        self.obs_coords = np.column_stack((lat.values, lon.values))
+        self.obs_coords = np.round(value / 0.025) * 0.025
         self.zarr_coords = None
         obs_data_channels = ["10u", "10v", "sp", "2t", "msl", "tp"]
         self.channels = list(set(self.channels) & set(obs_data_channels))

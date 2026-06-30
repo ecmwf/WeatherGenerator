@@ -1,10 +1,14 @@
 # pylint: disable=bad-builtin
 
+import contextlib
+from itertools import product
 import logging
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from weathergen.evaluate.export.verif_interpolator import InterpolatorFactory
+from weathergen.evaluate.io import data
 import xarray as xr
 from omegaconf import OmegaConf
 from cfgrib.xarray_to_grib import to_grib
@@ -69,6 +73,8 @@ class NetcdfParser(CfParser):
         -------
             None
         """
+        print(kwargs["region"])
+        print(self.region)
         da_fs = []
 
         for result in fstep_iterator_results:
@@ -99,9 +105,6 @@ class NetcdfParser(CfParser):
             da_fs = self.add_metadata(da_fs)
             da_fs = self.add_encoding(da_fs)
             da_fs = self.regrid(da_fs)
-            if kwargs.get("region"):
-                lat_min, lat_max, lon_min, lon_max = kwargs["region"]
-                da_fs = da_fs.sel(latitude=slice(lat_min, lat_max), longitude=slice(lon_min, lon_max))
             self.save(da_fs, ref_time)
 
     def get_output_filename(self, forecast_ref_time: np.datetime64) -> Path:
@@ -196,13 +199,18 @@ class NetcdfParser(CfParser):
         -------
             Regridded xarray Dataset.
         """
+        print(self.region)
         if self.regrid_degree is None or self.regrid_type is None:
             _logger.info("No regridding specified, skipping regridding step.")
+            if self.region is not None:
+                lat_min, lat_max, lon_min, lon_max = self.region
+                ds = ds.sel(latitude=slice(lat_min, lat_max), longitude=slice(lon_min, lon_max))
+                return ds
             return ds
-        nc_regridder = Regridder(ds, output_grid_type=self.regrid_type, degree=self.regrid_degree)
-
-        regrid_ds = nc_regridder.regrid_ds()
-        return regrid_ds
+        else:
+            nc_regridder = Regridder(ds, output_grid_type=self.regrid_type, degree=self.regrid_degree, region=self.region)
+            regrid_ds = nc_regridder.regrid_ds()
+            return regrid_ds
 
     def concatenate(
         self,

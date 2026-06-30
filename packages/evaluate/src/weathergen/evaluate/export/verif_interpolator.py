@@ -19,7 +19,7 @@ def convert_coordinates(coords: np.typing.NDArray) -> np.typing.NDArray:
     """
 
     xyz_coords = np.empty((coords.shape[0], 3), dtype="float32")
-
+    print(xyz_coords.shape)
     xyz_coords[:, 0] = np.cos(np.pi * coords[:, 0] / 180.0) * np.cos(np.pi * coords[:, 1] / 180.0)
     xyz_coords[:, 1] = np.cos(np.pi * coords[:, 0] / 180.0) * np.sin(np.pi * coords[:, 1] / 180.0)
     xyz_coords[:, 2] = np.sin(np.pi * coords[:, 0] / 180.0)
@@ -59,6 +59,7 @@ class Verif2DInterpolator(VerifInterpolator):
         _, self.indices = tree.query(obs_xyz, k=5)
 
         self.weights = np.empty((obs_points.shape[0], 3), dtype="float32")
+        print(grid_xyz.shape, obs_xyz.shape, self.indices.shape, self.weights.shape)
         self.compute_weights(grid_xyz, obs_xyz)
 
     def compute_weights(self, grid_xyz: np.typing.NDArray, obs_xyz: np.typing.NDArray):
