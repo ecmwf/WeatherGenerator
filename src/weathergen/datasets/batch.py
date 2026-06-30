@@ -157,7 +157,6 @@ class Sample:
         return min(lens) if len(lens) > 0 else 0
 
 
-
 class BatchSamples:
     """
     Container for source or target samples
@@ -219,7 +218,6 @@ class BatchSamples:
         Get number of target steps from smallest of all available streams
         """
         return self.samples[0].get_num_target_steps()
-
 
     def get_output_idxs(self) -> int:
         """
@@ -506,4 +504,3 @@ class ModelBatch:
         Get number of target steps from smallest of all available streams
         """
         return self.target_samples.get_num_target_steps()
-
