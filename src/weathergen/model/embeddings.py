@@ -113,24 +113,25 @@ class StreamEmbedTransformer(torch.nn.Module):
         if self.unembed_mode == "full":
             out = self.unembed(self.ln_final(x.flatten(-2, -1)))
         elif self.unembed_mode == "block":
-
-            B, C, D = x.shape
+            b, c, d = x.shape
 
             ln_w = torch.stack([ln.weight for ln in self.ln_final])
-            ln_b = torch.stack([ln.bias   for ln in self.ln_final])
-            W    = torch.stack([ue.weight for ue in self.unembed])
-            b    = torch.stack([ue.bias   for ue in self.unembed])
+            ln_b = torch.stack([ln.bias for ln in self.ln_final])
+            w = torch.stack([ue.weight for ue in self.unembed])
+            ue_bias = torch.stack([ue.bias for ue in self.unembed])
 
-            x_normed = torch.nn.functional.layer_norm(x.reshape(B * C, D), [D], weight=None, bias=None)
-            x_normed = x_normed.reshape(B, C, D) * ln_w + ln_b
+            x_normed = torch.nn.functional.layer_norm(
+                x.reshape(b * c, d), [d], weight=None, bias=None
+            )
+            x_normed = x_normed.reshape(b, c, d) * ln_w + ln_b
 
             out = torch.bmm(
                 x_normed.transpose(0, 1),
-                W.transpose(1, 2),
+                w.transpose(1, 2),
             ).transpose(0, 1)
 
-            out = out.add(b).flatten(-2, -1).to(x.dtype)
-            
+            out = out.add(ue_bias).flatten(-2, -1).to(x.dtype)
+
         else:
             raise ValueError(f"Unknown unembed mode: {self.unembed_mode}")
 
