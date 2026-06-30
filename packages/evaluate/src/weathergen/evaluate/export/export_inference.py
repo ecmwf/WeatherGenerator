@@ -219,10 +219,11 @@ def parse_args(args: list) -> argparse.Namespace:
         default=None,
         help="Template for the output nc filenames, "
         "default for VERIF files will be to create verif/%S/%V/%R_%S_%V_%M_%D.nc"
-        "default for netcdf/grib will be %D_%T_%R_%S.nc"
+        "default for netcdf/grib will be %D_%T_%R_%S.grib or %D_%T_%R_%S.nc, "
         "where %S, %V, %M, %D, %R, %T are replaced by the "
-        "streams, variable, method, data type, run ID, and timestamp"
-        "%T timestamp option only available for netcdf/grib",
+        "streams, variable, method, data type, run ID, and timestamp. "
+        "%T timestamp option only available for netcdf/grib. "
+        "To provide your own, please include the extension in the template.",
     )
 
     parser.add_argument(
