@@ -10,6 +10,7 @@
 import logging
 from pathlib import Path
 from typing import override
+import zarr
 
 import numpy as np
 import xarray as xr
@@ -40,6 +41,7 @@ class DataReaderGREP(DataReaderTimestep):
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
+        stage: str
     ) -> None:
         """
         Construct data reader for Zarr GREP dataset
@@ -50,6 +52,8 @@ class DataReaderGREP(DataReaderTimestep):
             filename (and path) of dataset
         stream_info :
             information about stream
+        stage :
+            training stage
 
         Returns
         -------
@@ -60,6 +64,7 @@ class DataReaderGREP(DataReaderTimestep):
         self._filename = filename
         self._tw_handler = tw_handler
         self._stream_info = stream_info
+        self._stage = stage
         self._initialized = False
 
         # Call super() with placeholder period; will be overwritten after lazy init sets the real
@@ -74,7 +79,7 @@ class DataReaderGREP(DataReaderTimestep):
         self.n_points: int = 0
 
         # debug
-        self.log_debug = False
+        self.log_debug = True
 
         # Set empty defaults so the object is always in a valid state
         self.init_empty()
@@ -89,21 +94,33 @@ class DataReaderGREP(DataReaderTimestep):
         self._initialized = True
 
         try:
-            ds: xr.Dataset = xr.open_zarr(
-                self._filename, consolidated=True, chunks=None, zarr_format=2
-            )
+            try:
+                ds: xr.Dataset = xr.open_zarr(
+                    self._filename,
+                    consolidated=True,
+                    chunks=None,
+                    zarr_format=2,
+                )
+            except zarr.errors.GroupNotFoundError:
+                ds: xr.Dataset = xr.open_zarr(
+                    self._filename,
+                    consolidated=True,
+                    chunks=None,
+                )
         except Exception as e:
             name = self._stream_info["name"]
             _logger.error(f"Failed to open {name} at {self._filename}: {e}")
-            return  # leave in empty state
+            return
 
         # ---- Time axis -------------------------------------------------------
 
         # TODO remove try/except
-        try:
-            time_coord: NDArray = ds.coords["time"].values
-        except KeyError:
-            time_coord: NDArray = ds.coords["time_centered"].values
+        for coord_name in ["time", "time_centered", "time_counter"]:
+            if coord_name in ds.coords:
+                time_coord: NDArray = ds.coords[coord_name].values
+                break
+        else:
+            raise KeyError("Nessuna coordinata temporale trovata")
 
         data_start_time = np.datetime64(time_coord[0])
         data_end_time = np.datetime64(time_coord[-1])
@@ -177,6 +194,29 @@ class DataReaderGREP(DataReaderTimestep):
             self.latitudes = np.unique(self._nav_lat_flat)
             self.longitudes = np.unique(self._nav_lon_flat)
 
+        elif "TLAT" in ds.coords and "TLON" in ds.coords:
+            # Curvilinear 2-D grid (e.g. C-GLORSv8): TLAT(nj, nx), TLON(nj, nx)
+            _logger.info(
+                f"Dataset '{self._stream_info['name']}' uses curvilinear grid (TLAT/TLON)."
+            )
+            self._curvilinear = True
+            nav_lat = ds.coords["TLAT"].values.astype(np.float32)  # (y, x)
+            nav_lon = ds.coords["TLON"].values.astype(np.float32)  # (y, x)
+
+            nav_lat = np.clip(nav_lat, -90.0, 90.0)
+            nav_lon = ((nav_lon + 180.0) % 360.0 - 180.0).astype(np.float32)
+
+            # Store flat point lists — used directly to build coords in _get()
+            self._nav_lat_flat = nav_lat.flatten()  # (n_points,)
+            self._nav_lon_flat = nav_lon.flatten()  # (n_points,)
+
+            self.n_lat, self.n_lon = nav_lat.shape
+            self.n_points = self.n_lat * self.n_lon
+
+            # Provide sorted unique 1-D views for callers that inspect .latitudes/.longitudes
+            self.latitudes = np.unique(self._nav_lat_flat)
+            self.longitudes = np.unique(self._nav_lon_flat)
+
         else:
             raise ValueError(
                 f"Dataset '{self._stream_info['name']}' has neither "
@@ -184,7 +224,7 @@ class DataReaderGREP(DataReaderTimestep):
             )
 
         # ---- Available variables (non-stat, time-varying) --------------------
-        time_variants = {"time", "time_centered"}
+        time_variants = {"time", "time_centered", "time_counter"}
         available_vars: list[str] = [
             var
             for var in ds.data_vars
@@ -358,12 +398,14 @@ class DataReaderGREP(DataReaderTimestep):
         datetimes_list: list[np.datetime64] = []
 
         # TODO remove try/except
-        try:
-            # EOBS uses 'time'
-            time_values = self.ds.coords["time"].values
-        except KeyError:
-            # C-GLORS uses 'time_centered'
-            time_values = self.ds.coords["time_centered"].values
+        for coord in ["time", "time_centered", "time_counter"]:
+            if coord in self.ds.coords:
+                time_values = self.ds.coords[coord].values
+                break
+        else:
+            raise KeyError(
+                f"No time coordinate found. Available coordinates: {list(self.ds.coords)}"
+            )   
 
         n_time = len(time_values)
 
@@ -382,25 +424,22 @@ class DataReaderGREP(DataReaderTimestep):
             # (n_points, n_channels)
             # TODO remove try/except: should be able to just use time or time_centered
             # depending on dataset, without needing to guess per-timestep.
-            try:
-                timestep_data = np.stack(
-                    [
-                        self.ds[ch].isel(time=int(t_idx)).values.astype(np.float32).flatten()
-                        for ch in selected_channels
-                    ],
-                    axis=1,
-                )
-            except ValueError:
-                timestep_data = np.stack(
-                    [
-                        self.ds[ch]
-                        .isel(time_centered=int(t_idx))
-                        .values.astype(np.float32)
-                        .flatten()
-                        for ch in selected_channels
-                    ],
-                    axis=1,
-                )
+            for time_dim in ["time", "time_centered", "time_counter"]:
+                if time_dim in self.ds.dims:
+                    break
+            else:
+                raise KeyError("No time dimension found")
+
+            timestep_data = np.stack(
+                [
+                    self.ds[ch]
+                    .isel({time_dim: int(t_idx)})
+                    .values.astype(np.float32)
+                    .flatten()
+                    for ch in selected_channels
+                ],
+                axis=1,
+            )
 
             data_arrays.append(timestep_data)
             dt = np.datetime64(time_values[t_idx])
@@ -425,9 +464,20 @@ class DataReaderGREP(DataReaderTimestep):
             coords_single = np.stack([self._nav_lat_flat, self._nav_lon_flat], axis=1).astype(
                 np.float32
             )
-            # Maschera i punti dove nav_lat == 0 AND nav_lon == 0
-            masked = (self._nav_lat_flat == 0.0) & (self._nav_lon_flat == 0.0)
-            coords_single[masked] = np.nan
+            if "time_counter" in self.ds.coords:
+                # Maschera i punti dove puntu sono nan o 0
+                data_mask = self.ds[selected_channels[0]].isel(time_counter=0)
+                masked = (np.isnan(data_mask) | (data_mask == 0)).values.flatten()
+                coords_single[masked] = np.nan
+            elif "nav_lat" in self.ds.coords and "nav_lon" in self.ds.coords:
+                # Maschera i punti dove nav_lat == 0 AND nav_lon == 0
+                masked = (self._nav_lat_flat == 0.0) & (self._nav_lon_flat == 0.0)
+                coords_single[masked] = np.nan
+            elif "TLAT" in self.ds.coords and "TLON" in self.ds.coords:
+                # Maschera i punti di terra
+                data_mask=self.ds[selected_channels[0]].isel(time=0)
+                masked = np.isnan(data_mask).values.flatten()
+                coords_single[masked] = np.nan
         else:
             lon_grid, lat_grid = np.meshgrid(self.longitudes, self.latitudes)
             coords_single = np.stack([lat_grid.flatten(), lon_grid.flatten()], axis=1).astype(
@@ -456,8 +506,8 @@ class DataReaderGREP(DataReaderTimestep):
                 f"datetimes shape {datetimes.shape}"
             )
             _logger.info(
-                f"  Sample coords: {coords[:5]}, sample data: {data[:5]}, "
-                f"geoinfos: {geoinfos[:5]}, sample datetimes: {datetimes[:5]}"
+                f"  Sample coords: {coords[1000:1005]}, sample data: {data[1000:1005]}, "
+                f"geoinfos: {geoinfos[1000:1005]}, sample datetimes: {datetimes[1000:1005]}"
             )
             _logger.info(f"  Channels in data: {selected_channels}")
             _logger.info(
