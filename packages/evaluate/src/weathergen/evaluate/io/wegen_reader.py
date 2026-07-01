@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
+from numpy.typing import NDArray
 
 # Local application / package
 from weathergen.common.config import (
@@ -550,14 +551,29 @@ class WeatherGenZarrReader(WeatherGenReader):
                 else das[0]
             )
 
-            if "sample" in combined.dims:
-                combined = combined.assign_coords(
-                    sample=global_sample_coords[: len(combined.sample)]
-                )
-            if concat_dim == "ipoint" and "ipoint" in combined.dims:
-                combined = combined.assign_coords(ipoint=np.arange(combined.sizes["ipoint"]))
+            combined = self._reindex_merged_coords(combined, concat_dim, global_sample_coords)
             merged[fstep] = combined
         return merged
+
+    @staticmethod
+    def _reindex_merged_coords(
+        da: xr.DataArray, concat_dim: str, global_sample_coords: NDArray
+    ) -> xr.DataArray:
+        """Re-index coordinates after cross-rank concatenation to avoid duplicates.
+
+        Each rank file uses local indices (0, 1, 2, …) for both samples and
+        ipoints.  After concatenation these overlap, so we replace them with
+        unique global coordinates:
+        - For gridded data (concat along 'sample'): assign contiguous global
+          sample indices derived from the rank offsets.
+        - For scatter data (concat along 'ipoint'): assign a fresh 0-based
+          ipoint range covering the combined length.
+        """
+        if "sample" in da.dims:
+            da = da.assign_coords(sample=global_sample_coords[: len(da.sample)])
+        if concat_dim == "ipoint" and "ipoint" in da.dims:
+            da = da.assign_coords(ipoint=np.arange(da.sizes["ipoint"]))
+        return da
 
     @staticmethod
     def _promote_scalar_sample(da: xr.DataArray) -> xr.DataArray:
