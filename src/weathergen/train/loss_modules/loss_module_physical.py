@@ -118,7 +118,7 @@ class LossPhysical(LossModuleBase):
                 name,
             ]
             for name, params in loss_fcts.items()
-            if name != "dynamic_loss"
+            if params is not None and name != "dynamic_loss"
         ]
 
         self.dynamic_loss_ema = DynamicLossEMA(
