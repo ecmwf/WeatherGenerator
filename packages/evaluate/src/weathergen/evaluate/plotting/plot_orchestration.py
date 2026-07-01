@@ -43,6 +43,7 @@ from weathergen.evaluate.plotting.plot_utils import (
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
+from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
@@ -633,6 +634,50 @@ def _dispatch_score_map_animations(
 
 
 # ---------------------------------------------------------------------------
+# Timeseries plots
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_timeseries_plots(
+    da_preds: dict,
+    da_tars: dict,
+    output_dir: str,
+    stream: str,
+    regions: list[str],
+    run_id: str,
+    samples: dict,
+    channels: dict,
+    ensemble: list,
+    n_workers: int,
+) -> None:
+    """Build and dispatch timeseries plot tasks for all (channel, sample[, ens]) triples."""
+    data_ts = Timeseries(da_preds, da_tars)
+    has_ens = any("ens" in v.dims for v in da_preds.values())
+    ens_members = ensemble if has_ens else [None]
+    ts_tasks = [
+        {
+            "output_dir": output_dir,
+            "channel": str(channel),
+            "sample": sample,
+            "stream": stream,
+            "region": region,
+            "ens": ens,
+        }
+        for channel in channels
+        for sample in samples
+        for ens in ens_members
+        for region in regions
+    ]
+    calls = [delayed(data_ts.plot_single_timeseries)(**t) for t in ts_tasks]
+    dispatch_parallel(
+        calls,
+        n_workers=n_workers,
+        backend="loky",
+        desc=f"Timeseries {run_id} - {stream}",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Per-sample map / histogram plots
 # ---------------------------------------------------------------------------
 
@@ -773,7 +818,7 @@ def plot_data(
     stream_cfg = reader.get_stream(stream)
     plot_settings = stream_cfg.get("plotting", {})
 
-    plot_keys = ("plot_maps", "plot_histograms", "plot_animations")
+    plot_keys = ("plot_maps", "plot_histograms", "plot_animations", "plot_timeseries")
     if not plot_settings or not any(plot_settings.get(k, False) for k in plot_keys):
         return
 
@@ -807,6 +852,9 @@ def plot_data(
     plot_target = plot_settings.get("plot_target", True)
     if not isinstance(plot_target, bool):
         raise TypeError("plot_target must be a boolean.")
+    plot_timeseries = plot_settings.get("plot_timeseries", False)
+    if not isinstance(plot_timeseries, bool):
+        raise TypeError("plot_timeseries must be a boolean.")
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_histograms, bool) and plot_histograms not in {
         "across-samples",
@@ -952,6 +1000,20 @@ def plot_data(
             n_workers=num_plot_workers,
             backend="loky",
             desc=f"Across-samples plots {run_id} - {stream}",
+        )
+
+    if plot_timeseries:
+        _dispatch_timeseries_plots(
+            da_preds=da_preds,
+            da_tars=da_tars,
+            output_dir=output_dir,
+            stream=stream,
+            regions=plotter.regions,
+            run_id=run_id,
+            samples=plot_sample_set,
+            channels=plot_channel_set,
+            ensemble=list(available_data.ensemble),
+            n_workers=num_plot_workers,
         )
 
     if plot_animations:

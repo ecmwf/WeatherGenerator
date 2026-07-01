@@ -459,7 +459,6 @@ class StreamData:
         return len(self.target_tokens)
 
 
-
 def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderData:
     """
     Spoof an instance from data_reader_base.ReaderData instance.

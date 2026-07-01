@@ -90,6 +90,8 @@ default_streams:
       plot_target: false
       plot_histograms: true
       plot_animations: true
+      plot_timeseries: false
+
   CERRA:
     regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"] #, "blah"]
@@ -104,6 +106,8 @@ default_streams:
       plot_target: false
       plot_histograms: true
       plot_animations: true
+      plot_timeseries: false
+      
   IMERG_ANEMOI:
     channels: ["tp_imerg_0"]
     evaluation:
@@ -119,6 +123,7 @@ default_streams:
       plot_target: false
       plot_histograms: true
       plot_animations: true
+      plot_timeseries: false
 
 run_ids :
   ar40mckx:
@@ -158,6 +163,7 @@ run_ids :
           plot_target: false
           plot_histograms: true
           plot_animations: true
+          plot_timeseries: false
 
   
 
