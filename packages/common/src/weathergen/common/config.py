@@ -550,6 +550,7 @@ def _load_private_conf(private_config_path: Path | None = None) -> DictConfig:
     except Exception as e:
         _logger.warning(f"Could not determine path to platform-env.py: {e}")
         env_script_path = None
+    private_home: Path | None = None
     if private_config_path is not None and private_config_path.is_file():
         _logger.info(f"Loading private config from {private_config_path}.")
     elif "WEATHERGEN_PRIVATE_CONF" in os.environ:
@@ -588,7 +589,9 @@ def _load_private_conf(private_config_path: Path | None = None) -> DictConfig:
             "Could not find private config. Please set the environment variable "
             "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
-    private_cf = OmegaConf.load(private_config_path)
+    config_path = private_config_path if private_config_path is not None else private_home
+    assert config_path is not None
+    private_cf = OmegaConf.load(config_path)
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
