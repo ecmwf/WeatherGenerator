@@ -43,6 +43,8 @@ In applying this licence, ECMWF does not waive the privileges and immunities gra
 
 ### Installation and setup
 
+We currently require torch 2.9.1 and cuda 12.9 compatible machines (we plan to cover a wider range later).
+
 1. Install uv, see https://docs.astral.sh/uv/getting-started/installation/.
 2. Clone the repo and cd to `WeatherGenerator`
 3. Create output directories and run sync script:
