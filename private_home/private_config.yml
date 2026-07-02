@@ -1,1 +1,2 @@
-path_shared_working_dir: private_home/shared_working_dir
+path_shared_working_dir: "private_home/shared_working_dir"
+data_path_anemoi: "./datasets/"
