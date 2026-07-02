@@ -83,6 +83,11 @@ class IOState:
     offset: np.timedelta64 | None = (
         None  # fallback offset in hours for init_time when source_interval is missing
     )
+    sample_labels: list[int] | None = None  # global sample indices for coordinate labeling
+
+    def get_sample_labels(self) -> list[int]:
+        """Return global sample labels (falls back to local samples if not set)."""
+        return self.sample_labels if self.sample_labels is not None else self.samples
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +259,7 @@ def _build_io_state(
     n_io_workers: int,
     ens_select: EnsembleSelect,
     rank: str = "",
+    sample_labels: list[int] | None = None,
 ) -> IOState:
     """Resolve all I/O parameters that are shared between the two impl paths."""
     zarr_path = str(fname_zarr)
@@ -299,6 +305,7 @@ def _build_io_state(
         rank=rank,
         offset=offset,
         regrid_opts=regrid_opts,
+        sample_labels=sample_labels,
     )
 
 
@@ -447,7 +454,7 @@ def _assemble_substep(
         da_tar, da_pred = build_scatter_dataarrays(
             tars_list,
             preds_list,
-            state.samples,
+            state.get_sample_labels(),
             state.read_channels,
             per_sample_valid_times,
             init_times,
