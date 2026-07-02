@@ -21,7 +21,6 @@ Usage (single-GPU, no SLURM):
         [--obs_streams AVHRR georing] \\
         [--out_dir plots/latent_diag/yk85n9s7]
 
-
 uv run python scripts/analyse_latent_space.py \
     --run_id yk85n9s7 \
     --n_batches 8 \
@@ -405,7 +404,7 @@ def plot_total_variation(spatial_var: torch.Tensor, healpix_level: int,
     # Get all 8 neighbours for every cell (nested ordering)
     all_pix = np.arange(H)
     try:
-        nbrs = ah.healpy.get_all_neighbours(nside, all_pix, nest=True)  # (8, H)
+        nbrs = ah.neighbours(all_pix, nside, order="nested")  # (8, H)
         nbrs = np.clip(nbrs, 0, H - 1)   # replace -1 (missing nbr) with self
         val = spatial_var.numpy()
         tv_per_cell = np.abs(val[nbrs] - val[None, :]).mean(axis=0)   # (H,)
@@ -595,7 +594,7 @@ def main():
     logger.info(f"Loading config for run_id={run_id}, mini_epoch={args.mini_epoch}.")
     cf = setup_config(run_id, args.mini_epoch)
     init_loggers(cf.general.run_id)
-
+    
     logger.info("Building dataset and model …")
     dataset, model, model_params, device, test_cfg, mp_dtype = build_dataset_and_model(cf, args.mini_epoch)
 

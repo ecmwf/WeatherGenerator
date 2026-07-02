@@ -140,7 +140,7 @@ class EncoderModule(torch.nn.Module):
         )
 
         tokens_global = self.ln(tokens_global)
-        if self.cf.fe_diffusion_soft_clamp_channels is not None:
+        if self.cf.get("fe_diffusion_soft_clamp_channels", None) is not None:
             tokens_global[..., self.cf.fe_diffusion_soft_clamp_channels] = torch.tanh(
                 tokens_global[..., self.cf.fe_diffusion_soft_clamp_channels]
             ) * 2.0
