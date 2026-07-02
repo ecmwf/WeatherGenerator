@@ -16,15 +16,19 @@ A working template to copy and edit is `config/eval_config.yml`
 5. [`default_streams`](#5-default_streams)
 6. [`run_ids`](#6-run_ids)
    - [Common run keys](#61-common-run-keys)
-   - [Type: `zarr` (default)](#62-type-zarr-default)
-   - [Type: `json`](#63-type-json)
-   - [Type: `merge`](#64-type-merge)
-   - [Type: `jsonmerge`](#65-type-jsonmerge)
-   - [Type: `csv`](#66-type-csv)
+   - [Run types](#62-run-types)
+     - [Type: `zarr` (default)](#621-type-zarr-default)
+     - [Type: `json`](#622-type-json)
+     - [Type: `merge`](#623-type-merge)
+     - [Type: `jsonmerge`](#624-type-jsonmerge)
+     - [Type: `csv`](#625-type-csv)
 7. [Stream config block](#7-stream-config-block)
    - [`evaluation` sub-block](#71-evaluation-sub-block)
    - [`plotting` sub-block](#72-plotting-sub-block)
+   - [Regridding](#73-regridding)
+   - [Climatology](#74-climatology)
 8. [Metrics reference](#8-metrics-reference)
+   - [Special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram)
 9. [Regions reference](#9-regions-reference)
 10. [Score caching (JSON files)](#10-score-caching-json-files)
 11. [CSV format for pre-computed scores](#11-csv-format-for-pre-computed-scores)
@@ -61,17 +65,6 @@ run_ids:                          # required — one entry per run to evaluate
   ...
 ```
 
-**Key design decisions:**
-
-- **Regions** can be set in three places (in order of precedence, highest first):
-  1. Per-stream under `default_streams.<STREAM>.regions` / `run_ids.<id>.streams.<STREAM>.regions`
-  2. Under `evaluation.regions` (applies to score calculation for all streams)
-  3. Under `global_plotting_options.regions` (applies to map generation for all streams)
-- **Stream config** can be defined once in `default_streams` and reused by all `run_ids`.
-  A run can override this entirely by supplying its own `streams` block.
-- **`evaluation`** and **`plotting`** are separate sub-blocks inside every stream config,
-  allowing you to score over a broad set of steps/samples while only plotting a subset.
-
 ---
 
 ## 2. Top-level keys
@@ -86,38 +79,7 @@ run_ids:                          # required — one entry per run to evaluate
 ## 3. `global_plotting_options`
 
 Applied to all runs. Stream-level blocks inside this section allow per-stream overrides
-(e.g. colorscale limits). All keys are optional.
-
-```yaml
-global_plotting_options:
-  regions: ["global", "europe"]
-  image_format: "png"
-  animation_format: "gif"
-  log_colorbar: false
-  dpi_val: 300
-  fps: 2
-  n_bins: 50
-  log_x: false
-  log_y: false
-  ERA5:
-    use_datashader: false
-    marker_size: 2
-    scale_marker_size: true
-    marker: "o"
-    alpha: 0.5
-    add_healpix_grid: false
-    healpix_nside: 4
-    healpix_color: "black"
-    healpix_linewidth: 0.2
-    healpix_linestyle: "-"
-    healpix_step: 64
-    2t:
-      vmin: 250
-      vmax: 300
-    10u:
-      vmin: -40
-      vmax: 40
-```
+(e.g. colorscale limits). All keys are optional; see the annotated example at the end of this section.
 
 ### Global image / animation options
 
@@ -141,11 +103,13 @@ rendering defaults.
 
 | Key | Type | Optional | Default | Description |
 |-----|------|----------|---------|-------------|
-| `use_datashader` | bool | yes | `false` | Use [datashader](https://datashader.org/) for rendering very dense scatter plots. Requires `datashader` to be installed. |
+| `use_datashader` | bool | yes | `false` | Use [datashader](https://datashader.org/) for faster rasterised rendering of very dense scatter plots (recommended for grids with > 100k points, e.g. N320 or CERRA, where individual scatter points would overlap). Falls back to matplotlib scatter if not installed. |
 | `marker_size` | float | yes | stream-dependent | Base scatter-plot marker size (matplotlib `s` units, i.e. pt²). Stream defaults: ERA5 → 2.5, IMERG → 0.25, CERRA → 0.1, others → 0.5. |
 | `scale_marker_size` | bool | yes | `false` | Scale marker size by `1/cos²(lat)` to compensate for point clustering at high latitudes. |
-| `marker` | str | yes | `"o"` | Marker style string passed to matplotlib. |
+| `marker` | str | yes | `"o"` | Matplotlib marker style. Common values: `"o"` (circle), `"s"` (square), `"."` (small dot), `"^"` (triangle up), `","` (pixel). See [matplotlib marker reference](https://matplotlib.org/stable/api/markers_api.html). |
 | `alpha` | float | yes | — | Marker alpha (transparency), `0.0`–`1.0`. |
+| `colormap` | str | yes | `"coolwarm"` | Matplotlib colormap name for 2D maps. Examples: `"viridis"`, `"RdBu_r"`, `"plasma"`. See [matplotlib colormaps](https://matplotlib.org/stable/gallery/color/colormap_reference.html). |
+| `levels` | list[float] | yes | — | Explicit colorscale boundary values (e.g. `[-10, -5, 0, 5, 10]`). When set, a `BoundaryNorm` is applied and `vmin`/`vmax` are ignored. |
 | `add_healpix_grid` | bool | yes | `false` | Overlay a HEALPix grid on map plots. |
 | `healpix_nside` | int | yes | `4` | HEALPix `nside` controlling grid resolution. Higher values produce a finer grid. |
 | `healpix_color` | str | yes | `"black"` | Colour of the HEALPix grid lines. |
@@ -180,9 +144,9 @@ global_plotting_options:
       linewidths: 0.05
 ```
 
-"Random" pass-through examples here are: `edgecolors`, `linewidths`, `zorder`, `alpha`.
+Pass-through examples here are: `edgecolors`, `linewidths`, `zorder`, `alpha`.
 If a key conflicts with an internally managed argument (e.g. `c`, `norm`, `cmap`, `s`, `marker`,
-`transform`), the internal value wins.
+`transform`), the internal value will be used.
 
 ### Per-channel colorscale limits (e.g. `2t:`)
 
@@ -193,6 +157,41 @@ limits for 2D maps.
 |-----|------|----------|---------|-------------|
 | `vmin` | float | yes | — | Minimum value of the colorscale. When unset, matplotlib auto-scales. |
 | `vmax` | float | yes | — | Maximum value of the colorscale. When unset, matplotlib auto-scales. |
+
+### Annotated example
+
+```yaml
+global_plotting_options:
+  regions: ["global", "europe"]
+  image_format: "png"
+  animation_format: "gif"
+  log_colorbar: false
+  dpi_val: 300
+  fps: 2
+  n_bins: 50
+  log_x: false
+  log_y: false
+  ERA5:
+    use_datashader: false
+    marker_size: 2.0
+    scale_marker_size: true
+    marker: "o"
+    alpha: 0.5
+    colormap: "coolwarm"
+    add_healpix_grid: false
+    healpix_nside: 4
+    healpix_color: "black"
+    healpix_linewidth: 0.2
+    healpix_linestyle: "-"
+    healpix_step: 64
+    2t:
+      vmin: 250
+      vmax: 300
+      colormap: "RdBu_r"
+    10u:
+      vmin: -40
+      vmax: 40
+```
 
 ---
 
@@ -281,6 +280,10 @@ default_streams:
       plot_animations: false
 ```
 
+If a `run_id` does not define its own `streams` block, `default_streams` is used as-is. When a run
+does include a `streams` block, `default_streams` is **completely ignored** for that run — all
+required streams must be specified explicitly in the run's `streams` block.
+
 See [section 7](#7-stream-config-block) for a full description of all keys.
 
 ---
@@ -301,7 +304,11 @@ These apply to all run types.
 | `type` | str | yes | `"zarr"` | Reader type. Options: `"zarr"`, `"json"`, `"merge"`, `"jsonmerge"`, `"csv"`. |
 | `streams` | dict | yes | — | Stream-specific config for this run. If absent, `default_streams` is used. When present, **`default_streams` is completely ignored for this run** — specify all required streams explicitly. |
 
-### 6.2 Type: `zarr` (default)
+### 6.2 Run types
+
+The `type` field selects which reader is used. All five types share the common keys from [section 6.1](#61-common-run-keys).
+
+#### 6.2.1 Type: `zarr` (default)
 
 Standard run reading directly from WeatherGenerator Zarr output.
 
@@ -325,7 +332,7 @@ run_ids:
 | `mini_epoch` | int | yes | `0` | Epoch number used to identify the Zarr store. In inference this is always `0`. |
 | `rank` | int\|str\|list | yes | `"all"` | Rank(s) of the Zarr store to read. Use `"all"` for multi-rank inference, an integer for a single rank, or a list of integers. |
 
-### 6.3 Type: `json`
+#### 6.2.2 Type: `json`
 
 Reads pre-computed scores from JSON files (no Zarr data required). Useful when the original
 Zarr output has been deleted or is unavailable.
@@ -333,7 +340,7 @@ Zarr output has been deleted or is unavailable.
 ```yaml
 run_ids:
   so67dku1:
-    type: "json"
+    type: "json"                # <-------
     label: "Archived run"
     results_base_dir: "./results/"
     streams:
@@ -348,7 +355,7 @@ run_ids:
 Uses the same path keys as the `zarr` type (`results_base_dir`, `metrics_dir`, etc.).
 Plotting (maps, histograms, animations) is **not** available with this type.
 
-### 6.4 Type: `merge`
+#### 6.2.3 Type: `merge`
 
 Stacks multiple Zarr runs over the ensemble dimension. Useful for creating a pseudo-ensemble
 from several independent runs.
@@ -356,7 +363,7 @@ from several independent runs.
 ```yaml
 run_ids:
   merge_test:
-    type: "merge"
+    type: "merge"               # <-------
     merge_run_ids:
       - so67dku4
       - c9cg8ql3
@@ -377,14 +384,14 @@ run_ids:
 | `merge_run_ids` | list[str] | no | — | List of existing run_ids to merge. Each must be readable with the `zarr` reader. |
 | `merge_metrics_dir` | str | no | — | Directory where merged score JSON files will be written and cached. |
 
-### 6.5 Type: `jsonmerge`
+#### 6.2.4 Type: `jsonmerge`
 
 Same as `merge` but reads from pre-computed JSON score files instead of Zarr data.
 
 ```yaml
 run_ids:
   merge_archived:
-    type: "jsonmerge"
+    type: "jsonmerge"           # <-------
     merge_run_ids:
       - so67dku4
       - c9cg8ql3
@@ -402,7 +409,7 @@ run_ids:
 
 Same required keys as `merge`.
 
-### 6.6 Type: `csv`
+#### 6.2.5 Type: `csv`
 
 Reads pre-computed scores from CSV files generated by external tools (e.g. ECMWF Quaver).
 Only score line plots are produced; no maps, histograms, or animations.
@@ -410,7 +417,7 @@ Only score line plots are produced; no maps, histograms, or animations.
 ```yaml
 run_ids:
   pangu:
-    type: "csv"
+    type: "csv"                 # <-------
     label: "Pangu-Weather"
     metrics_dir: "<path to folder containing run_id sub-folder>"
     streams:
@@ -454,7 +461,6 @@ ERA5:                                 # stream name
     plot_target: false
     plot_histograms: true
     plot_animations: false
-    plot_subtimesteps: false
 ```
 
 | Key | Type | Optional | Default | Description |
@@ -462,8 +468,8 @@ ERA5:                                 # stream name
 | `regions` | list[str] | yes | `["global"]` | Regions for 2D maps for this stream. Overrides `global_plotting_options.regions`. |
 | `channels` | list[str] | yes | all available | List of channel names to process (e.g. `["2t", "10u", "z_500"]`). |
 | `offset` | str | yes | — | Timedelta offset used to infer initialisation time when `source_interval` is absent. Format examples: `"1h"`, `"30m"`, `"2h30m"`. |
-| `regrid` | bool\|dict | yes | `false` | Regrid data from the native model grid to a regular lat/lon grid before scoring and plotting. `true` defaults to a 1.5°×1.5° grid. Use a dict `{target_grid: [0.25, 0.25]}` to change the resolution. Target grid can also be a string such as `"O96"`. |
-| `climatology_path` | str | yes | auto | Explicit path to a climatology Zarr file used for ACC, FACT, TACT metrics. When absent, the code tries to infer it from the model config. |
+| `regrid` | bool\|dict | yes | `false` | Re-project data to a regular lat/lon grid before scoring and plotting. `true` is shorthand for `{target_grid: [1.5, 1.5]}`. See [section 7.3](#73-regridding) for full dict options and caveats. |
+| `climatology_path` | str | yes | auto | Explicit path to a climatology Zarr file required for `acc`, `rps`, `rpss`, `fact`, and `tact`. When absent, the code attempts auto-detection. See [section 7.4](#74-climatology). |
 
 ### 7.1 `evaluation` sub-block
 
@@ -478,7 +484,9 @@ Controls which data are loaded and scored.
 ### 7.2 `plotting` sub-block
 
 Controls which subset of the evaluated data is visualised with maps, histograms, and animations.
-You can score over a broad set and plot only a representative subset.
+The `evaluation` and `plotting` sub-blocks are intentionally separate: you can score over a broad
+set of forecast steps and samples while only generating plots for a representative subset, saving
+both time and disk space.
 
 | Key | Type | Optional | Default | Description |
 |-----|------|----------|---------|-------------|
@@ -490,7 +498,59 @@ You can score over a broad set and plot only a representative subset.
 | `plot_target` | bool | yes | `true` | Also plot the target (ground truth) data using the same plotting options. |
 | `plot_histograms` | bool\|str | yes | `false` | Plot histograms of target vs prediction. `true` or `"per-sample"` creates one histogram per sample; `"across-samples"` aggregates all samples into a single histogram. |
 | `plot_animations` | bool | yes | `false` | Build an animation (GIF/MP4) cycling through forecast steps for each channel and sample. |
-| `plot_subtimesteps` | bool | yes | `false` | Create separate plots for each sub-timestep within a single forecast step (only relevant for `tokenize_spacetime` models). |
+
+### 7.3 Regridding
+
+When `regrid` is set, data is re-projected from the native model grid (e.g. an octahedral reduced
+Gaussian grid) to a regular lat/lon grid before scoring and plotting, using
+[earthkit.regrid](https://earthkit-regrid.readthedocs.io/).
+
+```yaml
+ERA5:
+  regrid: true                            # shorthand: target_grid defaults to [1.5, 1.5]
+  # or, for explicit control:
+  regrid:
+    target_grid: [1.5, 1.5]              # [lat_deg, lon_deg] for a regular lat/lon grid
+    # target_grid: "O96"                 # or a named Gaussian grid
+    # original_grid: "O96"              # optional: source grid if auto-detection fails
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `target_grid` | [float, float] \| str | `[1.5, 1.5]` | Target grid. A two-element list `[lat_deg, lon_deg]` for a regular lat/lon grid, or a named string such as `"O96"`. |
+| `original_grid` | str | auto | Source grid name (e.g. `"O96"`). The code infers the grid from the number of spatial points; specify explicitly if auto-detection fails or produces a warning. |
+
+> **When to regrid:** Useful when comparing runs at different native resolutions, or when using
+> metrics that require a regular grid (e.g. `grad_amplitude`, PSD with `psd_method: "fft"`).
+> Regridding adds I/O and interpolation overhead — for standard deterministic scoring it is
+> often unnecessary.
+
+> **Cache invalidation note:** Changing `target_grid` or `original_grid` does **not** automatically
+> invalidate cached JSON score files. Delete the relevant JSON files before re-running if grid
+> settings change (see [section 10](#10-score-caching-json-files)).
+
+### 7.4 Climatology
+
+A pre-computed climatology is required for the anomaly-based metrics `acc`, `rps`, `rpss`,
+`fact`, and `tact`. The climatology must be a Zarr file with matching spatial grid and channel
+names.
+
+**Auto-detection:** If `climatology_path` is not set, the code locates the climatology using the
+`data_path_aux` path from the model/inference config:
+
+```
+<data_path_aux>/climatology/<source_filename>_climatology.zarr
+```
+
+Auto-detection only works when the stream has a single source filename. If it fails, a warning
+is logged and climatology-dependent metrics are skipped.
+
+**Limitations:**
+- For **gridded data** (regular lat/lon, after optional regridding): the climatology is
+  interpolated to the model grid if resolutions differ.
+- For **non-gridded / HEALPix data**: the climatology must already be on the same point layout
+  as the model output; no spatial interpolation is applied.
+- If the expected Zarr file does not exist, affected metrics return `NaN` without raising an error.
 
 ---
 
@@ -528,8 +588,8 @@ evaluation:
 | `fbi` | Frequency Bias Index. Override threshold with `thresh`. |
 | `seeps` | Stable Equitable Error in Probability Space ([Rodwell et al., 2011](https://journals.ametsoc.org/view/journals/mwre/140/8/mwr-d-11-00301.1.pdf)). |
 | `grad_amplitude` | Ratio of spatial variability (gradient amplitude) between prediction and target. Requires a regular lat/lon grid. |
-| `qq_analysis` | Quantile–quantile analysis. Produces quantile plots rather than line plots. |
-| `psd` | Power Spectral Density. Produces PSD plots rather than line plots. Parameters: `psd_method` (`"sht"` or `"fft"`, default `"sht"`); for `"fft"` only: `psd_regrid_resolution` (degrees, default 1.0). |
+| `qq_analysis` | Quantile–quantile analysis. Produces Q-Q plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
+| `psd` | Power Spectral Density. Produces PSD plots rather than line plots — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
 
 ### Metrics requiring alignment between consecutive forecast steps
 
@@ -558,8 +618,47 @@ evaluation:
 |------|-------------|
 | `ssr` | Spread–Skill Ratio |
 | `crps` | Continuous Ranked Probability Score (via xskillscore) |
-| `rank_histogram` | Rank Histogram (Talagrand diagram) |
+| `rank_histogram` | Rank Histogram (Talagrand diagram). Produces a bar chart, not a score line plot — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
 | `spread` | Ensemble Spread |
+
+### Special output metrics: `psd`, `qq_analysis`, `rank_histogram`
+
+The three metrics below do **not** produce standard score-vs-lead-time line plots. They are
+handled by dedicated plotting functions and generate different output file types.
+
+#### `psd` — Power Spectral Density
+
+Computes the spatial power spectrum and plots variance as a function of total spherical harmonic
+wavenumber (or zonal wavenumber for the FFT path). One curve per run/stream/channel is produced.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `psd_method` | `"sht"` | `"sht"` — Spherical Harmonic Transform; works on any separable grid (regular, octahedral, reduced Gaussian). `"fft"` — 1-D zonal FFT per latitude ring; **requires a regular lat/lon grid**. |
+| `psd_regrid_resolution` | `1.0` | (FFT only) Resolution in degrees to regrid to before the FFT. |
+
+```yaml
+evaluation:
+  metrics:
+    - psd:
+        psd_method: "sht"
+    # or for the FFT path (requires regular grid or regrid: true):
+    - psd:
+        psd_method: "fft"
+        psd_regrid_resolution: 1.0
+```
+
+#### `qq_analysis` — Quantile–Quantile Analysis
+
+Computes and plots quantile–quantile curves comparing the distribution of predictions to targets.
+Useful for detecting distributional biases (e.g. over-smoothing or wet-bias in precipitation).
+One Q-Q curve per channel per run is produced. No additional parameters.
+
+#### `rank_histogram` — Rank Histogram (Talagrand Diagram)
+
+For each verification point the rank of the observation within the sorted ensemble is recorded.
+A flat histogram indicates a well-calibrated ensemble; a U-shape indicates under-dispersion;
+a dome shape indicates over-dispersion. Requires ensemble data (multi-member run or `merge`
+type). No additional parameters.
 
 ### Metric parameters
 
@@ -610,6 +709,10 @@ default_streams:
     regions: ["europe"]
 ```
 
+**Precedence (highest to lowest):** per-stream `regions` → `evaluation.regions` → `global_plotting_options.regions`.
+`evaluation.regions` controls which regions are **scored**; `global_plotting_options.regions`
+controls which map extents are **plotted**. A per-stream `regions` key overrides both for that stream.
+
 ---
 
 ## 10. Score caching (JSON files)
@@ -631,6 +734,12 @@ Where `metrics_dir` is resolved as follows (first match wins):
 At runtime, the code checks whether a JSON file already exists for the requested
 combination. If it does, the stored scores are loaded; otherwise they are computed and
 saved for future use.
+
+> **Known limitation:** The cache does **not** check whether configuration parameters have
+> changed since the JSON was written. If you change anything that affects score values —
+> such as `rank`, `regrid` settings, metric thresholds, or the set of ensemble members —
+> you must **manually delete the relevant JSON files** to force recomputation. Stale cached
+> scores will otherwise be silently reused.
 
 ---
 
