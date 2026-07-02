@@ -49,12 +49,11 @@ In applying this licence, ECMWF does not waive the privileges and immunities gra
   ```
 
 ###  Download data
-We use `anemoi-datasets` to download datasets. Note that this can take long (...).
-1. Configure  
+We use `anemoi-datasets` to download datasets.
+1. Configure 
 ```bash
-mkdir -p datasets
 cd datasets
-uv run --with "anemoi-datasets[remote]" anemoi-datasets create --overwrite ../scripts/era5_o96_2020_1pct.yaml era5-o96-2020-1pct-6h-v1.zarr
+uv run --with "anemoi-datasets[remote]" anemoi-datasets create --overwrite download_configs/era5_o96_2020_1m.yaml era5-o96-2020-1pct-6h-v1.zarr
 cd ..
 ```
 
@@ -62,5 +61,5 @@ cd ..
 ## Training
 
 ```bash
-WEATHERGEN_PRIVATE_CONF=./config/era5_local_private.yml uv run train --base-config ./config/era5_local.yml 
+WEATHERGEN_PRIVATE_CONF=./local_config.yml uv run train --base-config ./config/era5_local.yml
 ```
