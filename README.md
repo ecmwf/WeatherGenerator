@@ -41,9 +41,9 @@ In applying this licence, ECMWF does not waive the privileges and immunities gra
 
 ## Running WeatherGenerator on your machine
 
-### Installation and setup
+This setup is WIP. This manual only works for machines compatible with torch 2.9.1 and cuda 12.9. Moreover, it only works for a single dataset configuration referenced below.
 
-We currently require torch 2.9.1 and cuda 12.9 compatible machines (we plan to cover a wider range later).
+### Installation and setup
 
 1. Install uv, see https://docs.astral.sh/uv/getting-started/installation/.
 2. Clone the repo and cd to `WeatherGenerator`
@@ -54,12 +54,10 @@ We currently require torch 2.9.1 and cuda 12.9 compatible machines (we plan to c
     ```
 
 ###  Download data
-We use `anemoi-datasets` to download datasets.
-1. ERA5, 2020, 1-month.
+- ERA5, 2020, 1-month.
     ```bash
     uv run --with "anemoi-datasets[remote]" anemoi-datasets create --overwrite datasets/download_configs/era5_o96_2020_1m.yaml datasets/era5-o96-2020-1pct-6h-v1.zarr
     ```
-2. TBA ...
 
 
 ### Training
