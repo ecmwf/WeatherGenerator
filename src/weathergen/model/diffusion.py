@@ -36,6 +36,40 @@ from weathergen.model.engines import ForecastingEngine
 logger = logging.getLogger(__name__)
 
 
+class SpatialAdaLN(torch.nn.Module):
+    """Per-token (spatial) AdaLN-Zero for forecast conditioning.
+
+    Given conditioning tokens c (B, H, D) and noised tokens x (B, H, D):
+      scale, shift, gate = MLP(c)           # (B, H, D) each
+      x_mod = LayerNorm(x) * (1+scale) + shift
+
+    Returns (x_mod, gate). The caller should apply  raw_out = raw_out * gate
+    before the preconditioner so that each HEALPix cell can independently
+    up/down-weight the denoiser's output based on the quality or content of
+    the conditioning token at that cell.
+
+    Zero-initialised: at the start of training scale=shift=gate=0, so the
+    modulation is a no-op and the model degrades gracefully to the unguided case.
+    """
+
+    def __init__(self, dim: int, norm_eps: float = 1e-5):
+        super().__init__()
+        self.norm = torch.nn.LayerNorm(dim, eps=norm_eps, elementwise_affine=False)
+        # SiLU activation followed by a linear projection; zero-init ensures
+        # scale=shift=gate=0 at initialisation (identity / no-op).
+        self.proj = torch.nn.Sequential(
+            torch.nn.SiLU(),
+            torch.nn.Linear(dim, 3 * dim, bias=True),
+        )
+        torch.nn.init.zeros_(self.proj[-1].weight)
+        torch.nn.init.zeros_(self.proj[-1].bias)
+
+    def forward(self, x: torch.Tensor, c: torch.Tensor):
+        """x, c: (B, H, D).  Returns (x_modulated, gate) both (B, H, D)."""
+        scale, shift, gate = self.proj(c).chunk(3, dim=-1)
+        return self.norm(x) * (1 + scale) + shift, gate
+
+
 class DiffusionForecastEngine(torch.nn.Module):
     # Adopted from https://github.com/NVlabs/edm/blob/main/training/loss.py#L72
 
@@ -78,8 +112,8 @@ class DiffusionForecastEngine(torch.nn.Module):
             f"forecast.input_num_steps must be 1 when fe_diffusion_model_conditioning is "
             f"'{self.conditioning}' (got input_num_steps={_input_num_steps})"
         )
-        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev", "concatenate", "concatenate_hiddendim", "concatenate_hdMLP"}, (
-            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', 'concatenate', 'concatenate_hiddendim', or 'concatenate_hdMLP' when "
+        assert self.conditioning != "forecast" or self.conditioning_type in {"cross_attn", "additive", "cross_attn_rev", "concatenate", "concatenate_hiddendim", "concatenate_hdMLP", "spatial_ada_ln"}, (
+            f"fe_diffusion_model_conditioning_type must be 'cross_attn', 'additive', 'cross_attn_rev', 'concatenate', 'concatenate_hiddendim', 'concatenate_hdMLP', or 'spatial_ada_ln' when "
             f"fe_diffusion_model_conditioning is 'forecast' "
             f"(got '{self.conditioning_type}')"
         )
@@ -99,6 +133,15 @@ class DiffusionForecastEngine(torch.nn.Module):
         else:
             self.latent_proj_up = None
             self.latent_proj_down = None
+
+        # Spatial AdaLN: per-cell modulation using the conditioning token at each HEALPix cell.
+        # Only instantiated for the 'spatial_ada_ln' conditioning type.
+        if self.conditioning_type == "spatial_ada_ln":
+            self.spatial_ada_ln = SpatialAdaLN(
+                dim=_lat_dim, norm_eps=self.cf.get("norm_eps", 1e-4)
+            )
+        else:
+            self.spatial_ada_ln = None
 
         if self.conditioning_type == "concatenate_hdMLP":
             self.concat_hd_proj = torch.nn.Linear(2 * _lat_dim, _lat_dim, bias=False)
@@ -317,6 +360,18 @@ class DiffusionForecastEngine(torch.nn.Module):
             combined = torch.cat([net_input, c], dim=2)
             projected = self.concat_hd_proj(combined)
             raw_out = self.net(projected, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None)
+            if self.latent_proj_down is not None:
+                raw_out = self.latent_proj_down(raw_out)
+            return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper
+
+        if self.conditioning_type == "spatial_ada_ln":
+            # Pre-modulate each HEALPix cell's token by the corresponding conditioning token.
+            # scale/shift/gate are (B, H, D') — per-cell and per-channel.
+            # gate is applied to raw_out so the network can suppress or amplify each cell's
+            # denoised contribution based on the conditioning quality at that cell.
+            net_input_mod, spatial_gate = self.spatial_ada_ln(net_input, c)
+            raw_out = self.net(net_input_mod, fstep=fstep, coords=coords, noise_emb=noise_emb, conditioning=None)
+            raw_out = raw_out * spatial_gate
             if self.latent_proj_down is not None:
                 raw_out = self.latent_proj_down(raw_out)
             return c_skip * x + c_out * raw_out  # Eq. (7) in EDM paper

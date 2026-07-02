@@ -66,7 +66,7 @@ fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_soft_clamp_channels: []  # [1511, 1772, 1689, 209, 1400, 1944, 1520, 1213, 1402, 646]
 fe_diffusion_model_conditioning: "forecast" # options: "date_time", "time", "forecast"
-fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "concatenate", ..., "ada_ln"
+fe_diffusion_model_conditioning_type: "concatenate" # options: "cross_attn", "concatenate", ..., "spatial_ada_ln", "ada_ln"
 fe_layer_norm_after_blocks: [11]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth block
 fe_impute_latent_noise_std: 0.0  # 1e-4
 fe_impute_latent_diffusion_noise_std: 1e-3  # 1e-4
