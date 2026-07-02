@@ -121,9 +121,6 @@ def init_model_and_shard(
         for block in _get_transformer_blocks(model.latent_heads):
             fully_shard(block, **fsdp_kwargs)
 
-        for block in _get_transformer_blocks(model.target_token_engines):
-            fully_shard(block, **full_precision_fsdp_kwargs)
-
         full_precision_fsdp_kwargs = {
             "mp_policy": (
                 MixedPrecisionPolicy(
