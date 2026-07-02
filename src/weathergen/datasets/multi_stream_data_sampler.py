@@ -251,16 +251,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 else:
                     filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
-                    if not any(filename.exists() for filename in filenames):  # see above
+                    filename = next((f for f in filenames if f.exists()), None)
+                    if filename is None:
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
                             f"stream '{stream_name}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
-
-                    # The same dataset can exist on different locations in the filesystem,
-                    # so we need to choose here.
-                    filename = filenames[0]
 
                 ds_type = stream_info["type"]
                 if is_root():
