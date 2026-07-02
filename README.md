@@ -36,29 +36,31 @@ This software is licensed under the terms of the Apache Licence Version 2.0 whic
 
 In applying this licence, ECMWF does not waive the privileges and immunities granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
 
-# Running WeatherGenerator locally
 
-## Installation and setup
+---
+
+## Running WeatherGenerator on your machine
+
+### Installation and setup
 
 1. Install uv, see https://docs.astral.sh/uv/getting-started/installation/.
 2. Clone the repo and cd to `WeatherGenerator`
 3. Create output directories and run sync script:
-  ```bash
-  mkdir -p logs models output results
-  ./scripts/actions.sh sync
-  ```
+    ```bash
+    mkdir -p logs models output results
+    ./scripts/actions.sh sync
+    ```
 
 ###  Download data
 We use `anemoi-datasets` to download datasets.
-1. Configure 
-```bash
-cd datasets
-uv run --with "anemoi-datasets[remote]" anemoi-datasets create --overwrite download_configs/era5_o96_2020_1m.yaml era5-o96-2020-1pct-6h-v1.zarr
-cd ..
-```
+1. ERA5, 2020, 1-month.
+    ```bash
+    uv run --with "anemoi-datasets[remote]" anemoi-datasets create --overwrite datasets/download_configs/era5_o96_2020_1m.yaml datasets/era5-o96-2020-1pct-6h-v1.zarr
+    ```
+2. TBA ...
 
 
-## Training
+### Training
 
 ```bash
 WEATHERGEN_PRIVATE_CONF=./local_config.yml uv run train --base-config ./config/era5_local.yml

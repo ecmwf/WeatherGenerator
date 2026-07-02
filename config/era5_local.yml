@@ -138,7 +138,7 @@ training_config:
   shuffle: True
 
   start_date: 2020-01-01T00:00
-  end_date: 2020-01-02T06:00
+  end_date: 2020-01-16T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
@@ -182,8 +182,8 @@ validation_config:
   samples_per_mini_epoch: 32
   shuffle: False
 
-  start_date: 2020-01-01T00:00
-  end_date: 2020-01-02T06:00
+  start_date: 2020-01-17T00:00
+  end_date: 2020-01-25T00:00
 
   output:
     streams: ["ERA5"]
