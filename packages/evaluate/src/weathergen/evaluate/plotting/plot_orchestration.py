@@ -26,6 +26,7 @@ from weathergen.evaluate.io.data.io_orchestration import dispatch_parallel, get_
 from weathergen.evaluate.io.io_reader import Reader, ReaderOutput
 from weathergen.evaluate.plotting.bar_plots import BarPlots
 from weathergen.evaluate.plotting.line_plots import LinePlots
+from weathergen.evaluate.plotting.pdf_merge import merge_pdf_subdirectories
 from weathergen.evaluate.plotting.plot_orchestration_utils import (
     _compute_ranges,
     _compute_scores,
@@ -1202,3 +1203,7 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
             if eval_opt.get("bar_plots", False):
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
+
+    # Merge individual PDFs into combined documents for easier browsing
+    if plot_cfg["image_format"] == "pdf":
+        merge_pdf_subdirectories(summary_dir)
