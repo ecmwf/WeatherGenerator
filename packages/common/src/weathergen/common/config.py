@@ -554,7 +554,7 @@ def _load_private_conf() -> DictConfig:
             raise FileNotFoundError(
                 "Could not find private config. Please set the environment variable "
                 "WEATHERGEN_PRIVATE_CONF or run on a supported HPC."
-            )
+            ) from e
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
         # This code does many checks to ensure that any error message is surfaced.
         # Since it is a process call, it can be hard to diagnose the error.
