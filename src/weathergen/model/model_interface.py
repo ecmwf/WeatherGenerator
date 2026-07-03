@@ -46,16 +46,22 @@ def _get_transformer_blocks(module):
     Return the top-level transformer blocks (each containing one attention + one MLP)
     """
     blocks = []
+    attention_types = (
+        MultiSelfAttentionHeadLocal
+        | MultiSelfAttentionHead
+        | MultiCrossAttentionHeadVarlen
+        | MultiCrossAttentionHeadVarlenSlicedQ
+        | MultiSelfAttentionHeadVarlen
+    )
+
     for child in module.children():
-        has_attn = any(isinstance(m, (MultiSelfAttentionHeadLocal,
-                                      MultiSelfAttentionHead,
-                                      MultiCrossAttentionHeadVarlen,
-                                      MultiCrossAttentionHeadVarlenSlicedQ,
-                                      MultiSelfAttentionHeadVarlen)) for m in child.modules())
-        has_mlp  = any(isinstance(m, MLP) for m in child.modules())
+        has_attn = any(isinstance(m, attention_types) for m in child.modules())
+        has_mlp = any(isinstance(m, MLP) for m in child.modules())
         if has_attn and has_mlp:
             blocks.append(child)
+
     return blocks
+
 
 def init_model_and_shard(
     cf,
@@ -105,12 +111,12 @@ def init_model_and_shard(
                 else None
             ),
         }
-        
+
         for block in _get_transformer_blocks(model.encoder.ae_local_engine.ae_local_blocks):
             fully_shard(block, reshard_after_forward=False, **fsdp_kwargs)
 
         for block in _get_transformer_blocks(model.encoder.ae_local_global_engine.ae_adapter):
-            fully_shard(block, reshard_after_forward=False, **fsdp_kwargs)        
+            fully_shard(block, reshard_after_forward=False, **fsdp_kwargs)
 
         for block in _get_transformer_blocks(model.encoder.ae_global_engine.ae_global_blocks):
             fully_shard(block, **fsdp_kwargs)
