@@ -374,7 +374,7 @@ class Trainer(TrainerBase):
         )
 
         # Restore optimizer momentum buffers when continuing from a checkpoint
-        if run_id_contd is not None:
+        if run_id_contd is not None and self.cf.general.istep != 0:
             self._load_optimizer_state(run_id_contd, mini_epoch_contd)
 
         if self.cf.general.istep > 0 and is_root():

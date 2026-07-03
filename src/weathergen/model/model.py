@@ -781,10 +781,12 @@ class Model(torch.nn.Module):
 
             if self.forecast_engine:
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
-            # decoder predictions
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
-            # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output, intermediates)
+            if "masking" in self.cf.training_config.training_mode:
+                # decoder predictions
+                output = self.predict_decoders(model_params, step, tokens, batch, output)
+            if "student_teacher" in self.cf.training_config.training_mode:
+                # latent predictions (raw and with SSL heads)
+                output = self.predict_latent(model_params, step, tokens, batch, output, intermediates)
 
         return output
 

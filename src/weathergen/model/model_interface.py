@@ -40,6 +40,20 @@ logger = logging.getLogger(__name__)
 type TrainingMode = str
 
 
+def _has_trainable_params(module: torch.nn.Module) -> bool:
+    """True if the module has at least one parameter with requires_grad=True.
+
+    FSDP2 raises "RuntimeError: _chunk_cat expects non-empty tensor" in the
+    backward reduce-scatter (foreach_reduce) when a fully_shard group contains
+    only frozen parameters, since there are no gradients to reduce. This happens
+    during fine-tuning (e.g. forecast fine-tuning freezes the encoder and
+    latent_heads). Skipping fully_shard for fully-frozen modules leaves their
+    parameters in the root FSDP group, which still has trainable parameters, so
+    they remain sharded without triggering the empty-gradient reduce.
+    """
+    return any(p.requires_grad for p in module.parameters())
+
+
 def init_model_and_shard(
     cf,
     dataset,
@@ -96,36 +110,36 @@ def init_model_and_shard(
         )
 
         for module in model.encoder.ae_local_engine.ae_local_blocks.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
         for module in model.encoder.ae_local_global_engine.ae_adapter.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
         for module in model.encoder.ae_global_engine.ae_global_blocks.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
         for module in model.forecast_engine.fe_blocks.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 # reshard_after_forward=False keeps FE parameters unsharded
                 # during the multi-step rollout loop.
                 # Needed for pushforward trick.
                 fully_shard(module, reshard_after_forward=False, **fsdp_kwargs)
 
         for module in model.latent_heads.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
         if model.deep_ssl_fusion is not None:
             for module in model.deep_ssl_fusion.modules():
-                if isinstance(module, modules_to_shard):
+                if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                     fully_shard(module, **fsdp_kwargs)
 
         if model.deep_ssl_level_projections is not None:
             for module in model.deep_ssl_level_projections.modules():
-                if isinstance(module, modules_to_shard):
+                if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                     fully_shard(module, **fsdp_kwargs)
 
         full_precision_fsdp_kwargs = {
@@ -140,7 +154,7 @@ def init_model_and_shard(
         }
 
         for module in model.target_token_engines.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
     if with_ddp and with_fsdp:
