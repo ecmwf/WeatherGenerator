@@ -143,7 +143,9 @@ def init_loggers(run_id=None, logging_config=None, private_config_path=None):
                 ofile = pathlib.Path(filename)
                 # make sure the path is independent of path where job is launched
                 if not ofile.is_absolute():
-                    work_dir = pathlib.Path(_load_private_conf(private_config_path).get("path_shared_working_dir"))
+                    work_dir = pathlib.Path(
+                        _load_private_conf(private_config_path).get("path_shared_working_dir")
+                    )
                     ofile = work_dir / ofile
                 pathlib.Path(ofile.parent).mkdir(parents=True, exist_ok=True)
                 handler[k] = ofile

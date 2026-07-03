@@ -158,10 +158,18 @@ class Trainer(TrainerBase):
         # create output directory
         if is_root():
             print()
-            config.get_path_run(cf, private_config_path=private_config_path).mkdir(exist_ok=True, parents=True)
-            config.get_path_model(cf, private_config_path=private_config_path).mkdir(exist_ok=True, parents=True)
+            config.get_path_run(cf, private_config_path=private_config_path).mkdir(
+                exist_ok=True, parents=True
+            )
+            config.get_path_model(cf, private_config_path=private_config_path).mkdir(
+                exist_ok=True, parents=True
+            )
 
-        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf, private_config_path=private_config_path), private_config_path=private_config_path)
+        self.train_logger = TrainLogger(
+            cf,
+            config.get_path_run(self.cf, private_config_path=private_config_path),
+            private_config_path=private_config_path,
+        )
 
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
@@ -192,7 +200,9 @@ class Trainer(TrainerBase):
 
         return target_and_aux_calculators
 
-    def inference(self, cf, devices, run_id_contd, mini_epoch_contd, private_config_path: Path | None = None):
+    def inference(
+        self, cf, devices, run_id_contd, mini_epoch_contd, private_config_path: Path | None = None
+    ):
         # general initalization
         self.init(cf, devices, private_config_path=private_config_path)
 
@@ -249,7 +259,14 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None, private_config_path: Path | None = None):
+    def run(
+        self,
+        cf,
+        devices,
+        run_id_contd=None,
+        mini_epoch_contd=None,
+        private_config_path: Path | None = None,
+    ):
         # general initalization
         self.init(cf, devices, private_config_path=private_config_path)
         cf = self.cf

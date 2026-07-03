@@ -208,7 +208,12 @@ def save(config: Config, mini_epoch: int | None, private_config_path: Path | Non
         f.write(json_str)
 
 
-def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None, private_config_path: Path | None = None) -> Config:
+def load_run_config(
+    run_id: str,
+    mini_epoch: int | None,
+    model_path: str | None,
+    private_config_path: Path | None = None,
+) -> Config:
     """
     Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
@@ -399,7 +404,7 @@ def load_merge_configs(
     private configs "secrets" section will be discarded.
 
     Args:
-        private_config_path: Path to the private configuration file containing platform dependent information and secrets
+        private_config_path: Contains platform dependent information and secrets
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
         mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
@@ -434,7 +439,9 @@ def load_merge_configs(
     if from_run_id is None:
         base_config = _load_base_conf(base)
     else:
-        base_config = load_run_config(from_run_id, mini_epoch, None, private_config_path=private_config_path)
+        base_config = load_run_config(
+            from_run_id, mini_epoch, None, private_config_path=private_config_path
+        )
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
@@ -690,7 +697,9 @@ def get_path_run(config: Config, private_config_path: Path | None = None) -> Pat
     return _get_shared_wg_path(private_config_path) / "results" / get_run_id_from_config(config)
 
 
-def get_path_model(config: Config | None = None, run_id: str | None = None, private_config_path: Path | None = None) -> Path:
+def get_path_model(
+    config: Config | None = None, run_id: str | None = None, private_config_path: Path | None = None
+) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
     if config or run_id:
         run_id = run_id if run_id else get_run_id_from_config(config)
@@ -700,7 +709,9 @@ def get_path_model(config: Config | None = None, run_id: str | None = None, priv
     return _get_shared_wg_path(private_config_path) / "models" / run_id
 
 
-def get_path_results(config: Config, mini_epoch: int, private_config_path: Path | None = None) -> Path:
+def get_path_results(
+    config: Config, mini_epoch: int, private_config_path: Path | None = None
+) -> Path:
     """Get the path to validation results for a specific mini_epoch and rank."""
     ext = StoreType(config.zarr_store).value  # validate extension
     base_path = get_path_run(config, private_config_path)
