@@ -92,7 +92,7 @@ class DataReaderGREP(DataReaderTimestep):
         store = Path(self._filename)
         if (store / "zarr.json").exists():
             kwargs = {"zarr_format": 3}
-        elif (store / ".zgroup").exists():
+        elif (store / ".zgroup").exists() or (store / ".zarray").exists() or (store / ".zattrs").exists():
             kwargs = {"zarr_format": 2}
         else:
             raise ValueError(f"Cannot determine Zarr format for {self._filename}")
