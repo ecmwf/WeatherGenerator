@@ -235,14 +235,12 @@ def _process_stream(
 
     if needs_scoring:
         stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
-        needs_score_recomputation = bool(recomputable_metrics)
+        needs_score_recomputation = (plot_score_maps or plot_score_init_time_series or bool(recomputable_metrics))  and type_ == "zarr"
 
-    # Whether we need full evaluation data (all samples/fsteps)
-    needs_full_data = needs_score_recomputation or plot_score_maps or plot_score_init_time_series
 
     # --- Load data only when necessary ---
     output_data = None
-    if needs_full_data and type_ == "zarr":
+    if needs_score_recomputation:
         available_data = reader.check_availability(stream, mode="evaluation")
         if available_data.score_availability:
             output_data = reader.get_data(
