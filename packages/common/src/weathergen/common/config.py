@@ -543,15 +543,18 @@ def _load_private_conf() -> DictConfig:
     """
     Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
     """
-    try:
-        env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
-    except Exception as e:
-        _logger.warning(f"Could not determine path to platform-env.py: {e}")
-        env_script_path = None
     if "WEATHERGEN_PRIVATE_CONF" in os.environ:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
         _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
-    elif env_script_path and env_script_path.is_file():
+    else:
+        try:
+            env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
+        except Exception as e:
+            _logger.warning(f"Could not determine path to platform-env.py: {e}")
+            raise FileNotFoundError(
+                "Could not find private config. Please set the environment variable "
+                "WEATHERGEN_PRIVATE_CONF or run on a supported HPC."
+            )
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
         # This code does many checks to ensure that any error message is surfaced.
         # Since it is a process call, it can be hard to diagnose the error.
@@ -578,12 +581,6 @@ def _load_private_conf() -> DictConfig:
         )
         private_home = Path(result.stdout.strip())
         _logger.info(f"Loading private config from platform-env.py output: {private_home}.")
-    else:
-        _logger.info(f"Could not find platform script at {env_script_path}")
-        raise FileNotFoundError(
-            "Could not find private config. Please set the environment variable "
-            "WEATHERGEN_PRIVATE_CONF or provide a path."
-        )
     private_cf = OmegaConf.load(private_home)
 
     if "secrets" in private_cf:
