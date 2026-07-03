@@ -38,11 +38,15 @@ class ScoreCards:
         self.image_format = plotter_cfg.get("image_format")
         self.dpi_val = plotter_cfg.get("dpi_val")
         self.improvement = plotter_cfg.get("improvement_scale", 0.2)
-        self.out_plot_dir = Path(output_basedir) / "score_cards"
+        self._base_dir = Path(output_basedir) / "score_cards"
+        self.out_plot_dir = self._base_dir
         self.baseline = plotter_cfg.get("baseline")
-        if not os.path.exists(self.out_plot_dir):
-            _logger.info(f"Creating dir {self.out_plot_dir}")
-            os.makedirs(self.out_plot_dir, exist_ok=True)
+        os.makedirs(self.out_plot_dir, exist_ok=True)
+
+    def set_subdir(self, metric: str, region: str) -> None:
+        """Set a metric/region subdirectory for output."""
+        self.out_plot_dir = self._base_dir / metric / region
+        os.makedirs(self.out_plot_dir, exist_ok=True)
 
     def plot(
         self,

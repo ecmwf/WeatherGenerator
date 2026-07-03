@@ -241,17 +241,19 @@ def merge_pdf_subdirectories(
     """Merge PDFs in each plot subdirectory, filtered by run_ids.
 
     This is the main entry point called after ``plot_summary``.  It scans
-    known subdirectories (line_plots, ratio_plots, etc.) and produces:
+    known subdirectories (line_plots, ratio_plots, etc.) which now contain
+    a ``<metric>/<region>/`` nested structure.
 
-    1. One merged PDF per subdirectory containing all plots for the given
-       run_ids (e.g. ``merged_line_plots_runA_runB.pdf``).
-    2. Finer-grained merged PDFs grouped by plot type / metric
-       (e.g. ``merged_rmse_global_runA_runB.pdf``).
+    Produces:
+    1. One merged PDF per metric/region leaf directory
+       (e.g. ``line_plots/rmse/global/merged_line_plots_runA_runB.pdf``).
+    2. One top-level merged PDF per plot type aggregating all metrics/regions
+       (e.g. ``line_plots/merged_line_plots_runA_runB.pdf``).
 
     Parameters
     ----------
     base_dir : Path
-        The summary/output directory that contains plot subdirectories.
+        The run_ids-prefixed output directory (e.g. ``plots/runA_runB/``).
     run_ids : list[str]
         Run identifiers from the evaluation config.  Only PDFs whose filenames
         reference these run_ids will be included.
@@ -278,14 +280,31 @@ def merge_pdf_subdirectories(
         if not subdir.is_dir():
             continue
 
-        # Full merge of all matching PDFs in this subdirectory
-        result = merge_pdfs_in_directory(subdir, run_ids=run_ids)
-        if result:
-            merged_paths.append(result)
+        # Recursively find all PDFs under this plot-type directory
+        all_pdfs = sorted(
+            f for f in subdir.rglob("*.pdf")
+            if not f.stem.startswith("merged_") and _file_belongs_to_runs(f, run_ids)
+        )
 
-        # Finer-grained: group by plot type (metric_region prefix)
-        prefix_results = merge_pdfs_by_plot_type(subdir, run_ids=run_ids)
-        merged_paths.extend(prefix_results)
+        if not all_pdfs:
+            continue
+
+        # 1. Merge per leaf directory (metric/region)
+        leaf_dirs = {f.parent for f in all_pdfs}
+        for leaf_dir in sorted(leaf_dirs):
+            leaf_pdfs = sorted(f for f in all_pdfs if f.parent == leaf_dir)
+            if len(leaf_pdfs) >= 2:
+                out_name = _build_merged_filename(subdir_name, run_ids)
+                result = merge_pdfs(leaf_pdfs, leaf_dir / out_name)
+                if result:
+                    merged_paths.append(result)
+
+        # 2. One top-level merge aggregating all metrics/regions for this plot type
+        if len(all_pdfs) >= 2:
+            out_name = _build_merged_filename(subdir_name, run_ids)
+            result = merge_pdfs(all_pdfs, subdir / out_name)
+            if result:
+                merged_paths.append(result)
 
     if merged_paths:
         _logger.info(

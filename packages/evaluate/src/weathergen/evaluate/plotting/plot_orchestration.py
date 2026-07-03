@@ -1182,12 +1182,23 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
         "baseline": eval_opt.get("baseline", None),
     }
 
-    plotter = LinePlots(plot_cfg, summary_dir)
-    sc_plotter = ScoreCards(plot_cfg, summary_dir)
-    br_plotter = BarPlots(plot_cfg, summary_dir)
-    quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
+    # Prefix the output directory with a run_ids identifier so that
+    # different evaluation configs can coexist in the same base directory.
+    run_ids_str = "_".join(sorted(runs.keys()))
+    output_basedir = summary_dir / run_ids_str
+
+    plotter = LinePlots(plot_cfg, output_basedir)
+    sc_plotter = ScoreCards(plot_cfg, output_basedir)
+    br_plotter = BarPlots(plot_cfg, output_basedir)
+    quantile_plotter = QuantilePlots(plot_cfg, output_basedir)
     for metric in metrics:
         for region in scores_dict[metric].keys():
+            # Set metric/region subdirectory for all plotters
+            plotter.set_subdir(metric, region)
+            sc_plotter.set_subdir(metric, region)
+            br_plotter.set_subdir(metric, region)
+            quantile_plotter.set_subdir(metric, region)
+
             if eval_opt.get("summary_plots", False):
                 if metric == "psd":
                     psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
@@ -1206,4 +1217,4 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
 
     # Merge individual PDFs into combined documents for easier browsing
     if plot_cfg["image_format"] == "pdf":
-        merge_pdf_subdirectories(summary_dir, run_ids=list(runs.keys()))
+        merge_pdf_subdirectories(output_basedir, run_ids=list(runs.keys()))
