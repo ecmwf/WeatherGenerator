@@ -88,6 +88,62 @@ class Reader(ABC):
         self.model_base_dir = eval_cfg.get("model_base_dir")
         self.results_base_dir = eval_cfg.get("results_base_dir")
 
+    def get_eval_settings(self, stream: str) -> dict:
+        """Extract evaluation settings that affect score computation for a stream.
+
+        These settings are saved into JSON score files so that cached scores can
+        be invalidated when settings change (e.g. regridding, ensemble selection,
+        rank files, aggregation dimensions).
+
+        Parameters
+        ----------
+        stream : str
+            The stream name.
+
+        Returns
+        -------
+        dict
+            A dictionary of plain Python types (JSON-serializable).  Only
+            non-default / non-empty values are included to keep the JSON compact
+            and avoid spurious mismatches.
+        """
+        import omegaconf as oc
+
+        stream_cfg = self.get_stream(stream)
+        settings: dict = {}
+
+        # Regridding
+        regrid = stream_cfg.get("regrid")
+        if regrid:
+            # Normalise to dict (bool True → default grid)
+            if isinstance(regrid, bool):
+                regrid = {"target_grid": [1.5, 1.5]}
+            settings["regrid"] = oc.OmegaConf.to_container(regrid, resolve=True) if oc.OmegaConf.is_config(regrid) else dict(regrid)
+
+        # Ensemble selection
+        ensemble_cfg = stream_cfg.get("evaluation", {}).get("ensemble")
+        if ensemble_cfg and ensemble_cfg != "all":
+            val = oc.OmegaConf.to_container(ensemble_cfg, resolve=True) if oc.OmegaConf.is_config(ensemble_cfg) else ensemble_cfg
+            settings["ensemble"] = val if isinstance(val, list) else str(val)
+
+        # Rank selection
+        rank_cfg = self.eval_cfg.get("rank")
+        if rank_cfg is not None and rank_cfg != "all":
+            val = oc.OmegaConf.to_container(rank_cfg, resolve=True) if oc.OmegaConf.is_config(rank_cfg) else rank_cfg
+            settings["rank"] = val if isinstance(val, list) else str(val)
+
+        # Aggregation dimensions (default is "ipoint")
+        agg_dims = self.eval_cfg.get("agg_dims")
+        if agg_dims and agg_dims != "ipoint":
+            settings["agg_dims"] = oc.OmegaConf.to_container(agg_dims, resolve=True) if oc.OmegaConf.is_config(agg_dims) else agg_dims
+
+        # Derived channels / z-scaling (if explicitly configured)
+        derived = stream_cfg.get("derived_channels")
+        if derived:
+            settings["derived_channels"] = oc.OmegaConf.to_container(derived, resolve=True) if oc.OmegaConf.is_config(derived) else derived
+
+        return settings
+
     def get_stream(self, stream: str):
         """
         returns the dictionary associated to a particular stream
