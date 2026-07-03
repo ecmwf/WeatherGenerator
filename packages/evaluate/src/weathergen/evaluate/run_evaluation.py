@@ -235,8 +235,9 @@ def _process_stream(
 
     if needs_scoring:
         stream_loaded_scores, recomputable_metrics = reader.load_scores(stream, regions, metrics)
-        needs_score_recomputation = (plot_score_maps or plot_score_init_time_series or bool(recomputable_metrics))  and type_ == "zarr"
-
+        needs_score_recomputation = (
+            plot_score_maps or plot_score_init_time_series or bool(recomputable_metrics)
+        ) and type_ == "zarr"
 
     # --- Load data only when necessary ---
     output_data = None

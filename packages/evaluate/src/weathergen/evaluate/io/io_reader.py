@@ -12,6 +12,7 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
 import omegaconf as oc
 
 # Third-party
@@ -126,9 +127,7 @@ class Reader(ABC):
             if not val or val == defaults.get(key):
                 continue
             settings[key] = (
-                oc.OmegaConf.to_container(val, resolve=True)
-                if oc.OmegaConf.is_config(val)
-                else val
+                oc.OmegaConf.to_container(val, resolve=True) if oc.OmegaConf.is_config(val) else val
             )
         return settings
 
