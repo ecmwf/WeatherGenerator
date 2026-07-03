@@ -1206,4 +1206,4 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
 
     # Merge individual PDFs into combined documents for easier browsing
     if plot_cfg["image_format"] == "pdf":
-        merge_pdf_subdirectories(summary_dir)
+        merge_pdf_subdirectories(summary_dir, run_ids=list(runs.keys()))
