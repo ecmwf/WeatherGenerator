@@ -129,6 +129,11 @@ class Reader(ABC):
             settings[key] = (
                 oc.OmegaConf.to_container(val, resolve=True) if oc.OmegaConf.is_config(val) else val
             )
+
+        # Store the source (zarr) forecast steps so the cache is invalidated
+        # when the underlying data changes (e.g. new rollout length).
+        settings["forecast_steps"] = sorted(int(f) for f in self.get_forecast_steps())
+
         return settings
 
     def get_stream(self, stream: str):
@@ -268,18 +273,20 @@ class Reader(ABC):
 
         for name in ["channel", "fstep", "sample", "ensemble"]:
             if requested[name] is None:
-                # Default to all in Zarr
-                requested[name] = reader_data[name]
-                # If file with metrics exists, must exactly match
-                if available_data is not None and reader_data[name] != available[name]:
-                    _logger.info(
-                        f"Requested all {name}s for {mode}, but previous config "
-                        "was a strict subset. Recomputation required."
-                    )
-                    check_score = False
+                # Default to all in Zarr (or to cached score coords if available)
+                if available_data is not None and available[name]:
+                    # Trust the cached score's coordinates (may include expanded
+                    # sub-steps beyond zarr base fsteps).  Validity is guaranteed
+                    # by the eval_settings check in load_single_score.
+                    requested[name] = available[name]
+                else:
+                    requested[name] = reader_data[name]
 
-            # Must be subset of Zarr
-            if not requested[name] <= reader_data[name]:
+            # Must be subset of source data (skip when validating a cached score,
+            # since scores may contain expanded sub-steps beyond zarr base fsteps)
+            if available_data is not None:
+                pass
+            elif not requested[name] <= reader_data[name]:
                 missing = requested[name] - reader_data[name]
 
                 # Special handling for ensemble mean
