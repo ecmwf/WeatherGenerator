@@ -543,8 +543,8 @@ def get_target_coords_local(
     zi = 99
     a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
 
-    # Careful when merging develop-ssl into develop here. 
-    # This is not to be merged in.
+    # Careful when merging develop-ssl into develop. 
+    # This is not to be merged in to develop.
     a[..., 98] = np.sin(coords[:, 0])
     a[..., 97] = np.cos(coords[:, 0])
     a[..., 96] = np.sin(coords[:, 1])
