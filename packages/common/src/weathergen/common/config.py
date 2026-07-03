@@ -195,10 +195,10 @@ def format_cf(config: Config) -> str:
     return stream.getvalue()
 
 
-def save(config: Config, mini_epoch: int | None, private_config_path: Path | None = None):
+def save(config: Config, mini_epoch: int | None):
     """Save current config into the current runs model directory."""
     # save in directory with model files
-    dirname = get_path_model(config, private_config_path=private_config_path)
+    dirname = get_path_model(config)
     dirname.mkdir(exist_ok=True, parents=True)
 
     fname = _get_model_config_file_write_name(get_run_id_from_config(config), mini_epoch)
@@ -208,12 +208,7 @@ def save(config: Config, mini_epoch: int | None, private_config_path: Path | Non
         f.write(json_str)
 
 
-def load_run_config(
-    run_id: str,
-    mini_epoch: int | None,
-    model_path: str | None,
-    private_config_path: Path | None = None,
-) -> Config:
+def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None) -> Config:
     """
     Load a configuration file from a given run_id and mini_epoch.
     If run_id is a full path, loads it from the full path.
@@ -222,7 +217,6 @@ def load_run_config(
         run_id: Run ID of the pretrained WeatherGenerator model
         mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
         model_path: Path to the model directory. If None, uses the model_path from private config.
-        private_config_path: Path to the private configuration file.
 
     Returns:
         Configuration object loaded from the specified run and mini_epoch.
@@ -234,7 +228,7 @@ def load_run_config(
     else:
         # Load model config here. In case model_path is not provided, get it from private conf
         if model_path is None:
-            path = get_path_model(private_config_path=private_config_path, run_id=run_id)
+            path = get_path_model(run_id=run_id)
         else:
             path = Path(model_path) / run_id
 
@@ -393,7 +387,6 @@ def merge_configs(base_config: Config, update_config: Config):
 
 
 def load_merge_configs(
-    private_config_path: Path | None = None,
     from_run_id: str | None = None,
     mini_epoch: int | None = None,
     base: Path | Config | None = None,
@@ -404,7 +397,7 @@ def load_merge_configs(
     private configs "secrets" section will be discarded.
 
     Args:
-        private_config_path: Contains platform dependent information and secrets
+        private_home: Configuration file containing platform dependent information and secrets
         from_run_id: Run id of the pretrained WeatherGenerator model
         to continue training or inference
         mini_epoch: Mini_epoch of the checkpoint to load. -1 indicates last checkpoint available.
@@ -419,7 +412,7 @@ def load_merge_configs(
     Returns:
         Merged configuration object.
     """
-    private_config = _load_private_conf(private_config_path)
+    private_config = _load_private_conf()
     overwrite_configs: list[Config] = []
     for overwrite in overwrites:
         if isinstance(overwrite, (str | Path)):
@@ -439,9 +432,7 @@ def load_merge_configs(
     if from_run_id is None:
         base_config = _load_base_conf(base)
     else:
-        base_config = load_run_config(
-            from_run_id, mini_epoch, None, private_config_path=private_config_path
-        )
+        base_config = load_run_config(from_run_id, mini_epoch, None)
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
@@ -548,7 +539,7 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
     return overwrite_config
 
 
-def _load_private_conf(private_config_path: Path | None = None) -> DictConfig:
+def _load_private_conf() -> DictConfig:
     """
     Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
     """
@@ -557,10 +548,7 @@ def _load_private_conf(private_config_path: Path | None = None) -> DictConfig:
     except Exception as e:
         _logger.warning(f"Could not determine path to platform-env.py: {e}")
         env_script_path = None
-    private_home: Path | None = None
-    if private_config_path is not None and private_config_path.is_file():
-        _logger.info(f"Loading private config from {private_config_path}.")
-    elif "WEATHERGEN_PRIVATE_CONF" in os.environ:
+    if "WEATHERGEN_PRIVATE_CONF" in os.environ:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
         _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
     elif env_script_path and env_script_path.is_file():
@@ -596,9 +584,7 @@ def _load_private_conf(private_config_path: Path | None = None) -> DictConfig:
             "Could not find private config. Please set the environment variable "
             "WEATHERGEN_PRIVATE_CONF or provide a path."
         )
-    config_path = private_config_path if private_config_path is not None else private_home
-    assert config_path is not None
-    private_cf = OmegaConf.load(config_path)
+    private_cf = OmegaConf.load(private_home)
 
     if "secrets" in private_cf:
         del private_cf["secrets"]
@@ -692,38 +678,34 @@ def load_streams(streams_directory: Path) -> Config:
     return OmegaConf.create(streams)
 
 
-def get_path_run(config: Config, private_config_path: Path | None = None) -> Path:
+def get_path_run(config: Config) -> Path:
     """Get the current runs results_path for storing run results and logs."""
-    return _get_shared_wg_path(private_config_path) / "results" / get_run_id_from_config(config)
+    return _get_shared_wg_path() / "results" / get_run_id_from_config(config)
 
 
-def get_path_model(
-    config: Config | None = None, run_id: str | None = None, private_config_path: Path | None = None
-) -> Path:
+def get_path_model(config: Config | None = None, run_id: str | None = None) -> Path:
     """Get the current runs model_path for storing model checkpoints."""
     if config or run_id:
         run_id = run_id if run_id else get_run_id_from_config(config)
     else:
         msg = f"Missing run_id and cannot infer it from config: {config}"
         raise ValueError(msg)
-    return _get_shared_wg_path(private_config_path) / "models" / run_id
+    return _get_shared_wg_path() / "models" / run_id
 
 
-def get_path_results(
-    config: Config, mini_epoch: int, private_config_path: Path | None = None
-) -> Path:
+def get_path_results(config: Config, mini_epoch: int) -> Path:
     """Get the path to validation results for a specific mini_epoch and rank."""
     ext = StoreType(config.zarr_store).value  # validate extension
-    base_path = get_path_run(config, private_config_path)
+    base_path = get_path_run(config)
     fname = f"validation_chkpt{mini_epoch:05d}_rank{config.rank:04d}.{ext}"
 
     return base_path / fname
 
 
 @functools.cache
-def _get_shared_wg_path(private_config_path: Path | None = None) -> Path:
+def _get_shared_wg_path() -> Path:
     """Get the shared working directory for WeatherGenerator."""
-    private_config = _load_private_conf(private_config_path)
+    private_config = _load_private_conf()
     return Path(private_config.get("path_shared_working_dir"))
 
 

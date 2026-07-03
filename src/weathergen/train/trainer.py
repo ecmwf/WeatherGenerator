@@ -13,7 +13,6 @@ import copy
 import logging
 import time
 from math import sqrt
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -98,7 +97,7 @@ class Trainer(TrainerBase):
         """
         return self.world_size_original * batch_size_per_gpu
 
-    def init(self, cf: Config, devices, private_config_path: Path | None = None):
+    def init(self, cf: Config, devices):
         # pylint: disable=attribute-defined-outside-init
         self.cf = OmegaConf.merge(
             OmegaConf.create(
@@ -157,19 +156,10 @@ class Trainer(TrainerBase):
 
         # create output directory
         if is_root():
-            print()
-            config.get_path_run(cf, private_config_path=private_config_path).mkdir(
-                exist_ok=True, parents=True
-            )
-            config.get_path_model(cf, private_config_path=private_config_path).mkdir(
-                exist_ok=True, parents=True
-            )
+            config.get_path_run(cf).mkdir(exist_ok=True, parents=True)
+            config.get_path_model(cf).mkdir(exist_ok=True, parents=True)
 
-        self.train_logger = TrainLogger(
-            cf,
-            config.get_path_run(self.cf, private_config_path=private_config_path),
-            private_config_path=private_config_path,
-        )
+        self.train_logger = TrainLogger(cf, config.get_path_run(self.cf))
 
         # Initialize collapse monitor for SSL training
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
@@ -200,11 +190,9 @@ class Trainer(TrainerBase):
 
         return target_and_aux_calculators
 
-    def inference(
-        self, cf, devices, run_id_contd, mini_epoch_contd, private_config_path: Path | None = None
-    ):
+    def inference(self, cf, devices, run_id_contd, mini_epoch_contd):
         # general initalization
-        self.init(cf, devices, private_config_path=private_config_path)
+        self.init(cf, devices)
 
         cf = self.cf
         device_type = torch.accelerator.current_accelerator()
@@ -251,7 +239,7 @@ class Trainer(TrainerBase):
         self.loss_calculator_val = LossCalculator(cf, self.test_cfg, VAL, device=self.devices[0])
 
         if is_root():
-            config.save(self.cf, mini_epoch=0, private_config_path=private_config_path)
+            config.save(self.cf, mini_epoch=0)
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
@@ -259,16 +247,9 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
-    def run(
-        self,
-        cf,
-        devices,
-        run_id_contd=None,
-        mini_epoch_contd=None,
-        private_config_path: Path | None = None,
-    ):
+    def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
-        self.init(cf, devices, private_config_path=private_config_path)
+        self.init(cf, devices)
         cf = self.cf
 
         device_type = torch.accelerator.current_accelerator()
@@ -398,7 +379,7 @@ class Trainer(TrainerBase):
             )
 
         if is_root():
-            config.save(self.cf, None, private_config_path=private_config_path)
+            config.save(self.cf, None)
             logger.info(config.format_cf(self.cf))
 
         # run validation before training if requested
