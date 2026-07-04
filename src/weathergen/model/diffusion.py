@@ -486,82 +486,47 @@ class DiffusionForecastEngine(torch.nn.Module):
         """
         x = torch.randn(batch_size, self.num_healpix_cells, self.cf.ae_global_dim_embed).to(device="cuda")
 
-        # --- Training-aligned sigma bounds ---
-        # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
-        # The network only learns to denoise reliably within the training distribution.
-        #   - sigma_max_eff: cap at 99.7th percentile = exp(p_mean + 3*p_std)
-        #     Beyond this, the denoiser is in untrained territory → garbage predictions
-        #     that poison the entire ODE trajectory.
-        #   - sigma_min_eff: floor at a level where the network still contributes.
-        #     With EDM preconditioning, c_skip = sigma_data^2/(sigma^2+sigma_data^2).
-        #     At sigma << sigma_data, c_skip → 1, meaning the output ≈ input (skip
-        #     connection dominates) and the network can no longer correct errors.
-        #     We stop at sigma_min = max(config value, sigma_data * 0.01), which gives
-        #     c_skip ≈ 0.9999 — still some network contribution, and avoids the
-        #     numerical instability of dividing by near-zero sigma in the ODE.
-        sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
-        sigma_max_eff = min(self.sigma_max, sigma_max_train)
-        # sigma_max_eff = sigma_max_eff * 3.0
-
-        # --- Training-distribution-aligned sigma_min ---
-        # sigma_min_quantile controls what fraction of training samples fall below sigma_min_eff.
-        # sigma at quantile q of log-normal(p_mean, p_std): exp(p_mean + Φ⁻¹(q) * p_std).
-        # Φ⁻¹ approximated via its standard z-scores; default q=0.05 (5th percentile).
-        #   q=0.10 → z=-1.282 → exp(1.5-1.538)≈0.96   (stops right at sigma≈1)
-        #   q=0.05 → z=-1.645 → exp(1.5-1.974)≈0.62
-        #   q=0.01 → z=-2.326 → exp(1.5-2.791)≈0.27
-        sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
-        _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
-        _z = _z_scores.get(sigma_min_quantile, -1.645)
-        sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
-        sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
-        if log_diagnostics:
-            logger.info(
-                f"Inference sigma schedule: "
-                f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train 3σ={sigma_max_train:.4f}), "
-                f"sigma_min_eff={sigma_min_eff:.4f} "
-                f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
-                f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
-            )
-        # sigma_min_eff = self.cf.get("sigma_min", 0.002)
-
-        # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
-        step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
-        t_steps = (
-            sigma_max_eff ** (1 / self.rho)
-            + step_indices
-            / (num_steps - 1)
-            * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
-        ) ** self.rho
-        t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
-        # t_steps = torch.cat(
-        #     [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
-        # )  # t_N = 0
-
-        # # --- Training-distribution-aligned sigma_max ---
-        # # For log-uniform, there is no 3-sigma tail. The distribution ends abruptly.
-        # sigma_max_train = math.exp(self.train_log_max)
+        # # --- Training-aligned sigma bounds ---
+        # # Training noise: sigma = exp(eta * p_std + p_mean), eta ~ N(0,1).
+        # # The network only learns to denoise reliably within the training distribution.
+        # #   - sigma_max_eff: cap at 99.7th percentile = exp(p_mean + 3*p_std)
+        # #     Beyond this, the denoiser is in untrained territory → garbage predictions
+        # #     that poison the entire ODE trajectory.
+        # #   - sigma_min_eff: floor at a level where the network still contributes.
+        # #     With EDM preconditioning, c_skip = sigma_data^2/(sigma^2+sigma_data^2).
+        # #     At sigma << sigma_data, c_skip → 1, meaning the output ≈ input (skip
+        # #     connection dominates) and the network can no longer correct errors.
+        # #     We stop at sigma_min = max(config value, sigma_data * 0.01), which gives
+        # #     c_skip ≈ 0.9999 — still some network contribution, and avoids the
+        # #     numerical instability of dividing by near-zero sigma in the ODE.
+        # sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
         # sigma_max_eff = min(self.sigma_max, sigma_max_train)
+        # # sigma_max_eff = sigma_max_eff * 3.0
 
         # # --- Training-distribution-aligned sigma_min ---
-        # # Quantiles in a uniform distribution are perfectly linear in log-space.
+        # # sigma_min_quantile controls what fraction of training samples fall below sigma_min_eff.
+        # # sigma at quantile q of log-normal(p_mean, p_std): exp(p_mean + Φ⁻¹(q) * p_std).
+        # # Φ⁻¹ approximated via its standard z-scores; default q=0.05 (5th percentile).
+        # #   q=0.10 → z=-1.282 → exp(1.5-1.538)≈0.96   (stops right at sigma≈1)
+        # #   q=0.05 → z=-1.645 → exp(1.5-1.974)≈0.62
+        # #   q=0.01 → z=-2.326 → exp(1.5-2.791)≈0.27
         # sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
-        
-        # # Linear interpolation between min and max log boundaries
-        # log_quantile = self.train_log_min + sigma_min_quantile * (self.train_log_max - self.train_log_min)
-        # sigma_min_from_dist = math.exp(log_quantile)
-
+        # _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
+        # _z = _z_scores.get(sigma_min_quantile, -1.645)
+        # sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
         # sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
-
         # if log_diagnostics:
         #     logger.info(
-        #         f"Inference LU sigma schedule: "
-        #         f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
+        #         f"Inference sigma schedule: "
+        #         f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train 3σ={sigma_max_train:.4f}), "
         #         f"sigma_min_eff={sigma_min_eff:.4f} "
-        #         f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f})"
+        #         f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
+        #         f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
         #     )
+        # # sigma_min_eff = self.cf.get("sigma_min", 0.002)
+        # breakpoint()
 
-        # # --- Time step discretization (EDM Eq. 5 remains identical) ---
+        # # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         # step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
         # t_steps = (
         #     sigma_max_eff ** (1 / self.rho)
@@ -569,7 +534,44 @@ class DiffusionForecastEngine(torch.nn.Module):
         #     / (num_steps - 1)
         #     * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
         # ) ** self.rho
-        # t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])
+        # t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
+        # # t_steps = torch.cat(
+        # #     [self.net.round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+        # # )  # t_N = 0
+
+        # --- Training-distribution-aligned sigma_max ---
+        # For log-uniform, there is no 3-sigma tail. The distribution ends abruptly.
+        sigma_max_train = math.exp(self.train_log_max)
+        sigma_max_eff = min(self.sigma_max, sigma_max_train)
+
+        # --- Training-distribution-aligned sigma_min ---
+        # Quantiles in a uniform distribution are perfectly linear in log-space.
+        sigma_min_quantile = self.cf.get("sigma_min_quantile", 0.05)
+        
+        # Linear interpolation between min and max log boundaries
+        log_quantile = self.train_log_min + sigma_min_quantile * (self.train_log_max - self.train_log_min)
+        sigma_min_from_dist = math.exp(log_quantile)
+
+        sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
+        # sigma_min_eff = 0.002
+
+        if log_diagnostics:
+            logger.info(
+                f"Inference LU sigma schedule: "
+                f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train_max={sigma_max_train:.4f}), "
+                f"sigma_min_eff={sigma_min_eff:.4f} "
+                f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f})"
+            )
+
+        # --- Time step discretization (EDM Eq. 5 remains identical) ---
+        step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
+        t_steps = (
+            sigma_max_eff ** (1 / self.rho)
+            + step_indices
+            / (num_steps - 1)
+            * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
+        ) ** self.rho
+        t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])
 
         # --- Per-step tracking for diagnostics ---
         track = {

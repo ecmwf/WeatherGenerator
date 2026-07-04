@@ -55,7 +55,10 @@ def write_output(
     # ODE denoising step (the trajectory). The batch only has the original physical
     # forecast indices, so synthesize a contiguous run of indices starting at the
     # original first index to cover every entry in model_output / target_aux_out.
-    n_pred_steps = len(model_output.physical)
+    # Count only *filled* slots: for forecast_offset=1 the slot at index 0 is always
+    # empty, and including it would make n_pred_steps > len(timestep_idxs) for a
+    # normal multi-step autoregressive rollout, wrongly triggering the expansion.
+    n_pred_steps = sum(1 for p in model_output.physical if p)
     if n_pred_steps > len(timestep_idxs):
         timestep_idxs = list(range(forecast_offset, forecast_offset + n_pred_steps))
 
