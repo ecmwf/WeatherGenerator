@@ -43,6 +43,7 @@ from weathergen.evaluate.plotting.plot_utils import (
 from weathergen.evaluate.plotting.plotter import Plotter
 from weathergen.evaluate.plotting.quantile_plots import QuantilePlots
 from weathergen.evaluate.plotting.score_cards import ScoreCards
+from weathergen.evaluate.plotting.timeseries import Timeseries
 from weathergen.evaluate.scores.score import VerifiedData, get_score
 from weathergen.evaluate.utils.array_utils import bias_ranges, common_ranges
 from weathergen.evaluate.utils.clim_utils import get_climatology, needs_climatology
@@ -165,18 +166,6 @@ def run_score_timeseries_pipeline(
         f"{len(fsteps)} fsteps × {len(unique_hours)} init hours."
     )
 
-    # --- Parallel plotting ---
-    _plot_timeseries_parallel(
-        reader,
-        stream,
-        scores_by_hour,
-        unique_hours,
-        fsteps,
-        da_tars,
-        global_plotting_options,
-        n_workers,
-    )
-
     return scores_by_hour
 
 
@@ -211,119 +200,6 @@ def _compute_timeseries_scores_for_fstep(
         metric_scores[metric_name] = score
 
     return fstep, region, metric_scores
-
-
-def _plot_single_timeseries(
-    output_dir: str,
-    run_id: str,
-    metric_name: str,
-    region: str,
-    channel: str | None,
-    fstep: int,
-    lt_label: str,
-    score: xr.DataArray,
-    unique_hours: list[int],
-    image_format: str,
-    dpi_val: int,
-) -> None:
-    """Plot a single timeseries figure (parallelisable worker)."""
-    matplotlib.use("Agg")
-
-    score_vals = score.sel(channel=channel) if channel is not None else score
-    hours = score_vals.coords["source_end_hour"].values
-    values = score_vals.values.flatten()
-
-    plt.figure(figsize=(10, 6), dpi=dpi_val)
-    plt.plot(hours, values, marker="o", linewidth=2, label=run_id)
-
-    ch_label = channel if channel is not None else "all"
-    title = f"{metric_name.upper()} vs source end hour | {ch_label} |  {lt_label} | {region}"
-    plt.title(title)
-    plt.xlabel("Source window end hour [UTC]")
-    plt.ylabel(metric_name.upper())
-    plt.xlim(min(unique_hours) - 0.5, max(unique_hours) + 0.5)
-    plt.xticks(unique_hours)
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-
-    out_dir = Path(output_dir)
-    plot_path = (
-        out_dir / f"{metric_name}_{ch_label}_{region}_lead_{lt_label}"
-        f"_by_source_end_hour.{image_format}"
-    )
-    plt.savefig(plot_path, bbox_inches="tight")
-    plt.close()
-
-
-def _plot_timeseries_parallel(
-    reader: Reader,
-    stream: str,
-    scores_by_hour: dict[str, dict[str, dict[int, xr.DataArray]]],
-    unique_hours: list[int],
-    fsteps: list[int],
-    da_tars: dict[int, xr.DataArray],
-    global_plotting_options: dict | None,
-    n_workers: int | None = None,
-) -> None:
-    """Dispatch timeseries plotting tasks in parallel."""
-
-    output_dir = reader.runplot_dir / "plots" / stream / "score_timeseries"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    run_id = reader.run_id
-    plot_cfg = global_plotting_options or {}
-    image_format = plot_cfg.get("image_format", "png")
-    dpi_val = plot_cfg.get("dpi_val", 150)
-
-    # Build fstep → lead_time label mapping
-    lead_time_by_fstep: dict[int, str] = {}
-    for fstep in fsteps:
-        da = da_tars[fstep]
-        if "lead_time" in da.coords:
-            lt = da.coords["lead_time"].values
-            hours = int(lt.astype("timedelta64[h]").astype(int))
-            lead_time_by_fstep[fstep] = f"lead time {hours}h"
-        else:
-            lead_time_by_fstep[fstep] = f"fstep {fstep}"
-
-    # Build plot tasks
-    plot_tasks: list[dict] = []
-    for metric_name, region_dict in scores_by_hour.items():
-        for region, fstep_dict in region_dict.items():
-            sample_score = next(iter(fstep_dict.values()))
-            channels = (
-                list(sample_score.coords["channel"].values)
-                if "channel" in sample_score.dims
-                else [None]
-            )
-            for channel in channels:
-                for fstep, score in fstep_dict.items():
-                    plot_tasks.append(
-                        dict(
-                            output_dir=str(output_dir),
-                            run_id=run_id,
-                            metric_name=metric_name,
-                            region=region,
-                            channel=channel,
-                            fstep=fstep,
-                            lt_label=lead_time_by_fstep[fstep],
-                            score=score,
-                            unique_hours=unique_hours,
-                            image_format=image_format,
-                            dpi_val=dpi_val,
-                        )
-                    )
-
-    _logger.info(
-        f"RUN {run_id} - {stream}: Plotting {len(plot_tasks)} timeseries figures "
-        f"with up to {n_workers} worker(s)."
-    )
-
-    calls = [delayed(_plot_single_timeseries)(**t) for t in plot_tasks]
-    dispatch_parallel(calls, n_workers=n_workers, backend="loky", desc=f"Timeseries plots {stream}")
-
-    _logger.info(f"RUN {run_id} - {stream}: Score timeseries plots saved to {output_dir}.")
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +278,6 @@ def run_score_map_pipeline(
         "fig_size": cfg.get("fig_size", None),
         "animation_format": cfg.get("animation_format", "gif"),
         "fps": cfg.get("fps", 2),
-        "log_colorbar": cfg.get("log_colorbar", False),
     }
     output_basedir = str(reader.runplot_dir)
     run_id = reader.run_id
@@ -759,6 +634,50 @@ def _dispatch_score_map_animations(
 
 
 # ---------------------------------------------------------------------------
+# Timeseries plots
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_timeseries_plots(
+    da_preds: dict,
+    da_tars: dict,
+    output_dir: str,
+    stream: str,
+    regions: list[str],
+    run_id: str,
+    samples: dict,
+    channels: dict,
+    ensemble: list,
+    n_workers: int,
+) -> None:
+    """Build and dispatch timeseries plot tasks for all (channel, sample[, ens]) triples."""
+    data_ts = Timeseries(da_preds, da_tars)
+    has_ens = any("ens" in v.dims for v in da_preds.values())
+    ens_members = ensemble if has_ens else [None]
+    ts_tasks = [
+        {
+            "output_dir": output_dir,
+            "channel": str(channel),
+            "sample": sample,
+            "stream": stream,
+            "region": region,
+            "ens": ens,
+        }
+        for channel in channels
+        for sample in samples
+        for ens in ens_members
+        for region in regions
+    ]
+    calls = [delayed(data_ts.plot_single_timeseries)(**t) for t in ts_tasks]
+    dispatch_parallel(
+        calls,
+        n_workers=n_workers,
+        backend="loky",
+        desc=f"Timeseries {run_id} - {stream}",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Per-sample map / histogram plots
 # ---------------------------------------------------------------------------
 
@@ -899,7 +818,7 @@ def plot_data(
     stream_cfg = reader.get_stream(stream)
     plot_settings = stream_cfg.get("plotting", {})
 
-    plot_keys = ("plot_maps", "plot_histograms", "plot_animations")
+    plot_keys = ("plot_maps", "plot_histograms", "plot_animations", "plot_timeseries")
     if not plot_settings or not any(plot_settings.get(k, False) for k in plot_keys):
         return
 
@@ -933,6 +852,9 @@ def plot_data(
     plot_target = plot_settings.get("plot_target", True)
     if not isinstance(plot_target, bool):
         raise TypeError("plot_target must be a boolean.")
+    plot_timeseries = plot_settings.get("plot_timeseries", False)
+    if not isinstance(plot_timeseries, bool):
+        raise TypeError("plot_timeseries must be a boolean.")
     plot_histograms = plot_settings.get("plot_histograms", False)
     if not isinstance(plot_histograms, bool) and plot_histograms not in {
         "across-samples",
@@ -1080,6 +1002,20 @@ def plot_data(
             desc=f"Across-samples plots {run_id} - {stream}",
         )
 
+    if plot_timeseries:
+        _dispatch_timeseries_plots(
+            da_preds=da_preds,
+            da_tars=da_tars,
+            output_dir=output_dir,
+            stream=stream,
+            regions=plotter.regions,
+            run_id=run_id,
+            samples=plot_sample_set,
+            channels=plot_channel_set,
+            ensemble=list(available_data.ensemble),
+            n_workers=num_plot_workers,
+        )
+
     if plot_animations:
         last_fstep = list(da_tars.keys())[-1]
         last_preds = da_preds[last_fstep]
@@ -1144,7 +1080,7 @@ def plot_timeseries_summary(
     image_format = plt_opt.get("image_format", "png")
     dpi_val = plt_opt.get("dpi_val", 150)
 
-    ts_dir = summary_dir / "score_timeseries"
+    ts_dir = summary_dir / "score_init_time_series"
     ts_dir.mkdir(parents=True, exist_ok=True)
 
     for metric_name, region_dict in timeseries_scores.items():
@@ -1176,7 +1112,8 @@ def plot_timeseries_summary(
                             )
                             hours = score_vals.coords["source_end_hour"].values
                             values = score_vals.values.flatten()
-                            label = runs[run_id].get("label", run_id)
+                            run_label = runs[run_id].get("label", run_id)
+                            label = f"{run_label} ({run_id})"
                             color = runs[run_id].get("color", None)
                             plt.plot(
                                 hours,
@@ -1202,8 +1139,10 @@ def plot_timeseries_summary(
                         plt.legend()
                         plt.tight_layout()
 
+                        run_ids_str = "_".join(sorted(run_dict.keys()))
                         plot_path = (
                             ts_dir / f"{metric_name}_{ch_label}_{region}_{stream}"
+                            f"_{run_ids_str}"
                             f"_fstep_{fstep}_by_source_end_hour.{image_format}"
                         )
                         plt.savefig(plot_path, bbox_inches="tight")
