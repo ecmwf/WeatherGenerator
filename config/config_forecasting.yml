@@ -66,10 +66,10 @@ forecast_att_dense_rate: 1.0
 healpix_level: 5
 
 rope_2D: False
-mlp_type: swiglu
-use_xsa: True
-# mlp_type: mlp
-# use_xsa: False
+# mlp_type: swiglu
+# use_xsa: True
+mlp_type: mlp
+use_xsa: False
 
 with_mixed_precision: True
 with_flash_attention: True
