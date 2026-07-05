@@ -70,11 +70,8 @@ class EMAModel:
         ema_params = []
         src_params = []
         for name, p_ema in self.ema_model.named_parameters():
-            if "identity" in name.lower() or "q_cells" in name.lower():
-                continue
             p_src = self._resolve_src_param(name)
             if p_src is None:
-                # EMA-only param or intentionally excluded
                 raise AssertionError(
                     f"{name}: All parameters of the EMA model must be in the base model."
                 )
