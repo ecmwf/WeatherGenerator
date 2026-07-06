@@ -66,8 +66,6 @@ class EmbeddingEngine(torch.nn.Module):
                     num_heads=si["embed"]["num_heads"],
                     dropout_rate=self.cf.embed_dropout_rate,
                     norm_type=self.cf.norm_type,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
-                    use_xsa=self.cf.get("use_xsa", False),
                     unembed_mode=self.cf.embed_unembed_mode,
                     stream_name=stream_name,
                 )
@@ -81,7 +79,7 @@ class EmbeddingEngine(torch.nn.Module):
                 raise ValueError("Unsupported embedding network type")
 
     def forward(self, batch, pe_embed):
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
 
         num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
@@ -223,7 +221,6 @@ class LocalAssimilationEngine(torch.nn.Module):
                     dropout_rate=self.cf.ae_local_dropout_rate,
                     with_qk_lnorm=self.cf.ae_local_with_qk_lnorm,
                     with_flash=self.cf.with_flash_attention,
-                    use_xsa=self.cf.get("use_xsa", False),
                     norm_type=self.cf.norm_type,
                     qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                     norm_eps=self.cf.norm_eps,
@@ -236,7 +233,6 @@ class LocalAssimilationEngine(torch.nn.Module):
                     self.cf.ae_local_dim_embed,
                     with_residual=True,
                     dropout_rate=self.cf.ae_local_dropout_rate,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -287,7 +283,6 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
                     self.cf.ae_global_dim_embed,
                     with_residual=True,
                     dropout_rate=self.cf.ae_adapter_dropout_rate,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -312,8 +307,11 @@ class Local2GlobalAssimilationEngine(torch.nn.Module):
 
     def forward(self, tokens_c, tokens_global_c, q_cells_lens_c, cell_lens_c):
         for block in self.ae_adapter:
-            tokens_global_c = checkpoint(
-                block, tokens_global_c, tokens_c, q_cells_lens_c, cell_lens_c, use_reentrant=False
+            tokens_global_c = block(
+                tokens_global_c,
+                tokens_c,
+                q_cells_lens_c,
+                cell_lens_c,
             )
         return tokens_global_c
 
@@ -407,7 +405,6 @@ class QueryAggregationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -426,7 +423,6 @@ class QueryAggregationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_aggregation_dropout_rate,
                         with_qk_lnorm=self.cf.ae_aggregation_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -441,7 +437,6 @@ class QueryAggregationEngine(torch.nn.Module):
                     with_residual=True,
                     dropout_rate=self.cf.ae_aggregation_dropout_rate,
                     hidden_factor=self.cf.ae_aggregation_mlp_hidden_factor,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -486,7 +481,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_global_dropout_rate,
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -504,7 +498,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
                         dropout_rate=self.cf.ae_global_dropout_rate,
                         with_qk_lnorm=self.cf.ae_global_with_qk_lnorm,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         norm_eps=self.cf.norm_eps,
@@ -520,7 +513,6 @@ class GlobalAssimilationEngine(torch.nn.Module):
                     with_residual=True,
                     dropout_rate=self.cf.ae_global_dropout_rate,
                     hidden_factor=self.cf.ae_global_mlp_hidden_factor,
-                    mlp_type=self.cf.get("mlp_type", "mlp"),
                     norm_type=self.cf.norm_type,
                     norm_eps=self.cf.mlp_norm_eps,
                 )
@@ -575,7 +567,6 @@ class ForecastingEngine(torch.nn.Module):
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
-                            use_xsa=self.cf.get("use_xsa", False),
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
@@ -594,7 +585,6 @@ class ForecastingEngine(torch.nn.Module):
                             dropout_rate=self.cf.fe_dropout_rate,
                             with_qk_lnorm=self.cf.fe_with_qk_lnorm,
                             with_flash=self.cf.with_flash_attention,
-                            use_xsa=self.cf.get("use_xsa", False),
                             norm_type=self.cf.norm_type,
                             qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                             dim_aux=dim_aux,
@@ -610,7 +600,6 @@ class ForecastingEngine(torch.nn.Module):
                         self.cf.ae_global_dim_embed,
                         with_residual=True,
                         dropout_rate=self.cf.fe_dropout_rate,
-                        mlp_type=self.cf.get("mlp_type", "mlp"),
                         norm_type=self.cf.norm_type,
                         dim_aux=dim_aux,
                         norm_eps=self.cf.mlp_norm_eps,
@@ -695,7 +684,7 @@ class EnsPredictionHead(torch.nn.Module):
         for pred_head in self.pred_heads:
             cpred = toks
             for block in pred_head:
-                cpred = checkpoint(block, cpred, use_reentrant=False)
+                cpred = block(cpred)
             preds.append(cpred)
         preds = torch.stack(preds, 0)
 
@@ -710,7 +699,6 @@ class TargetPredictionEngineClassic(nn.Module):
         dim_coord_in,
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
-        tr_mlp_type,
         softcap,
         stream_config: dict,
     ):
@@ -732,7 +720,6 @@ class TargetPredictionEngineClassic(nn.Module):
         self.dim_coord_in = dim_coord_in
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
-        self.tr_mlp_type = tr_mlp_type
         self.softcap = softcap
         self.tte = torch.nn.ModuleList()
 
@@ -766,7 +753,6 @@ class TargetPredictionEngineClassic(nn.Module):
                         dropout_rate=0.1,  # Assuming dropout_rate is 0.1
                         with_qk_lnorm=True,
                         with_flash=self.cf.with_flash_attention,
-                        use_xsa=self.cf.get("use_xsa", False),
                         norm_type=self.cf.norm_type,
                         qk_norm_type=self.cf.get("qk_norm_type", self.cf.norm_type),
                         dim_aux=self.dim_coord_in,
@@ -783,7 +769,6 @@ class TargetPredictionEngineClassic(nn.Module):
                     with_residual=True,
                     hidden_factor=self.tr_mlp_hidden_factor,
                     dropout_rate=0.1,  # Assuming dropout_rate is 0.1
-                    mlp_type=self.tr_mlp_type,
                     norm_type=self.cf.norm_type,
                     dim_aux=(self.dim_coord_in if self.cf.pred_mlp_adaln else None),
                     norm_eps=self.cf.mlp_norm_eps,
@@ -821,9 +806,8 @@ class TargetPredictionEngine(nn.Module):
         dim_coord_in,
         tr_dim_head_proj,
         tr_mlp_hidden_factor,
-        tr_mlp_type,
         softcap,
-        stream_config: dict,
+        stream_name: str,
     ):
         """
         Initialize the TargetPredictionEngine with the configuration.
@@ -846,14 +830,13 @@ class TargetPredictionEngine(nn.Module):
             LayerNorm that does not scale after the layer is applied
         """
         super(TargetPredictionEngine, self).__init__()
-        self.name = f"TargetPredictionEngine_{stream_config['name']}"
+        self.name = f"TargetPredictionEngine_{stream_name}"
 
         self.cf = cf
         self.dims_embed = dims_embed
         self.dim_coord_in = dim_coord_in
         self.tr_dim_head_proj = tr_dim_head_proj
         self.tr_mlp_hidden_factor = tr_mlp_hidden_factor
-        self.tr_mlp_type = tr_mlp_type
         self.softcap = softcap
 
         # For backwards compatibility
@@ -894,7 +877,6 @@ class TargetPredictionEngine(nn.Module):
                         with_self_attn=False,
                         with_adanorm=False,
                         with_mlp=False,
-                        mlp_type=self.tr_mlp_type,
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -907,8 +889,6 @@ class TargetPredictionEngine(nn.Module):
                         attention_kwargs=attention_kwargs,
                         with_adanorm=True,
                         dropout_rate=0.1,
-                        mlp_type=self.tr_mlp_type,
-                        use_xsa=self.cf.get("use_xsa", False),
                     )
                 )
             elif self.cf.decoder_type == "CrossAttentionConditioning":
@@ -922,8 +902,6 @@ class TargetPredictionEngine(nn.Module):
                         with_adanorm=False,
                         with_mlp=True,
                         dropout_rate=0.1,
-                        mlp_type=self.tr_mlp_type,
-                        use_xsa=self.cf.get("use_xsa", False),
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -938,8 +916,6 @@ class TargetPredictionEngine(nn.Module):
                         with_adanorm=True,
                         with_mlp=True,
                         dropout_rate=0.1,
-                        mlp_type=self.tr_mlp_type,
-                        use_xsa=self.cf.get("use_xsa", False),
                         attention_kwargs=attention_kwargs,
                     )
                 )
@@ -955,7 +931,6 @@ class TargetPredictionEngine(nn.Module):
                         attention_kwargs=attention_kwargs,
                         tr_dim_head_proj=tr_dim_head_proj,
                         tr_mlp_hidden_factor=tr_mlp_hidden_factor,
-                        tr_mlp_type=tr_mlp_type,
                         mlp_norm_eps=self.cf.mlp_norm_eps,
                     )
                 )
@@ -1059,7 +1034,6 @@ class LatentPredictionHeadTransformer(nn.Module):
                     dropout_rate=dropout_rate,
                     with_qk_lnorm=with_qk_lnorm,
                     with_flash=self.global_cf.with_flash_attention,
-                    use_xsa=self.global_cf.get("use_xsa", False),
                     norm_type=self.global_cf.norm_type,
                     qk_norm_type=self.global_cf.qk_norm_type,
                     # dim_aux=dim_aux,
@@ -1075,7 +1049,6 @@ class LatentPredictionHeadTransformer(nn.Module):
                     hidden_factor=4,
                     with_residual=True,
                     dropout_rate=dropout_rate,
-                    mlp_type=loss_conf.get("mlp_type", self.global_cf.get("mlp_type", "mlp")),
                     norm_type=self.global_cf.norm_type,
                     # dim_aux=dim_aux,
                     norm_eps=self.global_cf.mlp_norm_eps,
@@ -1115,15 +1088,7 @@ class LatentPredictionHeadIdentity(nn.Module):
 
 
 class LatentPredictionHeadMLP(nn.Module):
-    def __init__(
-        self,
-        name,
-        in_dim: int,
-        loss_conf,
-        use_class_token: bool,
-        use_patch_token: bool,
-        default_mlp_type: str = "mlp",
-    ):
+    def __init__(self, name, in_dim: int, loss_conf, use_class_token: bool, use_patch_token: bool):
         super().__init__()
 
         self.name = name
@@ -1138,13 +1103,7 @@ class LatentPredictionHeadMLP(nn.Module):
         self.use_patch_token = use_patch_token
 
         # Create an MLP block
-        self.blocks = MLP(
-            in_dim,
-            out_dim,
-            num_layers,
-            hidden_factor,
-            mlp_type=loss_conf.get("mlp_type", default_mlp_type),
-        )
+        self.blocks = MLP(in_dim, out_dim, num_layers, hidden_factor)
 
     def forward(self, x: LatentState):
         outputs = []
