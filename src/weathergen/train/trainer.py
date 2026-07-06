@@ -373,8 +373,8 @@ class Trainer(TrainerBase):
                 / (
                     min(len_per_rank, self.training_cfg.samples_per_mini_epoch)
                     * self.runstate.world_size_original
+                )
             )
-        )
 
         if is_root():
             config.save(self.cf)
@@ -484,7 +484,6 @@ class Trainer(TrainerBase):
                     metadata=extract_batch_metadata(batch),
                 )
 
-
                 [
                     target_aux.update_state_pre_backward(self.runstate.istep, batch, self.model)
                     for _, target_aux in self.target_and_aux_calculators.items()
@@ -537,9 +536,7 @@ class Trainer(TrainerBase):
             self.perf_tracker.step(
                 batch,
                 self.runstate.istep,
-                log_fn=lambda m: self.train_logger.log_metrics(
-                    TRAIN, m, step=self.runstate.istep
-                ),
+                log_fn=lambda m: self.train_logger.log_metrics(TRAIN, m, step=self.runstate.istep),
             )
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.runstate.istep):
@@ -802,6 +799,7 @@ class Trainer(TrainerBase):
             if is_root():
                 if stage == VAL:
                     logger.info(
+                        f"""validation ({self.cf.general.run_id}) : {mini_epoch:03d} : 
                          {np.nanmean(avg_loss)}"""
                     )
 
