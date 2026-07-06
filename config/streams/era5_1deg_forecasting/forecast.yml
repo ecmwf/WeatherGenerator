@@ -11,6 +11,6 @@ Forecast_conditions :
   type : condition
   filenames : []
   variables : ['start_day', 'start_time', 'end_day', 'end_time']
-  transform : "absolute"  # absolute, absolute_normalized, cos_sin, fourier
+  transform : "cos_sin"  # absolute, absolute_normalized, cos_sin, fourier
   entry_point : "forecast_engine"
-  emb_dimension : None 
+  emb_dimension : None
