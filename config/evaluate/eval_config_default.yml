@@ -24,7 +24,7 @@
 # max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
 
 evaluation:
-  metrics: ["rmse", "mae"]
+  metrics: ["rmse", "mae", "acc", "froct"]
   # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
   summary_plots : true
   ratio_plots : false
@@ -52,21 +52,27 @@ default_streams:
     plotting:
       sample: [0]
       forecast_step: "all" #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
-      plot_maps: true
+      plot_maps: false
       plot_histograms: false
-      plot_animations: true
-  CERRA:
-    regions: ["europe"]
-    channels: ["z_500", "t_850", "u_850"] #, "blah"]
-    evaluation:
-      forecast_step: "all"
-      sample: "all"
-    plotting:
-      sample: [0]
-      forecast_step: "all"
-      plot_maps: true
-      plot_bias: false
-      plot_target: false
-      plot_histograms: true
-      plot_animations: true
+      plot_animations: false
       
+run_ids :
+  i3y14pw9:
+    label: "absolute"
+    results_base_dir : "./results/i3y14pw9"
+    #NEW: if "streams" is not specified, the default streams are used
+    
+  uab9gi2q:
+    label: "absolute normalized"
+    results_base_dir : "./results/uab9gi2q"
+    #NEW: if "streams" is not specified, the default streams are used
+      
+  iv0z6u29:
+    label: "cos_sin"
+    results_base_dir : "./results/iv0z6u29"
+    #NEW: if "streams" is not specified, the default streams are used
+  
+  dc0i1osz:
+    label: "fourier_emb_16"
+    results_base_dir : "./results/dc0i1osz"
+    #NEW: if "streams" is not specified, the default streams are used
