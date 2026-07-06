@@ -29,7 +29,13 @@ from weathergen.model.attention import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import apply_fct_to_blocks, freeze_weights, reset_weights
+from weathergen.model.utils import (
+    apply_fct_to_blocks,
+    check_reset_not_frozen,
+    freeze_weights,
+    log_trainable_summary,
+    reset_weights,
+)
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
@@ -183,9 +189,14 @@ def init_model_and_shard(
     if loaded_from_run_id is not None and loaded_from_run_id != current_run_id:
         reset_modules = cf.get("reset_modules", "")
         if reset_modules:
+            # a parameter that is both reset and frozen would stay random forever
+            check_reset_not_frozen(model, reset_modules)
             if is_root():
                 logger.info(f"Resetting weights for modules matching: {reset_modules}")
             apply_fct_to_blocks(model, reset_modules, reset_weights)
+
+    if is_root():
+        log_trainable_summary(model)
 
     # model params
     model_params = ModelParams(cf).create(cf)

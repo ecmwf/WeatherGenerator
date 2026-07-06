@@ -60,6 +60,59 @@ def apply_fct_to_blocks(model, blocks, fct):
             fct(module)
 
 
+def check_reset_not_frozen(model, reset_blocks):
+    """
+    Verify that no parameter about to be reset is frozen. A parameter that is reset
+    to random values but has requires_grad=False can never train, leaving random
+    dead weights in the model (almost never intended).
+    Args:
+        model : model instance with attribute named_modules
+        reset_blocks : regex pattern of block names that will be reset
+    Raises:
+        ValueError listing the frozen parameters that match the reset pattern.
+    """
+
+    frozen = []
+    for name, module in model.named_modules():
+        name = module.name if hasattr(module, "name") else name
+        if (re.fullmatch(reset_blocks, name) is not None) and (name != ""):
+            frozen += [
+                f"{name}.{pn}" for pn, p in module.named_parameters() if not p.requires_grad
+            ]
+    if frozen:
+        frozen = sorted(set(frozen))
+        raise ValueError(
+            "reset_modules overlaps with frozen parameters; these would be reset to random "
+            "values but never trained. Remove them from freeze_modules or reset_modules: "
+            + ", ".join(frozen[:16])
+            + (" ..." if len(frozen) > 16 else "")
+        )
+
+
+def log_trainable_summary(model):
+    """
+    Log per-top-level-block parameter counts and trainable fractions.
+    """
+
+    # unwrap DDP for readable block names
+    block = model.module if isinstance(model, nn.parallel.DistributedDataParallel) else model
+    logger.info("Trainable parameter summary:")
+    for name, child in block.named_children():
+        n_total = sum(p.numel() for p in child.parameters())
+        if n_total == 0:
+            continue
+        n_train = sum(p.numel() for p in child.parameters() if p.requires_grad)
+        logger.info(
+            f"  {name}: {n_train:,} / {n_total:,} trainable ({100 * n_train / n_total:.1f}%)"
+        )
+    n_total = sum(p.numel() for p in block.parameters())
+    n_train = sum(p.numel() for p in block.parameters() if p.requires_grad)
+    if n_total > 0:
+        logger.info(
+            f"  total: {n_train:,} / {n_total:,} trainable ({100 * n_train / n_total:.1f}%)"
+        )
+
+
 class ActivationFactory:
     _registry = {
         "identity": nn.Identity,
