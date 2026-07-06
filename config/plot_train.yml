@@ -1,0 +1,42 @@
+train:
+  plot:
+    ohr2l6q1:
+      slurm_id: 0
+      description: "No time-condition"
+      eval: vgbndhco 
+    b0fcbdo4:
+      slurm_id: 0
+      description: "Absolute"
+      eval: vgbndhco 
+    etc1a3v3:
+      slurm_id: 0
+      description: "Absolute_normalized"
+      eval: vgbndhco 
+    daytwizu:
+      slurm_id: 0
+      description: "cos_sin"
+      eval: vgbndhco 
+    qcufw2lt:
+      slurm_id: 0
+      description: "fourier (16 emb)"
+      eval: vgbndhco 
+    dzc5q1vz:
+      slurm_id: 0
+      description: "No time-condition finetuned"
+      eval: vgbndhco 
+    t2a0vosm:
+      slurm_id: 0
+      description: "Absolute finetuned"
+      eval: vgbndhco 
+    sisa19fb:
+      slurm_id: 0
+      description: "Absolute_normalized finetuned"
+      eval: vgbndhco 
+    u41ltnnj:
+      slurm_id: 0
+      description: "cos_sin finetuned"
+      eval: vgbndhco 
+    oq9o0t86:
+      slurm_id: 0
+      description: "fourier (16 emb) finetuned"
+      eval: vgbndhco 
