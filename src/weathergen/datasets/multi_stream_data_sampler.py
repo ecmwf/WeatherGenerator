@@ -252,7 +252,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
                     filename = next((f for f in filenames if f.exists()), None)
-                    if filename is None :  
+                    if filename is None:
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
                             f"stream '{stream_name}': {filenames}."
