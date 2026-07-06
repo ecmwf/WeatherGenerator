@@ -275,6 +275,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+            stream_info[str(self._stage) + "_geoinfo_channels"] = ds.geoinfo_channels
             stream_info["target_channel_weights"] = (
                 ds.target_channel_weights
                 if ds.target_channel_weights is not None
@@ -738,7 +739,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                     input_data,
                     source_masks.metadata[sidx],
                     is_student=True,
-                    add_geoinfo_noise="noise_time" in stream_info.get("geoinfo_channels",[]),
+                    add_geoinfo_noise="noise_time" in stream_info.get("geoinfo_channels", []),
                 )
 
                 sdata = self._build_stream_data(
@@ -767,8 +768,10 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
                 # Apply self-flow noise to teacher data (handled by masker)
                 input_data_target = self.masker.apply_noise_to_data(
-                    input_data_target_orig, target_masks.metadata[tidx], is_student=False,
-                    add_geoinfo_noise="noise_time" in stream_info.get("geoinfo_channels",[]),
+                    input_data_target_orig,
+                    target_masks.metadata[tidx],
+                    is_student=False,
+                    add_geoinfo_noise="noise_time" in stream_info.get("geoinfo_channels", []),
                 )
 
                 sdata = self._build_stream_data(

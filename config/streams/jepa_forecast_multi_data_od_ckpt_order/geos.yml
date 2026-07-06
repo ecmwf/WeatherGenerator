@@ -7,11 +7,13 @@ METEOSAT_SEVIRI_IR:
   stream_id: 10
   filenames: ['observations-file-2014-2024-seviri-o256-wegen-v3.zarr']
   geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'noise_time']
+  source: ['obsvalue_rawbt_065', 'obsvalue_rawbt_086', 'obsvalue_rawbt_160', 'obsvalue_rawbt_380', 'obsvalue_rawbt_620', 'obsvalue_rawbt_730', 'obsvalue_rawbt_850', 'obsvalue_rawbt_960', 'obsvalue_rawbt_105', 'obsvalue_rawbt_120', 'obsvalue_rawbt_133']
+  target: ['obsvalue_rawbt_065', 'obsvalue_rawbt_086', 'obsvalue_rawbt_160', 'obsvalue_rawbt_380', 'obsvalue_rawbt_620', 'obsvalue_rawbt_730', 'obsvalue_rawbt_850', 'obsvalue_rawbt_960', 'obsvalue_rawbt_105', 'obsvalue_rawbt_120', 'obsvalue_rawbt_133']
+  forcing: True
   loss_weight: 1.0
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
-  reconstruct: False
   embed:
     net: transformer
     num_tokens: 1
@@ -33,11 +35,13 @@ GOES_ABI_IR:
   stream_id: 11
   filenames: ['observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr']
   geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'noise_time']
+  source: ['obsvalue_rawbt_380', 'obsvalue_rawbt_620', 'obsvalue_rawbt_730', 'obsvalue_rawbt_850', 'obsvalue_rawbt_960', 'obsvalue_rawbt_105', 'obsvalue_rawbt_120', 'obsvalue_rawbt_133']
+  target: ['obsvalue_rawbt_380', 'obsvalue_rawbt_620', 'obsvalue_rawbt_730', 'obsvalue_rawbt_850', 'obsvalue_rawbt_960', 'obsvalue_rawbt_105', 'obsvalue_rawbt_120', 'obsvalue_rawbt_133']
+  forcing: True
   loss_weight: 1.0
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
-  reconstruct: False
   embed:
     net: transformer
     num_tokens: 1
@@ -59,11 +63,13 @@ HIMAWARI_AHI_IR:
   stream_id: 12
   filenames: ['observations-file-2015-2022-himawari8-IR-o256-v1.zarr', 'observations-file-2022-2024-himawari9-IR-o256-v1.zarr']
   geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'noise_time']
+  source: ['obsvalue_rawbt_380', 'obsvalue_rawbt_620', 'obsvalue_rawbt_730', 'obsvalue_rawbt_850', 'obsvalue_rawbt_960', 'obsvalue_rawbt_105', 'obsvalue_rawbt_120', 'obsvalue_rawbt_133']
+  target: ['obsvalue_rawbt_380', 'obsvalue_rawbt_620', 'obsvalue_rawbt_730', 'obsvalue_rawbt_850', 'obsvalue_rawbt_960', 'obsvalue_rawbt_105', 'obsvalue_rawbt_120', 'obsvalue_rawbt_133']
+  forcing: True
   loss_weight: 1.0
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
-  reconstruct: False
   embed:
     net: transformer
     num_tokens: 1
@@ -85,11 +91,11 @@ GOES_ABI_VIS:
   stream_id: 13
   filenames: ['observations-file-2017-2024-abi-goes16-VIS-o256-v2.zarr']
   geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'noise_time']
+  forcing: True
   loss_weight: 1.0
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
-  reconstruct: False
   embed:
     net: transformer
     num_tokens: 1
@@ -112,11 +118,11 @@ HIMAWARI_AHI_VIS:
   filenames: ['observations-file-2015-2022-himawari8-VIS-o256-v1.zarr', 'observations-file-2022-2024-himawari9-VIS-o256-v1.zarr']
   geoinfo_channels: ['zenith', 'noise_time']
   # geoinfo_channels: ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'noise_time']
+  forcing: True
   loss_weight: 1.0
   token_size: 1024
   tokenize_spacetime: False
   max_num_targets: 262144
-  reconstruct: False
   embed:
     net: transformer
     num_tokens: 1

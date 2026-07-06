@@ -1,0 +1,46 @@
+# EXP1 — lr-decay-fix pipeline (targets H3, optimization amplifier).
+#
+# Identical to config/jepa_multi_data_pipeline.yml except the final stage uses
+# the decaying-LR override. Self-contained / launchable as-is.
+#
+# COST NOTE: stages 1-3 are byte-for-byte the baseline. If your launcher can
+# seed a train-continue from the existing baseline `finetune-forecast`
+# checkpoint (xi0mujc2-finetune-forecast), delete stages 1-3 and keep only the
+# last stage to avoid re-pretraining.
+
+nodes: 1
+register: true
+cleanup-scripts: yes
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  - name: pretrain
+    command: train
+    base-config: ./config/config_jepa_multi_data_all_years.yml
+    config: ./config/config_jepa_multi_data_all_years.yml
+    options: []
+    chain: 2
+    nodes: 2
+
+  - name: pretrain-ft
+    command: train
+    config: ./config/config_jepa_multi_data_all_years_ft.yml
+    options: []
+    chain: 2
+    nodes: 2
+
+  - name: finetune-forecast
+    command: train-continue
+    from: pretrain-ft
+    config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
+    chain: 4
+    nodes: 2
+
+  # Stage 4: operational-analysis forecast finetune with the LR-decay fix
+  - name: finetune-forecast-ft
+    command: train-continue
+    from: finetune-forecast
+    config: ./config/experiments/exp1_lr_decay_fix/ft_forecast_lr_decay.yml
+    chain: 3
+    nodes: 2

@@ -1,0 +1,60 @@
+# EXP3 — unfreeze-lowlr-reg  (targets H1's amplifier: full-model plasticity)
+#
+# Stage-4 (operational-analysis forecast finetune) override. Unlike the existing
+# config_jepa_multi_data_ft_forecast_unfreeze_encoder.yml (which unfroze at the
+# bad constant 8e-5 LR), this unfreezes the WHOLE model but at a sane, decaying
+# LR and with stronger regularization, so the comparison to EXP1 is fair:
+#
+#   EXP1 (frozen non-ERA5 encoder, lr fix)  vs  EXP3 (full unfreeze, same lr fix)
+#   => isolates how much unfreezing actually buys once LR/reg are sane.
+#
+# Deltas vs baseline config_jepa_multi_data_ft_forecast.yml:
+#   - freeze_modules: "" (fully unfrozen)
+#   - fe_dropout_rate: 0.1 -> 0.2          (regularization, top-level model param)
+#   - policy_decay: constant -> linear, lr_max 1e-5 -> 5e-6  (H3-safe unfreeze)
+#   - optimizer.weight_decay: 0.1 -> 0.2   (regularization)
+#   - extra_validation_configs enabled     (memorization probe / early-stop read)
+
+# top-level model param: bump forecast-engine dropout for regularization
+fe_dropout_rate: 0.2
+
+streams_directory: "./config/streams/jepa_forecast_multi_data_od_ckpt_order/"
+
+freeze_modules: ""
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+training_config:
+  start_date: 2016-01-01T00:00
+  # OND-2022 carved out so the heldout-train-years probe below is genuinely held out
+  end_date: 2022-09-30T00:00
+
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 5e-6          # was 1e-5; lower because the whole model is now plastic
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 32768
+    policy_decay: "linear"  # was inherited "constant"
+
+  optimizer:
+    weight_decay: 0.2     # was 0.1; stronger reg against memorization
+
+  num_mini_epochs: 6
+  samples_per_mini_epoch: 8192
+
+# Memorization probe / early-stopping read-out (see EXP1 for rationale): ft-5 in
+# the analysis showed a real val minimum at ~epoch 3, so watch this curve to pick
+# the early-stop checkpoint.
+extra_validation_configs:
+  heldout-train-years:
+    start_date: 2022-10-01T00:00
+    end_date: 2022-12-31T00:00
+    shuffle: True
+    samples_per_mini_epoch: 256

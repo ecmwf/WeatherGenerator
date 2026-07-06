@@ -1,0 +1,40 @@
+# EXP2 — era5-size-control pipeline (targets H1, the primary cause).
+#
+# Same pretrain chain as baseline, but the forecast-finetune stage is the
+# size-matched ERA5 control (frozen encoder, ERA5 source, ~7-yr window) and
+# there is NO operational stage 4 — the diagnostic signal is entirely at the
+# size-controlled stage 3.
+#
+# COST NOTE: stages 1-2 are byte-for-byte the baseline. If your launcher can seed
+# a train-continue from the existing baseline `pretrain-ft` checkpoint, delete
+# stages 1-2 and keep only the size-control stage.
+
+nodes: 1
+register: true
+cleanup-scripts: yes
+results-dir: shared
+mini-epoch: -1
+
+stages:
+  - name: pretrain
+    command: train
+    base-config: ./config/config_jepa_multi_data_all_years.yml
+    config: ./config/config_jepa_multi_data_all_years.yml
+    options: []
+    chain: 2
+    nodes: 2
+
+  - name: pretrain-ft
+    command: train
+    config: ./config/config_jepa_multi_data_all_years_ft.yml
+    options: []
+    chain: 2
+    nodes: 2
+
+  # Stage 3 (control): ERA5 forecast finetune restricted to the oper-sized window
+  - name: finetune-forecast-era5-control
+    command: train-continue
+    from: pretrain-ft
+    config: ./config/experiments/exp2_era5_size_control/ft_forecast_era5_2yr.yml
+    chain: 4
+    nodes: 2
