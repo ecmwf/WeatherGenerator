@@ -268,11 +268,11 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
         elif self.conditioning == "forecast":
-            c = meta_info["ERA5"].params["conditioning_tokens"]          # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
+            c = meta_info["LATENT_CONDITIONING_TOKENS"]         # X_{t-1} as conditioning (model.py extracts last step as target, passes second-to-last here)
 
         if self.training:
             noise_level_rn = torch.tensor(
-                [meta_info["ERA5"].params["noise_level_rn"]], device=tokens.device
+                [meta_info["ERA5_in"].params["noise_level_rn"]], device=tokens.device
             )
         else:
             # During validation, use fixed noise level (default: 0.0)
