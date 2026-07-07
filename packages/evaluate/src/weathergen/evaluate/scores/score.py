@@ -201,11 +201,9 @@ class Scores:
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
-            "ssr_adj": self.calc_ssr_adj,
             "crps": self.calc_crps,
             "rank_histogram": self.calc_rank_histogram,
             "spread": self.calc_spread,
-            "spread_adj": self.calc_spread_adj,
         }
 
     def get_score(
@@ -1462,10 +1460,11 @@ class Scores:
         self,
         p: xr.DataArray,
         latitude_weights: xr.DataArray | None = None,
+        adjusted: bool = False,
         **kwargs,
     ) -> xr.DataArray:
         """
-        Calculate the spread of the forecast ensemble
+        Calculate the spread of the forecast ensemble.
 
         Parameters
         ----------
@@ -1473,56 +1472,20 @@ class Scores:
             Forecast data array with ensemble dimension
         latitude_weights: xr.DataArray | None
             Optional latitude weights for area-weighted averaging.
-            If provided, the spread will be weighted by these values.
+        adjusted: bool
+            If True, use the unbiased (``ddof=1``) ensemble variance following the GenCast
+            convention (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.6). The
+            finite-ensemble inflation factor ``sqrt((M + 1) / M)`` is applied in the
+            spread-skill ratio (see ``calc_ssr``), not here.
+            If False (default), use the biased (``ddof=0``) variance.
 
         Returns
         -------
         xr.DataArray
             Spread of the forecast ensemble
         """
-        ens_std = p.std(dim=self._ens_dim)
-
-        spread_squared = ens_std**2
-
-        if latitude_weights is not None:
-            spread_mean = self._weighted_mean(spread_squared, latitude_weights)
-        else:
-            spread_mean = self._mean(spread_squared)
-
-        return np.sqrt(spread_mean)
-
-    def calc_spread_adj(
-        self,
-        p: xr.DataArray,
-        latitude_weights: xr.DataArray | None = None,
-        **kwargs,
-    ) -> xr.DataArray:
-        """
-        Calculate the (unbiased) ensemble spread following the GenCast convention.
-
-        Defined as the square root of the mean *unbiased* (``ddof=1``) ensemble variance, matching
-        the spread of GenCast (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.6). The
-        finite-ensemble inflation factor ``sqrt((M + 1) / M)`` is *not* applied here; following
-        GenCast it is applied in the spread-skill ratio instead (see ``calc_ssr_adj``).
-
-        Unlike the unadjusted ``calc_spread`` (which uses the biased ``ddof=0`` standard
-        deviation), this uses the unbiased variance, as required for the GenCast spread-skill
-        relation to hold. The unadjusted ``calc_spread`` is left unchanged.
-
-        Parameters
-        ----------
-        p: xr.DataArray
-            Forecast data array with ensemble dimension
-        latitude_weights: xr.DataArray | None
-            Optional latitude weights for area-weighted averaging.
-            If provided, the spread will be weighted by these values.
-
-        Returns
-        -------
-        xr.DataArray
-            Unbiased ensemble spread (GenCast convention)
-        """
-        ens_var = p.var(dim=self._ens_dim, ddof=1)
+        ddof = 1 if adjusted else 0
+        ens_var = p.var(dim=self._ens_dim, ddof=ddof)
 
         if latitude_weights is not None:
             var_mean = self._weighted_mean(ens_var, latitude_weights)
@@ -1536,9 +1499,10 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         latitude_weights: xr.DataArray | None = None,
+        adjusted: bool = False,
     ) -> xr.DataArray:
         """
-        Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
+        Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data.
 
         Parameters
         ----------
@@ -1551,6 +1515,11 @@ class Scores:
             components. Can be computed via ``calc_latitude_weights`` or by passing
             ``use_latitude_weights=True`` in the ``parameters`` dict of ``get_score``.
             Default is None.
+        adjusted: bool
+            If True, apply the ensemble-size correction ``sqrt((M + 1) / M)`` following GenCast
+            (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.9) and use the unbiased
+            (``ddof=1``) spread. A perfectly calibrated ensemble of size M then yields SSR = 1.
+            If False (default), use the biased spread with no correction.
 
         Returns
         -------
@@ -1558,54 +1527,12 @@ class Scores:
             Spread-Skill Ratio (SSR)
         """
         ens_mean = p.mean(dim=self._ens_dim)
-        spread = self.calc_spread(p, latitude_weights=latitude_weights)
+        spread = self.calc_spread(p, latitude_weights=latitude_weights, adjusted=adjusted)
         rmse = self.calc_rmse(ens_mean, gt, latitude_weights=latitude_weights)
+        if adjusted:
+            ens_size = p.sizes[self._ens_dim]
+            return np.sqrt((ens_size + 1) / ens_size) * spread / rmse
         return spread / rmse
-
-    def calc_ssr_adj(
-        self,
-        p: xr.DataArray,
-        gt: xr.DataArray,
-        latitude_weights: xr.DataArray | None = None,
-    ) -> xr.DataArray:
-        """
-        Calculate the ensemble-size-adjusted Spread-Skill Ratio (SSR) of the forecast ensemble
-        data w.r.t. reference data.
-
-        Following GenCast (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.9), this is
-
-            SSR_adj = sqrt((M + 1) / M) * spread / RMSE(ensemble_mean)
-
-        where ``spread`` is the unbiased ensemble spread (``calc_spread_adj``) and M is the
-        ensemble size. For a perfectly reliable ensemble of finite size M, the RMSE of the
-        ensemble mean is inflated relative to the spread by exactly ``sqrt((M + 1) / M)``
-        (Fortin et al., 2014), so the ``sqrt((M + 1) / M)`` factor applied here makes a perfectly
-        calibrated ensemble yield an adjusted SSR of exactly 1. The original ``calc_spread`` /
-        ``calc_ssr`` are left unchanged.
-
-        Parameters
-        ----------
-        p: xr.DataArray
-            Forecast data array with ensemble dimension
-        gt: xr.DataArray
-            Ground truth data array
-        latitude_weights: xr.DataArray | None
-            Optional latitude weights for area-weighted averaging, applied to both spread and RMSE
-            components. Can be computed via ``calc_latitude_weights`` or by passing
-            ``use_latitude_weights=True`` in the ``parameters`` dict of ``get_score``.
-            Default is None.
-
-        Returns
-        -------
-        xr.DataArray
-            Ensemble-size-adjusted Spread-Skill Ratio (SSR). Optimal value is 1.
-        """
-        ens_size = p.sizes[self._ens_dim]
-        correction = np.sqrt((ens_size + 1) / ens_size)
-        ens_mean = p.mean(dim=self._ens_dim)
-        spread = self.calc_spread_adj(p, latitude_weights=latitude_weights)
-        rmse = self.calc_rmse(ens_mean, gt, latitude_weights=latitude_weights)
-        return correction * spread / rmse
 
     def calc_crps(
         self,
