@@ -18,7 +18,7 @@ METOP_ABC_AVHRR_IASI :
   #     masking_strategy_config :
   #       rate: 1.0
   token_size : 512 # 256
-  forcing: True
+  # forcing: True
   embed : 
     net : transformer
     num_tokens : 1
