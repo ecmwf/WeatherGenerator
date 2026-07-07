@@ -351,17 +351,17 @@ def _plot_score_maps_per_stream(
 
     score_results, preds, metric_names = computed
     valid = [
-        (m, r)
-        for m, r in zip(metric_names, score_results, strict=False)
-        if r is not None and "ipoint" in r.dims
+        (metric, result)
+        for metric, result in zip(metric_names, score_results, strict=False)
+        if result is not None and "ipoint" in result.dims
     ]
     if not valid:
         return
 
-    ens_metrics = {m for m, r in valid if "ens" in r.dims}
+    ens_metrics = {metric for metric, result in valid if "ens" in result.dims}
 
     plot_metrics = xr.concat(
-        [r for _, r in valid],
+        [result for _, result in valid],
         dim="metric",
         coords="minimal",
         combine_attrs="drop_conflicts",
@@ -369,7 +369,7 @@ def _plot_score_maps_per_stream(
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=[m for m, _ in valid],
+        metric=[metric for metric, _ in valid],
     ).compute()
 
     if "ens" in plot_metrics.dims:
