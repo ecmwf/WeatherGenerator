@@ -390,7 +390,8 @@ class Model(torch.nn.Module):
         )
 
         mode_cfg = cf.training_config
-        if cf.fe_num_blocks > 0:
+        fe_num_blocks = cf.get("fe_num_blocks", 0)
+        if fe_num_blocks > 0:
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
         else:
             self.forecast_engine = IdentityEngine()
