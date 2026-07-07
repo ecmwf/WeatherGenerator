@@ -61,7 +61,9 @@ fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_diffusion_model: True
+# fe_diffusion_latent_dim: 512
 fe_diffusion_latent_dim: 2048
+# fe_diffusion_latent_dim: 2560
 fe_diffusion_predict_residual: False
 fe_diffusion_classifier_free_guidance_prob: 0.0
 fe_diffusion_soft_clamp_channels: []  # [1511, 1772, 1689, 209, 1400, 1944, 1520, 1213, 1402, 646]
@@ -157,7 +159,7 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
 # load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z, 64 epochs
 # load_chkpt: {'run_id': 'btnf4goa', 'epoch': -1}  # d2048 hl5 pre-training with z, 128 epochs
-load_chkpt: {'run_id': 'yk85n9s7', 'epoch': -1}  # ERA5+obs 6h
+load_chkpt: {'run_id': 'yk85n9s7', 'epoch': -1}  # d2048 ERA5+obs
 
 
 norm_type: "LayerNorm"
