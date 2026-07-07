@@ -669,7 +669,12 @@ class Scores:
 
         return l2
 
-    def calc_mae(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+    def calc_mae(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate mean absolute error (MAE) of forecast data w.r.t. reference data.
 
@@ -679,6 +684,9 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If None, unweighted mean is used.
         """
         if self._agg_dims is None:
             raise ValueError(
@@ -686,7 +694,13 @@ class Scores:
                 "(agg_dims=None)."
             )
 
-        return self._mean(np.abs(p - gt))
+        mae = np.abs(p - gt)
+        if latitude_weights is not None:
+            _, broadcasted_weights = xr.broadcast(mae, latitude_weights)
+            return (mae * broadcasted_weights).mean(dim=self._agg_dims) / broadcasted_weights.mean(
+                dim=self._agg_dims
+            )
+        return self._mean(mae)
 
     def calc_mse(
         self,
@@ -1030,6 +1044,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         c: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
     ) -> xr.DataArray:
         """
         Calculate anomaly correlation coefficient (ACC).
@@ -1046,6 +1061,9 @@ class Scores:
             Ground truth data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted summation.
+            If None, unweighted sums are used.
 
         Returns
         -------
@@ -1062,10 +1080,15 @@ class Scores:
         # Calculate anomalies
         fcst_ano, obs_ano = p - c, gt - c
 
-        # Calculate ACC over spatial dimensions (no grouping)
-        acc = (fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
-            (fcst_ano**2).sum(self._agg_dims) * (obs_ano**2).sum(self._agg_dims)
-        )
+        if latitude_weights is not None:
+            _, w = xr.broadcast(fcst_ano, latitude_weights)
+            acc = (w * fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
+                (w * fcst_ano**2).sum(self._agg_dims) * (w * obs_ano**2).sum(self._agg_dims)
+            )
+        else:
+            acc = (fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
+                (fcst_ano**2).sum(self._agg_dims) * (obs_ano**2).sum(self._agg_dims)
+            )
 
         return acc
 
@@ -1203,7 +1226,12 @@ class Scores:
 
         return (1.0 - rps_fcst / rps_clim).where(rps_clim != 0, np.nan)
 
-    def calc_bias(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+    def calc_bias(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate mean bias of forecast data w.r.t. reference data
 
@@ -1213,14 +1241,21 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If None, unweighted mean is used.
         Returns
         -------
         xr.DataArray
             Mean bias
         """
-        bias = self._mean(p - gt)
-
-        return bias
+        bias = p - gt
+        if latitude_weights is not None:
+            _, broadcasted_weights = xr.broadcast(bias, latitude_weights)
+            return (bias * broadcasted_weights).mean(dim=self._agg_dims) / broadcasted_weights.mean(
+                dim=self._agg_dims
+            )
+        return self._mean(bias)
 
     def calc_psnr(
         self,
