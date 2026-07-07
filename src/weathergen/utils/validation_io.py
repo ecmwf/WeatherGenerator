@@ -216,7 +216,7 @@ def _write_latent_data_to_zarr(zio, data, cf, batch, batch_idx, batch_size):
     sample_start = batch_idx * batch_size
 
     # Iterate over latent data
-    for t_idx, latents_in_step in enumerate(data.latents):
+    for t_idx, latents_in_step in enumerate(data.latents, start=data.forecast_offset):
         for sample_idx_in_batch, latents_in_sample in enumerate(latents_in_step):
             if not latents_in_sample:
                 continue
