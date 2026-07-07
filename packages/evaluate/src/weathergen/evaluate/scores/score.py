@@ -449,6 +449,10 @@ class Scores:
         """
         return data.mean(dim=self._agg_dims)
 
+    def _weighted_mean(self, data: xr.DataArray, weights: xr.DataArray) -> xr.DataArray:
+        _, w = xr.broadcast(data, weights)
+        return (data * w).mean(dim=self._agg_dims) / w.mean(dim=self._agg_dims)
+
     def get_2x2_event_counts(
         self,
         p: xr.DataArray,
@@ -696,10 +700,7 @@ class Scores:
 
         mae = np.abs(p - gt)
         if latitude_weights is not None:
-            _, broadcasted_weights = xr.broadcast(mae, latitude_weights)
-            return (mae * broadcasted_weights).mean(dim=self._agg_dims) / broadcasted_weights.mean(
-                dim=self._agg_dims
-            )
+            return self._weighted_mean(mae, latitude_weights)
         return self._mean(mae)
 
     def calc_mse(
@@ -733,17 +734,9 @@ class Scores:
 
         mse = np.square(p - gt)
 
-        # Apply latitude weighting if provided
         if latitude_weights is not None:
-            # Broadcast weights to match data dimensions
-            _, broadcasted_weights = xr.broadcast(mse, latitude_weights)
-            # Weighted mean
-            mse_weighted = (mse * broadcasted_weights).mean(
-                dim=self._agg_dims
-            ) / broadcasted_weights.mean(dim=self._agg_dims)
-            return mse_weighted
-        else:
-            return self._mean(mse)
+            return self._weighted_mean(mse, latitude_weights)
+        return self._mean(mse)
 
     def calc_rmse(
         self,
@@ -1251,10 +1244,7 @@ class Scores:
         """
         bias = p - gt
         if latitude_weights is not None:
-            _, broadcasted_weights = xr.broadcast(bias, latitude_weights)
-            return (bias * broadcasted_weights).mean(dim=self._agg_dims) / broadcasted_weights.mean(
-                dim=self._agg_dims
-            )
+            return self._weighted_mean(bias, latitude_weights)
         return self._mean(bias)
 
     def calc_psnr(
@@ -1494,14 +1484,8 @@ class Scores:
 
         spread_squared = ens_std**2
 
-        # Apply latitude weighting if provided
         if latitude_weights is not None:
-            # Broadcast weights to match data dimensions
-            _, broadcasted_weights = xr.broadcast(spread_squared, latitude_weights)
-            # Weighted mean
-            spread_mean = (spread_squared * broadcasted_weights).mean(
-                dim=self._agg_dims
-            ) / broadcasted_weights.mean(dim=self._agg_dims)
+            spread_mean = self._weighted_mean(spread_squared, latitude_weights)
         else:
             spread_mean = self._mean(spread_squared)
 
@@ -1540,14 +1524,8 @@ class Scores:
         """
         ens_var = p.var(dim=self._ens_dim, ddof=1)
 
-        # Apply latitude weighting if provided
         if latitude_weights is not None:
-            # Broadcast weights to match data dimensions
-            _, broadcasted_weights = xr.broadcast(ens_var, latitude_weights)
-            # Weighted mean
-            var_mean = (ens_var * broadcasted_weights).mean(
-                dim=self._agg_dims
-            ) / broadcasted_weights.mean(dim=self._agg_dims)
+            var_mean = self._weighted_mean(ens_var, latitude_weights)
         else:
             var_mean = self._mean(ens_var)
 
