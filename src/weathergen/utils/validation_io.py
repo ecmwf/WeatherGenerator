@@ -72,9 +72,12 @@ def _filter_output_channels(
             continue
         if len(keep_idxs) == len(all_channels):
             continue
+        keep_names = [all_channels[i] for i in keep_idxs]
+        removed_names = [ch for ch in all_channels if ch not in keep_names]
         _logger.debug(
             f"Filtering output channels for stream {stream_name}: "
-            f"{len(all_channels)} -> {len(keep_idxs)} channels"
+            f"{len(all_channels)} -> {len(keep_idxs)} channels; "
+            f"kept: {keep_names}; removed: {removed_names}"
         )
         target_channels[stream_idx] = [all_channels[i] for i in keep_idxs]
         for t_idx in range(len(targets_all)):
@@ -195,7 +198,7 @@ def write_output(
     target_channels: list[list[str]] = [list(stream.val_target_channels) for stream in stream_infos]
     source_channels: list[list[str]] = [list(stream.val_source_channels) for stream in stream_infos]
 
-    filter_cfg = val_cfg.get("output", {}).get("filter_output_channels", None)
+    filter_cfg = val_cfg.get("output", {}).get("channels", None)
     _filter_output_channels(filter_cfg, stream_names, target_channels, targets_all, preds_all)
 
     geoinfo_channels = [[] for _ in stream_names]  # TODO obtain channels
