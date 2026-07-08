@@ -315,11 +315,11 @@ class Scores:
                 args[an] = kwargs[an]
 
         # Compute and inject latitude weights if requested via parameters.
-        # Config example: {rmse: {use_latitude_weights: true, lat_coord_name: lat}}
+        # Config example: {rmse: {latitude_weighting: true, lat_coord_name: lat}}
         # lat_coord_name is optional; auto-detected from ('lat', 'latitude', 'rlat') if omitted.
-        if "use_latitude_weights" in parameters:
+        if "latitude_weighting" in parameters:
             parameters = dict(parameters)  # don't mutate caller's dict
-            use_lat_weights = parameters.pop("use_latitude_weights")
+            use_lat_weights = parameters.pop("latitude_weighting")
             lat_coord_name = parameters.pop("lat_coord_name", None)
             if use_lat_weights and "latitude_weights" in inspect.getfullargspec(f).args:
                 ref_data = args.get("p") or args.get("gt")
@@ -1513,7 +1513,7 @@ class Scores:
         latitude_weights: xr.DataArray | None
             Optional latitude weights for area-weighted averaging, applied to both spread and RMSE
             components. Can be computed via ``calc_latitude_weights`` or by passing
-            ``use_latitude_weights=True`` in the ``parameters`` dict of ``get_score``.
+            ``latitude_weighting=True`` in the ``parameters`` dict of ``get_score``.
             Default is None.
         adjusted: bool
             If True, apply the ensemble-size correction ``sqrt((M + 1) / M)`` following GenCast

@@ -62,7 +62,7 @@ def calc_latitude_weights(
         Maximum weight value (at equator). Default is 1.0.
     lat_coord_name : str | None
         Name of the latitude coordinate. If None, will search for standard
-        latitude coordinate names ('lat', 'latitude', 'rlat').
+        latitude coordinate names ('lat', 'latitude', 'rlat', 'clat').
 
     Returns
     -------
@@ -76,7 +76,7 @@ def calc_latitude_weights(
         If no latitude coordinate is found in the data.
     """
     if lat_coord_name is None:
-        lat_names = ["lat", "latitude", "rlat"]
+        lat_names = ["lat", "latitude", "rlat", "clat"]
         found_coords = [name for name in lat_names if name in data.coords]
         if not found_coords:
             raise ValueError(
