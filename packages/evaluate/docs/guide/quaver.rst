@@ -31,7 +31,7 @@ Once you have the grib templates with the correct grid type for your data, you n
 
 .. code-block::
 
-    uv run export --run-id buydgjm5 --stream ERA5 --output-dir /ec/weathergen/quaver_checkpoints/ --format quaver --type prediction --fsteps 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 52 54 56 58 60 62 64 66 68 70 72 74 76 78 80 82 84 86 88 90 92 94 96 98 100 102 104 106 108 110 112 114 116 118 120 --quaver-template-folder "/ec/weathergen/quaver_templates/" --quaver-template-grid-type o96 --expver iuoo --n-processes 12
+    uv run export --run-id buydgjm5 --stream ERA5 --output-dir $WEGEN_DATA_FOLDER/quaver_checkpoints/ --format quaver --type prediction --fsteps 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30 32 34 36 38 40 42 44 46 48 50 52 54 56 58 60 62 64 66 68 70 72 74 76 78 80 82 84 86 88 90 92 94 96 98 100 102 104 106 108 110 112 114 116 118 120 --quaver-template-folder "$WEGEN_DATA_FOLDER/quaver_templates/" --quaver-template-grid-type o96 --expver iuoo --n-processes 12
 
 
 this can take a while for long runs, use a screen or a tmux session and you can leave ``{level_type}`` empty, i.e., using ``aifs_{}_o96_data.grib``, to process both pressure levels (pl) and surface fields (sfc) simultaneously.
