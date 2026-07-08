@@ -295,7 +295,7 @@ class EncoderModule(torch.nn.Module):
 
         cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
 
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
         rs = num_steps_input * len(batch)
 
         # create register and latent tokens and prepend to latent spatial tokens

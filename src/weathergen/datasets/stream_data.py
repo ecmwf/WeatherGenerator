@@ -451,6 +451,18 @@ class StreamData:
         """
         return any(self.source_is_spoof) or self.target_is_spoof[step]
 
+    def get_num_source_steps(self) -> int:
+        """
+        Get number of input/source steps
+        """
+        return len(self.source_tokens_cells)
+
+    def get_num_target_steps(self) -> int:
+        """
+        Get number of target steps
+        """
+        return len(self.target_tokens)
+
 
 def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderData:
     """

@@ -221,9 +221,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         """Load dataset readers for all streams from config."""
         streams_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
+            stream_info["data_paths"] = cf.get("data_paths", [])
             # list of sources for current stream
             streams_datasets[stream_name] = _Stream(stream_info, [])
-
             kwargs = {
                 "tw_handler": self.time_window_handler,
                 "stream_info": stream_info,
@@ -242,7 +242,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            for fname in stream_info["filenames"]:
+            for fname in stream_info.get("filenames", [pathlib.Path()]):
                 fname = pathlib.Path(fname)
                 # dont check if file exists since zarr stores might be directories
                 if fname.exists():
@@ -251,16 +251,13 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 else:
                     filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
 
-                    if not any(filename.exists() for filename in filenames):  # see above
+                    filename = next((f for f in filenames if f.exists()), None)
+                    if filename is None:
                         msg = (
                             f"Did not find input data for {stream_info['type']} "
                             f"stream '{stream_name}': {filenames}."
                         )
                         raise FileNotFoundError(msg)
-
-                    # The same dataset can exist on different locations in the filesystem,
-                    # so we need to choose here.
-                    filename = filenames[0]
 
                 ds_type = stream_info["type"]
                 if is_root():
