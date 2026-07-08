@@ -76,11 +76,14 @@ class VerifiedData:
     prediction_next: xr.DataArray | None
     ground_truth_next: xr.DataArray | None
     climatology: xr.DataArray | None
+    latitude_weights: xr.DataArray | None = None
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
+        if self.latitude_weights is None:
+            object.__setattr__(self, "latitude_weights", self._compute_latitude_weights())
 
     # TODO: add checks for prediction_next, ground_truth_next, climatology
     def _validate_dimensions(self):
@@ -98,6 +101,12 @@ class VerifiedData:
             xr.broadcast(self.prediction, self.ground_truth)
         except ValueError as e:
             raise ValueError(f"Forecast and truth are not broadcastable: {e}") from e
+
+    def _compute_latitude_weights(self) -> xr.DataArray | None:
+        found = [c for c in ("lat", "latitude", "rlat", "clat") if c in self.prediction.coords]
+        if not found:
+            return None
+        return calc_latitude_weights(self.prediction, lat_coord_name=found[0])
 
 
 def get_score(
@@ -314,19 +323,15 @@ class Scores:
             if an in kwargs:
                 args[an] = kwargs[an]
 
-        # Compute and inject latitude weights if requested via parameters.
-        # Config example: {rmse: {latitude_weighting: true, lat_coord_name: lat}}
-        # lat_coord_name is optional; auto-detected from ('lat', 'latitude', 'rlat') if omitted.
+        # Inject latitude weights if requested via parameters.
+        # Config example: {rmse: {latitude_weighting: true}}
+        # Weights are pre-computed on VerifiedData construction; None if no lat coord found.
         if "latitude_weighting" in parameters:
             parameters = dict(parameters)  # don't mutate caller's dict
             use_lat_weights = parameters.pop("latitude_weighting")
-            lat_coord_name = parameters.pop("lat_coord_name", None)
             if use_lat_weights and "latitude_weights" in inspect.getfullargspec(f).args:
-                ref_data = args.get("p") or args.get("gt")
-                if ref_data is not None:
-                    parameters["latitude_weights"] = calc_latitude_weights(
-                        data=ref_data, lat_coord_name=lat_coord_name
-                    )
+                if data.latitude_weights is not None:
+                    parameters["latitude_weights"] = data.latitude_weights
 
         if group_by_coord is not None and self._validate_groupby_coord(data, group_by_coord):
             # Apply groupby to all DataArrays in args
