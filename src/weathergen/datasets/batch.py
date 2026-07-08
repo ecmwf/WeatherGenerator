@@ -185,9 +185,7 @@ class BatchSamples:
             sample.to_device(device)
 
         self.tokens_lens = (
-            self.tokens_lens.to(device, non_blocking=True)
-            if self.tokens_lens is not None and torch.device(device).type == "cuda"
-            else self.tokens_lens
+            self.tokens_lens.to(device, non_blocking=True) if self.tokens_lens is not None else None
         )
 
         self.device = device

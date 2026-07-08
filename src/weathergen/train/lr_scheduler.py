@@ -179,11 +179,7 @@ class LearningRateScheduler:
 
         # explicitly track steps to be able to switch between optimizers
         self.i_step = 0
-        self.lr = (
-            self.cur_scheduler.get_last_lr()
-            if self.cur_scheduler is not None
-            else optimizer.param_groups[0]["lr"]
-        )
+        self.lr = self.cur_scheduler.get_last_lr()
 
         # advance manually to step_contd (last_mini_epoch parameter for schedulers is not working
         # and this is also more brittle with the different phases)
@@ -204,7 +200,7 @@ class LearningRateScheduler:
             return self.lr
 
         end_decay = self.n_steps_warmup + self.n_steps_decay
-        phase_decay = (self.i_step >= self.n_steps_warmup) and (self.i_step < end_decay)
+        phase_decay = (self.i_step > self.n_steps_warmup) and (self.i_step <= end_decay)
 
         if self.policy_decay == "sqrt" and phase_decay:
             self.lr = (
@@ -221,7 +217,7 @@ class LearningRateScheduler:
             if cur_lr < self.lr:
                 for g in self.optimizer.param_groups:
                     g["lr"] = self.lr
-        elif self.cur_scheduler is not None:
+        else:
             self.cur_scheduler.step()
             self.lr = self.cur_scheduler.get_last_lr()[0]
 

@@ -81,7 +81,7 @@ class EmbeddingEngine(torch.nn.Module):
     def forward(self, batch, pe_embed):
         num_steps_input = batch.get_num_source_steps()
 
-        num_tokens = torch.sum(batch.tokens_lens.cpu(), 2).flatten().sum().item()
+        num_tokens = torch.sum(batch.tokens_lens, 2).flatten().sum().item()
         tokens_all = torch.empty(
             (num_tokens, self.cf.ae_local_dim_embed), dtype=self.dtype, device=batch.get_device()
         )

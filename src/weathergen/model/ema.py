@@ -44,8 +44,7 @@ class EMAModel:
         It operates via the state_dict to be able to deal with sharded tensors in case
         FSDP2 is used.
         """
-        device = next(self.original_model.parameters()).device
-        self.ema_model.to_empty(device=device)
+        self.ema_model.to_empty(device="cuda")
         for p in self.ema_model.parameters():
             p.requires_grad = False
         maybe_sharded_sd = self.original_model.state_dict()
