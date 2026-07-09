@@ -571,7 +571,10 @@ class Trainer(TrainerBase):
 
         dataset_val_iter = iter(self.data_loader_validation)
 
-        num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
+        init_dates = mode_cfg.get("init_dates", None)
+        num_init_dates = len(init_dates) if init_dates is not None else 0
+        explicit_num_samples = mode_cfg.get("output", {}).get("num_samples", 0)
+        num_samples_write = (explicit_num_samples or num_init_dates) * batch_size
 
         with torch.no_grad():
             # print progress bar but only in interactive mode, i.e. when without ddp
