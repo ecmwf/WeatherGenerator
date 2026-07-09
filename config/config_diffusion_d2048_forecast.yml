@@ -254,14 +254,14 @@ training_config:
       eps : 2e-08
 
   losses : {
-    # "physical": {
-    #     type: LossPhysical,
-    #     weight: 0.0,
-    #     loss_fcts: {
-    #       "mse": {},
-    #     },
-    #     target_and_aux_calc: "Physical",
-    # },
+    "physical": {
+        type: LossPhysical,
+        weight: 0.0,
+        loss_fcts: {
+          "mse": {},
+        },
+        target_and_aux_calc: "Physical",
+    },
     "latent_diff": {
         type: LossLatentDiffusion,
         weight: 1.0,
