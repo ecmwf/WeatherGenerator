@@ -21,7 +21,20 @@ rules. Most tools auto-load it when you work there; if yours doesn't, read it fi
 
 ## Documentation (read when relevant)
 
+Full index of `agent_docs/`. Every new doc gets a line here — procedure:
+`agent_docs/recipes/add-documentation.md`.
+
+Systems (runtime dataflows):
+- `agent_docs/training-step.md` — the end-to-end training step: trainer, model forward, losses. Read before changing any of those; update after.
+- `agent_docs/data-pipeline.md` — stream configs → readers → tokenizer → ModelBatch. Read before touching data loading or stream configs; update after.
+- `agent_docs/ssl-training.md` — SSL/student-teacher delta: masking, teachers, latent losses. Read before touching SSL or masking code; update after.
 - `agent_docs/config-system.md` — config sources, merge precedence, stage configs, runtime mutation. Read before adding/renaming config options; update after changing the merge logic.
-- `agent_docs/data-pipeline.md` — stream configs → readers → tokenizer → ModelBatch. Read before touching data loading or stream configs; update after changing the pipeline.
 - `agent_docs/infrastructure.md` — uv, dependencies, running jobs on HPC vs. developing locally. Read before setting up the env or launching jobs; update after changing tooling or workflow.
 - `agent_docs/agentic_setup.md` — how these instruction files work and what belongs in AGENTS.md vs agent_docs/. Read before editing any AGENTS.md or adding documentation.
+
+Recipes (procedures):
+- `agent_docs/recipes/add-data-reader.md` — add a reader for a new data source.
+- `agent_docs/recipes/add-documentation.md` — add or change agent documentation.
+
+Decisions (rationale):
+- `agent_docs/decisions/dashboard-not-in-workspace.md` — why packages/dashboard has its own lockfile.

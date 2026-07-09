@@ -34,12 +34,14 @@ first; token efficiency second, and only where it doesn't compromise effectivene
   where the doc tracks code: "read before touching X; update after changing X". The
   update half is what keeps central docs from going stale — the agent editing code in
   that scope has the reminder in context. Always reference docs by root-relative path
-  (`agent_docs/<name>.md`); CI checks these links.
+  (`agent_docs/<name>.md`); CI checks these links (`check-agent-docs`).
 - Inclusion test per line: would an agent lacking it take a wrong turn or make a wrong
   edit? No → cut it, or demote it to `agent_docs/`.
 - Put each rule in the narrowest `AGENTS.md` that covers it (nested files load only
   when an agent works in that subtree), and state each fact at exactly one level —
-  ancestor files load together, so duplication is paid twice.
+  ancestor files load together, so duplication is paid twice. Pointers are the one
+  exception: redundant pointers (root index + scoped file) are cheap, aid discovery,
+  and are CI-checked; facts are not exempt.
 
 **agent_docs/ — loaded on demand. Everything a correct edit of a given kind needs.**
 
@@ -61,8 +63,10 @@ first; token efficiency second, and only where it doesn't compromise effectivene
   inventory is grep-replaceable — low value; coupling and rationale are not — high value.
 - Structure for partial reads: conclusion/summary first, clear H2 sections, `file:symbol`
   anchors. Agents often read only the top of a file.
-- Every doc must be linked from the nearest `AGENTS.md`; an unlinked doc isn't
-  discovered reliably.
+- Every doc must be linked from the nearest `AGENTS.md` covering what it spans *and*
+  listed in the root AGENTS.md documentation index (fallback discovery for tools that
+  don't auto-load nested files); an unlinked doc isn't discovered reliably. Procedure:
+  `agent_docs/recipes/add-documentation.md`.
 - All agent docs live in top-level `agent_docs/` — the highest-value content is
   cross-cutting and has no home directory, and one tree keeps grep-fallback discovery
   reliable. Scoping comes from which `AGENTS.md` points to a doc, not from its location
@@ -116,14 +120,13 @@ ln -s ../AGENTS.md .github/copilot-instructions.md
 
 `scripts/actions.sh check-agent-docs` (run in CI, linting job) asserts:
 
-- root provider files are symlinks resolving to `AGENTS.md`;
+- root provider files are symlinks resolving to `AGENTS.md`; every nested `AGENTS.md`
+  has a sibling `CLAUDE.md` symlink resolving to it (checkouts without symlink support
+  and some tools replace symlinks with regular files — that silently breaks
+  single-source-of-truth);
 - the Cursor stub and `.gemini/settings.json` reference `AGENTS.md`;
-- every nested `AGENTS.md` has a sibling `CLAUDE.md` symlink resolving to it;
-- every `agent_docs/...` or `docs/...` path referenced in any `AGENTS.md` exists (no
-  dangling pointers);
-- every file in `agent_docs/` and `docs/` is referenced by at least one `AGENTS.md`
-  (no orphan docs).
+- every `agent_docs/...`/`docs/...` path referenced in any `AGENTS.md` exists;
+- every doc is referenced by at least one `AGENTS.md`, and `agent_docs/` files are
+  listed in the root AGENTS.md index.
 
-Needed because checkouts without symlink support turn symlinks into plain text files,
-and tools sometimes replace a symlink with a regular file on write — either silently
-breaks single-source-of-truth.
+When adding or changing docs, follow `agent_docs/recipes/add-documentation.md`.
