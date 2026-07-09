@@ -87,6 +87,13 @@ a wrong edit. When in doubt, the pointer goes in AGENTS.md and the content goes 
 
 ## Editing rules
 
+- Context maintenance is part of every change, not a documentation task: if an edit
+  alters behavior described in a systems doc, a coupling line, or an AGENTS.md
+  rule/inventory, update that description in the same commit. Agents take statements
+  literally, so stale context turns into wrong edits later. The bidirectional pointer
+  triggers ("update after changing X") mark which docs a change touches;
+  `check-agent-docs` verifies links but cannot verify content — keeping descriptions
+  true is on the author.
 - Edit `AGENTS.md` files only; symlinks and settings propagate automatically.
 - Facts only — document what the setup is, not what it should be; agents take
   statements literally. Mark unverified claims as such or leave them out.

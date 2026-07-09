@@ -3,6 +3,10 @@
 A machine-learning Earth system model. This file holds always-relevant rules for LLM
 tools and an index into the reference docs; keep it lean and put detail in `agent_docs/`.
 
+Every change must keep context in sync: update the `agent_docs/` files and AGENTS.md
+lines that describe what you changed, in the same change — stale context misleads the
+next agent. The index below and the scoped AGENTS.md files say which docs cover what.
+
 ## Environment & tooling
 
 - Python 3.12, managed with uv. Deps declared in `pyproject.toml`, locked in `uv.lock`.
