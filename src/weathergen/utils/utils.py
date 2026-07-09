@@ -49,6 +49,23 @@ def is_stream_forcing(stream_cfg: dict, stage: Stage | None = None) -> bool:
     return is_forcing
 
 
+def is_stream_reconstructed(stream_cfg: dict, stage: Stage | None = None) -> bool:
+    """
+    Determine if a stream is physically reconstructed, i.e. has a decoder and contributes
+    to the physical (decoder) reconstruction loss.
+
+    A stream is NOT reconstructed if it is forcing (input-only) or if it explicitly opts
+    out via ``reconstruct: false``. The latter lets a stream still serve as a
+    student-teacher (JEPA) target while having no physical decoder, so JEPA can be trained
+    on all streams while only a subset is reconstructed in physical space. Note that, unlike
+    forcing streams, ``reconstruct: false`` streams keep a normal (non-empty) target mask,
+    so the teacher still encodes them.
+    """
+    if is_stream_forcing(stream_cfg, stage):
+        return False
+    return stream_cfg.get("reconstruct", True)
+
+
 def is_stream_diagnostic(stream_cfg: dict, stage: Stage | None = None) -> bool:
     """
     Determine if stream is diagnostic, i.e. does not contribute to model input
