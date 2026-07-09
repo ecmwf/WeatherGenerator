@@ -8,7 +8,8 @@ assimilated into a latent state, optionally rolled out in time autoregressively,
 decoded per stream.
 
 This file holds always-relevant rules for LLM tools and an index into the reference
-docs; keep it lean and put detail in `agent_docs/`.
+docs; keep it lean and put detail in `agent_docs/` and the `DOCS-*.md`
+reference files.
 
 Every change must keep context in sync: update the `agent_docs/` files, the `DOCS-*.md`
 reference files, and the lines in this file that describe what you changed, in the same
@@ -66,6 +67,8 @@ update the docs.
   analysis scripts)
 - `config/` — YAML run configs; `config/streams/` — per-stream config sets
 - `tests/` — standalone unit tests; `integration_tests/` — GPU integration tests
+- `agent_docs/` — agent-oriented docs indexed below: systems dataflows, `recipes/`
+  (procedures), `decisions/` (rationale); how the setup works: `agent_docs/agentic-setup.md`
 - `docs/` — human-facing reference (e.g. `docs/evaluate_config_reference.md`)
 - `ci/`, `.github/workflows/` — CI definitions
 - `logs/`, `models/`, `plots/`, `results/` — runtime output, gitignored; on HPC these are symlinks into shared storage. Never commit contents; details in `agent_docs/infrastructure.md`.
