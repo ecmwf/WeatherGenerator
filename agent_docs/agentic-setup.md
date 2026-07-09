@@ -77,13 +77,26 @@ Nothing else.**
   hurts; then group by subsystem or task, never by directory. Name files in task
   vocabulary (`config-system.md`, `masking.md`) — filenames are matched by searches.
   Exceptions: human-facing reference stays in `docs/` (e.g.
-  `docs/evaluate_config_reference.md`) or next to what it describes (the `DOCS-*.md`
-  files), package `README.md`s stay in their package, and a quasi-independent package
-  (own lockfile, deployable on its own) may keep real docs in-package so they travel
-  if it is extracted.
+  `docs/evaluate_config_reference.md`), directory-scoped reference stays next to the
+  code as `DOCS-*.md` (next block), package `README.md`s stay in their package, and a
+  quasi-independent package (own lockfile, deployable on its own) may keep real docs
+  in-package so they travel if it is extracted.
 - Scope-local rules and coupling one-liners are not docs: they go in
   `AGENT-README.md` (or, once scoped instruction files exist, the narrowest one that
   covers all files involved).
+
+**DOCS-*.md — directory-scoped reference, living next to the code it describes.**
+
+- One per subsystem directory (`config/`, `config/streams/`,
+  `src/weathergen/{model,datasets,train}/`, `packages/`): file-by-file inventories,
+  class/function detail with line anchors, schemas, option lists — what is in that
+  directory and how its scripts function. This is deliberately the grep-replaceable
+  layer: faster than reading the code, but derivable from it.
+- The split against `agent_docs/` is scope-by-task vs scope-by-directory, not level
+  of detail (both are detailed): a fact that spans directories — a runtime dataflow,
+  coupling ("change X → also update Y"), a workflow, a design choice — goes in
+  `agent_docs/`; detail local to one directory's files goes in its `DOCS-*.md`. When
+  both need a fact, one states it and the other links to it.
 
 **The pointer/content asymmetry:** a pointer costs ~15 tokens, a missed invariant costs
 a wrong edit. When in doubt, the pointer goes in `AGENT-README.md` and the content
