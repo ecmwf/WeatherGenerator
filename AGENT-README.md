@@ -93,7 +93,7 @@ Recipes (procedures):
 Decisions (rationale):
 - `agent_docs/decisions/dashboard-not-in-workspace.md` — why packages/dashboard has its own lockfile.
 
-Code-adjacent reference (human-oriented, more detail than the systems docs):
+Code-adjacent reference (more detail than the systems docs):
 - `config/DOCS-Config.md` — config merging, default_config.yml options, variants.
 - `config/streams/DOCS-Streams.md` — stream YAML schema, readers, adding a stream.
 - `src/weathergen/model/DOCS-model.md` — architecture: encoder, engines.py classes, attention, EMA.
