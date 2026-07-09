@@ -201,6 +201,89 @@ case "$1" in
       echo "Jupytext sync completed."
     )
     ;;
+  check-agent-docs)
+    (
+      # Enforce the invariants of the agent-instruction setup (agent_docs/agentic_setup.md):
+      # single source of truth (AGENTS.md + symlinks) and a fully linked doc tree.
+      cd "$SCRIPT_DIR" || exit 1
+      status=0
+
+      # Root provider files must be symlinks resolving to AGENTS.md
+      # ("-L": is a symlink, "-ef": same file).
+      for f in "CLAUDE.md" "GEMINI.md" ".github/copilot-instructions.md"; do
+        if [ ! -L "$f" ]; then
+          echo "FAIL: $f is not a symlink (should point to AGENTS.md)."
+          status=1
+        elif [ ! "$f" -ef "AGENTS.md" ]; then
+          echo "FAIL: $f is a symlink but does not resolve to AGENTS.md (-> $(readlink "$f"))."
+          status=1
+        fi
+      done
+
+      # Cursor needs its own .mdc format, so it is a stub that must reference AGENTS.md.
+      stub=".cursor/rules/main.mdc"
+      if [ ! -f "$stub" ] || ! grep -q "AGENTS.md" "$stub"; then
+        echo "FAIL: $stub missing or does not reference AGENTS.md."
+        status=1
+      fi
+
+      # Gemini CLI reads AGENTS.md (incl. nested) via the committed project setting.
+      gemini_settings=".gemini/settings.json"
+      if [ ! -f "$gemini_settings" ] || ! grep -q "AGENTS.md" "$gemini_settings"; then
+        echo "FAIL: $gemini_settings missing or does not set the context file to AGENTS.md."
+        status=1
+      fi
+
+      # Nested scopes need a sibling CLAUDE.md symlink; collect doc references on the way.
+      referenced_docs=""
+      while IFS= read -r agents; do
+        dir=$(dirname "$agents")
+        if [ "$dir" != "." ]; then
+          link="$dir/CLAUDE.md"
+          if [ ! -L "$link" ]; then
+            echo "FAIL: $link is not a symlink (should point to AGENTS.md)."
+            status=1
+          elif [ ! "$link" -ef "$agents" ]; then
+            echo "FAIL: $link does not resolve to $agents (-> $(readlink "$link"))."
+            status=1
+          fi
+        fi
+        for ref in $(grep -oE '(agent_docs|docs)/[A-Za-z0-9_./-]*\.md' "$agents" | sort -u); do
+          referenced_docs="$referenced_docs $ref"
+          if [ ! -f "$ref" ]; then
+            echo "FAIL: $agents points to $ref, which does not exist."
+            status=1
+          fi
+        done
+      done < <(find . -name AGENTS.md -not -path '*/.venv/*' -not -path '*/node_modules/*' -not -path '*/.git/*')
+
+      # Every doc must be pointed to by at least one AGENTS.md; agent docs must
+      # additionally be listed in the root AGENTS.md index (universal fallback for
+      # tools that do not auto-load nested files).
+      for doc in $(find agent_docs docs -name '*.md'); do
+        case " $referenced_docs " in
+          *" $doc "*) ;;
+          *)
+            echo "FAIL: $doc is not linked from any AGENTS.md, so agents won't discover it."
+            status=1
+            ;;
+        esac
+        case "$doc" in
+          agent_docs/*)
+            if ! grep -q "$doc" AGENTS.md; then
+              echo "FAIL: $doc is missing from the documentation index in the root AGENTS.md."
+              status=1
+            fi
+            ;;
+        esac
+      done
+
+      if [ "$status" -eq 0 ]; then
+        echo "Agent instruction files OK: symlinks intact, doc tree fully linked."
+      fi
+      exit "$status"
+    )
+    ;;
   *)
     (
       # Automatically extract all options from the case statement

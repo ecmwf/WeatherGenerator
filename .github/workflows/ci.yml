@@ -31,6 +31,9 @@ jobs:
       - name: TOML checks
         run: ./scripts/actions.sh toml-check
 
+      - name: Agent instruction files (symlinks + doc links)
+        run: ./scripts/actions.sh check-agent-docs
+
       - name: Type checker (pyrefly, experimental)
         # Do not attempt to install the default dependencies, this is much faster.
         # Run temporarily on a sub directory before the main restyling.
