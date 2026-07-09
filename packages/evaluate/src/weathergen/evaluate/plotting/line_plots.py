@@ -61,12 +61,12 @@ class LinePlots:
         self.add_grid = plotter_cfg.get("add_grid")
         self.plot_ensemble = plotter_cfg.get("plot_ensemble", False)
         self.baseline = plotter_cfg.get("baseline")
-        self.out_plot_dir_lines = Path(output_basedir) / "line_plots"
+        self.out_plot_dir = Path(output_basedir) / "lead_time_plots"
         self.out_plot_dir_ratio = Path(output_basedir) / "ratio_plots"
         self.out_plot_dir_psd = Path(output_basedir) / "psd_plots"
-        if not os.path.exists(self.out_plot_dir_lines):
-            _logger.info(f"Creating dir {self.out_plot_dir_lines}")
-            os.makedirs(self.out_plot_dir_lines, exist_ok=True)
+        if not os.path.exists(self.out_plot_dir):
+            _logger.info(f"Creating dir {self.out_plot_dir}")
+            os.makedirs(self.out_plot_dir, exist_ok=True)
         if not os.path.exists(self.out_plot_dir_ratio):
             _logger.info(f"Creating dir {self.out_plot_dir_ratio}")
             os.makedirs(self.out_plot_dir_ratio, exist_ok=True)
@@ -351,7 +351,7 @@ class LinePlots:
             y_dim,
             print_summary,
             title=title,
-            out_plot_dir=self.out_plot_dir_lines,
+            out_plot_dir=self.out_plot_dir,
         )
 
     def _plot_base(

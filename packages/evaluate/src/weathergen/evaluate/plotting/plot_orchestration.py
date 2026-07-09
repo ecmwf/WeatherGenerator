@@ -131,8 +131,11 @@ def run_score_timeseries_pipeline(
 
         for region in regions:
             region_metrics = metrics_dict.get(region)
-            metric_names = list(region_metrics.keys())
-            metric_params = list(region_metrics.values())
+            # PSD is a spatial metric incompatible with sample+ipoint aggregation
+            metric_names = [m for m in region_metrics.keys() if m != "psd"]
+            metric_params = [region_metrics[m] for m in metric_names]
+            if not metric_names:
+                continue
             score_tasks.append(
                 dict(
                     fstep=fstep,
@@ -819,7 +822,9 @@ def plot_data(
     plot_settings = stream_cfg.get("plotting", {})
 
     plot_keys = ("plot_maps", "plot_histograms", "plot_animations", "plot_timeseries")
-    if not plot_settings or not any(plot_settings.get(k, False) for k in plot_keys):
+    has_old_style = any(plot_settings.get(k, False) for k in plot_keys)
+    has_new_style = bool(plot_settings.get("data_plots"))
+    if not plot_settings or not (has_old_style or has_new_style):
         return
 
     plotter_cfg = {
@@ -843,27 +848,40 @@ def plot_data(
         _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
         return
 
-    plot_maps = plot_settings.get("plot_maps", False)
-    if not isinstance(plot_maps, bool):
-        raise TypeError("plot_maps must be a boolean.")
-    plot_bias = plot_settings.get("plot_bias", True)
-    if not isinstance(plot_bias, bool):
-        raise TypeError("plot_bias must be a boolean.")
-    plot_target = plot_settings.get("plot_target", True)
-    if not isinstance(plot_target, bool):
-        raise TypeError("plot_target must be a boolean.")
-    plot_timeseries = plot_settings.get("plot_timeseries", False)
-    if not isinstance(plot_timeseries, bool):
-        raise TypeError("plot_timeseries must be a boolean.")
-    plot_histograms = plot_settings.get("plot_histograms", False)
-    if not isinstance(plot_histograms, bool) and plot_histograms not in {
-        "across-samples",
-        "per-sample",
-    }:
-        raise TypeError("plot_histograms must be true, false, 'across-samples', or 'per-sample'. ")
-    plot_animations = plot_settings.get("plot_animations", False)
-    if not isinstance(plot_animations, bool):
-        raise TypeError("plot_animations must be a boolean.")
+    # Resolve plotting flags: prefer new-style data_plots list, fall back to old booleans.
+    data_plots_list = plot_settings.get("data_plots")
+    if data_plots_list is not None:
+        _dp = set(data_plots_list)
+        plot_maps = "maps" in _dp
+        plot_bias = "bias" in _dp
+        plot_target = "target" in _dp
+        plot_timeseries = "timeseries" in _dp
+        plot_histograms = "histograms" in _dp
+        plot_animations = "animations" in _dp
+    else:
+        plot_maps = plot_settings.get("plot_maps", False)
+        if not isinstance(plot_maps, bool):
+            raise TypeError("plot_maps must be a boolean.")
+        plot_bias = plot_settings.get("plot_bias", True)
+        if not isinstance(plot_bias, bool):
+            raise TypeError("plot_bias must be a boolean.")
+        plot_target = plot_settings.get("plot_target", True)
+        if not isinstance(plot_target, bool):
+            raise TypeError("plot_target must be a boolean.")
+        plot_timeseries = plot_settings.get("plot_timeseries", False)
+        if not isinstance(plot_timeseries, bool):
+            raise TypeError("plot_timeseries must be a boolean.")
+        plot_histograms = plot_settings.get("plot_histograms", False)
+        if not isinstance(plot_histograms, bool) and plot_histograms not in {
+            "across-samples",
+            "per-sample",
+        }:
+            raise TypeError(
+                "plot_histograms must be true, false, 'across-samples', or 'per-sample'. "
+            )
+        plot_animations = plot_settings.get("plot_animations", False)
+        if not isinstance(plot_animations, bool):
+            raise TypeError("plot_animations must be a boolean.")
 
     model_output = output_data
     if output_data is None:
@@ -1185,20 +1203,42 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
     sc_plotter = ScoreCards(plot_cfg, summary_dir)
     br_plotter = BarPlots(plot_cfg, summary_dir)
     quantile_plotter = QuantilePlots(plot_cfg, summary_dir)
+
+    # Resolve which summary plots to produce: prefer new-style score_plots list,
+    # fall back to old-style individual booleans.
+    score_plots_list = eval_opt.get("score_plots")
+    if score_plots_list is not None:
+        _sp = set(score_plots_list)
+        do_lead_time = "lead_time" in _sp
+        do_ratio = "ratio" in _sp
+        do_heatmap = "heatmap" in _sp
+        do_scorecard = "scorecard" in _sp
+        do_bar = "bar" in _sp
+    else:
+        do_lead_time = eval_opt.get("summary_plots", False)
+        do_ratio = eval_opt.get("ratio_plots", False)
+        do_heatmap = eval_opt.get("heat_maps", False)
+        do_scorecard = eval_opt.get("score_cards", False)
+        do_bar = eval_opt.get("bar_plots", False)
+
     for metric in metrics:
         for region in scores_dict[metric].keys():
-            if eval_opt.get("summary_plots", False):
-                if metric == "psd":
-                    psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
-                elif metric == "qq_analysis":
+            # PSD plots are always produced when psd is in the metrics —
+            # they are intrinsic to the metric, not a separate plot option.
+            if metric == "psd":
+                psd_plot_metric_region(metric, region, runs, scores_dict, plotter)
+                continue
+
+            if do_lead_time:
+                if metric == "qq_analysis":
                     quantile_plot_metric_region(metric, region, runs, scores_dict, quantile_plotter)
                 else:
                     plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
-            if eval_opt.get("ratio_plots", False):
+            if do_ratio:
                 ratio_plot_metric_region(metric, region, runs, scores_dict, plotter, print_summary)
-            if eval_opt.get("heat_maps", False):
+            if do_heatmap:
                 heat_maps_metric_region(metric, region, runs, scores_dict, plotter)
-            if eval_opt.get("score_cards", False):
+            if do_scorecard:
                 score_card_metric_region(metric, region, runs, scores_dict, sc_plotter)
-            if eval_opt.get("bar_plots", False):
+            if do_bar:
                 bar_plot_metric_region(metric, region, runs, scores_dict, br_plotter)
