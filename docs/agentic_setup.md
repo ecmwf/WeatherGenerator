@@ -16,15 +16,70 @@ so there is one file per scope to edit and the copies can't drift.
 | GitHub Copilot | reads root `AGENTS.md` natively (coding agent also nested); `.github/copilot-instructions.md → AGENTS.md` symlink as fallback |
 | Cursor | `.cursor/rules/main.mdc` stub pointing at `/AGENTS.md` (needs its own `.mdc` frontmatter format, so no symlink) |
 
+## What goes where
+
+The common agent task — assess or change a code section — has three phases that fail
+differently: routing (find the right files; failure = wasted tokens), understanding
+(grasp enough to change it correctly; failure = a plausible wrong edit), and
+verification (run the right checks). Effectiveness is decided in the understanding
+phase, by knowledge the code itself cannot state. Documentation priority: effectiveness
+first; token efficiency second, and only where it doesn't compromise effectiveness.
+
+**AGENTS.md — auto-loaded. Route, rule, verify. Nothing else.**
+
+- Orientation map: enough for the first search to land right.
+- Hard rules and invariants that apply to most edits in the scope.
+- Verification commands.
+- Pointers to `docs/` with a trigger phrased in task vocabulary, bidirectional where
+  the doc tracks code: "read before touching X; update after changing X". The update
+  half is what keeps central docs from going stale — the agent editing code in that
+  scope has the reminder in context. Always reference docs by root-relative path
+  (`docs/<name>.md`); CI checks these links.
+- Inclusion test per line: would an agent lacking it take a wrong turn or make a wrong
+  edit? No → cut it, or demote it to `docs/`.
+- Put each rule in the narrowest `AGENTS.md` that covers it (nested files load only
+  when an agent works in that subtree), and state each fact at exactly one level —
+  ancestor files load together, so duplication is paid twice.
+
+**docs/ — loaded on demand. Everything a correct edit of a given kind needs.**
+
+- Document the delta between what the code says and what is true: dataflow across
+  files, coupling ("if you change X, also update Y"), invariants, which of two
+  similar mechanisms is canonical, why something is deliberately unusual. A file
+  inventory is grep-replaceable — low value; coupling and rationale are not — high value.
+- Structure for partial reads: conclusion/summary first, clear H2 sections, `file:symbol`
+  anchors. Agents often read only the top of a file.
+- Every doc must be linked from the nearest `AGENTS.md`; an unlinked doc isn't
+  discovered reliably.
+- All docs live in top-level `docs/` — the highest-value content is cross-cutting and
+  has no home directory, and one tree keeps grep-fallback discovery reliable. Scoping
+  comes from which `AGENTS.md` points to a doc, not from its location (one file,
+  N pointers — this is also what avoids repeating shared content per scope). Central
+  files never move when coupling grows, so pointers stay valid. Flat until it
+  hurts; then group by subsystem or task, never by directory. Name files in task
+  vocabulary (`config-system.md`, `masking.md`) — filenames are matched by searches.
+  Exceptions: human-facing package `README.md`s stay in their package, and a
+  quasi-independent package (own lockfile, deployable on its own) may keep real docs
+  in-package so they travel if it is extracted.
+- Scope-local rules and coupling one-liners are not docs: they go in the narrowest
+  `AGENTS.md` that covers all files involved.
+
+**The pointer/content asymmetry:** a pointer costs ~15 tokens, a missed invariant costs
+a wrong edit. When in doubt, the pointer goes in AGENTS.md and the content goes in
+`docs/`. Be generous with pointers, strict with content.
+
 ## Editing rules
 
 - Edit `AGENTS.md` files only; symlinks and settings propagate automatically.
-- Root `AGENTS.md` is auto-loaded into every session for every tool — every token costs
-  context budget. Keep it to rules, a layout map, and the doc index.
-- Scoped rules go in the narrowest `AGENTS.md` that covers them; they load only when an
-  agent works in that subtree.
-- Reference docs go in `docs/`, linked from the nearest AGENTS.md with a one-line
-  "read when..." hook. An unlinked doc isn't discovered reliably.
+- Facts only — document what the setup is, not what it should be; agents take
+  statements literally. Mark unverified claims as such or leave them out.
+- Plain imperatives over formatting: bold and callouts don't raise compliance. Keep
+  the *why* on non-obvious rules ("never X — it breaks Y") so agents know when a rule
+  generalizes.
+- Personal instructions never go in the tracked provider files. Use `CLAUDE.local.md`
+  (repo-specific, gitignored, loaded in addition to the project file) or
+  `~/.claude/CLAUDE.md` (user-global) — both compose with the repo instructions
+  instead of replacing them.
 
 ## Adding a new scope
 
@@ -50,7 +105,9 @@ ln -s ../AGENTS.md .github/copilot-instructions.md
 
 - root provider files are symlinks resolving to `AGENTS.md`;
 - the Cursor stub and `.gemini/settings.json` reference `AGENTS.md`;
-- every nested `AGENTS.md` has a sibling `CLAUDE.md` symlink resolving to it.
+- every nested `AGENTS.md` has a sibling `CLAUDE.md` symlink resolving to it;
+- every `docs/...` path referenced in any `AGENTS.md` exists (no dangling pointers);
+- every file in `docs/` is referenced by at least one `AGENTS.md` (no orphan docs).
 
 Needed because checkouts without symlink support turn symlinks into plain text files,
 and tools sometimes replace a symlink with a regular file on write — either silently

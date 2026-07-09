@@ -21,5 +21,5 @@ rules. Most tools auto-load it when you work there; if yours doesn't, read it fi
 
 ## Documentation (read when relevant)
 
-- `docs/infrastructure.md` — uv, dependencies, running jobs on HPC vs. developing locally. Read before setting up the env or launching jobs.
-- `docs/agentic_setup.md` — how these instruction files and the provider symlinks work. Read before editing AGENTS.md or the provider files.
+- `docs/infrastructure.md` — uv, dependencies, running jobs on HPC vs. developing locally. Read before setting up the env or launching jobs; update after changing tooling or workflow.
+- `docs/agentic_setup.md` — how these instruction files work and what belongs in AGENTS.md vs docs/. Read before editing any AGENTS.md or adding documentation.
