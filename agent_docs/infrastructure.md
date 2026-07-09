@@ -25,6 +25,26 @@ Never `pip install` into the env — it bypasses the lock and drifts contributor
 - Most jobs (training, evaluation, inference, profiling) run on HPC clusters, submitted to the scheduler rather than run on a workstation.
 - Development happens on the HPC (interactive sessions) or locally. Local is for editing, small tests, and tooling; anything needing real compute goes to the HPC.
 
+## Runtime output directories (repo root)
+
+All gitignored. On clusters, `scripts/actions.sh create-links` creates them as symlinks
+into the shared working directory (`path_shared_working_dir` from the private repo's
+HPC config) — they may point at shared storage, so never assume they are local or
+disposable, and never commit their contents.
+
+- `models/<run_id>/` — checkpoints (`common/config.py:get_path_model`, written by
+  `trainer.py:save_model`).
+- `results/<run_id>/` — per-run results: metrics and train logs (`get_path_run`,
+  `utils/train_logger.py`), validation/inference zarr output (`get_path_results`,
+  `utils/validation_io.py:write_output`).
+- `logs/<run_id>/` — process logs (`common/logger.py:init_loggers`, relative to cwd).
+- `plots/` — output of plotting tools (`utils/plot_training.py`, evaluate package's
+  default plot dir).
+- `output/` — legacy; only referenced in commented-out code, kept in `create-links`
+  and `.gitignore`.
+- `profiling/` — profiling artifacts from an unmerged branch; not produced by the code
+  on this branch.
+
 ## TODO: document the HPC setup(s)
 
 Add cluster specifics so agents and contributors have accurate context:

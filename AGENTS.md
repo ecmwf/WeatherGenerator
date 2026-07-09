@@ -19,6 +19,7 @@ next agent. The index below and the scoped AGENTS.md files say which docs cover 
 - `packages/` — uv-workspace libraries (common, evaluate, metrics, readers_extra)
 - `config/` — YAML run configs
 - `tests/` — unit tests; `integration_tests/` — GPU integration tests
+- `logs/`, `models/`, `plots/`, `results/` — runtime output, gitignored; on HPC these are symlinks into shared storage. Never commit contents; details in `agent_docs/infrastructure.md`.
 
 `src/`, `packages/`, `config/`, `tests/` each have their own AGENTS.md with local
 rules. Most tools auto-load it when you work there; if yours doesn't, read it first.
