@@ -34,7 +34,7 @@ Systems (runtime dataflows):
 - `agent_docs/data-pipeline.md` — stream configs → readers → tokenizer → ModelBatch. Read before touching data loading or stream configs; update after.
 - `agent_docs/ssl-training.md` — SSL/student-teacher delta: masking, teachers, latent losses. Read before touching SSL or masking code; update after.
 - `agent_docs/config-system.md` — config sources, merge precedence, stage configs, runtime mutation. Read before adding/renaming config options; update after changing the merge logic.
-- `agent_docs/infrastructure.md` — uv, dependencies, running jobs on HPC vs. developing locally. Read before setting up the env or launching jobs; update after changing tooling or workflow.
+- `agent_docs/infrastructure.md` — software stack (cluster base env + uv), SLURM/GH200 hardware, runtime output dirs; local runs not supported yet. Read before setting up an env, launching jobs, or touching run outputs; update after changing tooling or workflow.
 - `agent_docs/agentic-setup.md` — how these instruction files work and what belongs in AGENTS.md vs agent_docs/. Read before editing any AGENTS.md or adding documentation.
 
 Recipes (procedures):
