@@ -326,7 +326,7 @@ def evaluate_from_config(cfg: dict, mlflow_client: MlflowClient | None) -> None:
     summary_dir = Path(cfg.evaluation.get("summary_dir", _DEFAULT_PLOT_DIR))
     metrics = cfg.evaluation.metrics
 
-    # Normalise boolean plot flags → list-based config (backward-compat shim).
+    # backward-compatibility with old way of specifying plotting options (bools) instead of lists:
     with open_dict(cfg):
         parse_plot_config(cfg)
 

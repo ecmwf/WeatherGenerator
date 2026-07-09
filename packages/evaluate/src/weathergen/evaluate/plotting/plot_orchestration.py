@@ -133,9 +133,16 @@ def run_score_timeseries_pipeline(
 
         for region in regions:
             # PSD is a spatial metric incompatible with sample+ipoint aggregation
+<<<<<<< HEAD
             region_metrics = dict(metrics_dict.get(region))
             region_metrics.pop("psd", None)
             if not region_metrics:
+=======
+            #TODO: Temporary fix. Will be propery fixed with MetricResults class
+            metric_names = [m for m in region_metrics.keys() if m != "psd"]
+            metric_params = [region_metrics[m] for m in metric_names]
+            if not metric_names:
+>>>>>>> 03fde246 (shorten logic)
                 continue
 
             metric_names = list(region_metrics.keys())
@@ -879,39 +886,15 @@ def plot_data(
         return
 
     # Resolve plotting flags: prefer new-style data_plots list, fall back to old booleans.
-    data_plots_list = plot_settings.get("data_plots")
-    if data_plots_list is not None:
-        _dp = set(data_plots_list)
-        plot_maps = "maps" in _dp
-        plot_bias = "bias" in _dp
-        plot_target = "target" in _dp
-        plot_timeseries = "timeseries" in _dp
-        plot_histograms = "histograms" in _dp
-        plot_animations = "animations" in _dp
-    else:
-        plot_maps = plot_settings.get("plot_maps", False)
-        if not isinstance(plot_maps, bool):
-            raise TypeError("plot_maps must be a boolean.")
-        plot_bias = plot_settings.get("plot_bias", True)
-        if not isinstance(plot_bias, bool):
-            raise TypeError("plot_bias must be a boolean.")
-        plot_target = plot_settings.get("plot_target", True)
-        if not isinstance(plot_target, bool):
-            raise TypeError("plot_target must be a boolean.")
-        plot_timeseries = plot_settings.get("plot_timeseries", False)
-        if not isinstance(plot_timeseries, bool):
-            raise TypeError("plot_timeseries must be a boolean.")
-        plot_histograms = plot_settings.get("plot_histograms", False)
-        if not isinstance(plot_histograms, bool) and plot_histograms not in {
-            "across-samples",
-            "per-sample",
-        }:
-            raise TypeError(
-                "plot_histograms must be true, false, 'across-samples', or 'per-sample'. "
-            )
-        plot_animations = plot_settings.get("plot_animations", False)
-        if not isinstance(plot_animations, bool):
-            raise TypeError("plot_animations must be a boolean.")
+    data_plots_list = plot_settings.get("data_plots",  [])
+    
+    _dp = set(data_plots_list)
+    plot_maps = ("maps" in _dp) or plot_settings.get("plot_maps", False) 
+    plot_bias = ("bias" in _dp) or plot_settings.get("plot_bias", False)
+    plot_target = ("target" in _dp) or plot_settings.get("plot_target", False)
+    plot_timeseries = ("timeseries" in _dp) or plot_settings.get("plot_timeseries", False)
+    plot_histograms = ("histograms" in _dp) or plot_settings.get("plot_histograms", False)
+    plot_animations = ("animations" in _dp) or plot_settings.get("plot_animations", False)
 
     model_output = output_data
     if output_data is None:
@@ -1269,20 +1252,13 @@ def plot_summary(cfg: dict, scores_dict: dict, summary_dir: Path):
 
     # Resolve which summary plots to produce: prefer new-style score_plots list,
     # fall back to old-style individual booleans.
-    score_plots_list = eval_opt.get("score_plots")
-    if score_plots_list is not None:
-        _sp = set(score_plots_list)
-        do_lead_time = "lead_time" in _sp
-        do_ratio = "ratio" in _sp
-        do_heatmap = "heatmap" in _sp
-        do_scorecard = "scorecard" in _sp
-        do_bar = "bar" in _sp
-    else:
-        do_lead_time = eval_opt.get("summary_plots", False)
-        do_ratio = eval_opt.get("ratio_plots", False)
-        do_heatmap = eval_opt.get("heat_maps", False)
-        do_scorecard = eval_opt.get("score_cards", False)
-        do_bar = eval_opt.get("bar_plots", False)
+    score_plots_list = eval_opt.get("score_plots", [])
+    _sp = set(score_plots_list) 
+    do_lead_time = "lead_time" in _sp or "qq_analysis" in _sp
+    do_ratio = "ratio" in _sp or eval_opt.get("ratio_plots", False)
+    do_heatmap = "heatmap" in _sp or eval_opt.get("heat_maps", False)
+    do_scorecard = "scorecard" in _sp or eval_opt.get("score_cards", False)
+    do_bar = "bar" in _sp or eval_opt.get("bar_plots", False)
 
     # Map each resolved plot option to the subdir(s) it produces, so PDF merging
     # can reuse the same flags without re-deriving them from eval_opt.
