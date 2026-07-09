@@ -1484,9 +1484,9 @@ class Scores:
         latitude_weights: xr.DataArray | None
             Optional latitude weights for area-weighted averaging.
         adjusted: bool
-            If True (default), use the unbiased (``ddof=1``) ensemble variance following the GenCast
-            convention (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.6). The
-            finite-ensemble inflation factor ``sqrt((M + 1) / M)`` is applied in the
+            If True (default), use the unbiased (``ddof=1``) ensemble variance following
+            the GenCast convention (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.6).
+            The finite-ensemble inflation factor ``sqrt((M + 1) / M)`` is applied in the
             spread-skill ratio (see ``calc_ssr``), not here.
             If False, use the biased (``ddof=0``) variance.
 
@@ -1527,8 +1527,8 @@ class Scores:
             ``latitude_weighting=True`` in the ``parameters`` dict of ``get_score``.
             Default is None.
         adjusted: bool
-            If True (default), apply the ensemble-size correction ``sqrt((M + 1) / M)`` following GenCast
-            (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.9) and use the unbiased
+            If True (default), apply the ensemble-size correction ``sqrt((M + 1) / M)`` following
+            GenCast (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.9) and use the unbiased
             (``ddof=1``) spread. A perfectly calibrated ensemble of size M then yields SSR = 1.
             If False, use the biased spread with no correction.
 
@@ -1931,3 +1931,4 @@ class Scores:
         _logger.info(f"Q-Q analysis completed with {len(overall_qq_score.attrs)} attributes")
 
         return overall_qq_score
+ 
