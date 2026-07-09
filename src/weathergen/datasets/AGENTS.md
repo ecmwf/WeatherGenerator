@@ -4,3 +4,4 @@
 - `multi_stream_data_sampler.py` — assembles training samples across streams; `batch.py` — batch/sample metadata; `stream_data.py`, `memory_pinning.py` — stream tensors + pinned-memory transfer.
 - `tokenizer.py`, `tokenizer_masking.py`, `tokenizer_utils.py`, `masking.py` — turn reader output into model tokens, incl. masking for SSL.
 - Inline tests: `utils_test.py`.
+- `agent_docs/data-pipeline.md` — the full path from stream configs to ModelBatch. Read before changing readers, tokenization, or batch assembly; update after. Masking/SSL sample composition: `agent_docs/ssl-training.md`.

@@ -4,3 +4,4 @@
 - `streams/<name>/` — input data-stream definitions (which datasets a run reads).
 - `evaluate/` — evaluation configs (reference: `docs/evaluate_config_reference.md`); `profiling/` — profiling configs.
 - New options belong in `default_config.yml` with a sensible default, so partial overwrite configs stay valid.
+- `agent_docs/config-system.md` — merge precedence and stage configs. Read before adding options or changing configs; update after changing config semantics. Streams: `agent_docs/data-pipeline.md`.

@@ -30,18 +30,30 @@ first; token efficiency second, and only where it doesn't compromise effectivene
 - Orientation map: enough for the first search to land right.
 - Hard rules and invariants that apply to most edits in the scope.
 - Verification commands.
-- Pointers to `docs/` with a trigger phrased in task vocabulary, bidirectional where
-  the doc tracks code: "read before touching X; update after changing X". The update
-  half is what keeps central docs from going stale — the agent editing code in that
-  scope has the reminder in context. Always reference docs by root-relative path
-  (`docs/<name>.md`); CI checks these links.
+- Pointers to `agent_docs/` with a trigger phrased in task vocabulary, bidirectional
+  where the doc tracks code: "read before touching X; update after changing X". The
+  update half is what keeps central docs from going stale — the agent editing code in
+  that scope has the reminder in context. Always reference docs by root-relative path
+  (`agent_docs/<name>.md`); CI checks these links.
 - Inclusion test per line: would an agent lacking it take a wrong turn or make a wrong
-  edit? No → cut it, or demote it to `docs/`.
+  edit? No → cut it, or demote it to `agent_docs/`.
 - Put each rule in the narrowest `AGENTS.md` that covers it (nested files load only
   when an agent works in that subtree), and state each fact at exactly one level —
   ancestor files load together, so duplication is paid twice.
 
-**docs/ — loaded on demand. Everything a correct edit of a given kind needs.**
+**agent_docs/ — loaded on demand. Everything a correct edit of a given kind needs.**
+
+- Three genres, split by the question they answer; no fact belongs to two:
+  - `agent_docs/*.md` — systems: what happens at runtime, one doc per dataflow (not per
+    directory). Template: ~5-line summary, H2 per stage with `file:symbol` anchors
+    and data shapes at boundaries, then a "Coupling & invariants" section ("change
+    X → check Y") — that section is the payload.
+  - `agent_docs/recipes/` — procedures: how to make a change of kind X. Trigger line,
+    numbered steps with file anchors, verification command, pitfalls.
+  - `agent_docs/decisions/` — rationale: why something is deliberately this way
+    (context → decision → consequences). Prevents "fixing" intentional choices.
+  - Mechanism goes in systems, procedure in recipes, rationale in decisions; the
+    latter two link into systems docs instead of restating them.
 
 - Document the delta between what the code says and what is true: dataflow across
   files, coupling ("if you change X, also update Y"), invariants, which of two
@@ -51,22 +63,23 @@ first; token efficiency second, and only where it doesn't compromise effectivene
   anchors. Agents often read only the top of a file.
 - Every doc must be linked from the nearest `AGENTS.md`; an unlinked doc isn't
   discovered reliably.
-- All docs live in top-level `docs/` — the highest-value content is cross-cutting and
-  has no home directory, and one tree keeps grep-fallback discovery reliable. Scoping
-  comes from which `AGENTS.md` points to a doc, not from its location (one file,
-  N pointers — this is also what avoids repeating shared content per scope). Central
-  files never move when coupling grows, so pointers stay valid. Flat until it
+- All agent docs live in top-level `agent_docs/` — the highest-value content is
+  cross-cutting and has no home directory, and one tree keeps grep-fallback discovery
+  reliable. Scoping comes from which `AGENTS.md` points to a doc, not from its location
+  (one file, N pointers — this is also what avoids repeating shared content per scope).
+  Central files never move when coupling grows, so pointers stay valid. Flat until it
   hurts; then group by subsystem or task, never by directory. Name files in task
   vocabulary (`config-system.md`, `masking.md`) — filenames are matched by searches.
-  Exceptions: human-facing package `README.md`s stay in their package, and a
-  quasi-independent package (own lockfile, deployable on its own) may keep real docs
+  Exceptions: human-facing reference stays in `docs/` (e.g.
+  `docs/evaluate_config_reference.md`), package `README.md`s stay in their package, and
+  a quasi-independent package (own lockfile, deployable on its own) may keep real docs
   in-package so they travel if it is extracted.
 - Scope-local rules and coupling one-liners are not docs: they go in the narrowest
   `AGENTS.md` that covers all files involved.
 
 **The pointer/content asymmetry:** a pointer costs ~15 tokens, a missed invariant costs
 a wrong edit. When in doubt, the pointer goes in AGENTS.md and the content goes in
-`docs/`. Be generous with pointers, strict with content.
+`agent_docs/`. Be generous with pointers, strict with content.
 
 ## Editing rules
 
@@ -106,8 +119,10 @@ ln -s ../AGENTS.md .github/copilot-instructions.md
 - root provider files are symlinks resolving to `AGENTS.md`;
 - the Cursor stub and `.gemini/settings.json` reference `AGENTS.md`;
 - every nested `AGENTS.md` has a sibling `CLAUDE.md` symlink resolving to it;
-- every `docs/...` path referenced in any `AGENTS.md` exists (no dangling pointers);
-- every file in `docs/` is referenced by at least one `AGENTS.md` (no orphan docs).
+- every `agent_docs/...` or `docs/...` path referenced in any `AGENTS.md` exists (no
+  dangling pointers);
+- every file in `agent_docs/` and `docs/` is referenced by at least one `AGENTS.md`
+  (no orphan docs).
 
 Needed because checkouts without symlink support turn symlinks into plain text files,
 and tools sometimes replace a symlink with a regular file on write — either silently
