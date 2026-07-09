@@ -230,7 +230,7 @@ results
 reports
 
 # Personal (untracked) agent instructions; tracked ones are AGENTS.md + symlinks,
-# see agent_docs/agentic_setup.md
+# see agent_docs/agentic-setup.md
 CLAUDE.local.md
 GEMINI.local.md
 AGENTS.local.md

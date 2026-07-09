@@ -2,7 +2,7 @@
 
 Use when: creating a doc under `agent_docs/`, or renaming/moving/removing one.
 
-1. Pick the genre (taxonomy in `agent_docs/agentic_setup.md`): systems doc (a runtime
+1. Pick the genre (taxonomy in `agent_docs/agentic-setup.md`): systems doc (a runtime
    dataflow) → `agent_docs/<topic>.md`; procedure → `agent_docs/recipes/`; rationale →
    `agent_docs/decisions/`.
 2. Name the file in task vocabulary (`config-system.md`, not `common-package.md`) —

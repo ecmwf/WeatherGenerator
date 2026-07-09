@@ -203,7 +203,7 @@ case "$1" in
     ;;
   check-agent-docs)
     (
-      # Enforce the invariants of the agent-instruction setup (agent_docs/agentic_setup.md):
+      # Enforce the invariants of the agent-instruction setup (agent_docs/agentic-setup.md):
       # single source of truth (AGENTS.md + symlinks) and a fully linked doc tree.
       cd "$SCRIPT_DIR" || exit 1
       status=0

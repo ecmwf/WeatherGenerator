@@ -30,7 +30,7 @@ Systems (runtime dataflows):
 - `agent_docs/ssl-training.md` — SSL/student-teacher delta: masking, teachers, latent losses. Read before touching SSL or masking code; update after.
 - `agent_docs/config-system.md` — config sources, merge precedence, stage configs, runtime mutation. Read before adding/renaming config options; update after changing the merge logic.
 - `agent_docs/infrastructure.md` — uv, dependencies, running jobs on HPC vs. developing locally. Read before setting up the env or launching jobs; update after changing tooling or workflow.
-- `agent_docs/agentic_setup.md` — how these instruction files work and what belongs in AGENTS.md vs agent_docs/. Read before editing any AGENTS.md or adding documentation.
+- `agent_docs/agentic-setup.md` — how these instruction files work and what belongs in AGENTS.md vs agent_docs/. Read before editing any AGENTS.md or adding documentation.
 
 Recipes (procedures):
 - `agent_docs/recipes/add-data-reader.md` — add a reader for a new data source.
