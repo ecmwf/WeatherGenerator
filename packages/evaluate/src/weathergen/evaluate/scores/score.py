@@ -332,6 +332,12 @@ class Scores:
             if use_lat_weights and "latitude_weights" in inspect.getfullargspec(f).args:
                 if data.latitude_weights is not None:
                     parameters["latitude_weights"] = data.latitude_weights
+                else:
+                    _logger.warning(
+                        "Latitude weighting was requested for score '%s', but no latitude "
+                        "coordinate was found. Proceeding without weighting.",
+                        score_name,
+                    )
 
         if group_by_coord is not None and self._validate_groupby_coord(data, group_by_coord):
             # Apply groupby to all DataArrays in args
