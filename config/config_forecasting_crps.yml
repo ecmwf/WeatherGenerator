@@ -182,7 +182,7 @@ training_config:
   losses : {
    "physical": {
        type: LossPhysical,
-       loss_fcts: {"mse": null, "kernel_crps": {}, },
+       loss_fcts: {"kernel_crps": {}, },
        },
    }
 
