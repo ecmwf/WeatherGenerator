@@ -4,7 +4,7 @@ One-line purpose: `src/weathergen/model/` implements the WeatherGenerator networ
 transformer that assimilates arbitrary multi-stream Earth-system observations into a latent state on
 a HEALPix grid, rolls that state forward in time, and decodes it at arbitrary target coordinates.
 
-Part of the agent docs rooted at `WeatherGenerator/AGENT-README.md`. Training-side view (losses,
+Part of the agent docs rooted at `AGENT-README.md`. Training-side view (losses,
 EMA teacher usage, trainer loop): `src/weathergen/train/DOCS-Train.md`.
 
 All paths below are relative to `src/weathergen/model/`. Line numbers are approximate anchors, not

@@ -1,143 +1,99 @@
-# AGENT-README — WeatherGenerator
+# WeatherGenerator
 
-Entry point for AI coding agents (and humans) working in this repository. It describes the project
-structure, the tools and commands to use, and the checks that must pass. More detailed docs live
-next to the code they describe and are indexed at the bottom of this file — read the relevant one
-before modifying that part of the codebase.
+A machine-learning Earth system model: a hierarchical transformer trained on diverse
+data streams (ERA5 reanalysis, satellite and in-situ observations, ocean/climate model
+output) with self-supervised student-teacher losses (JEPA/DINO-style) alongside
+physical prediction losses. Data from all streams is tokenized onto the HEALPix grid,
+assimilated into a latent state, optionally rolled out in time autoregressively, and
+decoded per stream.
 
-## What this project is
+This file holds always-relevant rules for LLM tools and an index into the reference
+docs; keep it lean and put detail in `agent_docs/`.
 
-WeatherGenerator is a machine-learning Earth system model: a hierarchical transformer trained on
-diverse data streams (ERA5 reanalysis, satellite and in-situ observations, ocean/climate model
-output) using self-supervised student-teacher approaches (JEPA/DINO-style) alongside physical
-prediction losses. Space is discretized on the HEALPix grid; data from all streams is tokenized
-onto HEALPix cells, assimilated into a latent state, optionally rolled out in time
-autoregressively, and decoded per stream.
+Every change must keep context in sync: update the `agent_docs/` files, the `DOCS-*.md`
+reference files, and the lines in this file that describe what you changed, in the same
+change — stale context misleads the next agent. The index below says which docs cover what.
+The code may be newer than the docs — where code and docs disagree, trust the code and
+update the docs.
 
-**Branches:** `main` (stable, for experiments), `develop` (fast-moving, breaking changes), `develop-ssl` (fast-moving
-pretraining experiments)
+## Repositories & branches
 
-## The three sibling repositories
+- Upstream is `github.com/ecmwf/WeatherGenerator`; development happens on personal
+  forks with PRs back to upstream. Branches: `develop` (default; fast-moving, breaking
+  changes), `main` (stable, for experiments), `develop-ssl` (fast-moving pretraining
+  experiments).
+- `../WeatherGenerator-private` (sibling repo): HPC-specific paths, private configs,
+  SLURM launch scripts. May contain credentials — never read files that look like
+  secrets. Split rule: anything that defines a model or affects training results goes
+  in this repo; machine/team-specific paths and settings go in the private repo.
+  Never hardcode HPC paths in this repo. Details: `agent_docs/infrastructure.md`.
+- Some users also have a `weathergen-research` sibling (experiment planning,
+  documentation, literature) with its own instruction files.
 
-This repo lives beside two others (paths relative to the common parent directory):
+## Environment & tooling
 
-| Repo | Purpose |
-|---|---|
-| `WeatherGenerator/` | This repo. All public code: model, training, evaluation, configs. |
-| `WeatherGenerator-private/` | HPC-specific paths, private configs, SLURM launch scripts. **May contain credentials — never read files that look like secrets.** See `../WeatherGenerator-private/AGENT-README.md`. |
-| `weathergen-research/` | Only some users may have it. Experiment planning, documentation, literature. Has its own CLAUDE.md. |
+- Python 3.12, managed with uv. Deps declared in `pyproject.toml`, locked in `uv.lock`.
+- `uv sync` to set up, `uv run <cmd>` to run. Never `pip install` into the env — it bypasses the lock.
+- Entry points (`pyproject.toml [project.scripts]`, run as `uv run <cmd>`): `train`,
+  `train_continue`, `inference`, `evaluate`, `export`, `plot_train`. CLI flags are
+  dash-separated (`--run-id`, not `--run_id`); full CLI in `src/weathergen/utils/cli.py`.
+  Invocations, run-id mechanics, and HPC launching: `agent_docs/infrastructure.md`.
+- Dev tasks: `scripts/actions.sh {lint|lint-check|type-check|unit-test|toml-check}`; `integration-test*` targets need a GPU.
 
-Rule of thumb: anything that defines a model or affects training results goes in
-`WeatherGenerator`; anything that is a machine/team-specific path or setting goes in
-`WeatherGenerator-private`. Never hardcode HPC paths in this repo.
+## Checks & style
 
-## Repository layout
+- Run `./scripts/actions.sh lint` before considering a change done. CI
+  (`.github/workflows/ci.yml`) runs lint-check, toml-check, type-check, unit-test, and
+  requires the PR to be linked to a GitHub issue (`scripts/check_gh_issue.py`) — all
+  must pass.
+- `unit-test` runs pytest on the `*_test.py` files colocated in `src/` (what CI runs);
+  the standalone tests in `tests/` run via `uv run --extra cpu pytest tests/` and are
+  not currently in CI.
+- Line length 100, ruff formatting; type hints required (pyrefly); use `logging`,
+  never `print`; match existing naming conventions. Do not commit large binary blobs
+  (>2MB commits are rejected — TODO: check this holds on upstream) or the contents of
+  runtime output dirs.
 
-```
-WeatherGenerator/
-├── src/weathergen/           # Core code (package "weathergen")
-│   ├── run_train.py          # Entry points: train, train_continue, inference
-│   ├── datasets/             # Multi-stream data loading, readers, tokenizer, masking
-│   ├── model/                # Architecture: encoder, engines, attention, EMA
-│   ├── train/                # Trainer, losses, LR schedule, SSL teacher
-│   └── utils/                # CLI parsing, distributed, logging, plotting
-├── packages/                 # UV workspace packages
-│   ├── common/               # Config system (merge_configs), I/O utilities
-│   ├── evaluate/             # Evaluation pipeline (Zarr results → metrics/plots)
-│   ├── metrics/              # MLFlow integration
-│   ├── readers_extra/        # Extra data readers (FESOM, ICON, ...)
-│   ├── dashboard/            # Streamlit dashboard (NOT a workspace member)
-│   └── science/              # Standalone analysis scripts
-├── config/                   # YAML configs: default_config.yml + variants
-│   └── streams/              # Per-stream config sets (ERA5, obs, FESOM, ...)
-├── tests/                    # Standalone unit tests (plus *_test.py colocated in src/)
-├── integration_tests/        # End-to-end GPU tests (small training runs)
-├── scripts/actions.sh        # One-stop script for sync/lint/type-check/tests
-├── docs/                     # Assorted docs (e.g. evaluate_config_reference.md)
-└── ci/, .github/workflows/   # CI definitions
-```
+## Layout
 
-## Tooling and everyday commands
+- `src/weathergen/` — core model + training code. Entry points in `run_train.py`;
+  `datasets/` (multi-stream loading, readers, tokenizer, masking), `model/`
+  (encoder, engines, attention, EMA), `train/` (trainer, losses, LR schedule, SSL
+  teacher), `utils/` (CLI, distributed, logging, plotting)
+- `packages/` — uv-workspace libraries (common, evaluate, metrics, readers_extra).
+  Also here but not workspace members: `dashboard/` (own lockfile —
+  `agent_docs/decisions/dashboard-not-in-workspace.md`) and `science/` (standalone
+  analysis scripts)
+- `config/` — YAML run configs; `config/streams/` — per-stream config sets
+- `tests/` — standalone unit tests; `integration_tests/` — GPU integration tests
+- `docs/` — human-facing reference (e.g. `docs/evaluate_config_reference.md`)
+- `ci/`, `.github/workflows/` — CI definitions
+- `logs/`, `models/`, `plots/`, `results/` — runtime output, gitignored; on HPC these are symlinks into shared storage. Never commit contents; details in `agent_docs/infrastructure.md`.
 
-The project is managed with **uv** (workspace with multiple packages). Always run things through
-`uv run` or `scripts/actions.sh`; never pip-install into a global environment.
+## Documentation (read when relevant)
 
-```bash
-./scripts/actions.sh sync         # Create/update .venv (GPU extra on Linux, CPU on macOS)
-./scripts/actions.sh sync-safe    # Slower sync that survives LUSTRE cache corruption (HPC)
+Full index of `agent_docs/`. Every new doc gets a line here — procedure:
+`agent_docs/recipes/add-documentation.md`.
 
-# Training / inference (entry points defined in pyproject.toml [project.scripts])
-# NB: CLI flags are dash-separated (--run-id, not --run_id)
-uv run train --config config/<variant>.yml --run-id <run_id>
-uv run train_continue --from-run-id <run_id> --mini-epoch <N>   # resume (also for chained HPC jobs)
-uv run inference --from-run-id <run_id>   # inference dates come from test_config / --options
-uv run evaluate --config config/evaluate/<cfg>.yml
-uv run export ...                 # export inference output
-uv run plot_train -fd "{<run_id>: [<job_id>, <label>]}"   # or -fy runs.yml
-```
+Systems (runtime dataflows):
+- `agent_docs/training-step.md` — the end-to-end training step: trainer, model forward, losses. Read before changing any of those; update after.
+- `agent_docs/data-pipeline.md` — stream configs → readers → tokenizer → ModelBatch. Read before touching data loading or stream configs; update after.
+- `agent_docs/ssl-training.md` — SSL/student-teacher delta: masking, teachers, latent losses. Read before touching SSL or masking code; update after.
+- `agent_docs/config-system.md` — config sources, merge precedence, stage configs, runtime mutation. Read before adding/renaming config options; update after changing the merge logic.
+- `agent_docs/infrastructure.md` — software stack (cluster base env + uv), SLURM/GH200 hardware, run commands and run IDs, runtime output dirs; local runs not supported yet. Read before setting up an env, launching or continuing runs, or touching run outputs; update after changing tooling or workflow.
+- `agent_docs/agentic-setup.md` — how these instruction files work (opt-in loading) and what belongs in AGENT-README.md vs agent_docs/. Read before editing this file or adding documentation.
 
-Other shared flags: `--options key.subkey=value ...` (highest-precedence overrides),
-`--private-config <path>`, `--base-config <path>` (defaults to `config/default_config.yml`),
-`--reuse-run-id` (continue/inference). See `src/weathergen/utils/cli.py` for the full CLI.
+Recipes (procedures):
+- `agent_docs/recipes/add-data-reader.md` — add a reader for a new data source.
+- `agent_docs/recipes/add-documentation.md` — add or change agent documentation.
 
-**Run IDs:** every training/inference/validation run has an 8-character alphanumeric ID (starts
-with a letter; random unless given via `--run-id`). Outputs land in `models/<run_id>/`,
-`results/<run_id>/` (under the shared working dir) and `./logs/<run_id>/` (cwd-relative).
-Continue training with `train_continue --from-run-id`.
+Decisions (rationale):
+- `agent_docs/decisions/dashboard-not-in-workspace.md` — why packages/dashboard has its own lockfile.
 
-Actual HPC launches (SLURM, job chaining, MLFlow registration) go through
-`../WeatherGenerator-private/hpc/launch-slurm.py` — see `../WeatherGenerator-private/hpc/DOCS-HPC.md`.
-
-## Checks to run (before considering any change done)
-
-```bash
-./scripts/actions.sh lint         # ruff format + ruff check --fix (auto-fixes)
-./scripts/actions.sh lint-check   # CI version: ruff format -n + ruff check + pylint, no fixes
-./scripts/actions.sh type-check   # Only run when requested. pyrefly, per package then root (slow: re-syncs envs)
-./scripts/actions.sh unit-test    # Only run when requested. pytest on src/ (colocated *_test.py files) — this is what CI runs
-uv run --extra cpu pytest tests/  # standalone tests in tests/ (not currently in CI)
-./scripts/actions.sh toml-check   # Only run when requested. pyproject.toml consistency across workspace
-```
-
-Integration tests need a GPU and pre-synced data (run on CSCS CI, `ci/cscs.yaml`):
-
-```bash
-./scripts/actions.sh integration-test-single   # smallest single-stream run
-./scripts/actions.sh integration-test          # Outdated. multi-stream
-./scripts/actions.sh integration-test-jepa     # Outdated. JEPA/SSL
-./scripts/actions.sh integration-test-all
-```
-
-**CI (GitHub Actions, `.github/workflows/ci.yml`):** lint-check, toml-check, type-check,
-unit-test, and a check that the PR branch is linked to a GitHub issue (branch naming enforced by
-`scripts/check_gh_issue.py`). All must pass.
-
-**Code style:** line length 100; ruff formatting; type hints required (pyrefly); use `logging`,
-never `print`; match existing naming conventions. Do not commit large binary blobs (>2MB commits
-are rejected).
-
-## Configuration system (short version)
-
-Hierarchical OmegaConf YAML. Merge order (ascending priority):
-`config/default_config.yml` → private config (from `WeatherGenerator-private`; found via explicit
-path, the `WEATHERGEN_PRIVATE_CONF` env var, or auto-detection by `hpc/platform-env.py`) → extra
-`--config` files → `--options` CLI overrides.
-`validation_config` inherits from `training_config`, `test_config` from `validation_config`.
-Use `merge_configs()` from `packages/common/src/weathergen/common/config.py` when combining
-configs in code. Details: [config/DOCS-Config.md](config/DOCS-Config.md).
-
-## Detailed docs index
-
-| Doc | Covers |
-|---|---|
-| [config/DOCS-Config.md](config/DOCS-Config.md) | Config merging, default_config.yml options, variants |
-| [config/streams/DOCS-Streams.md](config/streams/DOCS-Streams.md) | Stream YAML schema, readers, adding a stream |
-| [src/weathergen/model/DOCS-model.md](src/weathergen/model/DOCS-model.md) | Architecture: encoder, engines.py classes, attention, EMA |
-| [src/weathergen/datasets/DOCS-Datasets.md](src/weathergen/datasets/DOCS-Datasets.md) | Data pipeline: samplers, readers, tokenizer, masking |
-| [src/weathergen/train/DOCS-Train.md](src/weathergen/train/DOCS-Train.md) | Trainer, loss system, SSL teacher, checkpointing |
-| [packages/DOCS-Packages.md](packages/DOCS-Packages.md) | Workspace packages: common, evaluate, metrics, readers_extra |
-| `../WeatherGenerator-private/AGENT-README.md` | The private repo: structure, rules |
-| `../WeatherGenerator-private/hpc/DOCS-HPC.md` | launch-slurm.py, per-HPC scripts, job chaining |
-
-Keep these docs up to date: if you change something a doc describes (a config key, a class name, a
-command), update the doc in the same change.
+Code-adjacent reference (human-oriented, more detail than the systems docs):
+- `config/DOCS-Config.md` — config merging, default_config.yml options, variants.
+- `config/streams/DOCS-Streams.md` — stream YAML schema, readers, adding a stream.
+- `src/weathergen/model/DOCS-model.md` — architecture: encoder, engines.py classes, attention, EMA.
+- `src/weathergen/datasets/DOCS-Datasets.md` — data pipeline: samplers, readers, tokenizer, masking.
+- `src/weathergen/train/DOCS-Train.md` — trainer, loss system, SSL teacher, checkpointing.
+- `packages/DOCS-Packages.md` — workspace packages: common, evaluate, metrics, readers_extra.

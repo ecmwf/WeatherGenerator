@@ -3,7 +3,7 @@
 Purpose: developer/agent documentation for the WeatherGenerator training loop, loss system,
 target-and-aux calculators (incl. SSL teachers), LR scheduling, and collapse monitoring.
 
-Part of the agent docs rooted at `WeatherGenerator/AGENT-README.md`.
+Part of the agent docs rooted at `AGENT-README.md`.
 For the model architecture side, see `src/weathergen/model/DOCS-model.md`.
 
 Line anchors below are approximate; verify with grep before editing.

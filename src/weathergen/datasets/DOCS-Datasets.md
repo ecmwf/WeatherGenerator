@@ -2,7 +2,7 @@
 
 One-line purpose: turns heterogeneous weather data (gridded reanalysis, point observations, ocean/atmosphere model output) into masked, tokenized, HEALPix-organized `ModelBatch` objects for training and inference.
 
-Part of the agent docs rooted at `WeatherGenerator/AGENT-README.md`. Stream configuration itself is documented in `config/streams/DOCS-Streams.md`.
+Part of the agent docs rooted at `AGENT-README.md`. Stream configuration itself is documented in `config/streams/DOCS-Streams.md`.
 
 Data flow in one sentence:
 

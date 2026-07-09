@@ -1,7 +1,7 @@
 # DOCS-Config — The WeatherGenerator configuration system
 
 How run configurations are loaded, merged, and structured, and what lives in `config/`. Part of
-the agent docs rooted at [`WeatherGenerator/AGENT-README.md`](../AGENT-README.md).
+the agent docs rooted at [`AGENT-README.md`](../AGENT-README.md).
 
 ## How a run config is assembled
 
