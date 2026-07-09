@@ -46,7 +46,7 @@ training_config:
     lr_final_decay: 2e-6
     lr_final: 0.0
     num_steps_warmup: 1024
-    num_steps_cooldown: 512
+    num_steps_cooldown: 16384
     policy_warmup: "cosine"
     policy_decay: "cosine"
     policy_cooldown: "linear"
