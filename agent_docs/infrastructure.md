@@ -5,6 +5,16 @@ SLURM-managed HPC clusters (development focus: GH200 nodes, aarch64); running th
 locally is not explicitly supported yet. The software stack has two layers: a per-cluster
 base environment (uenv or modules) and, on top of it, uv managing the project environment.
 
+## Repositories and forks
+
+- Upstream is `github.com/ecmwf/WeatherGenerator`; development usually happens on
+  personal forks, with PRs back to upstream. Remotes in a clone typically include the
+  upstream plus one or more forks — never identify a code state by commit alone, always
+  as (repository, commit). See `agent_docs/context-version.md`.
+- `WeatherGenerator-private` is a sibling repository (expected at
+  `../WeatherGenerator-private`, overridable via `WEATHERGEN_PRIVATE_REPO_PATH`) holding
+  private HPC configs used by e.g. `scripts/actions.sh create-links`.
+
 ## Execution model
 
 - All real runs (training, evaluation, inference, profiling) happen on HPC clusters,

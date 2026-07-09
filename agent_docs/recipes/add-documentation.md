@@ -19,6 +19,8 @@ Use when: creating a doc under `agent_docs/`, or renaming/moving/removing one.
    dangling references, orphan docs, and agent docs missing from the root index.
    On rename/move/delete, additionally grep the old path across `agent_docs/` itself:
    cross-references between docs are not machine-checked.
+7. Bump the verified-against stamp in `agent_docs/context-version.md` (repository,
+   branch, commit, date) to the code state you verified the docs against.
 
 Pitfalls:
 

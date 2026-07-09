@@ -6,6 +6,8 @@ tools and an index into the reference docs; keep it lean and put detail in `agen
 Every change must keep context in sync: update the `agent_docs/` files and AGENTS.md
 lines that describe what you changed, in the same change — stale context misleads the
 next agent. The index below and the scoped AGENTS.md files say which docs cover what.
+Docs are verified against a pinned code state (`agent_docs/context-version.md`); the
+code may be newer — where code and docs disagree, trust the code and update the docs.
 
 ## Environment & tooling
 
@@ -36,6 +38,9 @@ Systems (runtime dataflows):
 - `agent_docs/config-system.md` — config sources, merge precedence, stage configs, runtime mutation. Read before adding/renaming config options; update after changing the merge logic.
 - `agent_docs/infrastructure.md` — software stack (cluster base env + uv), SLURM/GH200 hardware, runtime output dirs; local runs not supported yet. Read before setting up an env, launching jobs, or touching run outputs; update after changing tooling or workflow.
 - `agent_docs/agentic-setup.md` — how these instruction files work and what belongs in AGENTS.md vs agent_docs/. Read before editing any AGENTS.md or adding documentation.
+
+Meta:
+- `agent_docs/context-version.md` — which (repository, commit) these docs were verified against.
 
 Recipes (procedures):
 - `agent_docs/recipes/add-data-reader.md` — add a reader for a new data source.
