@@ -5,7 +5,7 @@ site_author: WeatherGenerator contributors
 copyright: "&copy; {{ build_date_utc.strftime('%Y') }} WeatherGenerator contributors"
 
 theme:
-  name: mkdocs
+  name: readthedocs
   locale: en
   highlightjs: true  
   logo: images/wg_logo.svg
