@@ -30,5 +30,5 @@ extra_css:
 
 nav:
   - "Introduction": README.md
-  - "Configuration File": guides/config.md
+  - "Configuration File": guide/config.md
   - "Examples": examples/index.md
