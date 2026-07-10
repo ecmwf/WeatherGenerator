@@ -566,7 +566,9 @@ class Trainer(TrainerBase):
 
                     batch.to_device(self.device)
 
-                    inference_only = self.cf.get("inference_only", False)
+                    # `inference_only` pertains to the active mode (test/inference).
+                    # Use the passed `mode_cfg` so validation/training respect their own setting.
+                    inference_only = mode_cfg.get("inference_only", False)
 
                     # evaluate model
                     with torch.autocast(

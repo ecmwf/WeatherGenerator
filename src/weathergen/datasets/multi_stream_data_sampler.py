@@ -91,7 +91,9 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
 
         self.mode_cfg = mode_cfg
         self._stage = stage
-        self.inference_only = cf.get("inference_only", False)
+        # `inference_only` applies to the active mode config (test/inference).
+        # Read from `mode_cfg` so training/validation are not affected by test flags.
+        self.inference_only = mode_cfg.get("inference_only", False)
 
         self.mini_epoch = 0
         self.mask_value = 0.0
