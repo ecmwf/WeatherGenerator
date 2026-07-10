@@ -9,7 +9,6 @@ theme:
   name: readthedocs
   locale: en
   highlightjs: true  
-  logo: _static/images/wg_logo.svg
   # font:
   #   text: "Inter"
   #   headings: "Familjen Grotesk"
