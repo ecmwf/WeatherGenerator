@@ -43,16 +43,11 @@ def _filter_output_channels(
     if not filter_cfg:
         return
 
-    output_filter_per_stream: dict[str, list[str]] = {
-        str(key): list(value)
-        for key, value in filter_cfg.items()
-        if value  # skip empty lists / None
-    }
-
     for stream_idx, stream_name in enumerate(stream_names):
-        write_vars = output_filter_per_stream.get(stream_name)
-        if write_vars is None:
+        write_vars = filter_cfg.get(stream_name, [])
+        if not write_vars:
             continue
+        write_vars = list(write_vars)
 
         all_channels = target_channels[stream_idx]
         write_vars_set = set(write_vars)
