@@ -5,12 +5,14 @@ site_author: WeatherGenerator contributors
 copyright: "&copy; {{ build_date_utc.strftime('%Y') }} WeatherGenerator contributors"
 
 theme:
+  name: mkdocs
+  locale: en
+  highlightjs: true  
   logo: images/wg_logo.svg
   # font:
   #   text: "Inter"
   #   headings: "Familjen Grotesk"
   # CHECK GDPR login
-  highlightjs: true
 plugins:
   - search
   - mkdocstrings:
