@@ -1,4 +1,4 @@
-![WeatherGenerator logo](./_static/images/wg_logo.svg)
+![WeatherGenerator logo](wg_logo.svg)
 
 # The `WeatherGenerator-FastEvaluation` package
 
