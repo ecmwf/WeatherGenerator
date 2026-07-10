@@ -351,15 +351,17 @@ def _plot_score_maps_per_stream(
 
     score_results, preds, metric_names = computed
     valid = [
-        (m, r)
-        for m, r in zip(metric_names, score_results, strict=False)
-        if r is not None and "ipoint" in r.dims
+        (metric, result)
+        for metric, result in zip(metric_names, score_results, strict=False)
+        if result is not None and "ipoint" in result.dims
     ]
     if not valid:
         return
 
+    ens_metrics = {metric for metric, result in valid if "ens" in result.dims}
+
     plot_metrics = xr.concat(
-        [r for _, r in valid],
+        [result for _, result in valid],
         dim="metric",
         coords="minimal",
         combine_attrs="drop_conflicts",
@@ -367,24 +369,28 @@ def _plot_score_maps_per_stream(
     plot_metrics = plot_metrics.assign_coords(
         lat=preds.lat.reset_coords(drop=True),
         lon=preds.lon.reset_coords(drop=True),
-        metric=[m for m, _ in valid],
+        metric=[metric for metric, _ in valid],
     ).compute()
 
-    if "ens" in preds.dims:
-        plot_metrics["ens"] = preds.ens
+    if "ens" in plot_metrics.dims:
+        plot_metrics = plot_metrics.assign_coords(ens=preds.ens.values)
 
-    has_ens = "ens" in plot_metrics.coords
-    ens_values = plot_metrics.coords["ens"].values if has_ens else [None]
+    all_ens = plot_metrics.coords["ens"].values if "ens" in plot_metrics.dims else [None]
 
     plot_tasks: list[dict] = []
     for metric in plot_metrics.coords["metric"].values:
+        metric_has_ens = str(metric) in ens_metrics and "ens" in plot_metrics.dims
+        ens_values = all_ens if metric_has_ens else [None]
         for ens_val in ens_values:
             tag = "score_maps" + (f"_ens_{ens_val}" if ens_val is not None else "") + f"_{metric}"
             for channel in plot_metrics.coords["channel"].values:
                 sel = {"metric": metric, "channel": channel}
                 if ens_val is not None:
                     sel["ens"] = ens_val
-                data = plot_metrics.sel(**sel).squeeze()
+                data = plot_metrics.sel(**sel)
+                if ens_val is None and "ens" in data.dims:
+                    data = data.isel(ens=0, drop=True)
+                data = data.squeeze()
                 title = f"{metric} - {channel}: fstep {fstep}" + (
                     f", ens {ens_val}" if ens_val is not None else ""
                 )
