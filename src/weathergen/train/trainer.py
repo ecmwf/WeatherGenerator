@@ -48,7 +48,13 @@ from weathergen.train.utils import (
     get_target_idxs_from_cfg,
 )
 from weathergen.utils.distributed import is_root
-from weathergen.utils.performance import NullThroughputTracker, ThroughputTracker, nvtx_range
+from weathergen.utils.performance import (
+    MemoryTracker,
+    NullMemoryTracker,
+    NullThroughputTracker,
+    ThroughputTracker,
+    nvtx_range,
+)
 from weathergen.utils.train_logger import TrainLogger, prepare_losses_for_logging
 from weathergen.utils.utils import get_dtype
 from weathergen.utils.validation_io import write_output
@@ -88,6 +94,7 @@ class Trainer(TrainerBase):
         self.batch_size_test_per_gpu = -1
         self.collapse_monitor: CollapseMonitor | None = None
         self.perf_tracker: ThroughputTracker | NullThroughputTracker = NullThroughputTracker()
+        self.memory_tracker: MemoryTracker | NullMemoryTracker = NullMemoryTracker()
         self.t_training_start: float = 0
         self.training_loop_annotation_context = contextlib.nullcontext
 
@@ -171,6 +178,11 @@ class Trainer(TrainerBase):
                 warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
                 batch_size_per_gpu=self.batch_size_per_gpu,
             )
+        # peak GPU memory tracking is on by default; opt out via
+        # train_logging.memory_tracking.enabled
+        memory_tracking_cfg = cf.train_logging.get("memory_tracking", {}) or {}
+        if memory_tracking_cfg.get("enabled", False) and torch.cuda.is_available():
+            self.memory_tracker = MemoryTracker(device=torch.device(self.devices[0]))
         if cf.get("profiling", {}).get("nvtx_annotate", False):
             self.training_loop_annotation_context = nvtx_range
 
@@ -545,6 +557,11 @@ class Trainer(TrainerBase):
                     TRAIN, m, step=self.cf.general.istep
                 ),
             )
+            self.memory_tracker.step(
+                log_fn=lambda m: self.train_logger.log_metrics(
+                    TRAIN, m, step=self.cf.general.istep
+                ),
+            )
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
                 self.collapse_monitor._compute_collapse_metrics(
@@ -655,6 +672,13 @@ class Trainer(TrainerBase):
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
 
+        # close the memory window covering validation so its peak is not
+        # attributed to the subsequent checkpoint save or training step
+        self.memory_tracker.step(
+            log_fn=lambda m: self.train_logger.log_metrics(VAL, m, step=self.cf.general.istep),
+            window="validation",
+        )
+
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
             self.model.state_dict() if self.ema_model is None else self.ema_model.state_dict()
@@ -728,6 +752,13 @@ class Trainer(TrainerBase):
 
             # save config
             config.save(self.cf, mini_epoch)
+
+        # capture peak memory during checkpoint saving; gathering the full
+        # state dict on rank 0 is often the run-wide peak
+        self.memory_tracker.step(
+            log_fn=lambda m: self.train_logger.log_metrics(TRAIN, m, step=self.cf.general.istep),
+            window="save_model",
+        )
 
     def _log(self, stage: Stage):
         """

@@ -20,14 +20,16 @@ import pytest
 import torch
 
 from weathergen.utils.performance import (
+    MemoryTracker,
+    NullMemoryTracker,
     ThroughputTracker,
     compute_source_bytes,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def _no_cuda_sync():
@@ -205,4 +207,108 @@ def test_step_does_not_log_on_non_root(tracker):
     with patch("weathergen.utils.performance.is_root", return_value=False):
         tracker.step(batch, istep=2, log_fn=lambda m: logged.update(m))
 
+    assert logged == {}
+
+
+# ---------------------------------------------------------------------------
+# MemoryTracker
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _mock_cuda_memory():
+    """Mock CUDA allocator peak counters — tests run on CPU."""
+    with (
+        patch(
+            "weathergen.utils.performance.torch.cuda.max_memory_allocated",
+            return_value=2 * 1024**3,
+        ),
+        patch(
+            "weathergen.utils.performance.torch.cuda.max_memory_reserved",
+            return_value=3 * 1024**3,
+        ),
+        patch("weathergen.utils.performance.torch.cuda.reset_peak_memory_stats") as reset_mock,
+    ):
+        yield reset_mock
+
+
+def test_memory_tracker_logs_global_peaks_on_root():
+    """step() logs allocated and reserved peaks in GiB on the root rank."""
+    tracker = MemoryTracker(device=torch.device("cpu"))
+    logged = {}
+
+    with patch("weathergen.utils.performance.is_root", return_value=True):
+        tracker.step(log_fn=logged.update)
+
+    assert logged["performance.memory.step.max_allocated_gib"] == pytest.approx(2.0)
+    assert logged["performance.memory.step.max_reserved_gib"] == pytest.approx(3.0)
+
+
+def test_memory_tracker_window_label_in_metric_keys():
+    """The window label is woven into the metric keys."""
+    tracker = MemoryTracker(device=torch.device("cpu"))
+    logged = {}
+
+    with patch("weathergen.utils.performance.is_root", return_value=True):
+        tracker.step(log_fn=logged.update, window="save_model")
+
+    assert set(logged) == {
+        "performance.memory.save_model.max_allocated_gib",
+        "performance.memory.save_model.max_reserved_gib",
+    }
+
+
+def test_memory_tracker_reads_peaks_before_resetting():
+    """Each step() reads the peak counters before resetting the stats.
+
+    Resetting first would zero the high-water marks and log ~0 values; the
+    reset at the end is what makes the next step report its own window.
+    """
+    calls = []
+
+    with (
+        patch(
+            "weathergen.utils.performance.torch.cuda.max_memory_allocated",
+            side_effect=lambda device: calls.append("read_allocated") or 0,
+        ),
+        patch(
+            "weathergen.utils.performance.torch.cuda.max_memory_reserved",
+            side_effect=lambda device: calls.append("read_reserved") or 0,
+        ),
+        patch(
+            "weathergen.utils.performance.torch.cuda.reset_peak_memory_stats",
+            side_effect=lambda device: calls.append("reset"),
+        ),
+        patch("weathergen.utils.performance.is_root", return_value=True),
+    ):
+        tracker = MemoryTracker(device=torch.device("cpu"))
+        tracker.step()
+        tracker.step()
+
+    assert calls == [
+        "reset",  # construction starts a clean window
+        "read_allocated",
+        "read_reserved",
+        "reset",
+        "read_allocated",
+        "read_reserved",
+        "reset",
+    ]
+
+
+def test_memory_tracker_does_not_log_on_non_root():
+    """step() does not invoke log_fn on non-root ranks."""
+    tracker = MemoryTracker(device=torch.device("cpu"))
+    logged = {}
+
+    with patch("weathergen.utils.performance.is_root", return_value=False):
+        tracker.step(log_fn=logged.update)
+
+    assert logged == {}
+
+
+def test_null_memory_tracker_is_noop():
+    """NullMemoryTracker.step() accepts the same call signature and does nothing."""
+    logged = {}
+    NullMemoryTracker().step(log_fn=logged.update)
     assert logged == {}
