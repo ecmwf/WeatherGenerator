@@ -588,37 +588,30 @@ class Trainer(TrainerBase):
                             )
 
                         targets_and_auxs = {}
-                        if not inference_only:
-                            for loss_name, target_aux in self.target_and_aux_calculators_val.items():
-                                target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
-                                targets_and_auxs[loss_name] = target_aux.compute(
-                                    self.cf.general.istep,
-                                    batch.get_target_samples(target_idxs),
-                                    self.model_params,
-                                    self.model,
-                                )
-                        else:
-                            # In inference_only mode, targets are absent but we still need
-                            # coordinate/time metadata for output writing. Compute targets_and_auxs
-                            # from source samples, which carry target_coords_raw and
-                            # target_times_raw (populated by get_target_coords in the sampler).
-                            for loss_name, target_aux in self.target_and_aux_calculators_val.items():
-                                tao = target_aux.compute(
-                                    self.cf.general.istep,
-                                    batch.get_source_samples(),
-                                    self.model_params,
-                                    self.model,
-                                )
-                                # Source stream data marks output steps as spoof because target
-                                # files are absent by design in inference_only mode. Override
-                                # is_spoof to False so write_output writes actual predictions
-                                # rather than discarding them as corrupted validation data.
+                        # Compute targets/aux once per loss; pass source samples when
+                        # running in inference-only mode, otherwise pass real targets.
+                        for loss_name, target_aux in self.target_and_aux_calculators_val.items():
+                            target_idxs = get_target_idxs_from_cfg(mode_cfg, loss_name)
+                            samples = (
+                                batch.get_source_samples() if inference_only
+                                else batch.get_target_samples(target_idxs)
+                            )
+                            tao = target_aux.compute(
+                                self.cf.general.istep,
+                                samples,
+                                self.model_params,
+                                self.model,
+                            )
+                            # When running inference_only, target files are absent and the
+                            # sampler marks these steps as spoof. Override so outputs are
+                            # written as real predictions.
+                            if inference_only:
                                 for step_dict in tao.physical:
                                     for _sname, step_data in step_dict.items():
                                         step_data["is_spoof"] = [False] * len(
                                             step_data["is_spoof"]
                                         )
-                                targets_and_auxs[loss_name] = tao
+                            targets_and_auxs[loss_name] = tao
 
                     if not inference_only:
                         _ = self.loss_calculator_val.compute_loss(
