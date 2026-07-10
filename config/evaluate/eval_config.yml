@@ -1,14 +1,23 @@
 #optional: if commented out all is taken care of by the default settings
 # NB. global options apply to all run_ids 
+
 #global_plotting_options:
-#  region: ["belgium", "global"]
+#  regions: ["europe", "global"] # Have regions here, if you want for them to apply to all streams (map generation)
 #  image_format : "png" #options: "png", "pdf", "svg", "eps", "jpg" ..
+#  animation_format: "gif" #options: "mp4", "gif"
+
 #  dpi_val : 300
 #  fps: 2
+#  n_bins: 50 #number of bins for histograms. 
+#  log_x: true #use log scale for x axis in histograms. 
+#  log_y: true #use log scale for y axis in histograms. 
 #  ERA5:
+#    use_datashader: false
 #    marker_size: 2
 #    scale_marker_size: 1
 #    marker: "o"
+#    add_healpix_grid: false
+#    healpix_nside: 4
 #    # alpha: 0.5
 #    2t: 
 #      vmin: 250
@@ -16,28 +25,58 @@
 #    10u:
 #      vmin: -40
 #      vmax: 40
+#  IMERG_ANEMOI:
+#    marker_size: 1.5
+#    scale_marker_size: true
+#    marker: "o"
+#    "tp_*":
+#      colorbar_scale: "log"
+#      levels: [0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02]
+#      colors:
+#        - "none"
+#        - "#BEDAE5"
+#        - "#80B5CC"
+#        - "#5691B3"
+#        - "#4B6E9C"
+#        - "#424B83"
+#        - "#45596D"
+#        - "#5B9E4C"
+
+
+# max_workers: 36  # hard cap on parallel workers (I/O, plotting, scoring)
 
 evaluation:
-  metrics  : ["rmse", "mae"]
-  regions: ["global", "nhem"]
+  metrics  : 
+  - rmse
+  - mae
+  - psd:
+        psd_method: "sht"                    # "sht" (SHT-based, default) or "fft" (regrid FFT)
+        # psd_regrid_resolution: 1.0           # degrees, only for fft method
+  # metrics  : ["rmse", "mae"]
+  # regions: ["global", "nhem"] # Have regions here, if you want for them to apply to all streams (scores calculation)
   summary_plots : true
   ratio_plots : false
   heat_maps : false
   summary_dir: "./plots/"
   plot_ensemble: "members" #supported: false, "std", "minmax", "members"
-  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation 
+  plot_score_maps: false #plot scores on a 2D maps. it slows down score computation
+  plot_score_animations: false #plot animations of score maps across forecast steps. it slows down score computation
+  plot_score_init_timeseries: true #plot timeseries of scores across forecast steps. 
   print_summary: false #print out score values on screen. it can be verbose
   log_scale: false
   add_grid: false
   score_cards: false
   bar_plots: false
-  num_processes: 0  #options: int, "auto", 0 means no parallelism (default)
   # baseline: "ar40mckx"
 
 
 default_streams:
   ERA5:
+    #offset: "1h" #optional: specify a timedelta offset to infer init_time when source_interval is missing. Format examples: "1h", "30m", "2h30m".
+    regions: ["global"]
     channels: ["2t", "10u"] #, "10v", "z_500", "t_850", "u_850", "v_850", "q_850", ]
+    regrid: True 
+      # target_grid: [1.5, 1.5] #default is [1.5, 1.5], e.g. ["O96"]
     evaluation:
       forecast_step: "all"
       sample: "all"
@@ -47,10 +86,14 @@ default_streams:
       forecast_step: [1,3, 2] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
       ensemble: [0,2,5] #supported: "all", "mean", [0,1,2]
       plot_maps: true
+      plot_bias: false
       plot_target: false
       plot_histograms: true
       plot_animations: true
+      plot_timeseries: false
+
   CERRA:
+    regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"] #, "blah"]
     evaluation:
       forecast_step: "all"
@@ -59,10 +102,29 @@ default_streams:
       sample: [2, 3, 0]
       forecast_step: [1,3, 4, 5]
       plot_maps: true
+      plot_bias: false
       plot_target: false
       plot_histograms: true
       plot_animations: true
+      plot_timeseries: false
       
+  IMERG_ANEMOI:
+    channels: ["tp_imerg_0"]
+    evaluation:
+      forecast_step: "all"
+      sample: "all"
+      ensemble: [14]
+    plotting:
+      sample: [1, 3]
+      forecast_step: [1, 2, 3] #supported: "all", [1,2,3,...], "1-50" (equivalent of [1,2,3,...50])
+      ensemble: [14]
+      plot_maps: true
+      plot_bias: false
+      plot_target: false
+      plot_histograms: true
+      plot_animations: true
+      plot_timeseries: false
+
 run_ids :
   ar40mckx:
     label: "pretrained model ar40mckx"
@@ -81,9 +143,10 @@ run_ids :
 
   jjc9ym62:
     label: "2 steps window"
+    color: "magenta" #optional: if not specified, the color is automatically assigned by the plotting module
     results_base_dir : "./results/"
     epoch: 1 #optional: if not specified epoch 0 (in inference it is always 0) is used
-    rank: 2 #optional: if not specified rank 0 is used
+    rank: "all" #optional: int, "all", or list of ints. Default: "all". Use "all" for multi-rank inference.
     streams:
       ERA5:
         channels: ["2t", "10u", "10v"] 
@@ -96,9 +159,11 @@ run_ids :
           forecast_step: [1,3, 2]
           ensemble: "mean" 
           plot_maps: true
+          plot_bias: false
           plot_target: false
           plot_histograms: true
           plot_animations: true
+          plot_timeseries: false
 
   
 
@@ -111,8 +176,9 @@ run_ids :
     merge_run_ids:
       - so67dku4
       - c9cg8ql3
-    metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
+    merge_metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
     label: "Merged Results"
+    color: "green" #optional
     results_base_dir : "./results/"
     streams:
       ERA5:
@@ -138,6 +204,25 @@ run_ids :
           sample: [0, 1, 2, 3]
           ensemble: "all" #supported
 
+  #WeatherGeneratorMerge JSON example:
+  ###############################
+
+  #Example of syntax to stack multiple runs over the ensemble dimension  
+  merge_test: #<------ This is the new run_id name of the merged dataset. NB. you always need to specify one
+    type: "jsonmerge" # <------- VERY IMPORTANT
+    merge_run_ids:
+      - so67dku4
+      - c9cg8ql3
+    merge_metrics_dir: "./merge_test/metrics/" #<------- VERY IMPORTANT
+    label: "Merged Results"
+    results_base_dir : "./results/"
+    streams:
+      ERA5:
+        channels: ["z_500", "t_850", "u_850", "v_850", "q_850"]
+        evaluation:
+          forecast_step: [2,4,6] 
+          sample: [0, 1, 2, 3]
+          ensemble: "all" 
 
   # CSV Reader example:
   ###############################
@@ -165,4 +250,12 @@ run_ids :
           forecast_step: "all"
           sample: "all"
   
-          
+  #mertics with parameters example:
+  ###############################
+
+  #Example of syntax to pass parameters to individual metrics
+  evaluation:
+    metrics:
+    - fbi:
+        thresh: 280
+    - rmse

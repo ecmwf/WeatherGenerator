@@ -26,10 +26,8 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.omegaconf import open_dict
 
 from weathergen.common.io import StoreType
+from weathergen.common.paths import _REPO_ROOT, get_wg_private_path
 
-_REPO_ROOT = Path(
-    __file__
-).parent.parent.parent.parent.parent.parent  # TODO use importlib for resources
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
 
 _DATETIME_TYPE_NAME = "datetime"  # Names for custom resolvers used in Omegaconf
@@ -84,14 +82,19 @@ OmegaConf.register_new_resolver(_TIMEDELTA_TYPE_NAME, parse_timedelta)
 OmegaConf.register_new_resolver(_DATETIME_TYPE_NAME, str_to_datetime64)
 
 
+def _patch_time(key, sub_conf, resolver):
+    raw_key = f"_{key}"
+    sub_conf[raw_key] = sub_conf[key]
+    sub_conf[key] = f"${{{resolver}:{sub_conf[key]}}}"
+    return sub_conf
+
+
 def _sanitize_start_end_time_keys(sub_conf):
     """Convert start_date and end_date keys to datetime resolvers."""
     time_keys = ["start_date", "end_date"]
     for key in time_keys:
         if key in sub_conf:
-            raw_key = f"_{key}"
-            sub_conf[raw_key] = f"${{{key}}}"
-            sub_conf[key] = f"${{{_DATETIME_TYPE_NAME}:{sub_conf[key]}}}"
+            sub_conf = _patch_time(key, sub_conf, _DATETIME_TYPE_NAME)
 
 
 def _sanitize_delta_time_keys(sub_conf):
@@ -99,16 +102,12 @@ def _sanitize_delta_time_keys(sub_conf):
     delta_keys = ["time_window_step", "time_window_len"]
     for key in delta_keys:
         if key in sub_conf:
-            raw_key = f"_{key}"
-            sub_conf[raw_key] = f"${{{key}}}"
-            sub_conf[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf[key]}}}"
+            sub_conf = _patch_time(key, sub_conf, _TIMEDELTA_TYPE_NAME)
 
     if sub_conf.get("forecast") is not None:
         key = "time_step"
         if key in sub_conf.forecast:
-            raw_key = f"_{key}"
-            sub_conf.forecast[raw_key] = f"${{{key}}}"
-            sub_conf.forecast[key] = f"${{{_TIMEDELTA_TYPE_NAME}:{sub_conf.forecast[key]}}}"
+            sub_conf.forecast = _patch_time(key, sub_conf.forecast, _TIMEDELTA_TYPE_NAME)
 
 
 def _sanitize_time_keys(conf: Config) -> Config:
@@ -137,35 +136,34 @@ def _sanitize_time_keys(conf: Config) -> Config:
 
 
 def _strip_interpolation(conf: Config) -> Config:
-    """Remove OmegaConf interpolations and convert timedelta/datetime objects to strings."""
-    stripped = OmegaConf.create()
-    for key in list(conf.keys()):
-        if key.startswith("_"):
-            # Skip hidden/backup keys
-            continue
-        elif OmegaConf.is_interpolation(conf, key):
-            raw_key = f"_{key}"
-            if raw_key in conf:
+    """Recursively convert interpolated timedelta/datetime objects to strings."""
+    stripped = {}
+    if OmegaConf.is_dict(conf):
+        for key in list(conf.keys()):
+            key = str(key)
+            if OmegaConf.is_missing(conf, key):
+                val = "???"
+            elif OmegaConf.is_config(conf[key]):
+                val = _strip_interpolation(conf[key])
+            elif key.startswith("_"):
+                continue  # Skip hidden/backup keys
+            elif OmegaConf.is_interpolation(conf, key):
+                raw_key = f"_{key}"
+                assert raw_key in conf, (
+                    f"Backup key: {raw_key} expected for interpolated key: {key}"
+                )
                 # Retrieve the value from the backup key (resolves interpolation)
                 val = conf[raw_key]
             else:
-                # Fallback to the original key
                 val = conf[key]
-        else:
-            # Standard key retrieval
-            val = conf[key]
 
-        # Convert unsupported types (timedelta/datetime) to strings
-        if isinstance(val, np.timedelta64 | pd.Timedelta):
-            val = timedelta_to_str(val)
-        elif isinstance(val, np.datetime64 | pd.Timestamp):
-            dt = pd.to_datetime(val)
-            # Format: Standard ISO without microseconds
-            val = dt.strftime("%Y-%m-%dT%H:%M:%S")
+            stripped[key] = val
+    elif OmegaConf.is_list(conf):
+        stripped = [
+            _strip_interpolation(item) if OmegaConf.is_config(item) else item for item in conf
+        ]
 
-        stripped[key] = val
-
-    return stripped
+    return OmegaConf.create(stripped)
 
 
 def get_run_id():
@@ -187,7 +185,7 @@ def format_cf(config: Config) -> str:
     for key, value in clean_cf.items():
         match key:
             case "streams":
-                for rt in value:
+                for rt in value.values():
                     for k, v in rt.items():
                         whitespace = "" if k == "reportypes" else "  "
                         stream.write(f"{whitespace}{k} : {v}")
@@ -234,18 +232,30 @@ def load_run_config(run_id: str, mini_epoch: int | None, model_path: str | None)
         else:
             path = Path(model_path) / run_id
 
-        fname = path / _get_model_config_file_read_name(run_id, mini_epoch)
-        assert fname.exists(), (
-            "The fallback path to the model does not exist. Please provide a `model_path`.",
-            fname,
-        )
-        _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
+        config_path_with_epoch = path / _get_model_config_file_read_name(run_id, mini_epoch)
+        config_path_without_epoch = path / _get_model_config_file_read_name(run_id, None)
+
+        if config_path_with_epoch.exists():
+            fname = config_path_with_epoch
+            _logger.info(f"Loading config from specified run_id and mini_epoch: {fname}")
+        elif config_path_without_epoch.exists():
+            fname = config_path_without_epoch
+            _logger.info(
+                f"Config for mini_epoch {mini_epoch} not found. "
+                f"Falling back to config without mini_epoch: {fname}"
+            )
+        else:
+            raise FileNotFoundError(
+                f"Could not find model config for run_id '{run_id}' "
+                f"(mini_epoch={mini_epoch}) in '{path}'. "
+                f"Tried: '{config_path_with_epoch.name}' and '{config_path_without_epoch.name}'. "
+                f"Please check run_id and mini_epoch."
+            )
 
     with fname.open() as f:
         json_str = f.read()
 
     config = OmegaConf.create(json.loads(json_str))
-    config = _sanitize_time_keys(config)
 
     return _apply_fixes(config)
 
@@ -300,20 +310,72 @@ def _apply_fixes(config: Config) -> Config:
     "outdatet" run configurations. The fixes in this function should be
     eventually removed.
     """
-    config = _check_logging(config)
+    config = _check_time_interpolation(config)
+    config = _check_datasets(config)
+    config = _check_streams(config)
     return config
 
 
-def _check_logging(config: Config) -> Config:
+def _check_datasets(config: Config) -> Config:
     """
-    Apply fixes to log frequency config.
+    Collect dataset paths under legacy keys.
     """
     config = config.copy()
-    if config.get("train_log_freq") is None:  # TODO remove this for next version
-        config.train_log_freq = OmegaConf.create(
-            {"checkpoint": 250, "terminal": 10, "metrics": config.train_log.log_interval}
-        )
+    if config.get("data_paths") is None:  # TODO remove this for next version
+        legacy_keys = [
+            "data_path_anemoi",
+            "data_path_obs",
+            "data_path_eobs",
+            "data_path_fesom",
+            "data_path_icon",
+        ]
+        paths = [config.get(key) for key in legacy_keys]
+        config.data_paths = [path for path in paths if path is not None]
 
+    return config
+
+
+def _check_time_interpolation(config: Config) -> Config:
+    """
+    convert 'value': '${resolver:time_value_str}' to 'time_value_str'.
+    """
+
+    def _convert_interpolation(cfg, key):
+        if OmegaConf.is_interpolation(cfg, key):
+            interpolation = OmegaConf.to_container(cfg, resolve=False)[key]
+            resolver, sep, value = interpolation[2:-1].partition(":")
+            cfg[key] = value
+
+    time_keys = ["start_date", "end_date"]
+    delta_keys = ["time_window_step", "time_window_len"]
+    forecast_step_dt = "time_step"
+
+    config = config.copy()
+    subconfs = [
+        config.get("training_config"),
+        config.get("test_config"),
+        config.get("validation_config"),
+    ]
+
+    for subconf in subconfs:
+        if subconf is not None:
+            for key in (*time_keys, *delta_keys):
+                _convert_interpolation(subconf, key)
+            if "forecast" in subconf:
+                _convert_interpolation(subconf.forecast, forecast_step_dt)
+
+    return config
+
+
+def _check_streams(config: Config) -> Config:
+    """Convert streams stored as list to dict/DictConfig."""
+    config = config.copy()
+    stream_conf = config.get("streams")
+    assert stream_conf
+    if isinstance(stream_conf, list | ListConfig):
+        stream_conf = OmegaConf.create({conf["name"]: conf for conf in stream_conf})
+
+    config["streams"] = stream_conf
     return config
 
 
@@ -375,6 +437,9 @@ def load_merge_configs(
         from_run_id = get_run_id_from_config(base_config)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
+        # streams from an overwrite's streams_directory replace inherited streams
+        if any(o.get("streams_directory") is not None for o in overwrite_configs):
+            base_config.streams = None
     # use OmegaConf.unsafe_merge if too slow
     c = OmegaConf.merge(base_config, private_config, *overwrite_configs)
     assert isinstance(c, Config)
@@ -479,7 +544,7 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     """
     Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
     """
-    env_script_path = _REPO_ROOT.parent / "WeatherGenerator-private" / "hpc" / "platform-env.py"
+    env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
 
     if private_home is not None and private_home.is_file():
         _logger.info(f"Loading private config from {private_home}.")
@@ -526,6 +591,8 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     if "secrets" in private_cf:
         del private_cf["secrets"]
 
+    private_cf = _check_datasets(private_cf)  # TODO: remove temp backward compatibility fix
+
     assert isinstance(private_cf, DictConfig)
     return private_cf
 
@@ -546,7 +613,7 @@ def _load_base_conf(base: Path | Config | None) -> Config:
     return conf
 
 
-def load_streams(streams_directory: Path) -> list[Config]:
+def load_streams(streams_directory: Path) -> Config:
     """Load all stream configurations from a directory."""
     # TODO: might want to put this into config later instead of hardcoding it here...
     streams_history = {
@@ -585,10 +652,7 @@ def load_streams(streams_directory: Path) -> list[Config]:
         try:
             config = OmegaConf.load(config_file)
             for stream_name, stream_config in config.items():
-                # Stream config schema is {stream_name: stream_config}
-                # where stream_config itself is a dict containing the actual options.
-                # stream_name needs to be added to this dict since only stream_config
-                # will be further processed.
+                # include key in value to have bidirectional key <-> value mapping
                 stream_config.name = stream_name
                 if stream_name in streams:
                     msg = f"Duplicate stream name found: {stream_name}."
@@ -609,7 +673,11 @@ def load_streams(streams_directory: Path) -> list[Config]:
             _logger.warning(f"Parsed stream configuration file is empty: {config_file}")
             continue
 
-    return list(streams.values())
+    for _, stream in streams.items():
+        if stream.get("frequency", None) is not None:
+            stream = _patch_time("frequency", stream, _TIMEDELTA_TYPE_NAME)
+
+    return OmegaConf.create(streams)
 
 
 def get_path_run(config: Config) -> Path:

@@ -16,7 +16,9 @@ import numpy as np
 from anemoi.datasets.data import MissingDateError
 from anemoi.datasets.data.dataset import Dataset
 from numpy.typing import NDArray
+from omegaconf import OmegaConf
 
+from weathergen.common.config import timedelta_to_str
 from weathergen.datasets.data_reader_base import (
     DataReaderTimestep,
     ReaderData,
@@ -24,6 +26,8 @@ from weathergen.datasets.data_reader_base import (
     TIndex,
     check_reader_data,
 )
+from weathergen.train.utils import Stage
+from weathergen.utils.distributed import is_root
 
 _logger = logging.getLogger(__name__)
 
@@ -36,6 +40,7 @@ class DataReaderAnemoi(DataReaderTimestep):
         tw_handler: TimeWindowHandler,
         filename: Path,
         stream_info: dict,
+        stage: Stage,
     ) -> None:
         """
         Construct data reader for anemoi dataset
@@ -52,6 +57,19 @@ class DataReaderAnemoi(DataReaderTimestep):
         None
         """
 
+        # use anemoi_config if it's defined; ignore filename in this case
+        data_paths = stream_info.get("data_paths", [])
+        anemoi_config = stream_info.get("anemoi_config")
+        if anemoi_config:
+            # convert OmegaConf DictConfig to a plain dict for anemoi.open_dataset.
+            filename = OmegaConf.to_container(anemoi_config, resolve=True)
+            # add additional data paths
+            for path in data_paths:
+                anemoi_datasets.add_dataset_path(path)
+            # provide some visibility since we ignore filename
+            if is_root():
+                _logger.info("Ignoring filename and using anemoi_config option.")
+
         # open  dataset to peak that it is compatible with requested parameters
         ds0: Dataset = anemoi_datasets.open_dataset(filename)
         # If there is no overlap with the time range, the dataset will be empty
@@ -64,7 +82,8 @@ class DataReaderAnemoi(DataReaderTimestep):
 
         kwargs = {}
         if "frequency" in stream_info:
-            kwargs["frequency"] = stream_info["frequency"]
+            frequency = timedelta_to_str(stream_info["frequency"])
+            kwargs["frequency"] = frequency
         if "subsampling_rate" in stream_info:
             name = stream_info["name"]
             _logger.warning(
@@ -102,18 +121,42 @@ class DataReaderAnemoi(DataReaderTimestep):
         self.longitudes = _clip_lon(ds.longitudes)
 
         # select/filter requested source channels
-        self.source_idx = self.select_channels(ds0, "source")
-        self.source_channels = [ds.variables[i] for i in self.source_idx]
+        if stream_info.get(str(stage) + "_source_channels") is None:
+            self.source_idx = self.select_channels(ds, "source")
+            self.source_channels = [ds.variables[i] for i in self.source_idx]
+        else:
+            self.source_channels = stream_info.get(str(stage) + "_source_channels")
+            self.source_idx = [ds.variables.index(ch) for ch in self.source_channels]
 
         # select/filter requested target channels
-        self.target_idx = self.select_channels(ds0, "target")
-        self.target_channels = [ds.variables[i] for i in self.target_idx]
+        if stream_info.get(str(stage) + "_target_channels") is None:
+            self.target_idx = self.select_channels(ds, "target")
+            self.target_channels = [ds.variables[i] for i in self.target_idx]
+        else:
+            self.target_channels = stream_info.get(str(stage) + "_target_channels")
+            self.target_idx = [ds.variables.index(ch) for ch in self.target_channels]
 
         # get target channel weights from stream config
-        self.target_channel_weights = self.parse_target_channel_weights()
+        if stream_info.get("target_channel_weights") is None:
+            self.target_channel_weights = self.parse_target_channel_weights()
+        else:
+            self.target_channel_weights = stream_info.get("target_channel_weights")
 
-        self.geoinfo_channels = []
-        self.geoinfo_idx = []
+        # select/filter requested geoinfo channels (can be any variable, not just constant-in-time)
+        if stream_info.get("geoinfo_channels") is None:
+            self.geoinfo_idx = self.select_geoinfo_channels(ds)
+            self.geoinfo_channels = [ds.variables[i] for i in self.geoinfo_idx]
+        else:
+            self.geoinfo_channels = stream_info.get("geoinfo_channels")
+            self.geoinfo_idx = [ds.variables.index(ch) for ch in self.geoinfo_channels]
+
+        # set geoinfo normalization statistics
+        if len(self.geoinfo_idx) > 0:
+            self.mean_geoinfo = ds.statistics["mean"][self.geoinfo_idx]
+            self.stdev_geoinfo = ds.statistics["stdev"][self.geoinfo_idx]
+        else:
+            self.mean_geoinfo = np.zeros(0)
+            self.stdev_geoinfo = np.ones(0)
 
         ds_name = stream_info["name"]
         _logger.info(f"{ds_name}: source channels: {self.source_channels}")
@@ -177,12 +220,13 @@ class DataReaderAnemoi(DataReaderTimestep):
                 num_data_fields=len(channels_idx), num_geo_fields=len(self.geoinfo_idx)
             )
 
+        # coords-first representation and collapse multiple steps
+        data = data.transpose([0, 2, 1]).reshape((data.shape[0] * data.shape[2], -1))
+
+        # extract geoinfo channels (can be time-varying, so read from dataset)
+        geoinfos = data[:, list(self.geoinfo_idx)]
         # extract channels
-        data = (
-            data[:, list(channels_idx)]
-            .transpose([0, 2, 1])
-            .reshape((data.shape[0] * data.shape[2], -1))
-        )
+        data = data[:, list(channels_idx)]
 
         # construct lat/lon coords
         latlon = np.concatenate(
@@ -194,9 +238,6 @@ class DataReaderAnemoi(DataReaderTimestep):
         ).transpose()
         # repeat latlon len(t_idxs) times
         coords = np.vstack((latlon,) * len(t_idxs))
-
-        # empty geoinfos for anemoi
-        geoinfos = np.zeros((len(data), 0), dtype=data.dtype)
 
         # date time matching #data points of data
         # Assuming a fixed frequency for the dataset
@@ -245,12 +286,46 @@ class DataReaderAnemoi(DataReaderTimestep):
                     not v.is_computed_forcing
                     and not v.is_constant_in_time
                     and (
-                        np.array([f in k for f in channels]).any() if channels is not None else True
+                        np.array([f == k for f in channels]).any() if channels is not None else True
                     )
-                    and not np.array([f in k for f in channels_exclude]).any()
+                    and not np.array([f == k for f in channels_exclude]).any()
                 )
             ]
         )
+
+        return np.array(chs_idx, dtype=np.int64)
+
+    def select_geoinfo_channels(self, ds0: anemoi_datasets) -> NDArray[np.int64]:
+        """
+        Select geoinfo channels (can be any variable, not just constant-in-time)
+
+        Parameters
+        ----------
+        ds0 :
+            raw anemoi dataset with available channels
+
+        Returns
+        -------
+        NDArray of channel indices for geoinfo variables
+
+        """
+
+        geoinfo_channels = self.stream_info.get("geoinfo_channels", [])
+
+        if len(geoinfo_channels) == 0:
+            return np.array([], dtype=np.int64)
+
+        # Select channels that match the geoinfo list (exact match required)
+        chs_idx = np.sort(
+            [ds0.name_to_index[k] for k in ds0.typed_variables.keys() if k in geoinfo_channels]
+        )
+
+        if len(chs_idx) == 0 and len(geoinfo_channels) > 0:
+            stream_name = self.stream_info["name"]
+            _logger.warning(
+                f"No matching geoinfo channels found for {stream_name}. "
+                f"Requested: {geoinfo_channels}"
+            )
 
         return np.array(chs_idx, dtype=np.int64)
 

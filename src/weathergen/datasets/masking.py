@@ -8,7 +8,10 @@ import omegaconf
 import torch
 from numpy.typing import NDArray
 
+from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
+from weathergen.train.utils import Stage
+from weathergen.utils.utils import is_stream_diagnostic, is_stream_forcing
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +112,7 @@ class Masker:
                                         specific to the masking strategy. See above.
     """
 
-    def __init__(self, healpix_level):
+    def __init__(self, healpix_level: int, stage: Stage, streams=None, mode_cfg=None):
         self.rng = None
 
         self.mask_value = 0.0
@@ -119,11 +122,89 @@ class Masker:
         self.healpix_level_data = healpix_level
         self.healpix_num_cells = 12 * (4**healpix_level)
 
+        self.stage = stage
+
+        # Build and store per-stream effective masking configs
+        if streams is not None and mode_cfg is not None:
+            self._effective_masking_cfgs = self.build_effective_masking_cfgs(streams, mode_cfg)
+        else:
+            self._effective_masking_cfgs = {}
+
     def reset_rng(self, rng) -> None:
         """
         Reset rng after mini_epoch to ensure proper randomization
         """
         self.rng = rng
+
+    def merge_masking_config(self, mode_cfg, override):
+        """Merge a stream's masking override into the base mode config.
+
+        Only masking strategy fields are overridden. Structural keys like
+        ``num_samples`` and ``num_steps_input`` remain unchanged.
+
+        The override is flat per section (``model_input`` / ``target_input``),
+        not per named strategy.  If a section has multiple strategies (e.g.
+        ``"input_physical"`` and ``"input_jepa"``), masking strategy fields are
+        broadcast to all of them.  ``randomly_drop_as_source_rate`` is a
+        per-stream rate; the drop decision is made once per call to
+        ``build_samples_for_stream`` and applies to all source strategies
+        uniformly (training only).
+
+        Expected YAML in a stream config, e.g.:
+
+            STREAM_NAME:
+              type: ...
+              filenames: ...
+              ...
+              masking_override:
+                target_input:
+                  masking_strategy_config:
+                    hl_mask: 3
+              ...
+
+        This overrides only ``hl_mask`` within ``masking_strategy_config`` for
+        every target strategy, inheriting rate, rate_sampling, etc. from the
+        global config.  ``masking_strategy`` itself can also be replaced.
+        """
+
+        stream_cfg = copy.deepcopy(mode_cfg)
+
+        # Copy top-level masking keys from override
+        if "randomly_drop_as_source_rate" in override:
+            stream_cfg["randomly_drop_as_source_rate"] = override["randomly_drop_as_source_rate"]
+
+        for section_key in ("model_input", "target_input"):
+            section = stream_cfg.get(section_key, {})
+            # target and source are identical when target is not specified
+            if section == {} and section_key == "target_input":
+                # by the processing order of "model_input" and "target_input", the target_input
+                # here will have stream specific model_input overrides
+                stream_cfg["target_input"] = copy.deepcopy(stream_cfg.get("model_input", {}))
+                section = stream_cfg["target_input"]
+
+            override_values = override.get(section_key)
+            if override_values is None:
+                continue
+
+            for strategy_cfg in section.values():
+                if "masking_strategy" in override_values:
+                    strategy_cfg["masking_strategy"] = override_values["masking_strategy"]
+                if "masking_strategy_config" in override_values:
+                    strategy_cfg["masking_strategy_config"] = omegaconf.OmegaConf.merge(
+                        strategy_cfg.get("masking_strategy_config", omegaconf.OmegaConf.create({})),
+                        override_values["masking_strategy_config"],
+                    )
+
+        return stream_cfg
+
+    def build_effective_masking_cfgs(self, streams: Config, mode_cfg):
+        """Build effective masking configs for all streams."""
+        cfgs = {}
+        for stream_name, stream_info in streams.items():
+            override = stream_info.get("masking_override", {})
+            cfgs[stream_name] = self.merge_masking_config(mode_cfg, override)
+
+        return cfgs
 
     def _get_sampling_rate(self, cfg):
         """
@@ -250,23 +331,32 @@ class Masker:
         return corr_dict
 
     def build_samples_for_stream(
-        self, training_mode: str, num_cells: int, stage_cfg: dict
+        self,
+        training_mode: str,
+        num_cells: int,
+        stream_info: dict,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Construct teacher/student keep masks for a stream.
         SampleMetaData is currently just a dict with the masking params used.
         """
 
-        # target and source configs
-        target_cfgs = stage_cfg.get("target_input", [])
-        source_cfgs = stage_cfg.get("model_input", [])
+        stream_masking_cfg = self._effective_masking_cfgs[stream_info["name"]]
 
-        # target and source are assumed identical when target is not specified
-        if len(target_cfgs) == 0:
-            target_cfgs = copy.deepcopy(source_cfgs)
+        # # target and source configs
+        target_cfgs = stream_masking_cfg.get("target_input")
+        source_cfgs = stream_masking_cfg.get("model_input")
+        assert target_cfgs is not None and source_cfgs is not None
 
-        losses = stage_cfg.losses
+        losses = stream_masking_cfg.losses
         corr_dict = self.parse_src_target_correspondence(losses, target_cfgs, source_cfgs)
+
+        # randomly_drop_as_source_rate from consolidated masking config (training only)
+        randomly_drop_rate = (
+            stream_masking_cfg.get("randomly_drop_as_source_rate", 0.0)
+            if self.stage == "train"
+            else 0.0
+        )
 
         target_masks = MaskData()
 
@@ -276,12 +366,19 @@ class Masker:
         for i_cfg, (_, target_cfg) in enumerate(target_cfgs.items()):
             # different samples/view per strategy
             for _ in range(target_cfg.get("num_samples", 1)):
-                target_mask, mask_params = self._get_mask(
-                    num_cells=num_cells,
-                    strategy=target_cfg.get("masking_strategy"),
-                    masking_strategy_config=target_cfg.get("masking_strategy_config", {}),
-                    target_relationship_mask=("independent", None),
-                )
+                # determine if forcing dataset => mask is empty
+                if is_stream_forcing(stream_info, self.stage):
+                    target_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                else:
+                    masking_config = target_cfg.get("masking_strategy_config", {})
+                    # targets are never randomly dropped
+                    target_mask, mask_params = self._get_mask(
+                        num_cells=num_cells,
+                        strategy=target_cfg.get("masking_strategy"),
+                        masking_strategy_config=masking_config,
+                        target_relationship_mask=("independent", None),
+                    )
+
                 # get all losses and flatten
                 losses = [v[1][1] for _, v in corr_dict.items() if len(v) > 0 and v[0] == i_cfg]
                 losses = [ll for lt in losses for ll in lt]
@@ -299,6 +396,7 @@ class Masker:
         source_masks = MaskData()
         source_target_mapping = []
         target_num_samples = get_num_samples(target_cfgs)
+        is_stream_dropped = randomly_drop_rate > 0.0 and self.rng.uniform() < randomly_drop_rate
         i_source = 0
         for i_src_cfg, (_, source_cfg) in enumerate(source_cfgs.items()):
             # skip items that do not appear in loss
@@ -323,12 +421,17 @@ class Masker:
                 # target is specified)
                 target_idx += i_sample % target_num_samples[target_cfg_idx].item()
 
-                source_mask, mask_params = self._get_mask(
-                    num_cells=num_cells,
-                    strategy=source_cfg.get("masking_strategy"),
-                    masking_strategy_config=masking_config,
-                    target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
-                )
+                # determine if diagnostic dataset or randomly dropped => mask is empty
+                if is_stream_diagnostic(stream_info, self.stage) or is_stream_dropped:
+                    source_mask, mask_params = torch.zeros(num_cells, dtype=torch.bool), {}
+                else:
+                    source_mask, mask_params = self._get_mask(
+                        num_cells=num_cells,
+                        strategy=source_cfg.get("masking_strategy"),
+                        masking_strategy_config=masking_config,
+                        target_relationship_mask=(relationship, target_masks.get_mask(target_idx)),
+                    )
+
                 corr = target_idx
                 source_masks.add_mask(
                     source_mask, mask_params, source_cfg, losses, i_source, corr, relationship
@@ -409,7 +512,10 @@ class Masker:
         return (mask, params)
 
     def _generate_cell_mask(
-        self, num_cells: int, strategy: str, masking_strategy_config: dict
+        self,
+        num_cells: int,
+        strategy: str,
+        masking_strategy_config: dict,
     ) -> (np.typing.NDArray, dict):
         """Generate a boolean keep mask at data healpix level (True = keep cell).
 
@@ -674,8 +780,8 @@ class Masker:
 
         hl_data = self.healpix_level_data
         hl_mask = cfg.get("hl_mask")
-        assert hl_mask is not None and hl_mask < hl_data, (
-            "For healpix keep mask generation, cfg['hl_mask'] must be set and < data level."
+        assert hl_mask is not None and hl_mask <= hl_data, (
+            "For healpix keep mask generation, cfg['hl_mask'] must be set and <= data level."
         )
         num_parent_cells = 12 * (4**hl_mask)
         level_diff = hl_data - hl_mask

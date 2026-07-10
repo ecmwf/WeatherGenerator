@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -115,10 +114,11 @@ general:
   run_history: []
 
 # logging frequency in the training loop (in number of batches)
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250
+  log_grad_norms: False
 
 # parameters for data loading
 data_loading :

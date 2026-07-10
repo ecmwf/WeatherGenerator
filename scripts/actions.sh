@@ -2,11 +2,13 @@
 
 # TODO: this is the root weathergenerator directory, rename the variable.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
+PRIVATE_REPO_PATH="${WEATHERGEN_PRIVATE_REPO_PATH:-$SCRIPT_DIR/../WeatherGenerator-private}"
 
 case "$1" in
   sync)
     (
       cd "$SCRIPT_DIR" || exit 1
+      # Creates a virtual environment without checking the integrity of the cache.
       # If we are running on a mac, use the cpu extra
       if [[ "$(uname)" == "Darwin" ]]; then
         uv sync --all-packages --extra cpu
@@ -16,31 +18,49 @@ case "$1" in
       uv sync --all-packages --extra gpu
     )
     ;;
+  sync-safe)
+    (
+      # Creates a virtual environment, checking the integrity of the cache 
+      # and copying the files.
+      # This is slower (+ 60 seconds to the sync) but it is prevents issues with 
+      # corrupted cache. These issues happen when a shared filesystem such as LUSTRE
+      # is used along with symlinks and a SCRATCH deletion policy: some files from 
+      # cached packages may get deleted because they seem to not be touched enough.
+      cd "$SCRIPT_DIR" || exit 1
+      # --refresh --reinstall : LUSTRE may clean up some pieces of the cache.
+      # This ensures basic integrity but it is too slow (adds 60 seconds to the sync) to do it on every sync. So we only do it on mac, where the cache is more likely to get corrupted.
+      # --link-mode=copy overrides the pyproject.toml setting (symlink) to fully
+      # detach installed files from the cache, so SCRATCH cleanups can't corrupt the venv.
+      # If we are running on a mac, use the cpu extra
+      if [[ "$(uname)" == "Darwin" ]]; then
+        uv sync --all-packages --extra cpu --refresh --reinstall --link-mode=copy
+        exit 0
+      fi
+      # Otherwise, use the gpu extra
+      uv sync --all-packages --extra gpu --refresh --reinstall --link-mode=copy
+    )
+    ;;
   lint)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
-        src/ scripts/ packages/ \
-        && \
       uv run --no-project --with "ruff==0.12.2" \
-        ruff check --target-version py312 \
-        --fix  \
-        src/ scripts/ packages/
+        ruff format --target-version py312 src/ scripts/ packages/ \
+      && \
+      uv run --no-project --with "ruff==0.12.2" \
+        ruff check --target-version py312 --fix  src/ scripts/ packages/
     )
     ;;
   lint-check)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv run --no-project --with "ruff==0.12.2" ruff format --target-version py312 \
-        -n \
-        src/ scripts/ packages/ \
-        && \
       uv run --no-project --with "ruff==0.12.2" \
-       ruff check  --target-version py312  \
-       src/ scripts/ packages/ \
-        && \
+        ruff format --target-version py312 -n src/ scripts/ packages/ \
+      && \
+      uv run --no-project --with "ruff==0.12.2" \
+        ruff check  --target-version py312 src/ scripts/ packages/ \
+      && \
       uv run --no-project --with "pylint==4.0.3" \
-       pylint src/ packages/
+        pylint src/ packages/
     )
     ;;
   type-check)
@@ -50,7 +70,6 @@ case "$1" in
 
       # weathergen-common
       uv sync --project packages/common --no-install-workspace
-      uv pip list
       uv run --project packages/common --frozen pyrefly check packages/common
       # Fail for errors on weathergen-common:
       if [ $? -ne 0 ]; then
@@ -60,7 +79,6 @@ case "$1" in
 
       # weathergen-metrics
       uv sync --project packages/metrics --no-install-workspace
-      uv pip list
       uv run --project packages/metrics --frozen pyrefly check packages/metrics
       # Fail for errors on weathergen-metrics:
       if [ $? -ne 0 ]; then
@@ -69,14 +87,12 @@ case "$1" in
       fi
 
       # weathergen-evaluate
-      uv sync --project packages/evaluate --no-install-workspace --package weathergen-evaluate 
-      uv pip list
+      uv sync --project packages/evaluate --no-install-workspace --package weathergen-evaluate
       uv run --project packages/evaluate --frozen pyrefly check packages/evaluate
 
       # weathergen (root)
       # Install the whole workspace. It also needs the extra cpu option for the right version of pytorch.
       uv sync --all-packages --extra cpu --no-install-workspace
-      uv pip list
       uv run --all-packages pyrefly check src
       echo "Type checking completed."
     )
@@ -84,7 +100,6 @@ case "$1" in
   unit-test)
     (
       cd "$SCRIPT_DIR" || exit 1
-      uv sync --extra cpu 
       uv run --extra cpu pytest src/
     )
     ;;
@@ -114,6 +129,12 @@ case "$1" in
       uv sync --offline --all-packages --extra gpu
       uv run --offline pytest ./integration_tests/small_multi_stream_test.py --verbose -s
     );;
+    integration-test-export)
+    (
+      cd "$SCRIPT_DIR" || exit 1
+      uv sync --offline --all-packages --extra gpu
+      uv run --offline pytest ./integration_tests/export_test.py --verbose -s
+    );;
     integration-test-all)
     (
       cd "$SCRIPT_DIR" || exit 1
@@ -121,6 +142,7 @@ case "$1" in
       uv run --offline pytest ./integration_tests/small1_test.py --verbose -s
       uv run --offline pytest ./integration_tests/small_multi_stream_test.py --verbose -s
       uv run --offline pytest ./integration_tests/jepa1_test.py --verbose -s
+      uv run --offline pytest ./integration_tests/export_test.py --verbose -s
     );;
   create-links)
     (
@@ -129,7 +151,11 @@ case "$1" in
       # 1. Get the path of the private config of the cluster
       # 2. Read the yaml and extract the path of the shared conf
       # This uses the yq command. It is a python package so uvx (bundled with uv) will donwload and create the right venv
-      export working_dir=$(cat $(../WeatherGenerator-private/hpc/platform-env.py hpc-config) | uvx yq .path_shared_working_dir)
+      # The 'yq' command is used in a separate virtual environment, because the cache 
+      # around that tool can get corrupted. 
+      # See https://github.com/ecmwf/WeatherGenerator/issues/2298
+      export working_dir=$(cat "$("$PRIVATE_REPO_PATH"/hpc/platform-env.py hpc-config)" |
+        UV_CACHE_DIR="$(mktemp -d)" VIRTUAL_ENV=""  uvx yq .path_shared_working_dir)      
       # Remove quotes
       export working_dir=$(echo "$working_dir" | sed 's/[\"\x27]//g')
       # If the working directory does not exist, exit with an error
@@ -160,7 +186,7 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       uv sync --all-packages
-      uv run ipython kernel install --user --env VIRTUAL_ENV $(pwd)/.venv --name=weathergen_kernel --display-name "Python (WeatherGenerator)" 
+      uv run ipython kernel install --user --env VIRTUAL_ENV $(pwd)/.venv --name=weathergen_kernel --display-name "Python (WeatherGenerator)"
       echo "Jupyter kernel created. You can now use it in Jupyter Notebook or JupyterLab."
       echo "To use this kernel, select 'Python (WeatherGenerator)' from the kernel options in Jupyter Notebook or JupyterLab."
       echo "If you want to remove the kernel later, you can run:"
@@ -171,14 +197,16 @@ case "$1" in
     (
       cd "$SCRIPT_DIR" || exit 1
       # Run on any python or jupyter notebook files in the WeatherGenerator-private/notebooks directory
-      uv run jupytext --set-formats ipynb,py:percent --sync  ../WeatherGenerator-private/notebooks/*.ipynb ../WeatherGenerator-private/notebooks/*.py
+      uv run jupytext --set-formats ipynb,py:percent --sync  "$PRIVATE_REPO_PATH"/notebooks/*.ipynb "$PRIVATE_REPO_PATH"/notebooks/*.py
       echo "Jupytext sync completed."
     )
     ;;
   *)
-    # Automatically extract all options from the case statement
-    options=$(grep -oP '^\s*\K[\w-]+(?=\))' "$0" | tr '\n' '|' | sed 's/|$//')
-    echo "Usage: $0 {$options}"
-    exit 1
+    (
+      # Automatically extract all options from the case statement
+      options=$(sed -nE 's/^[[:space:]]*([a-zA-Z][a-zA-Z0-9_-]*)\).*/\1/p' "$0" | tr '\n' '|' | sed 's/|$//')
+      echo "Usage: $0 {$options}"
+      exit 1
+    )
     ;;
 esac

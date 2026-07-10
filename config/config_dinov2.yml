@@ -1,5 +1,3 @@
-
-embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -107,7 +105,7 @@ general:
   run_history: []
 
 # logging frequency in the training loop (in number of batches)
-train_log_freq:
+train_logging:
   terminal: 10
   metrics: 20
   checkpoint: 250

@@ -17,15 +17,6 @@ from weathergen.datasets.batch import BatchSamples
 
 
 ####################################################################################################
-def arc_alpha(sin_alpha, cos_alpha):
-    """Invert cosine/sine for alpha in [0,2pi] using both functions"""
-    t = torch.arccos(cos_alpha)
-    mask = sin_alpha < 0.0
-    t[mask] = (2.0 * np.pi) - t[mask]
-    return t
-
-
-####################################################################################################
 def vecs_to_rots(vecs):
     """
     Convert vectors to rotations that align with (1,0,0) ie coordinate origin in geophysical
@@ -266,7 +257,9 @@ def add_local_vert_coords_ctrs2(verts_local, tcs_lens, a, zi, geoinfo_offset):
     return a
 
 
-def get_tokens_lens(streams: dict, batch_data: BatchSamples, input_steps: int) -> torch.Tensor:
+def get_tokens_lens(
+    streams_names: list[str], batch_data: BatchSamples, input_steps: int
+) -> torch.Tensor:
     """
     Extract tokens_lens for (num_steps, num_samples, num_streams)
     """
@@ -277,8 +270,8 @@ def get_tokens_lens(streams: dict, batch_data: BatchSamples, input_steps: int) -
                 [
                     torch.stack(
                         [
-                            sample.streams_data[stream_info["name"]].source_tokens_lens[i]
-                            for stream_info in streams
+                            sample.streams_data[stream_name].source_tokens_lens[i]
+                            for stream_name in streams_names
                         ]
                     )
                     for sample in batch_data.samples

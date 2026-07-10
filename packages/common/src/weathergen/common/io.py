@@ -23,7 +23,6 @@ import xarray as xr
 import zarr
 from numpy import datetime64
 from numpy.typing import NDArray
-from tqdm import tqdm
 from zarr.errors import ZarrUserWarning
 from zarr.storage import LocalStore, ZipStore
 
@@ -359,9 +358,9 @@ class OutputItem:
     def _append_dataset(self, dataset: OutputDataset | None, name: str) -> None:
         if dataset:
             self.datasets.append(dataset)
-        else:
-            msg = f"Missing {name} dataset for item: {self.key.path}"
-            raise ValueError(msg)
+        # else:
+        #     msg = f"Missing {name} dataset for item: {self.key.path}"
+        #     raise ValueError(msg)
 
 
 class ZarrIO:
@@ -409,9 +408,7 @@ class ZarrIO:
     def write_zarr(self, item: OutputItem):
         """Write one output item to the zarr store."""
         group = self._get_group(item.key, create=True)
-        for dataset in tqdm(item.datasets):  # pyrefly: ignore[not-iterable]
-            # pyrefly doesn't recognize that tqdm makes item.datasets iterable
-            # until fixed, ignore the warning here
+        for dataset in item.datasets:
             if dataset is not None:
                 self._write_dataset(group, dataset)
 
@@ -530,7 +527,7 @@ class ZarrIO:
 
 class ZipZarrIO(ZarrIO):
     def __enter__(self) -> typing.Self:
-        _logger.info(f"Opening zipstore, read-only: {self.read_only}")
+        _logger.debug(f"Opening zipstore, read-only: {self.read_only}")
         self._store = ZipStore(self._store_path, mode=self._mode, read_only=self.read_only)
         if self.read_only:
             self.data_root = zarr.open_group(store=self._store, mode=self._mode)
@@ -739,11 +736,13 @@ class OutputBatchData:
 
     def _extract_sources(
         self, sample: int, stream_idx: int, key: ItemKey, source_interval: TimeRange
-    ) -> OutputDataset:
+    ) -> OutputDataset | None:
         channels = self.source_channels[stream_idx]
         geoinfo_channels = self.geoinfo_channels[stream_idx]
 
         source: IOReaderData = self.sources[sample][stream_idx]
+        if source is None:
+            return None
 
         assert source.data.shape[1] == len(channels), (
             f"Number of source channel names {len(channels)} does not align with source data."

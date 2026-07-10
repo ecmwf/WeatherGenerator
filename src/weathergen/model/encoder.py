@@ -17,6 +17,7 @@ from weathergen.model.engines import (
     EmbeddingEngine,
     GlobalAssimilationEngine,
     Local2GlobalAssimilationEngine,
+    Local2GlobalSumEngine,
     LocalAssimilationEngine,
     QueryAggregationEngine,
 )
@@ -57,7 +58,7 @@ class EncoderModule(torch.nn.Module):
 
         # embedding engine
         # determine stream names once so downstream components use consistent keys
-        self.stream_names = [str(stream_cfg["name"]) for stream_cfg in cf.streams]
+        self.stream_names = list(cf.streams.keys())
         # separate embedding networks for differnt observation types
         self.embed_engine = EmbeddingEngine(cf, self.sources_size)
 
@@ -77,7 +78,11 @@ class EncoderModule(torch.nn.Module):
             )
 
         # local -> global assimilation engine adapter
-        self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
+        ae_adapter_type = cf.get("ae_adapter_type", "cross_attention")
+        if ae_adapter_type == "sum":
+            self.ae_local_global_engine = Local2GlobalSumEngine(cf)
+        else:
+            self.ae_local_global_engine = Local2GlobalAssimilationEngine(cf)
 
         # learnable queries
         if cf.ae_local_queries_per_cell:
@@ -125,7 +130,12 @@ class EncoderModule(torch.nn.Module):
             self.assimilate_local, model_params, stream_cell_tokens, batch, use_reentrant=False
         )
 
-        tokens_global = checkpoint(self.ae_global_engine, tokens_global, use_reentrant=False)
+        tokens_global = checkpoint(
+            self.ae_global_engine,
+            tokens_global,
+            coords=model_params.rope_coords,
+            use_reentrant=False,
+        )
 
         return tokens_global, posteriors
 
@@ -206,7 +216,11 @@ class EncoderModule(torch.nn.Module):
         return tokens_global_unmasked, posteriors
 
     def aggregation_engine_unmasked(
-        self, tokens_global_unmasked, tokens_global_register_class, tokens_lens
+        self,
+        tokens_global_unmasked,
+        tokens_global_register_class,
+        tokens_lens,
+        rope_cell_coords=None,
     ):
         """
         Aggregation engine on the global latents of unmasked cells
@@ -219,7 +233,8 @@ class EncoderModule(torch.nn.Module):
         tokens_global_unmasked = torch.permute(tokens_global_unmasked, [1, 0, 2])
 
         cell_lens_unflattened = torch.sum(tokens_lens, 2)
-        batch_lens = cell_lens_unflattened.to(torch.bool).sum(dim=-1).flatten()
+        cell_mask = cell_lens_unflattened.to(torch.bool)
+        batch_lens = cell_mask.sum(dim=-1).flatten()
         expected_len = batch_lens.sum().item()
         actual_len = tokens_global_unmasked.shape[1]
         assert expected_len == actual_len, (
@@ -235,10 +250,24 @@ class EncoderModule(torch.nn.Module):
             dim=0,
         )
 
+        # Build packed coords matching the interleaved token order
+        if rope_cell_coords is not None:
+            num_extra = self.num_class_tokens + self.num_register_tokens
+            zero_coords = torch.zeros(
+                num_extra, 2, device=rope_cell_coords.device, dtype=rope_cell_coords.dtype
+            )
+            packed_coords = []
+            for mask_b in cell_mask.flatten(0, 1):
+                packed_coords.append(zero_coords)
+                packed_coords.append(rope_cell_coords[mask_b])
+            packed_coords = torch.cat(packed_coords, dim=0)
+        else:
+            packed_coords = None
+
         batch_lens = batch_lens + (self.num_class_tokens + self.num_register_tokens)
         batch_lens_patched = torch.cat([zero_pad, batch_lens], dim=0)
         tokens_global_unmasked = self.ae_aggregation_engine(
-            tokens_global_unmasked, batch_lens_patched, use_reentrant=False
+            tokens_global_unmasked, batch_lens_patched, use_reentrant=False, coords=packed_coords
         )
 
         return tokens_global_unmasked
@@ -260,7 +289,7 @@ class EncoderModule(torch.nn.Module):
 
         cell_lens = torch.sum(batch.tokens_lens, 2).flatten()
 
-        num_steps_input = batch.get_num_steps()
+        num_steps_input = batch.get_num_source_steps()
         rs = num_steps_input * len(batch)
 
         # create register and latent tokens and prepend to latent spatial tokens
@@ -283,7 +312,10 @@ class EncoderModule(torch.nn.Module):
 
         # apply aggregation engine on unmasked tokens
         tokens_global_unmasked = self.aggregation_engine_unmasked(
-            tokens_global_unmasked, tokens_global_register_class, batch.tokens_lens
+            tokens_global_unmasked,
+            tokens_global_register_class,
+            batch.tokens_lens,
+            rope_cell_coords=model_params.rope_cell_coords,
         )
 
         # final processing
