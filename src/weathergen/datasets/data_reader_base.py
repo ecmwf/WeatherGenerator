@@ -15,6 +15,7 @@ import numpy as np
 from numpy import datetime64, timedelta64
 from numpy.typing import NDArray
 
+from weathergen.common.config import str_to_datetime64
 from weathergen.common.config import timedelta_to_str
 from weathergen.utils.better_abc import ABCMeta, abstract_attribute
 
@@ -66,7 +67,9 @@ class DTRange:
 
 class TimeWindowHandler:
     """
-    Handler for time windows and translation of indices to times
+    Handler for time windows and translation of indices to times.
+
+    Maps a uniform time grid (defined by t_start, t_end, t_window_step) to integer indices.
     """
 
     def __init__(
@@ -125,6 +128,14 @@ class TimeWindowHandler:
 
         return TimeIndexRange(idx_start, idx_end)
 
+    def get_sample_indices(self) -> np.ndarray | None:
+        """Return explicit sample indices if only a subset of the time grid is valid.
+
+        Returns None for the default handler (all indices in get_index_range() are valid).
+        Subclasses may override to restrict sampling to specific indices.
+        """
+        return None
+
     def window(self, idx: TIndex) -> DTRange:
         """
         Temporal window corresponding to index
@@ -143,6 +154,64 @@ class TimeWindowHandler:
         t_end_win = t_start_win + self.t_window_len
 
         return DTRange(t_start_win, t_end_win)
+
+
+class TimeWindowHandlerDates(TimeWindowHandler):
+    """
+    TimeWindowHandler for an explicit list of initialisation dates.
+
+    The underlying uniform grid is derived from the min/max of the provided dates.
+    Only indices corresponding to the specified dates are valid for sampling.
+    """
+
+    def __init__(
+        self,
+        dates: list[NPDT64],
+        t_window_len_hours: NPTDel64,
+        t_window_step_hours: NPTDel64,
+    ):
+        """
+        Parameters
+        ----------
+        dates :
+            explicit list of initialisation datetimes (must be aligned to t_window_step)
+        t_window_len :
+            length of data window
+        t_window_step :
+            delta hours between start times of windows
+        """
+        parsed = np.array(
+            [str_to_datetime64(d).astype("datetime64[ms]") for d in dates],
+            dtype="datetime64[ms]",
+        )
+        parsed = np.sort(parsed)
+
+        t_start = parsed[0]
+        # t_end must be > t_start and cover the last date's full window
+        t_end = parsed[-1] + t_window_len_hours
+
+        super().__init__(t_start, t_end, t_window_len_hours, t_window_step_hours)
+
+        # Compute grid indices for each date
+        deltas = (parsed - self.t_start).astype("timedelta64[ms]")
+        step_ms = self.t_window_step.astype("timedelta64[ms]").astype(np.int64)
+        indices, remainders = np.divmod(deltas.astype(np.int64), step_ms)
+
+        if np.any(remainders != 0):
+            bad = parsed[remainders != 0]
+            raise ValueError(
+                f"The following init_dates are not aligned with time_window_step: {bad}."
+            )
+
+        self._sample_indices = indices.astype(np.int64)
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        return f"{base} (explicit dates, n={len(self._sample_indices)})"
+
+    def get_sample_indices(self) -> np.ndarray:
+        """Return the grid indices that correspond to the explicit init dates."""
+        return self._sample_indices.copy()
 
 
 @dataclass
@@ -335,7 +404,7 @@ class DataReaderBase(metaclass=ABCMeta):
 
     def init_empty(self) -> None:
         """
-        Initialize
+        Initialise
         """
         # pylint: disable=attribute-defined-outside-init
         self.source_channels = []

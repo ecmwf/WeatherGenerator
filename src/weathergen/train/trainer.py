@@ -231,6 +231,9 @@ class Trainer(TrainerBase):
         self.device = torch.device(f"{device_type}:{cf.local_rank}")
         self.ema_model = None
 
+        for stream in cf.streams:
+            stream["max_num_targets"] = -1
+
         # create data loader
         # only one needed since we only run the validation code path
         # Force full maps during inference by disabling target subsampling
@@ -619,6 +622,13 @@ class Trainer(TrainerBase):
         else:
             # Always include a pass without fixed noise level (random sampling)
             noise_levels = [None] + noise_levels
+        
+        init_dates = mode_cfg.get("init_dates", None)
+        num_init_dates = len(init_dates) if init_dates is not None else 0
+        explicit_num_samples = mode_cfg.get("output", {}).get("num_samples", 0)
+        num_samples_write = (explicit_num_samples or num_init_dates) * batch_size
+        if num_init_dates > 0:
+            mode_cfg.samples_per_mini_epoch = num_init_dates * batch_size
 
         # Accumulate losses across noise levels with suffixed keys so they are
         # logged as a single "val" entry (e.g. LossLatentDiff.LossLatentDiff.mse.eta0.03)
@@ -640,14 +650,24 @@ class Trainer(TrainerBase):
                 stage_suffix = f"_eta{eta_str}" if len(noise_levels) > 1 else ""
 
             dataset_val_iter = iter(self.data_loader_validation)
-            num_samples_write = mode_cfg.get("output", {}).get("num_samples", 0) * batch_size
 
             with torch.no_grad():
                 # print progress bar but only in interactive mode, i.e. when without ddp
                 with tqdm.tqdm(
-                    total=len(self.data_loader_validation), disable=self.cf.with_ddp
+                    total=len(self.data_loader_validation), disable=self.cf.with_ddp, desc="Validation"
                 ) as pbar:
                     for bidx, batch in enumerate(dataset_val_iter):
+                        # show the init date of the batch currently being processed
+                        first_stream_data = next(
+                            sd
+                            for sd in batch.source_samples.samples[0].streams_data.values()
+                            if sd is not None
+                        )
+                        init_date = self.dataset_val.time_window_handler.window(
+                            first_stream_data.sample_idx
+                        ).start
+                        pbar.set_postfix({"init": str(init_date)})
+
                         if cf.data_loading.get("memory_pinning", False):
                             # pin memory for faster CPU-GPU transfer
                             batch = batch.pin_memory()
@@ -721,10 +741,10 @@ class Trainer(TrainerBase):
                                     targets_and_auxs,
                                 )
 
-                        pbar.update(batch_size)
-
                         if (bidx * batch_size) > mode_cfg.samples_per_mini_epoch:
                             break
+
+                        pbar.update(batch_size)
 
                     # Terminal logging per noise level for progress visibility
                     self._log_terminal(0, mini_epoch, VAL, stage_suffix=stage_suffix)

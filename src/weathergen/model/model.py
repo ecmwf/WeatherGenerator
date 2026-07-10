@@ -736,7 +736,7 @@ class Model(torch.nn.Module):
             tokens = tokens.reshape(shape)
             # tokens[:, 0] = t (most recent), tokens[:, 1] = t-1, ..., tokens[:, -1] = t-(T-1) (oldest)
             if self.cf.stage == "inference":
-                print("Using most recent steps as conditioning tokens for inference.")
+                # print("Using most recent steps as conditioning tokens for inference.")
                 # conditioning_tokens = tokens[:, :-1].sum(axis=1)
                 conditioning_tokens = tokens[:, 1:].sum(axis=1)
             else:

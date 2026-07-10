@@ -364,7 +364,7 @@ class DiffusionForecastEngine(torch.nn.Module):
 
         # Ensemble mode: draw N independent samples in one batched ODE pass.
         if num_ensemble_members > 1:
-            logger.info(f"Diffusion ensemble mode: generating {num_ensemble_members} members.")
+            # logger.info(f"Diffusion ensemble mode: generating {num_ensemble_members} members.")
             # Build batched conditioning of shape (N, healpix_cells, embed_dim).
             # conditioning_tokens is (1, H, D) on the first rollout step (encoder output) and
             # (N, H, D) on subsequent steps (stored by model.py after the previous ensemble step).
@@ -455,15 +455,16 @@ class DiffusionForecastEngine(torch.nn.Module):
         _z = _z_scores.get(sigma_min_quantile, -1.645)
         sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
         sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
-        if log_diagnostics:
-            logger.info(
-                f"Inference sigma schedule: "
-                f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train 3σ={sigma_max_train:.4f}), "
-                f"sigma_min_eff={sigma_min_eff:.4f} "
-                f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
-                f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
-            )
+        # if log_diagnostics:
+        #     logger.info(
+        #         f"Inference sigma schedule: "
+        #         f"sigma_max_eff={sigma_max_eff:.4f} (config={self.sigma_max}, train 3σ={sigma_max_train:.4f}), "
+        #         f"sigma_min_eff={sigma_min_eff:.4f} "
+        #         f"(config={self.sigma_min}, dist q={sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
+        #         f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
+        #     )
         # sigma_min_eff = self.cf.get("sigma_min", 0.002)
+        # sigma_min_eff = 40
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
@@ -628,7 +629,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         out_path_base.mkdir(exist_ok=True, parents=True)
         fig.savefig(out_path_base / "sampling_diagnostics.png", dpi=150)
         plt.close(fig)
-        logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
+        # logger.info(f"Saved sampling diagnostics to {out_path_base / 'sampling_diagnostics.png'}")
 
 
 class Preconditioner:
