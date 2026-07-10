@@ -23,6 +23,7 @@ METEOSAT_SEVIRI_IR :
   tokenize_spacetime : False
   max_num_targets: 131072
   # forcing: True
+  reconstruct: False
   embed : 
     net : transformer
     num_tokens : 1
@@ -56,6 +57,7 @@ GOES_ABI_IR :
   tokenize_spacetime : False
   max_num_targets: 131072
   # forcing: True
+  reconstruct: False
   embed : 
     net : transformer
     num_tokens : 1
@@ -89,6 +91,7 @@ HIMAWARI_AHI_IR :
   tokenize_spacetime : False
   max_num_targets: 131072
   # forcing: True
+  reconstruct: False
   embed : 
     net : transformer
     num_tokens : 1
@@ -125,6 +128,7 @@ GOES_ABI_VIS :
   tokenize_spacetime : False
   max_num_targets: 131072
   # forcing: True
+  reconstruct: False
   embed : 
     net : transformer
     num_tokens : 1
@@ -159,6 +163,7 @@ HIMAWARI_AHI_VIS :
   tokenize_spacetime : False
   max_num_targets: 131072
   # forcing: True
+  reconstruct: False  
   embed :
     net : transformer
     num_tokens : 1

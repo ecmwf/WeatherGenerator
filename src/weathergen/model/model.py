@@ -42,7 +42,7 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype, is_stream_forcing
+from weathergen.utils.utils import get_dtype, is_stream_forcing, is_stream_reconstructed
 
 logger = logging.getLogger(__name__)
 
@@ -423,6 +423,11 @@ class Model(torch.nn.Module):
                 if is_stream_forcing(si):
                     continue
 
+                # skip decoder for streams that are not physically reconstructed
+                # (forcing/input-only, or explicit reconstruct: false -> JEPA-only target)
+                if not is_stream_reconstructed(si):
+                    continue
+
                 # skip for the moment to ensure target embedding and tte exist (ordering of
                 # cf.streams is random)
                 if si.get("pred_spatial_shared") is None:
@@ -515,6 +520,11 @@ class Model(torch.nn.Module):
             for i_stream, (stream_name, si) in enumerate(self.streams.items()):
                 # skip decoder if channels are empty
                 if is_stream_forcing(si):
+                    continue
+
+                # skip decoder for streams that are not physically reconstructed
+                # (forcing/input-only, or explicit reconstruct: false -> JEPA-only target)
+                if not is_stream_reconstructed(si):
                     continue
 
                 pred_spatial_shared = si.get("pred_spatial_shared")
@@ -732,7 +742,6 @@ class Model(torch.nn.Module):
                 if np.random.rand() < self.cf.get("fe_diffusion_classifier_free_guidance_prob", 0.0):  # occasionally dropout conditioning for classifier free guidance
                     conditioning_tokens = torch.zeros_like(conditioning_tokens)
             # X_t (tokens[:, 0], most recent) is the diffusion denoising target; older steps are conditioning.
-            # batch.samples[0].meta_info["LATENT"].params["conditioning_tokens"] = conditioning_tokens
             batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = conditioning_tokens
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
             tokens = tokens[:, 0]
@@ -935,6 +944,12 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.streams.keys():
+            # streams without a physical decoder (forcing, or reconstruct: false JEPA-only
+            # targets) have no embed_target_coords/target_token_engine. Skip them here even
+            # though they may still carry (unused) target coords on the student view.
+            if stream_name not in self.embed_target_coords:
+                continue
+            
             # extract target coords for current stream and fstep and convert to one tensor
             # Use modular indexing so that ensemble calls (batch_size > len(batch)) replicate
             # the single real sample's coordinates across all N members.

@@ -25,6 +25,7 @@ ERA5_in :
   tokenize_spacetime : True
   max_num_targets: -1
   # forcing: True
+  reconstruct: False
   frequency : 06:00:00
   nominal_time_mapping :
     "0" : 5
