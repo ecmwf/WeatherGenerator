@@ -790,7 +790,7 @@ class Model(torch.nn.Module):
                     self._warned_diffusion_multi_step = True
                 # Resize output to fit the diffusion trajectory.
                 output = self._reindex_output_for_trajectory(output, len(tokens))
-                cond = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"]
+                cond = batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                 predict_residual = self.cf.get("fe_diffusion_model", False) and self.cf.get("fe_diffusion_predict_residual", False)
                 for i, toks in enumerate(tokens):
                     toks_abs = cond + toks if predict_residual else toks
@@ -800,7 +800,7 @@ class Model(torch.nn.Module):
                 # Pass tokens[-1] forward so inference diagnostics have a reference point;
                 # inference_forward always starts from pure noise regardless.
                 final_abs = cond + tokens[-1] if predict_residual else tokens[-1]
-                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = final_abs
+                batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = final_abs
                 tokens = None #NOTE: This is precautionary, might need to be handled differently. It should not be the same as conditioning tokens.
                 continue
 
@@ -811,7 +811,7 @@ class Model(torch.nn.Module):
                 if isinstance(tokens, list):
                     # diffusion_rollout=True: discard intermediate ODE steps, keep the final state.
                     tokens = tokens[-1]  # (1, healpix_cells, embed_dim)
-                cond = batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"]
+                cond = batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"]
                 predict_residual = self.cf.get("fe_diffusion_predict_residual", False)
                 # Apply residual correction; broadcasts cond (1, H, D) over all N members.
                 member_final_tokens = cond + tokens if predict_residual else tokens
@@ -829,7 +829,7 @@ class Model(torch.nn.Module):
                 # Store per-member conditioning for the next rollout step.
                 # conditioning_tokens holds (N, H, D) during ensemble rollout; inference_forward
                 # calls expand(N, ...) which is a no-op when the dim already matches.
-                batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = (
+                batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = (
                     member_final_tokens
                 )
                 tokens = None

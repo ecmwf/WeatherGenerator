@@ -419,7 +419,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         if self.conditioning in ["date_time", "date", "time"]:
             c = meta_info["ERA5"].params["timestamp"]
         elif self.conditioning == "forecast":
-            c = meta_info["ERA5"].params["conditioning_tokens"]
+            c = meta_info["LATENT_CONDITIONING_TOKENS"]
 
         num_ensemble_members: int = self.cf.get("fe_diffusion_num_ensemble_members", 1)
 
