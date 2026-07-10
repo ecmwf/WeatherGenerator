@@ -16,6 +16,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
+from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
 from weathergen.evaluate.scores.score_utils import to_list
 
 # from common.io import MockIO
@@ -187,6 +188,8 @@ class Scores:
             "vrmse": self.calc_vrmse,
             "bias": self.calc_bias,
             "acc": self.calc_acc,
+            "rps": self.calc_rps,
+            "rpss": self.calc_rpss,
             "froct": self.calc_froct,
             "troct": self.calc_troct,
             "fact": self.calc_fact,
@@ -196,6 +199,7 @@ class Scores:
             "seeps": self.calc_seeps,
             "qq_analysis": self.calc_quantiles,
             "nse": self.calc_nse,
+            "psd": self.calc_psd,
         }
         self.prob_metrics_dict = {
             "ssr": self.calc_ssr,
@@ -254,12 +258,15 @@ class Scores:
             f = self.det_metrics_dict[score_name]
             _logger.debug(f"Using deterministic metric: {score_name}")
         elif score_name in self.prob_metrics_dict.keys():
-            assert self.ens_dim in data.prediction.dims, (
-                f"Probablistic score {score_name} chosen, but ensemble dimension {self.ens_dim} "
-                "not found in prediction data. Skipping score calculation."
-            )
-            return None
+            if self._ens_dim not in data.prediction.dims:
+                _logger.warning(
+                    f"Probabilistic score '{score_name}' chosen, but ensemble dimension "
+                    f"'{self._ens_dim}' not found in prediction data dims "
+                    f"{data.prediction.dims}. Skipping score calculation."
+                )
+                return None
             f = self.prob_metrics_dict[score_name]
+            _logger.debug(f"Using probabilistic metric: {score_name}")
         else:
             raise ValueError(
                 f"Unknown score chosen. Supported scores: {
@@ -287,6 +294,8 @@ class Scores:
             "froct": ["p", "gt", "p_next", "gt_next"],
             "troct": ["p", "gt", "p_next", "gt_next"],
             "acc": ["p", "gt", "c"],
+            "rps": ["p", "gt", "c"],
+            "rpss": ["p", "gt", "c"],
             "fact": ["p", "c"],
             "tact": ["gt", "c"],
         }
@@ -922,6 +931,9 @@ class Scores:
         if c is None:
             return xr.full_like(x.sum(self._agg_dims), np.nan)
 
+        if "statistic" in c.dims:
+            c = c.sel(statistic="mean", drop=True)
+
         # Calculate anomalies
         ano = x - c
         act = ano.std(dim=self._agg_dims)
@@ -1001,6 +1013,9 @@ class Scores:
         if c is None:
             return xr.full_like(p.sum(self._agg_dims), np.nan)
 
+        if "statistic" in c.dims:
+            c = c.sel(statistic="mean", drop=True)
+
         # Calculate anomalies
         fcst_ano, obs_ano = p - c, gt - c
 
@@ -1010,6 +1025,140 @@ class Scores:
         )
 
         return acc
+
+    def calc_rps(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        c: xr.DataArray,
+        rps_quintile_stats: list[str] = None,
+    ) -> xr.DataArray:
+        """
+        Calculate Ranked Probability Score (RPS) using quintile categories.
+
+        Uses the four **quintile** boundary thresholds q20, q40, q60, q80 (selected from the
+        ``statistic`` dimension of ``c``) to define five categories.
+
+        Supports both deterministic and ensemble forecasts
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array.  May optionally contain an ensemble dimension named
+            ``self._ens_dim`` (default ``'ens'``).
+        gt: xr.DataArray
+            Ground truth data array (always deterministic / single-valued).
+        c: xr.DataArray
+            Climatology DataArray with a ``statistic`` dimension.  Must contain at least
+            the statistics ``'q20'``, ``'q40'``, ``'q60'``, ``'q80'``.
+        rps_quintile_stats: list[str]
+            List of statistic names in ``c`` to use as quintile boundaries. Default is
+            ``['q20', 'q40', 'q60', 'q80']``.
+
+        Returns
+        -------
+        xr.DataArray
+            Ranked Probability Score (RPS). Lower values indicate better forecasts.
+            Perfect score is 0.
+        """
+        if rps_quintile_stats is None:
+            rps_quintile_stats = ["q20", "q40", "q60", "q80"]
+        if c is None:
+            return xr.full_like(p.sum(self._agg_dims), np.nan)
+
+        if "statistic" not in c.dims:
+            raise ValueError(
+                "calc_rps expects a quantile DataArray with a 'statistic' dimension "
+                f"(e.g. from the new climatology format). Got dims: {c.dims}"
+            )
+        missing = [s for s in rps_quintile_stats if s not in c.statistic.values]
+        if missing:
+            raise ValueError(
+                f"calc_rps requires statistics {rps_quintile_stats} in the 'statistic' "
+                f"dimension, but {missing} are absent. Available: {list(c.statistic.values)}"
+            )
+
+        n_categories = len(rps_quintile_stats) + 1
+        boundaries = c.sel(statistic=rps_quintile_stats)
+
+        # Observation CDF
+        gt_cat = xr.zeros_like(gt, dtype=int)
+        for stat in rps_quintile_stats:
+            gt_cat = gt_cat + (gt > boundaries.sel(statistic=stat, drop=True))
+
+        if self._ens_dim in p.dims:
+            # Ensemble: fraction of members not exceeding boundary k
+            rps_sum = xr.zeros_like(gt)
+            for k, stat in enumerate(rps_quintile_stats):
+                p_cumulative = (p <= boundaries.sel(statistic=stat, drop=True)).mean(
+                    dim=self._ens_dim
+                )
+                rps_sum = rps_sum + (p_cumulative - (gt_cat <= k).astype(float)) ** 2
+        else:
+            # Deterministic
+            p_cat = xr.zeros_like(p, dtype=int)
+            for stat in rps_quintile_stats:
+                p_cat = p_cat + (p > boundaries.sel(statistic=stat, drop=True))
+            rps_sum = xr.zeros_like(gt)
+            for k in range(n_categories):
+                rps_sum = rps_sum + ((p_cat <= k).astype(float) - (gt_cat <= k).astype(float)) ** 2
+
+        return (rps_sum / (n_categories - 1)).mean(self._agg_dims)
+
+    def calc_rpss(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        c: xr.DataArray,
+        rps_quintile_stats: list[str] = None,
+    ) -> xr.DataArray:
+        """
+        Calculate the Ranked Probability Skill Score (RPSS) based on quintile categories.
+
+        RPSS = 1 - mean(RPS_fcst) / mean(RPS_clim)
+
+        The climatological reference uses a uniform distribution over the quintile
+        categories
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array (deterministic or ensemble with an ``ens`` dimension).
+        gt: xr.DataArray
+            Ground truth data array.
+        c: xr.DataArray
+            Climatology DataArray with a ``statistic`` dimension containing at least
+            ``'q20'``, ``'q40'``, ``'q60'``, ``'q80'``.
+        rps_quintile_stats: list[str]
+            List of statistic names in ``c`` to use as quintile boundaries. Default is
+            ``['q20', 'q40', 'q60', 'q80']``.
+
+        Returns
+        -------
+        xr.DataArray
+            RPSS. Values in (-inf, 1]; positive means better than climatology.
+        """
+        if rps_quintile_stats is None:
+            rps_quintile_stats = ["q20", "q40", "q60", "q80"]
+        if c is None:
+            return xr.full_like(p.mean(self._agg_dims), np.nan)
+
+        rps_fcst = self.calc_rps(p, gt, c, rps_quintile_stats=rps_quintile_stats)
+
+        # Uniform climatological reference: P_clim(cat <= k) = (k+1) / n_categories
+        n_categories = len(rps_quintile_stats) + 1
+        boundaries = c.sel(statistic=rps_quintile_stats)
+        gt_cat = xr.zeros_like(gt, dtype=int)
+        for stat in rps_quintile_stats:
+            gt_cat = gt_cat + (gt > boundaries.sel(statistic=stat, drop=True))
+        rps_clim_sum = xr.zeros_like(gt)
+        for k in range(n_categories - 1):  # final term is zero and omitted
+            rps_clim_sum = (
+                rps_clim_sum + ((k + 1) / n_categories - (gt_cat <= k).astype(float)) ** 2
+            )
+        rps_clim = (rps_clim_sum / (n_categories - 1)).mean(self._agg_dims)
+
+        return (1.0 - rps_fcst / rps_clim).where(rps_clim != 0, np.nan)
 
     def calc_bias(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
         """
@@ -1273,7 +1422,8 @@ class Scores:
         xr.DataArray
             Spread-Skill Ratio (SSR)
         """
-        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)  # spread/rmse
+        ens_mean = p.mean(dim=self._ens_dim)
+        ssr = self.calc_spread(p) / self.calc_rmse(ens_mean, gt)
 
         return ssr
 
@@ -1663,3 +1813,187 @@ class Scores:
         _logger.info(f"Q-Q analysis completed with {len(overall_qq_score.attrs)} attributes")
 
         return overall_qq_score
+
+    def calc_psd(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        psd_method: str = "sht",
+        psd_regrid_resolution: float = 1.0,
+        psd_sht_truncation: int | None = None,
+        lat_range: tuple[float, float] = (-60.0, 60.0),
+    ) -> xr.DataArray:
+        """Compute power spectral density for prediction and ground truth.
+
+        Returns a scalar summary score (log-spectral MSE) and stores the full
+        PSD curves in ``.attrs`` for plotting downstream.
+
+        Parameters
+        ----------
+        p: xr.DataArray
+            Forecast data array
+        gt: xr.DataArray
+            Ground truth data array
+        psd_method: str
+            Method to compute the PSD. Options: 'sht' (spherical harmonic transform),
+            'fft' (2D Fourier transform)
+        psd_regrid_resolution: float
+            Resolution in degrees to regrid data for PSD calculation. Default is 1.0 degree
+        psd_sht_truncation: int | None
+            Maximum spherical harmonic degree for truncation. If None, no truncation is applied.
+        lat_range: tuple[float, float]
+            Latitude range (min, max) to include in PSD calculation. Default is (-60,
+            60) degrees.
+
+        Returns
+        -------
+        xr.DataArray
+            Power spectral density score (log-spectral MSE) averaged over aggregation dimensions.
+
+        """
+        if self._agg_dims is None:
+            raise ValueError("Cannot calculate PSD without aggregation dimensions.")
+        if len(self._agg_dims) != 1:
+            raise ValueError(
+                f"PSD expects exactly one spatial aggregation dimension, "
+                f"got agg_dims={self._agg_dims}."
+            )
+        spatial_dim = self._agg_dims[0]
+        if spatial_dim not in gt.dims:
+            raise ValueError(
+                f"Spatial dimension '{spatial_dim}' not found in dims {list(gt.dims)}."
+            )
+
+        # PSD requires a spatial dimension with lat/lon coords (e.g. "ipoint").
+        # If the aggregation dim is "sample" or "ens" (e.g. from score map pipeline),
+        # PSD is not applicable — return NaN gracefully.
+        if spatial_dim in ("sample", "ens"):
+            _logger.debug(f"PSD: aggregation dim is '{spatial_dim}' (not spatial). Skipping.")
+            return xr.DataArray(np.nan)
+
+        n_points = gt.sizes[spatial_dim]
+        nlat, lats, lons = self._get_psd_grid_info(gt, spatial_dim)
+
+        if psd_method == "fft" and (lats is None or lons is None):
+            raise ValueError(f"PSD method 'fft' requires lat/lon coords on '{spatial_dim}'.")
+
+        # Detect grid type once for the entire stream (avoid repeated detection per channel)
+        grid_type = None
+        if psd_method == "sht" and lats is not None and lons is not None:
+            grid_type = detect_grid_type(lats, lons, n_points)
+
+        psd_kwargs = dict(
+            lats=lats,
+            lons=lons,
+            nlat=nlat,
+            n_points=n_points,
+            psd_method=psd_method,
+            psd_regrid_resolution=psd_regrid_resolution,
+            psd_sht_truncation=psd_sht_truncation,
+            lat_range=lat_range,
+            grid_type=grid_type,
+        )
+
+        # Dims to preserve (e.g. channel) vs batch dims (sample, ens)
+        other_dims = [d for d in gt.dims if d != spatial_dim]
+        preserve_dims = [d for d in other_dims if d not in ("sample", "ens")]
+
+        if not preserve_dims:
+            gt_np, p_np = self._stack_for_psd(gt, p, spatial_dim, n_points)
+            slice_score, slice_attrs = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
+            score = xr.DataArray(slice_score)
+            score.attrs.update(slice_attrs)
+            score.attrs["psd_method"] = psd_method
+            return score
+
+        # Iterate over preserved dims (typically per channel)
+        shape = tuple(gt.sizes[d] for d in preserve_dims)
+        score_values = np.empty(shape)
+        all_attrs: dict = {}
+
+        for idx in np.ndindex(*shape):
+            sel = dict(zip(preserve_dims, idx, strict=False))
+            gt_slice = gt.isel(**sel)
+            p_slice = p.isel(**sel)
+            gt_np, p_np = self._stack_for_psd(gt_slice, p_slice, spatial_dim, n_points)
+
+            slice_score, slice_attrs = compute_psd_score(gt=gt_np, p=p_np, **psd_kwargs)
+            score_values[idx] = slice_score
+
+            key = "_".join(
+                str(gt.coords[d].values[i]) if d in gt.coords else str(i) for d, i in sel.items()
+            )
+            for k, v in slice_attrs.items():
+                all_attrs[f"{key}/{k}"] = v
+
+        coords = {d: gt.coords[d] for d in preserve_dims if d in gt.coords}
+        score = xr.DataArray(score_values, dims=preserve_dims, coords=coords)
+        all_attrs["psd_method"] = psd_method
+        all_attrs["preserve_dims"] = preserve_dims
+        score.attrs.update(all_attrs)
+        return score
+
+    @staticmethod
+    def _get_psd_grid_info(
+        gt: xr.DataArray, spatial_dim: str
+    ) -> tuple[int | None, np.typing.NDArray | None, np.typing.NDArray | None]:
+        """
+        Extract nlat, lats, lons from ground-truth coords.
+
+        Parameters
+        ----------
+        gt: xr.DataArray
+            Ground truth data array with lat/lon coordinates.
+        spatial_dim: str
+            Name of the spatial dimension along which to compute the PSD.
+        Returns
+        -------
+        nlat: int | None
+            Number of latitude points, or None if lat/lon coords are not found.
+        lats: np.typing.NDArray | None
+            Latitude values, or None if lat/lon coords are not found.
+        lons: np.typing.NDArray | None
+            Longitude values, or None if lat/lon coords are not found.
+
+        """
+        if "lat" in gt.coords and "lon" in gt.coords:
+            if gt.coords["lat"].dims == (spatial_dim,) and gt.coords["lon"].dims == (spatial_dim,):
+                lats = gt.coords["lat"].values
+                lons = gt.coords["lon"].values
+                return len(np.unique(lats)), lats, lons
+        raise ValueError(f"PSD requires lat/lon coords on spatial dimension '{spatial_dim}'.")
+
+    @staticmethod
+    def _stack_for_psd(
+        gt: xr.DataArray, p: xr.DataArray, spatial_dim: str, n_points: int
+    ) -> tuple[np.typing.NDArray, np.typing.NDArray]:
+        """
+        Reshape data to (n_batch, n_points) for PSD computation.
+
+        Parameters
+        ----------
+        gt: xr.DataArray
+            Ground truth data array.
+        p: xr.DataArray
+            Forecast data array.
+        spatial_dim: str
+            Name of the spatial dimension along which to compute the PSD.
+        n_points: int
+            Number of points along the spatial dimension.
+        Returns
+        -------
+        gt_np: np.typing.NDArray
+            Reshaped ground truth data of shape (n_batch, n_points).
+        p_np: np.typing.NDArray
+            Reshaped forecast data of shape (n_batch, n_points).
+        """
+        non_spatial = [d for d in gt.dims if d != spatial_dim]
+        if non_spatial:
+            gt_np = gt.transpose(*non_spatial, spatial_dim).values.reshape(-1, n_points)
+            p_np = p.transpose(
+                *[d for d in p.dims if d != spatial_dim], spatial_dim
+            ).values.reshape(-1, n_points)
+        else:
+            gt_np = gt.values.reshape(1, -1)
+            p_np = p.values.reshape(1, -1)
+        return gt_np, p_np
