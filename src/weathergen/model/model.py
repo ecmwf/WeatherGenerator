@@ -82,15 +82,6 @@ class ModelOutput:
     def get_latent_prediction(self, fstep: int):
         return self.latent[fstep]
 
-class EnsembleLatentTokens(NamedTuple):
-    batch_size: int
-    token_dim: int
-    num_neighbors: int
-    num_members: int
-    tokens_tiled: torch.Tensor      # (num_members * batch_size, num_healpix_cells, token_dim)
-    tokens_nbors: torch.Tensor | None      # gathered neighbor tokens, flattened
-    tokens_nbors_lens: torch.Tensor | None # cu_seqlens-style length tensor
-
 
 
 class ModelParams(torch.nn.Module):
@@ -355,8 +346,8 @@ class Model(torch.nn.Module):
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
         self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
 
-        self.decoder_ens_latent_perturbation = cf.get("decoder_ens_latent_perturbation")
         self._logged_ensemble_memory = False
+        self.ens_latent_perturb = cf.get("decoder_ens_latent_perturbation")
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -594,12 +585,12 @@ class Model(torch.nn.Module):
 
         # Latent-perturbation noise scale (learnable or fixed)
         self.use_latent_perturbation = (
-            self.decoder_ens_latent_perturbation is not None
-            and self.decoder_ens_latent_perturbation.get("num_members", 0) >= 1
+            self.ens_latent_perturb is not None
+            and self.ens_latent_perturb.get("num_members", 0) >= 1
         )
 
         if self.use_latent_perturbation:
-            num_members = self.decoder_ens_latent_perturbation.get("num_members", 1)
+            num_members = self.ens_latent_perturb.get("num_members", 1)
             if num_members > 1:
                 # loss_fcts keys that are able to exploit multiple ensemble members
                 ensemble_aware_loss_fcts = {"kernel_crps"}  # extend as needed
@@ -619,16 +610,10 @@ class Model(torch.nn.Module):
                     )
 
         if self.use_latent_perturbation:
-            if self.decoder_ens_latent_perturbation.get("sigma_learnable", True):
-                self.latent_perturbation_log_sigma = nn.Parameter(
-                    torch.zeros(1),
-                    requires_grad=True,
-                )
-            else:
-                self.latent_perturbation_log_sigma = nn.Parameter(
-                    torch.zeros(1),
-                    requires_grad=False,
-                )
+            sigma_learnable = self.ens_latent_perturb.get("sigma_learnable", True)
+            self.latent_perturbation_log_sigma = nn.Parameter(
+                torch.zeros(1), requires_grad=sigma_learnable
+            )
         else:
             self.latent_perturbation_log_sigma = None
 
@@ -644,7 +629,7 @@ class Model(torch.nn.Module):
         self.apply(_reset_params)
 
         if self.latent_perturbation_log_sigma is not None:
-            sigma_init = self.decoder_ens_latent_perturbation.get("sigma_init", 0.01)
+            sigma_init = self.ens_latent_perturb.get("sigma_init", 0.01)
             with torch.no_grad():
                 self.latent_perturbation_log_sigma.fill_(math.log(sigma_init))
 
@@ -827,10 +812,9 @@ class Model(torch.nn.Module):
 
     def _build_ensemble_latent_tokens(
         self,
-        model_params: ModelParams,
         tokens: torch.Tensor,
         batch: ModelBatch,
-    ) -> EnsembleLatentTokens:
+    ) -> tuple[torch.Tensor, int]:
         """
         Strip aux tokens and, if latent perturbation is enabled, build the
         CRPS ensemble by perturbing the assimilated latent tokens with Gaussian
@@ -845,7 +829,6 @@ class Model(torch.nn.Module):
 
         batch_size = len(batch)
         token_dim = tokens.shape[-1]
-        num_neighbors = model_params.hp_nbours.shape[-1]  # neighbors + cell itself
 
         assert tokens.shape == (
             batch_size,
@@ -857,25 +840,21 @@ class Model(torch.nn.Module):
             "revisit tokens_nbors_lens if Q>1"
         )
 
-        num_members = (
-            self.decoder_ens_latent_perturbation.get("num_members", 1)
-            if self.use_latent_perturbation
-            else 1
-        )
+        if not self.use_latent_perturbation:
+            return tokens, 1
 
-        tokens_tiled = tokens
-        if self.use_latent_perturbation:
-            sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
-            eps = torch.randn(
-                num_members, batch_size,
-                self.num_healpix_cells * self.cf.ae_local_num_queries, token_dim,
-                device=tokens.device, dtype=tokens.dtype,
-            )
-            tokens_tiled = (tokens.unsqueeze(0) + sigma * eps).reshape(
-                num_members * batch_size,
-                self.num_healpix_cells * self.cf.ae_local_num_queries,
-                token_dim,
-            )
+        num_members = self.ens_latent_perturb.get("num_members", 1)
+        sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
+        eps = torch.randn(
+            num_members, batch_size,
+            self.num_healpix_cells * self.cf.ae_local_num_queries, token_dim,
+            device=tokens.device, dtype=tokens.dtype,
+        )
+        tokens_tiled = (tokens.unsqueeze(0) + sigma * eps).reshape(
+            num_members * batch_size,
+            self.num_healpix_cells * self.cf.ae_local_num_queries,
+            token_dim,
+        )
 
         assert tokens_tiled.shape == (
             num_members * batch_size,
@@ -883,18 +862,7 @@ class Model(torch.nn.Module):
             token_dim,
         )
 
-        result = EnsembleLatentTokens(
-            batch_size=batch_size,
-            token_dim=token_dim,
-            num_neighbors=num_neighbors,
-            num_members=num_members,
-            tokens_tiled=tokens_tiled,
-            tokens_nbors=None,
-            tokens_nbors_lens=None,
-        )
-
-
-        return result
+        return tokens_tiled, num_members
 
     def predict_decoders(
         self,
@@ -927,11 +895,9 @@ class Model(torch.nn.Module):
             return output
 
 
-        ens = self._build_ensemble_latent_tokens(model_params, tokens, batch)
-        batch_size = ens.batch_size
-        token_dim = ens.token_dim
-        num_members = ens.num_members
-        tokens_tiled = ens.tokens_tiled
+        tokens_tiled, num_members = self._build_ensemble_latent_tokens(tokens, batch)
+        batch_size = len(batch)
+        token_dim = tokens.shape[-1]
 
 
         # pair with tokens from assimilation engine to obtain target tokens
@@ -1017,20 +983,10 @@ class Model(torch.nn.Module):
                         f"expected {num_members * t_coords.shape[0]} pts in pred, "
                         f"got {total_target_points}"
                     )
-                    pred = (
-                        pred.reshape(
-                            ens_head_size, 
-                            num_members, 
-                            t_coords.shape[0], 
-                            output_channels,
-                        )
-                        .permute(1, 0, 2, 3)
-                        .reshape(
-                            num_members * ens_head_size, 
-                            t_coords.shape[0], 
-                            output_channels,
-                        )
-                    )
+                    n_pts = t_coords.shape[0]
+                    split_shape = (ens_head_size, num_members, n_pts, output_channels)
+                    merged_shape = (num_members * ens_head_size, n_pts, output_channels)
+                    pred = pred.reshape(split_shape).permute(1, 0, 2, 3).reshape(merged_shape)
 
                 assert pred.shape[1] == t_coords.shape[0], (
                     f"expected {t_coords.shape[0]} points in dim=1, "
