@@ -96,6 +96,44 @@ def _hdate_list(ref_date_str: str, fromyear: int, toyear: int) -> list[str]:
             for y in range(fromyear, toyear + 1)]
 
 
+_MOFC_WEEKDAYS = {0: "Monday", 3: "Thursday"}   # IFS extended-range run days
+
+
+def _check_mofc_date(ref_date_str: str) -> None:
+    """
+    Raise ValueError if ref_date is not a Monday or Thursday.
+    The IFS extended-range forecast (mofc) only runs on these two days;
+    MARS returns 'Data not found' for any other weekday.
+    The error message shows the nearest valid date(s) for convenience.
+    """
+    from datetime import timedelta
+    ref_dt  = datetime.strptime(ref_date_str, "%Y%m%d")
+    weekday = ref_dt.weekday()   # 0=Mon ... 6=Sun
+    if weekday in _MOFC_WEEKDAYS:
+        return   # valid
+
+    # Find nearest Monday and Thursday in both directions
+    candidates: list[datetime] = []
+    for wd in _MOFC_WEEKDAYS:
+        back = ref_dt - timedelta(days=(weekday - wd) % 7)
+        fwd  = ref_dt + timedelta(days=(wd - weekday) % 7)
+        if back != ref_dt:
+            candidates.append(back)
+        if fwd != ref_dt:
+            candidates.append(fwd)
+    candidates.sort(key=lambda d: abs((d - ref_dt).days))
+    suggestions = ", ".join(
+        f"{d.strftime('%Y%m%d')} ({_MOFC_WEEKDAYS.get(d.weekday(), d.strftime('%A'))})"
+        for d in candidates[:2]
+    )
+    day_name = ref_dt.strftime("%A")
+    raise ValueError(
+        f"ref-date {ref_date_str} is a {day_name} — IFS mofc only runs on "
+        f"Mondays and Thursdays.\n"
+        f"  Nearest valid date(s): {suggestions}"
+    )
+
+
 def _mars_request_text(req: dict) -> str:
     """
     Render a dict as a MARS request string.
@@ -293,6 +331,8 @@ def retrieve_and_stage(
     _log.info("MARS stream: %s  |  hdate mode: %s  |  steps: %d..%d  (%d total)",
               stream, is_hdate,
               steps[0], steps[-1], len(steps))
+
+    _check_mofc_date(ref_date)
 
     # -----------------------------------------------------------------------
     # Group params for efficient batching:

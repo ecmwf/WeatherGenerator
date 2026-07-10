@@ -104,6 +104,43 @@ def _hdate_list(ref_date_str: str, fromyear: int, toyear: int) -> list[str]:
     return [f"{y:04d}{ref_dt.month:02d}{ref_dt.day:02d}" for y in range(fromyear, toyear + 1)]
 
 
+_MOFC_WEEKDAYS = {0: "Monday", 3: "Thursday"}   # IFS extended-range run days
+
+
+def _check_mofc_date(ref_date_str: str) -> None:
+    """
+    Raise ValueError if ref_date is not a Monday or Thursday.
+    The IFS extended-range forecast (mofc) only runs on these two days;
+    MARS / ECMWF Web API return no data for any other weekday.
+    The error message shows the nearest valid date(s) for convenience.
+    """
+    from datetime import timedelta
+    ref_dt  = datetime.strptime(ref_date_str, "%Y%m%d")
+    weekday = ref_dt.weekday()   # 0=Mon ... 6=Sun
+    if weekday in _MOFC_WEEKDAYS:
+        return   # valid
+
+    candidates: list[datetime] = []
+    for wd in _MOFC_WEEKDAYS:
+        back = ref_dt - timedelta(days=(weekday - wd) % 7)
+        fwd  = ref_dt + timedelta(days=(wd - weekday) % 7)
+        if back != ref_dt:
+            candidates.append(back)
+        if fwd != ref_dt:
+            candidates.append(fwd)
+    candidates.sort(key=lambda d: abs((d - ref_dt).days))
+    suggestions = ", ".join(
+        f"{d.strftime('%Y%m%d')} ({_MOFC_WEEKDAYS.get(d.weekday(), d.strftime('%A'))})"
+        for d in candidates[:2]
+    )
+    day_name = ref_dt.strftime("%A")
+    raise ValueError(
+        f"ref-date {ref_date_str} is a {day_name} — IFS mofc only runs on "
+        f"Mondays and Thursdays.\n"
+        f"  Nearest valid date(s): {suggestions}"
+    )
+
+
 def _weekly_means_from_grib(
     grib_path: Path,
     varname: str,
@@ -246,6 +283,8 @@ def retrieve_and_stage(
     stage_dir.mkdir(parents=True, exist_ok=True)
 
     server = ECMWFService("mars")
+
+    _check_mofc_date(ref_date)
 
     if forecast_only or hcfromyear is None:
         date_list = [ref_date]
