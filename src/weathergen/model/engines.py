@@ -472,7 +472,9 @@ class QueryAggregationEngine(torch.nn.Module):
             if isinstance(block, MultiSelfAttentionHeadVarlen):
                 tokens = checkpoint(block, tokens, x_lens=batch_lens, coords=coords, use_reentrant=False)
             else:
-                tokens = checkpoint(block, tokens, coords=coords, aux_info=aux_info, use_reentrant=False)
+                # MLP.forward accepts positional args only (def forward(self, *args)),
+                # so coords/aux_info must be passed positionally, not as keywords.
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 
@@ -552,7 +554,10 @@ class GlobalAssimilationEngine(torch.nn.Module):
     def forward(self, tokens, coords=None):
         aux_info = None
         for block in self.ae_global_blocks:
-            tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
+            if isinstance(block, torch.nn.LayerNorm):
+                tokens = checkpoint(block, tokens, use_reentrant=False)
+            else:
+                tokens = checkpoint(block, tokens, coords, aux_info, use_reentrant=False)
         return tokens
 
 

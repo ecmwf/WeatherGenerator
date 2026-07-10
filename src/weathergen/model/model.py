@@ -732,7 +732,8 @@ class Model(torch.nn.Module):
                 if np.random.rand() < self.cf.get("fe_diffusion_classifier_free_guidance_prob", 0.0):  # occasionally dropout conditioning for classifier free guidance
                     conditioning_tokens = torch.zeros_like(conditioning_tokens)
             # X_t (tokens[:, 0], most recent) is the diffusion denoising target; older steps are conditioning.
-            batch.samples[0].meta_info["ERA5"].params["conditioning_tokens"] = conditioning_tokens
+            # batch.samples[0].meta_info["LATENT"].params["conditioning_tokens"] = conditioning_tokens
+            batch.samples[0].meta_info["LATENT_CONDITIONING_TOKENS"] = conditioning_tokens
             # self.forecast_engine._pending_target_tokens = diffusion_target_tokens
             tokens = tokens[:, 0]
         else:

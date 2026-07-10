@@ -101,6 +101,14 @@ class LossLatentDiffusion(LossModuleBase):
         pred_tokens_all = [pl["latent_state"].z_pre_norm for pl in preds.latent if pl and "latent_state" in pl]
         target_tokens_all = [latent["diffusion_latent"] for latent in targets.latent if latent]
 
+        # Remove the register and class tokens (prepended by the encoder) from the
+        # predictions and targets so the diffusion loss is computed on healpix-cell
+        # latents only.
+        num_extra_tokens = self.cf.num_register_tokens + self.cf.num_class_tokens
+        if num_extra_tokens > 0:
+            pred_tokens_all = [tokens[:, num_extra_tokens:] for tokens in pred_tokens_all]
+            target_tokens_all = [tokens[:, num_extra_tokens:] for tokens in target_tokens_all]
+
         # In ensemble mode predict_latent is not called, so latent predictions are absent.
         # Return a zero loss rather than crashing.
         if not pred_tokens_all:
