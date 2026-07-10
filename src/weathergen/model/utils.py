@@ -60,6 +60,34 @@ def apply_fct_to_blocks(model, blocks, fct):
             fct(module)
 
 
+def broadcast_matching_params(model, blocks, src=0):
+    """
+    Broadcast parameters and buffers of blocks matching the regex from rank src to
+    all ranks. Needed after reset_parameters() under DDP: the reset draws from each
+    rank's own RNG, and DDP only syncs parameters at wrap time, so without a
+    broadcast the ranks train permanently diverged weights.
+    Args:
+        model : model instance with attribute named_modules
+        blocks : regex pattern to match block names
+        src : rank whose values are broadcast
+    """
+
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return
+    seen = set()
+    tensors = []
+    for name, module in model.named_modules():
+        name = module.name if hasattr(module, "name") else name
+        if (re.fullmatch(blocks, name) is not None) and (name != ""):
+            for t in list(module.parameters()) + list(module.buffers()):
+                if id(t) not in seen:
+                    seen.add(id(t))
+                    tensors.append(t)
+    for t in tensors:
+        torch.distributed.broadcast(t.data, src=src)
+    logger.info(f"Broadcast {len(tensors)} reset tensors from rank {src}")
+
+
 def check_reset_not_frozen(model, reset_blocks):
     """
     Verify that no parameter about to be reset is frozen. A parameter that is reset

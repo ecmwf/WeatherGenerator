@@ -31,6 +31,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import (
     apply_fct_to_blocks,
+    broadcast_matching_params,
     check_reset_not_frozen,
     freeze_weights,
     log_trainable_summary,
@@ -189,11 +190,14 @@ def init_model_and_shard(
     if loaded_from_run_id is not None and loaded_from_run_id != current_run_id:
         reset_modules = cf.get("reset_modules", "")
         if reset_modules:
+            assert not with_fsdp, "reset_modules with FSDP-sharded parameters is not supported"
             # a parameter that is both reset and frozen would stay random forever
             check_reset_not_frozen(model, reset_modules)
             if is_root():
                 logger.info(f"Resetting weights for modules matching: {reset_modules}")
             apply_fct_to_blocks(model, reset_modules, reset_weights)
+            # each rank resets with its own RNG; sync to rank 0 like DDP does at wrap time
+            broadcast_matching_params(model, reset_modules, src=0)
 
     if is_root():
         log_trainable_summary(model)
