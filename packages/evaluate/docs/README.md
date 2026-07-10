@@ -1,11 +1,11 @@
+![WeatherGenerator logo](./_static/images/wg_logo.svg)
+
 # The `WeatherGenerator-FastEvaluation` package
 
 A modular evaluation and visualization package for verifying forecast data and model outputs in the WeatherGenerator project. This package reads the output of the inference stage from the WeatherGenerator and provides statistics or exports to other tools.
 
-
 ---
 
-## Overview
 
 The `WeatherGenerator-FastEvaluation` tool is designed for rapid diagnostics of WeatherGenerator model outputs, in contrast to the evaluation frameworks used in national meteorological services.
 
