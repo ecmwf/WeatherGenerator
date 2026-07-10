@@ -9,5 +9,5 @@ python:
   install:
     - requirements: packages/evaluate/docs/requirements.txt
 
-sphinx:
-  configuration: packages/evaluate/docs/conf.py
+mkdocs:
+  configuration: mkdocs.yml

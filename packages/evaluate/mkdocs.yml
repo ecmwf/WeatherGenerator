@@ -1,0 +1,31 @@
+site_name: WeatherGenerator-FastEvaluation
+site_url: https://wgen-fasteval.readthedocs.io/
+repo_url: https://github.com/ecmwf/WeatherGenerator/tree/develop/packages/evaluate
+site_author: WeatherGenerator contributors
+copyright: "&copy; {{ build_date_utc.strftime('%Y') }} WeatherGenerator contributors"
+
+theme:
+  logo: images/wg_logo.svg
+  # font:
+  #   text: "Inter"
+  #   headings: "Familjen Grotesk"
+  # CHECK GDPR login
+highlightjs: true
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        # See: https://mkdocstrings.github.io/python/usage/
+        python:
+          options:
+            docstring_style: sphinx
+markdown_extensions:
+  - markdown_include.include:
+      base_path: .
+  - admonition
+extra_css:
+  - ./_static/custom.css
+
+nav:
+  - "Introduction": README.md
+  - "Examples": examples/index.md
