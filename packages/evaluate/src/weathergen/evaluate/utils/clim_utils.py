@@ -124,6 +124,13 @@ def align_clim_data(
             for dim in target_da.dims:
                 if dim in target_da.coords and target_da.coords[dim].dims == (dim,):
                     all_stat_coords[dim] = target_da.coords[dim].values
+            # Also copy non-dimensional coordinates (e.g. 'sample', 'lat', 'lon', 'valid_time')
+            # so that downstream groupby('sample') works for scatter data.
+            for coord_name, coord in target_da.coords.items():
+                if coord_name not in all_stat_coords and all(
+                    d in target_da.dims for d in coord.dims
+                ):
+                    all_stat_coords[coord_name] = (list(coord.dims), coord.values)
             aligned_clim[fstep] = xr.DataArray(
                 np.full(
                     (len(all_stats),) + target_da.shape,
@@ -251,3 +258,22 @@ def get_climatology(reader, da_tars, stream: str) -> dict | None:
         return {fstep: scale_z_channels(da, stream) for fstep, da in aligned.items()}
 
     return None
+
+
+def needs_climatology(metrics_dict: dict) -> bool:
+    """
+    Check if any of the specified metrics require climatology data.
+
+    Parameters
+    ----------
+    metrics : dict
+        Dictionary mapping metric names to their parameters.
+
+    Returns
+    -------
+    bool
+        True if any metric requires climatology, False otherwise
+    """
+    metrics = [m for metrics in metrics_dict.values() for m in metrics.keys()]
+    req_clim = ["acc", "rps", "rpss"]
+    return any(m in req_clim for m in metrics)

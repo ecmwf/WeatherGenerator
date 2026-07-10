@@ -1,0 +1,17 @@
+runid : "i0xr7z48"
+init_time :  "2023-10-07T00"
+inpath : "../wegen_export/cyclones/" 
+outpath : "./plots/"
+latmin: -30 # TCs are only detected for latmin<=lat<=latmax
+latmax: 30
+selected_storm : # the storm you want to analyze
+  lon : 154.7
+  lat : 9.6 
+  time : "2023-10-07T00:00"
+tracking_params:
+  laplace_size : 2 # in units of gridboxes
+  laplace_threshold : 0 # should be >= 0 to fond low pressure systems
+  pressure_threshold : 103000 # in Pa
+  wind_threshold : 0  # in m/s
+  peak_separation : 5 # in units of gridboxes
+  merge_distance: 300 # in km

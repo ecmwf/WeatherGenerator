@@ -31,6 +31,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
 from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
 from weathergen.utils.distributed import is_root
+from weathergen.utils.performance import register_nvtx_hooks
 from weathergen.utils.utils import get_dtype
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,10 @@ def init_model_and_shard(
     model_creation_device = "meta" if with_ddp and with_fsdp else "cuda"
     with torch.device(model_creation_device):
         model = get_model(cf, training_mode, dataset, overrides)
+
+    if cf.get("profiling", {}).get("nvtx_annotate", False):
+        logger.info("Registering NVTX hooks for model.")
+        register_nvtx_hooks(model)
 
     # freeze request model part
     apply_fct_to_blocks(model, cf.freeze_modules, freeze_weights)
@@ -142,8 +147,7 @@ def init_model_and_shard(
         # because the input tensors are not converted to DTensors. This seems to primarily
         # occur during validation.
         for embed in model.encoder.embed_engine.embeds.values():
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_channels")
-            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
+            torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward")
 
     # complete initalization and load model if inference/continuing a run
     if run_id_contd is not None:
