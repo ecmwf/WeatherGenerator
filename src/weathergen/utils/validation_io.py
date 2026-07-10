@@ -105,10 +105,6 @@ def write_output(
                     t_times_s += [t_times.astype("datetime64[ns]")]
 
             targets_lens[-1] += [[]]
-            # Use coordinate count rather than target-value count so that in
-            # inference_only mode (where target tokens are empty but coords and
-            # predictions are non-empty) the correct number of output datapoints
-            # is indexed when writing predictions.
             targets_lens[-1][-1] += [t.shape[0] for t in t_coords_s]
 
             preds_all[-1] += [np.concatenate(preds_s, axis=1)]
