@@ -10,4 +10,4 @@ python:
     - requirements: packages/evaluate/docs/requirements.txt
 
 mkdocs:
-  configuration: packages/evaluate/docs/mkdocs.yml
+  configuration: packages/evaluate/mkdocs.yml
