@@ -1,0 +1,276 @@
+# (C) Copyright 2025 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+# Flow matching / score matching config. Reuses the time-conditioned forecasting
+# backbone built for the diffusion model (fe_diffusion_model: True) but routes the
+# forecast engine to FlowMatchingForecastEngine (fe_flow_matching_model: True) and
+# trains with the conditional flow-matching / denoising-score-matching loss over a
+# Gaussian probability path. See src/weathergen/model/flow_matching.py.
+
+embed_orientation: "channels"
+embed_unembed_mode: "block"
+embed_dropout_rate: 0.1
+
+ae_local_dim_embed: 512
+ae_local_num_blocks: 0
+ae_local_num_heads: 16
+ae_local_dropout_rate: 0.1
+ae_local_with_qk_lnorm: True
+
+ae_local_num_queries: 1
+ae_local_queries_per_cell: False
+ae_adapter_num_heads: 16
+ae_adapter_embed: 128
+ae_adapter_with_qk_lnorm: True
+ae_adapter_with_residual: True
+ae_adapter_dropout_rate: 0.1
+
+ae_global_dim_embed: 512
+ae_global_num_blocks: 4
+ae_global_num_heads: 32
+ae_global_dropout_rate: 0.1
+ae_global_with_qk_lnorm: True
+ae_global_att_dense_rate: 1.0
+ae_global_block_factor: 64
+ae_global_mlp_hidden_factor: 2
+ae_global_trailing_layer_norm: False
+
+ae_aggregation_num_blocks: 0
+ae_aggregation_num_heads: 32
+ae_aggregation_dropout_rate: 0.1
+ae_aggregation_with_qk_lnorm: True
+ae_aggregation_att_dense_rate: 1.0
+ae_aggregation_block_factor: 64
+ae_aggregation_mlp_hidden_factor: 2
+
+decoder_type: PerceiverIOCoordConditioning
+pred_adapter_kv: False
+pred_self_attention: True
+pred_dyadic_dims: False
+pred_mlp_adaln: True
+num_class_tokens: 0
+num_register_tokens: 0
+
+fe_num_blocks: 6
+fe_num_heads: 16
+fe_dropout_rate: 0.1
+fe_with_qk_lnorm: True
+
+# --- Backbone: reuse the diffusion time-conditioned (DiT) forecasting backbone ---
+# fe_diffusion_model builds the noise/time-conditioned blocks in ForecastingEngine and
+# runs model.py's forecast target/conditioning construction. fe_flow_matching_model then
+# wraps that backbone in FlowMatchingForecastEngine (checked before the diffusion wrapper).
+fe_diffusion_model: True
+fe_flow_matching_model: True
+fe_diffusion_predict_residual: False
+fe_diffusion_classifier_free_guidance_prob: 0.0
+fe_diffusion_model_conditioning: "forecast"       # previous latent state as conditioning
+fe_diffusion_model_conditioning_type: "cross_attn"
+fe_layer_norm_after_blocks: []
+fe_impute_latent_noise_std: 0.0
+fe_impute_latent_diffusion_noise_std: 0.0
+forecast_att_dense_rate: 1.0
+with_step_conditioning: True
+
+# --- Flow matching / score matching parameters ---
+fe_flow_path: condot            # Gaussian path: alpha_t=t, beta_t=1-t (CondOT)
+fe_flow_prediction_type: velocity  # velocity (CFM) | noise (DSM) | score
+fe_flow_sampler: ode            # ode (flow, Euler+Heun) | sde (score, Euler-Maruyama)
+fe_flow_num_ensemble_members: 1
+fm_t_eps: 1.0e-3                 # clamp t to [t_eps, 1-t_eps]
+fm_num_steps: 50                # inference integration steps
+fm_sde_sigma: 0.0               # SDE diffusion coefficient (0 -> ODE)
+fm_time_scale: 1000.0           # scale t before sinusoidal time embedding
+fm_c_in: 1.0                    # input preconditioning (identity for flow matching)
+
+# t is drawn directly at the source (masking.py) as noise_level_rn ~ Unif[t_min, t_max];
+# the engine/loss consume it as the path time t.
+noise_distribution: uniform
+
+diffusion_conditioning_embed_dim: 32
+frequency_embedding_dim: 256
+embedding_dim: 512
+# Diffusion/EDM-only knobs kept for backbone/config compatibility (unused by flow matching).
+sigma_min: 0.002
+sigma_max: 80
+sigma_data: 1.0
+rho: 7
+p_mean: 1.5
+p_std: 1.2
+
+healpix_level: 5
+
+rope_2D: True
+mlp_type: swiglu
+use_xsa: True
+
+with_mixed_precision: True
+with_flash_attention: True
+compile_model: False
+with_fsdp: False
+attention_dtype: bf16
+mixed_precision_dtype: bf16
+mlp_norm_eps: 1e-5
+norm_eps: 1e-4
+
+latent_noise_kl_weight: 0.0
+latent_noise_gamma: 2.0
+latent_noise_saturate_encodings: 5
+latent_noise_use_additive_noise: False
+latent_noise_deterministic_latents: True
+
+freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_token_engines.*|.*embed_target_coords.*|.*encoder.*|.*StreamEmbedder_ERA5.*|.*embed_engine.*|.*embed_engine.*|.*ae_local_engine.*|.*ae_local_global_engine.*|.*ae_global_engine.*"
+# Reuse the same pretrained multi-var d512 hl5 backbone as the diffusion experiments.
+load_chkpt: {'run_id': 'm6fs8wvj', 'epoch': -1}  # multi-var d512 hl5, sigma_data=1.0, swiglu xsa geoinfos
+
+norm_type: "LayerNorm"
+
+#####################################
+
+streams_directory: "./config/streams/era5_1deg_forecasting/"
+streams: ???
+
+zarr_store: "zip"
+
+general:
+
+  # mutable parameters
+  istep: 0
+  rank: ???
+  world_size: ???
+
+  multiprocessing_method: "fork"
+
+  desc: ""
+  run_id: ???
+  run_history: []
+
+train_logging:
+  terminal: 10
+  metrics: 20
+  checkpoint: 250
+  log_grad_norms: False
+
+data_loading :
+
+  num_workers: 12
+  rng_seed: ???
+  repeat_data_in_mini_epoch : False
+  memory_pinning: True
+
+
+training_config:
+
+  training_mode: ["masking","student_teacher"]
+
+  num_mini_epochs: 128
+  samples_per_mini_epoch: 4096
+  shuffle: True
+
+  start_date: 1979-01-01T00:00
+  end_date: 2022-12-31T18:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
+  learning_rate_scheduling :
+    lr_start: 1e-6
+    lr_max: 1e-5
+    lr_final_decay: 1e-6
+    lr_final: 0.0
+    num_steps_warmup: 64
+    num_steps_cooldown: 512
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  optimizer:
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
+    adamw :
+      beta1 : 0.975
+      beta2 : 0.9875
+      eps : 2e-08
+
+  losses : {
+    "physical": {
+        type: LossPhysical,
+        weight: 0.0,
+        loss_fcts: {
+          "mse": {},
+        },
+        target_and_aux_calc: "Physical",
+    },
+    "latent_diff": {
+        type: LossFlowMatching,
+        weight: 1.0,
+        target_and_aux_calc: FlowMatchingTargetEncoder,
+        loss_fcts: { "mse": { }, },
+        }
+  }
+
+  model_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      masking_strategy_config: {diffusion_rn: True, noise_distribution: uniform, t_min: 0.0, t_max: 1.0},
+      num_steps_input: 2,
+      num_samples: 1,
+      }
+    }
+
+  target_input: {
+    "forecasting" : {
+      masking_strategy: "forecast",
+      masking_strategy_config: {diffusion_rn: True, noise_distribution: uniform, t_min: 0.0, t_max: 1.0},
+      num_steps_input: 1,
+      num_samples: 1,
+      }
+    }
+
+  forecast :
+      time_step: 06:00:00
+      num_steps: 1
+      offset: 0
+      policy: "fixed"
+
+
+validation_config:
+
+  # Fixed path-time values t in (0,1) at which to evaluate during validation (each a
+  # separate pass with independently logged metrics). Analogue of the diffusion
+  # validation_noise_levels, but interpreted as t rather than eta.
+  validation_noise_levels: [0.2, 0.4, 0.6, 0.8]
+
+  samples_per_mini_epoch: 256
+  shuffle: True
+
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T18:00
+
+  validate_with_ema:
+    enabled : True
+    ema_ramp_up_ratio: 0.09
+    ema_halflife_in_thousands: 1e-3
+
+  output : {
+    num_samples: 0,
+    normalized_samples: False,
+    streams: null,
+    }
+
+  validate_before_training: True
+
+
+wgtags:
+  org: null
+  issue: null
+  exp: null
+  grid: null
