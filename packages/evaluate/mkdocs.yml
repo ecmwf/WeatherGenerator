@@ -10,7 +10,7 @@ theme:
   #   text: "Inter"
   #   headings: "Familjen Grotesk"
   # CHECK GDPR login
-highlightjs: true
+  highlightjs: true
 plugins:
   - search
   - mkdocstrings:
