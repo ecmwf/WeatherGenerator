@@ -10,7 +10,10 @@
 # nor does it submit to any jurisdiction.
 
 import os
+import random
+import time
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.multiprocessing
@@ -63,10 +66,32 @@ class TrainerBase:
         return devices
 
     @staticmethod
+    def init_seeds(seed: int) -> None:
+        """
+        Seed the torch, Python, and global NumPy RNGs.
+
+        The same seed is used on all ranks so that model weight initialization is
+        identical across ranks even without a parameter broadcast (e.g. FSDP2).
+        Data loading randomness is diversified per rank/worker/mini-epoch in
+        MultiStreamDataSampler.
+        """
+        torch.manual_seed(seed)  # also seeds the RNGs of all CUDA devices
+        random.seed(seed)
+        np.random.seed(seed % 2**32)
+
+    @staticmethod
     def init_ddp(cf):
         """Initializes the distributed environment."""
         rank = 0
         local_rank = 0
+
+        # rng seed: use value from config if provided, otherwise derive from time;
+        # in the distributed case, rank 0's seed is communicated to all ranks below
+        if cf.data_loading.get("rng_seed", None) is None:
+            cf.data_loading.rng_seed = int(time.time())
+        # seed 0 breaks the multiplicative per-rank/worker seed derivation in
+        # MultiStreamDataSampler and negative seeds are invalid for numpy
+        cf.data_loading.rng_seed = max(int(cf.data_loading.rng_seed), 1)
 
         if not dist.is_available():
             print("Distributed training is not available.")
@@ -127,14 +152,16 @@ class TrainerBase:
                 cf.general.run_id = tensor_to_str(run_id_int)
             print(f"rank: {rank} has run_id: {cf.general.run_id}")
 
-            # communicate data_loader_rng_seed
-            if hasattr(cf, "data_loader_rng_seed"):
-                if cf.data_loader_rng_seed is not None:
-                    l_seed = torch.tensor(
-                        [cf.data_loader_rng_seed if rank == 0 else 0], dtype=torch.int32
-                    ).cuda()
-                    dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
-                    cf.data_loader_rng_seed = l_seed.item()
+            # communicate rank 0's rng seed to all ranks; ranks derive their own seed
+            # from a common base seed (cf. MultiStreamDataSampler.worker_workset)
+            l_seed = torch.tensor(
+                [cf.data_loading.rng_seed if rank == 0 else 0], dtype=torch.int64
+            ).to(device)
+            dist.all_reduce(l_seed, op=torch.distributed.ReduceOp.SUM)
+            cf.data_loading.rng_seed = l_seed.item()
+
+        TrainerBase.init_seeds(cf.data_loading.rng_seed)
+        print(f"rank: {rank} uses rng_seed: {cf.data_loading.rng_seed}")
 
         cf.world_size = world_size
         cf.rank = rank
