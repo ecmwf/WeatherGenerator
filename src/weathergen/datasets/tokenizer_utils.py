@@ -91,9 +91,9 @@ def encode_times_target(times, time_win) -> torch.tensor:
     dt = pd.to_datetime(times)
     dt_win = pd.to_datetime(time_win)
     # for target only provide local time
-    dt_delta = torch.tensor(
-        np.atleast_1d((dt - dt_win[0]).seconds), dtype=torch.float32
-    ).unsqueeze(1)
+    dt_delta = torch.tensor(np.atleast_1d((dt - dt_win[0]).seconds), dtype=torch.float32).unsqueeze(
+        1
+    )
     time_tensor = torch.cat(
         (
             dt_delta,
@@ -543,7 +543,7 @@ def get_target_coords_local(
     zi = 99
     a[..., (geoinfo_offset + zi) :] = target_coords[..., (geoinfo_offset + 2) :]
 
-    # Careful when merging develop-ssl into develop. 
+    # Careful when merging develop-ssl into develop.
     # This is not to be merged in to develop.
     a[..., 98] = np.sin(coords[:, 0])
     a[..., 97] = np.cos(coords[:, 0])

@@ -49,7 +49,7 @@ class DataReaderObs(DataReaderBase):
         base_date_str = dt_obj.strftime("%Y%m%d%H%M")
         self.hrly_index = self.z[f"idx_{base_date_str}_1"]
         self.colnames = list(self.data.attrs["colnames"])
-        
+
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
         data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
 

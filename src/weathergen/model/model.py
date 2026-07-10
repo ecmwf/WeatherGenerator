@@ -787,7 +787,9 @@ class Model(torch.nn.Module):
                 output = self.predict_decoders(model_params, step, tokens, batch, output)
             if "student_teacher" in self.cf.training_config.training_mode:
                 # latent predictions (raw and with SSL heads)
-                output = self.predict_latent(model_params, step, tokens, batch, output, intermediates)
+                output = self.predict_latent(
+                    model_params, step, tokens, batch, output, intermediates
+                )
 
         return output
 

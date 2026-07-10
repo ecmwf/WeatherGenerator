@@ -32,6 +32,7 @@ from weathergen.model.layers import MLP
 from weathergen.model.utils import ActivationFactory
 from weathergen.utils.utils import get_dtype
 
+
 class EmbeddingEngine(torch.nn.Module):
     name: "EmbeddingEngine"
 
@@ -104,7 +105,7 @@ class EmbeddingEngine(torch.nn.Module):
             # skip empty stream
             if sdata.numel() == 0:
                 continue
-            
+
             # embedding from physical space to per patch latent representation
             x_embeds += [self.embeds[stream_name](sdata).flatten(0, 1)]
 

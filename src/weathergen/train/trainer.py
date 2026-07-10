@@ -256,7 +256,6 @@ class Trainer(TrainerBase):
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
-
         # inference validation set
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
