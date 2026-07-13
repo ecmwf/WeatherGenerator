@@ -16,7 +16,7 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.scores.score_utils import to_list
+from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_list
 
 # from common.io import MockIO
 
@@ -76,11 +76,14 @@ class VerifiedData:
     prediction_next: xr.DataArray | None
     ground_truth_next: xr.DataArray | None
     climatology: xr.DataArray | None
+    latitude_weights: xr.DataArray | None = None
 
     def __post_init__(self):
         # Perform checks on initialization
         self._validate_dimensions()
         self._validate_broadcastability()
+        if self.latitude_weights is None:
+            object.__setattr__(self, "latitude_weights", self._compute_latitude_weights())
 
     # TODO: add checks for prediction_next, ground_truth_next, climatology
     def _validate_dimensions(self):
@@ -98,6 +101,12 @@ class VerifiedData:
             xr.broadcast(self.prediction, self.ground_truth)
         except ValueError as e:
             raise ValueError(f"Forecast and truth are not broadcastable: {e}") from e
+
+    def _compute_latitude_weights(self) -> xr.DataArray | None:
+        found = [c for c in ("lat", "latitude", "rlat", "clat") if c in self.prediction.coords]
+        if not found:
+            return None
+        return calc_latitude_weights(self.prediction, lat_coord_name=found[0])
 
 
 def get_score(
@@ -311,6 +320,22 @@ class Scores:
             if an in kwargs:
                 args[an] = kwargs[an]
 
+        # Inject latitude weights if requested via parameters.
+        # Config example: {rmse: {latitude_weighting: true}}
+        # Weights are pre-computed on VerifiedData construction; None if no lat coord found.
+        if "latitude_weighting" in parameters:
+            parameters = dict(parameters)  # don't mutate caller's dict
+            use_lat_weights = parameters.pop("latitude_weighting")
+            if use_lat_weights and "latitude_weights" in inspect.getfullargspec(f).args:
+                if data.latitude_weights is not None:
+                    parameters["latitude_weights"] = data.latitude_weights
+                else:
+                    _logger.warning(
+                        "Latitude weighting was requested for score '%s', but no latitude "
+                        "coordinate was found. Proceeding without weighting.",
+                        score_name,
+                    )
+
         if group_by_coord is not None and self._validate_groupby_coord(data, group_by_coord):
             # Apply groupby to all DataArrays in args
             grouped_args = {
@@ -429,6 +454,10 @@ class Scores:
             Averaged data
         """
         return data.mean(dim=self._agg_dims)
+
+    def _weighted_mean(self, data: xr.DataArray, weights: xr.DataArray) -> xr.DataArray:
+        _, w = xr.broadcast(data, weights)
+        return (data * w).mean(dim=self._agg_dims) / w.mean(dim=self._agg_dims)
 
     def get_2x2_event_counts(
         self,
@@ -650,7 +679,12 @@ class Scores:
 
         return l2
 
-    def calc_mae(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+    def calc_mae(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate mean absolute error (MAE) of forecast data w.r.t. reference data.
 
@@ -660,6 +694,9 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If None, unweighted mean is used.
         """
         if self._agg_dims is None:
             raise ValueError(
@@ -667,9 +704,17 @@ class Scores:
                 "(agg_dims=None)."
             )
 
-        return self._mean(np.abs(p - gt))
+        mae = np.abs(p - gt)
+        if latitude_weights is not None:
+            return self._weighted_mean(mae, latitude_weights)
+        return self._mean(mae)
 
-    def calc_mse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+    def calc_mse(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate mean squared error (MSE) of forecast data w.r.t. reference data.
 
@@ -679,6 +724,9 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If provided, the MSE will be weighted by these values.
         Returns
         -------
         xr.DataArray
@@ -690,17 +738,30 @@ class Scores:
                 "(agg_dims=None)."
             )
 
-        return self._mean(np.square(p - gt))
+        mse = np.square(p - gt)
 
-    def calc_rmse(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+        if latitude_weights is not None:
+            return self._weighted_mean(mse, latitude_weights)
+        return self._mean(mse)
+
+    def calc_rmse(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate root mean squared error (RMSE) of forecast data w.r.t. reference data
+
         Parameters
         ----------
         p: xr.DataArray
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If provided, the RMSE will be weighted by these values.
         Returns
         -------
         xr.DataArray
@@ -713,7 +774,7 @@ class Scores:
                 "(agg_dims=None)."
             )
 
-        rmse = np.sqrt(self.calc_mse(p, gt))
+        rmse = np.sqrt(self.calc_mse(p, gt, latitude_weights=latitude_weights))
 
         return rmse
 
@@ -982,6 +1043,7 @@ class Scores:
         p: xr.DataArray,
         gt: xr.DataArray,
         c: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
     ) -> xr.DataArray:
         """
         Calculate anomaly correlation coefficient (ACC).
@@ -998,6 +1060,9 @@ class Scores:
             Ground truth data array
         c: xr.DataArray
             Climatological mean data array, which is used to calculate anomalies
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted summation.
+            If None, unweighted sums are used.
 
         Returns
         -------
@@ -1014,10 +1079,15 @@ class Scores:
         # Calculate anomalies
         fcst_ano, obs_ano = p - c, gt - c
 
-        # Calculate ACC over spatial dimensions (no grouping)
-        acc = (fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
-            (fcst_ano**2).sum(self._agg_dims) * (obs_ano**2).sum(self._agg_dims)
-        )
+        if latitude_weights is not None:
+            _, w = xr.broadcast(fcst_ano, latitude_weights)
+            acc = (w * fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
+                (w * fcst_ano**2).sum(self._agg_dims) * (w * obs_ano**2).sum(self._agg_dims)
+            )
+        else:
+            acc = (fcst_ano * obs_ano).sum(self._agg_dims) / np.sqrt(
+                (fcst_ano**2).sum(self._agg_dims) * (obs_ano**2).sum(self._agg_dims)
+            )
 
         return acc
 
@@ -1155,7 +1225,12 @@ class Scores:
 
         return (1.0 - rps_fcst / rps_clim).where(rps_clim != 0, np.nan)
 
-    def calc_bias(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+    def calc_bias(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+    ) -> xr.DataArray:
         """
         Calculate mean bias of forecast data w.r.t. reference data
 
@@ -1165,14 +1240,18 @@ class Scores:
             Forecast data array
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+            If None, unweighted mean is used.
         Returns
         -------
         xr.DataArray
             Mean bias
         """
-        bias = self._mean(p - gt)
-
-        return bias
+        bias = p - gt
+        if latitude_weights is not None:
+            return self._weighted_mean(bias, latitude_weights)
+        return self._mean(bias)
 
     def calc_psnr(
         self,
@@ -1385,26 +1464,53 @@ class Scores:
 
     ### Probablistic scores
 
-    def calc_spread(self, p: xr.DataArray, **kwargs) -> xr.DataArray:
+    def calc_spread(
+        self,
+        p: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+        adjusted: bool = True,
+        **kwargs,
+    ) -> xr.DataArray:
         """
-        Calculate the spread of the forecast ensemble
+        Calculate the spread of the forecast ensemble.
+
         Parameters
         ----------
         p: xr.DataArray
             Forecast data array with ensemble dimension
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging.
+        adjusted: bool
+            If True (default), use the unbiased (``ddof=1``) ensemble variance following
+            the GenCast convention (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.6).
+            The finite-ensemble inflation factor ``sqrt((M + 1) / M)`` is applied in the
+            spread-skill ratio (see ``calc_ssr``), not here.
+            If False, use the biased (``ddof=0``) variance.
 
         Returns
         -------
         xr.DataArray
             Spread of the forecast ensemble
         """
-        ens_std = p.std(dim=self._ens_dim)
+        ddof = 1 if adjusted else 0
+        ens_var = p.var(dim=self._ens_dim, ddof=ddof)
 
-        return self._mean(np.sqrt(ens_std**2))
+        if latitude_weights is not None:
+            var_mean = self._weighted_mean(ens_var, latitude_weights)
+        else:
+            var_mean = self._mean(ens_var)
 
-    def calc_ssr(self, p: xr.DataArray, gt: xr.DataArray) -> xr.DataArray:
+        return np.sqrt(var_mean)
+
+    def calc_ssr(
+        self,
+        p: xr.DataArray,
+        gt: xr.DataArray,
+        latitude_weights: xr.DataArray | None = None,
+        adjusted: bool = True,
+    ) -> xr.DataArray:
         """
-        Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data
+        Calculate the Spread-Skill Ratio (SSR) of the forecast ensemble data w.r.t. reference data.
 
         Parameters
         ----------
@@ -1412,14 +1518,29 @@ class Scores:
             Forecast data array with ensemble dimension
         gt: xr.DataArray
             Ground truth data array
+        latitude_weights: xr.DataArray | None
+            Optional latitude weights for area-weighted averaging, applied to both spread and RMSE
+            components. Can be computed via ``calc_latitude_weights`` or by passing
+            ``latitude_weighting=True`` in the ``parameters`` dict of ``get_score``.
+            Default is None.
+        adjusted: bool
+            If True (default), apply the ensemble-size correction ``sqrt((M + 1) / M)`` following
+            GenCast (Price et al., https://arxiv.org/pdf/2312.15796, Eq. A.9) and use the unbiased
+            (``ddof=1``) spread. A perfectly calibrated ensemble of size M then yields SSR = 1.
+            If False, use the biased spread with no correction.
+
         Returns
         -------
         xr.DataArray
             Spread-Skill Ratio (SSR)
         """
-        ssr = self.calc_spread(p) / self.calc_rmse(p, gt)  # spread/rmse
-
-        return ssr
+        ens_mean = p.mean(dim=self._ens_dim)
+        spread = self.calc_spread(p, latitude_weights=latitude_weights, adjusted=adjusted)
+        rmse = self.calc_rmse(ens_mean, gt, latitude_weights=latitude_weights)
+        if adjusted:
+            ens_size = p.sizes[self._ens_dim]
+            return np.sqrt((ens_size + 1) / ens_size) * spread / rmse
+        return spread / rmse
 
     def calc_crps(
         self,
