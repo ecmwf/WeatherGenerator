@@ -557,11 +557,6 @@ class Trainer(TrainerBase):
                     TRAIN, m, step=self.cf.general.istep
                 ),
             )
-            self.memory_tracker.step(
-                log_fn=lambda m: self.train_logger.log_metrics(
-                    TRAIN, m, step=self.cf.general.istep
-                ),
-            )
             # Compute collapse monitoring metrics
             if self.collapse_monitor.should_compute(self.cf.general.istep):
                 self.collapse_monitor._compute_collapse_metrics(
@@ -575,6 +570,15 @@ class Trainer(TrainerBase):
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_logging.metrics == 0:
                 self._log(TRAIN)
+                # Reduce and log the peak memory accumulated over this logging
+                # interval. Done here rather than per step so the cross-rank
+                # reduction (and its device sync) only happens once per interval.
+                self.memory_tracker.step(
+                    log_fn=lambda m: self.train_logger.log_metrics(
+                        TRAIN, m, step=self.cf.general.istep, 
+                    ),
+                    window="train"
+                )
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
