@@ -796,7 +796,7 @@ class Model(torch.nn.Module):
         cell_offsets = (
             torch.arange(num_stacked, device=tokens_stacked.device).view(num_stacked, 1, 1) * n_hpc
         )
-        # indices of neigbhors
+        # indices of neighbors
         idxs = (model_params.hp_nbours.unsqueeze(0) + cell_offsets).flatten(0, 1)
         # collect neighbors for each cell + cell itself
         tokens_nbors = tokens_flat[idxs.flatten()].flatten(0, 1)
@@ -833,7 +833,7 @@ class Model(torch.nn.Module):
 
         num_members = self.ens_latent_perturb.get("num_members", 1)
         sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
-        # ensemble pertubations
+        # ensemble perturbations
         eps = torch.randn(
             num_members,
             batch_size,
