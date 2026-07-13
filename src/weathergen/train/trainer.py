@@ -626,15 +626,6 @@ class Trainer(TrainerBase):
                                 self.model_params,
                                 self.model,
                             )
-                            # When running inference_only, target files are absent and the
-                            # sampler marks these steps as spoof. Override so outputs are
-                            # written as real predictions.
-                            if inference_only:
-                                for step_dict in tao.physical:
-                                    for _sname, step_data in step_dict.items():
-                                        step_data["is_spoof"] = [False] * len(
-                                            step_data["is_spoof"]
-                                        )
                             targets_and_auxs[loss_name] = tao
 
                     if not inference_only:
