@@ -295,7 +295,9 @@ class LossPhysical(LossModuleBase):
             if self.dynamic_loss_ema.enabled and weights_channels is not None:
                 losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"] = {}
                 for ch_n, w in zip(target_channels, weights_channels, strict=True):
-                    losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"][ch_n] = w.item()
+                    losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"][ch_n] = (
+                        w.item()
+                    )
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
