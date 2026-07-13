@@ -77,7 +77,6 @@ class ThroughputTracker:
         if self._total_batches == 0:
             return None
 
-
         device_batches = self._total_batches
         device_samples = self._total_samples
         device_mb = self._total_mb
