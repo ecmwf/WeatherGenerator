@@ -1,0 +1,53 @@
+# (C) Copyright 2026 WeatherGenerator contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+AVHRR :
+  type : obs
+  stream_id : 22
+  filenames : ['observations-file-2001-2023-eumetsat-avhrr-o256-v4.zarr']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
+  coords_channels: ['latitude', 'longitude']
+  loss_weight : 1.0
+  token_size : 256
+  forcing: True
+  tokenize_spacetime: False
+  embed : 
+    net : linear
+  # below unused 
+  embed_target_coords : 
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head : 
+    ens_size : 1
+    num_layers : 1
+
+METOP_IASI_PC :
+  type : obs
+  stream_id : 21
+  filenames : ['observations-od-ai-0001-2011-2023-iasi-pc-bufr-v1.zarr']
+  geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
+  loss_weight : 1.0
+  token_size : 128
+  forcing: True
+  tokenize_spacetime: False
+  embed : 
+    net : linear
+  # unused below
+  embed_target_coords : 
+    net : linear
+    dim_embed : 256
+  target_readout :
+    num_layers : 2
+    num_heads : 4
+  pred_head : 
+    ens_size : 1
+    num_layers : 1

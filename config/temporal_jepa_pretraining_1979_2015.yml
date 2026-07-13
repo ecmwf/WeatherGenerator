@@ -11,7 +11,7 @@ embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
-ae_local_dim_embed: 1024
+ae_local_dim_embed: 2048
 ae_local_num_blocks: 4
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
@@ -101,7 +101,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/pretrain_multi_data_all_years/"
+streams_directory: "./config/streams/era5_o96_geos_o256_avhrr_iasipc_jepa/"
 streams: ???
 
 general:
@@ -192,12 +192,12 @@ training_config:
   context_loss:
     enabled: false
 
-  num_mini_epochs: 96
-  samples_per_mini_epoch: 8192
+  num_mini_epochs: 64
+  samples_per_mini_epoch: 4096
   shuffle: True
 
   start_date: 1979-01-01T00:00
-  end_date: 2022-12-31T00:00
+  end_date: 2015-12-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00

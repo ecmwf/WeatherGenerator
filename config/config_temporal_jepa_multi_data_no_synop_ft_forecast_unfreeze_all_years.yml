@@ -7,80 +7,25 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-embed_orientation: "channels"
-embed_unembed_mode: "block"
-embed_dropout_rate: 0.1
-
-ae_local_dim_embed: 1024
-ae_local_num_blocks: 4
-ae_local_num_heads: 16
-ae_local_dropout_rate: 0.1
-ae_local_with_qk_lnorm: True
-
-ae_local_num_queries: 1
-ae_local_queries_per_cell: False
-ae_adapter_num_heads: 16
-ae_adapter_embed: 128
-ae_adapter_with_qk_lnorm: True
-ae_adapter_with_residual: True
-ae_adapter_dropout_rate: 0.1
-
-ae_global_dim_embed: 2048
-ae_global_num_blocks: 5
-ae_global_num_heads: 16
-ae_global_dropout_rate: 0.1
-ae_global_with_qk_lnorm: True
-# TODO: switching to < 1 triggers triton-related issues.
-# See https://github.com/ecmwf/WeatherGenerator/issues/1050
-ae_global_att_dense_rate: 1.0
-ae_global_block_factor: 64
-ae_global_mlp_hidden_factor: 4
-ae_global_trailing_layer_norm: True
-
-ae_aggregation_num_blocks: 5
-ae_aggregation_num_heads: 16
-ae_aggregation_dropout_rate: 0.1
-ae_aggregation_with_qk_lnorm: True
-ae_aggregation_att_dense_rate: 1.0
-ae_aggregation_block_factor: 64
-ae_aggregation_mlp_hidden_factor: 4
-
-decoder_type: PerceiverIOCoordConditioning # CrossAttentionAdaNormConditioning
-pred_adapter_kv: False
-pred_self_attention: True
-pred_dyadic_dims: False
-pred_mlp_adaln: True
-num_class_tokens: 0
-num_register_tokens: 64
-
-# noise before predictor in JEPA
-noise_pre_predictor_std: 0
-
 # number of steps offset applied to first target window; if set to zero and forecast_steps=0 then
 # one is training an auto-encoder
-fe_num_blocks: 6
+fe_num_blocks: 16
 fe_num_heads: 16
 fe_dropout_rate: 0.1
 fe_with_qk_lnorm: True
 fe_layer_norm_after_blocks: [7]  # Index starts at 0. Thus, [3] adds a LayerNorm after the fourth layer
-fe_impute_latent_noise_std: 0.0  # 1e-4
+fe_impute_latent_noise_std: 0
 # currently fixed to 1.0 (due to limitations with flex_attention and triton)
 forecast_att_dense_rate: 1.0
-with_step_conditioning: True # False
 
 healpix_level: 5
-# Use 2D RoPE instead of traditional global positional encoding
-# When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
-# When False: uses traditional pe_global positional encoding
-rope_2D: True 
-mlp_type: swiglu
-use_xsa: True
 
+# performance
 with_mixed_precision: True
 with_flash_attention: True
 compile_model: False
 with_fsdp: False
-ddp_find_unused_parameters: False
+ddp_find_unused_parameters: False #True
 attention_dtype: bf16
 mixed_precision_dtype: bf16
 mlp_norm_eps: 1e-5
@@ -95,13 +40,13 @@ latent_noise_deterministic_latents: True
 freeze_modules: ""
 
 norm_type: "LayerNorm"
-qk_norm_type: "RMSNorm"
+
 # type of zarr_store
 zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/pretrain_multi_data_all_years/"
+streams_directory: "./config/streams/jepa_forecast_multi_data_no_synop_all_years/"
 streams: ???
 
 general:
@@ -118,8 +63,9 @@ general:
   # run_path, 
   # path_shared_
 
-  multiprocessing_method: "fork"
+  multiprocessing_method: "spawn" # "fork"
 
+  desc: ""
   run_id: ???
   run_history: []
 
@@ -128,149 +74,111 @@ train_logging:
   terminal: 100
   metrics: 20
   checkpoint: 500
-  log_grad_norms: False
-
-  # Collapse monitoring for SSL training (JEPA/DINO/iBOT)
-  # Detects representation collapse via various metrics
-  # For forecasting, supports sequences of latents with per-step and aggregate metrics
-  collapse_monitoring:
-    enabled: False
-    compute_frequency: 100  # batches between metric computations
-    log_frequency: 100      # batches between metric logging
-    metrics:
-      effective_rank:
-        enabled: true
-        tensor_source: "both"  # "student", "teacher", or "both"
-        sample_size: 2048      # max samples for SVD (0 = no sampling)
-        # For forecasting sequences: "all" (per-step + aggregates),
-        # "aggregate_only" (mean/min/max/degradation), "per_step_only"
-        forecast_aggregation: "all"
-      singular_values:
-        enabled: true
-        tensor_source: "both"
-        sample_size: 2048
-        forecast_aggregation: "all"
-      dimension_variance:
-        enabled: true
-        tensor_source: "both"  # cheap to compute, good early indicator
-        forecast_aggregation: "all"
-      prototype_entropy:
-        enabled: true  # only applies to DINO
-      ema_beta:
-        enabled: true
+  log_grad_norms: True
 
 # parameters for data loading
 data_loading :
 
   num_workers: 6
   rng_seed: ???
+  repeat_data_in_mini_epoch : False
+  persistent_workers: False
+  prefetch_factor: 1
+
+  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
+  # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
+  # If this happens, you can disable the flag, but performance will drop on GH200.
+  memory_pinning: False
 
 
 # config for training
 training_config:
-
+  
   # training_mode: "masking", "student_teacher", "latent_loss"
-  training_mode: ["student_teacher"]
+  # training_mode: ["student_teacher"]
+  training_mode: ["masking"]
 
-  # Shift teacher by one 6h forecast interval. This is in time-window indices;
-  # with time_window_step=01:00:00, 6 indices = 6 hours.
-  teacher_time_offset: 1
+  teacher_time_offset: 0
+
+  context_loss:
+    enabled: false
 
   # Deep self-supervision (V-JEPA 2.1 style): compute SSL loss at multiple encoder depths.
   # When enabled, intermediate encoder representations are tapped and used as additional
   # targets/predictions for the SSL loss. Disabled by default (empty tap_after).
   deep_ssl:
-    enabled: true
-    tap_after:                     # named tap points (final output always included implicitly)
-      - local2global               # after local-to-global adapter, before global attention
-      - "global:0"                 # after 1st global layer (0-indexed)
-      - "global:1"                 # after 2nd global layer
-    fusion_hidden_factor: 4        # MLP hidden dim = factor * dim_embed
-    level_weights: [0.25, 0.25, 0.25, 0.25]  # per-level loss weights (len = num taps + 1)
-
-  # Temporal JEPA predicts the full future teacher latent, so no separate context loss is needed.
-  context_loss:
     enabled: false
 
-  num_mini_epochs: 96
+
+  num_mini_epochs: 24
   samples_per_mini_epoch: 8192
   shuffle: True
 
-  start_date: 1979-01-01T00:00
+  start_date: 1980-01-01T00:00
   end_date: 2022-12-31T00:00
 
   time_window_step: 06:00:00
   time_window_len: 06:00:00
-
-  window_offset_prediction : 0
   
   learning_rate_scheduling :
     lr_start: 1e-6
     lr_max: 8e-5
-    lr_final_decay: 1e-6
+    lr_final_decay: 2e-6
     lr_final: 0.0
-    num_steps_warmup: 512
-    num_steps_cooldown: 1024
+    num_steps_warmup: 256
+    num_steps_cooldown: 512
     policy_warmup: "cosine"
     policy_decay: "constant"
     policy_cooldown: "linear"
     parallel_scaling_policy: "sqrt"
 
   optimizer:
-    grad_clip: 0.25
-    weight_decay: 0.05
+    grad_clip: 1.0
+    weight_decay: 0.1
+    log_grad_norms: False
     adamw :
       # parameters are scaled by number of DDP workers
       beta1 : 0.9875 # at B=8 beta1 =0.9
       beta2 : 0.994 # at B=8 beta1 approx 0.95
-      eps : 2e-08
+      eps : 1e-08
 
   losses : {
     "student-teacher": {
-        enabled: True,
-        type: LossLatentSSLStudentTeacher,
-        weight: 1.0,
-        loss_fcts : {
-          "JEPA": {
-            'weight': 1, "loss_extra_args": {temporal: true}, "out_dim": 2048, "head": transformer,
-            "num_blocks": 6, "num_heads": 16, "with_qk_lnorm": True, "intermediate_dim": 1024, 
-            "dropout_rate": 0.1,
-            target_source_correspondence: {0 : {0 : "independent"} },
+        enabled: False,
+        type: Disabled,
         },
+    # "physical": {
+    #     enabled: False,
+    #     type: Disabled,
+    #     },
+    "forecast": {
+        type: LossPhysical,
+        loss_fcts: { "mse": { }, },
         },
-        target_and_aux_calc: { "EMATeacher" : 
-          { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 400000,
-            model_param_overrides : { 
-              training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
-            },
-          }
-        }
-      }
-  }
+    }
   
   model_input: {
     "random_easy" : {
-      # Full-field student input; the prediction task is temporal, not spatial masking.
+      enabled: False,
+      num_samples: 0,
+      },
+    "forecasting" : {
+      # masking strategy: "random", "healpix", "forecast"
       masking_strategy: "forecast",
-      num_samples: 1,
-      num_steps_input: 1,
-      masking_strategy_config : {},
-    },
-  }
+      },
+    }
 
   target_input: {
     "random_easy_target" : {
-      masking_strategy: "forecast",
-      num_samples: 1,
-      masking_strategy_config : {},
-    },
-  }
+      enabled: False,
+      },
+    }
 
   forecast :
-    time_step: 00:00:00
-    num_steps: 0
-    policy: null
+      time_step: 06:00:00
+      num_steps: 2
+      offset: 1
+      policy: "fixed"
 
 
 # validation config; full validation config is merge of training and validation config
@@ -284,9 +192,9 @@ validation_config:
   
   # whether to track the exponential moving average of weights for validation
   validate_with_ema: 
-    enabled : False
+    enabled : True
     ema_ramp_up_ratio: 0.09
-    ema_halflife_in_thousands: 1e-3
+    ema_halflife_in_thousands: 600
 
   # parameters for validation samples that are written to disk
   output : {
@@ -300,9 +208,25 @@ validation_config:
 
   # run validation before training starts (mainly for model development)
   validate_before_training: False
-  
+ 
 # test config; full test config is merge of validation and test config
-# test config is used by default when running inference
+test_config: 
+
+  samples_per_mini_epoch: 128
+  shuffle: False
+
+  start_date: 2023-06-01T00:00
+  end_date: 2023-08-31T00:00
+
+  # parameters for validation samples that are written to disk
+  output : {
+    # number of samples that are written
+    num_samples: 128,
+    # write samples in normalized model space
+    normalized_samples: False,
+    # output streams to write; default all
+    streams: null,
+    }
 
 # Tags for experiment tracking
 # These tags will be logged in MLFlow along with completed runs for train, eval, val
@@ -331,4 +255,6 @@ wgtags:
   # All extra tags (including lists, dictionaries, etc.) are treated 
   # as strings by mlflow, so treat all extra tags as simple string key: value pairs.
   grid: null
+
+
 

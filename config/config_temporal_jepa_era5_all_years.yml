@@ -101,7 +101,7 @@ zarr_store: "zip" # "zarr" for LocalStore, "zip" for ZipStore
 
 #####################################
 
-streams_directory: "./config/streams/pretrain_multi_data_all_years/"
+streams_directory: "./config/streams/pretrain_era5_all_years/"
 streams: ???
 
 general:
@@ -162,7 +162,7 @@ train_logging:
 # parameters for data loading
 data_loading :
 
-  num_workers: 6
+  num_workers: 12
   rng_seed: ???
 
 
@@ -240,7 +240,7 @@ training_config:
         },
         target_and_aux_calc: { "EMATeacher" : 
           { ema_ramp_up_ratio : null,
-            ema_halflife_in_thousands: 400000,
+            ema_halflife_in_thousands: 800000,
             model_param_overrides : { 
               training_config: { losses: { student-teacher:{ loss_fcts :{JEPA: {head: identity} }}}}
             },
