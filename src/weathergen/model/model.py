@@ -348,6 +348,19 @@ class Model(torch.nn.Module):
 
         assert self.cf.ae_local_num_queries == 1, "ae_local_num_queries > 1 is depricated."
 
+        # Latent-perturbation noise scale (learnable or fixed)
+        self.use_latent_perturbation = (
+            self.ens_latent_perturb is not None
+            and self.ens_latent_perturb.get("num_members", 0) >= 1
+        )
+
+        self.latent_perturbation_log_sigma = None
+        if self.use_latent_perturbation:
+            sigma_learnable = self.ens_latent_perturb.get("sigma_learnable", True)
+            self.latent_perturbation_log_sigma = nn.Parameter(
+                torch.zeros(1), requires_grad=sigma_learnable
+            )
+
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
     ):
@@ -582,12 +595,6 @@ class Model(torch.nn.Module):
                         use_patch_token=False,
                     )
 
-        # Latent-perturbation noise scale (learnable or fixed)
-        self.use_latent_perturbation = (
-            self.ens_latent_perturb is not None
-            and self.ens_latent_perturb.get("num_members", 0) >= 1
-        )
-
         if self.use_latent_perturbation:
             num_members = self.ens_latent_perturb.get("num_members", 1)
             if num_members > 1:
@@ -607,14 +614,6 @@ class Model(torch.nn.Module):
                         f"decoder_ens_latent_perturbation.num_members={num_members} (>1) is "
                         f"configured, but none of the enabled loss_fcts {lf} are ensemble-aware"
                     )
-
-        if self.use_latent_perturbation:
-            sigma_learnable = self.ens_latent_perturb.get("sigma_learnable", True)
-            self.latent_perturbation_log_sigma = nn.Parameter(
-                torch.zeros(1), requires_grad=sigma_learnable
-            )
-        else:
-            self.latent_perturbation_log_sigma = None
 
         return self
 
