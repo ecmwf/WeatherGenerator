@@ -346,7 +346,7 @@ class Model(torch.nn.Module):
 
         self.ens_latent_perturb = cf.get("decoder_ens_latent_perturbation")
 
-        assert self.cf.ae_local_num_queries == 1, "ae_local_num_queries > 1 is depricated."
+        assert self.cf.ae_local_num_queries == 1, "ae_local_num_queries > 1 is deprecated."
 
         # Latent-perturbation noise scale (learnable or fixed)
         self.use_latent_perturbation = (
