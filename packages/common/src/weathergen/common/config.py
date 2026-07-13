@@ -422,6 +422,9 @@ def load_merge_configs(
     else:
         base_config = load_run_config(from_run_id, mini_epoch, None)
         from_run_id = get_run_id_from_config(base_config)
+        with open_dict(base_config):
+            # one-shot action key: must be set per stage, not inherited from the previous run
+            base_config.pop("reset_modules", None)
     with open_dict(base_config):
         base_config.from_run_id = from_run_id
     # use OmegaConf.unsafe_merge if too slow
