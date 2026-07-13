@@ -244,8 +244,7 @@ class Masker:
             )
         elif self.stage == "train" and cool_down_steps:
             assert self.total_train_steps is not None, (
-                "cool_down_steps requires total_train_steps to schedule the final "
-                "training steps."
+                "cool_down_steps requires total_train_steps to schedule the final training steps."
             )
             assert self.total_train_steps > 0, "total_train_steps must be greater than zero."
             cool_down_steps = min(cool_down_steps, self.total_train_steps)
