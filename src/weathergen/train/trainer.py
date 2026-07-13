@@ -178,10 +178,7 @@ class Trainer(TrainerBase):
                 warmup_steps=cf.train_logging.get("performance_tracking_warmup_steps", 2),
                 batch_size_per_gpu=self.batch_size_per_gpu,
             )
-        # peak GPU memory tracking is on by default; opt out via
-        # train_logging.memory_tracking.enabled
-        memory_tracking_cfg = cf.train_logging.get("memory_tracking", {}) or {}
-        if memory_tracking_cfg.get("enabled", False) and torch.cuda.is_available():
+        if cf.train_logging.get("memory_tracking", False) and torch.cuda.is_available():
             self.memory_tracker = MemoryTracker(device=torch.device(self.devices[0]))
         if cf.get("profiling", {}).get("nvtx_annotate", False):
             self.training_loop_annotation_context = nvtx_range
