@@ -1040,7 +1040,7 @@ class Plotter:
 
         # render points
         if opts["use_datashader"] and HAS_DATASHADER:
-            artist = self._render_datashader(
+            self._render_datashader(
                 ax, proj, data, opts["norm"], opts["cmap"], opts["marker_size_base"]
             )
         else:
@@ -1058,7 +1058,7 @@ class Plotter:
                 lat=data["lat"],
             )
 
-            artist = self._render_scatter(
+            self._render_scatter(
                 ax, data, opts["norm"], opts["cmap"], marker_size, opts["marker"], opts["extra"]
             )
 
@@ -1082,8 +1082,6 @@ class Plotter:
             pad=0.02,
             shrink=0.6,
             orientation="horizontal",
-            marker=opts["marker"], 
-            **opts["extra"]
         )
         cbar.set_label(f"Variable: {varname}", fontsize=7)
         cbar.ax.tick_params(labelsize=6)

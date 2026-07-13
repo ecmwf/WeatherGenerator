@@ -825,9 +825,7 @@ def plot_data(
     plot_settings = stream_cfg.get("plotting", {})
 
     plot_keys = ("plot_maps", "plot_histograms", "plot_animations", "plot_timeseries")
-    has_old_style = any(plot_settings.get(k, False) for k in plot_keys)
-    has_new_style = bool(plot_settings.get("data_plots"))
-    if not plot_settings or not (has_old_style or has_new_style):
+    if not plot_settings or not any(plot_settings.get(k, False) for k in plot_keys):
         return
 
     plotter_cfg = {
@@ -851,38 +849,27 @@ def plot_data(
         _logger.warning(f"RUN {reader.run_id} - {stream}: No plotting config. Skipping plots.")
         return
 
-    # Resolve plot flags: new-style data_plots list takes precedence over old booleans
-    data_plots_list = plot_settings.get("data_plots")
-    if data_plots_list:
-        data_plots_set = set(data_plots_list)
-        plot_maps = "maps" in data_plots_set
-        plot_bias = "bias" in data_plots_set
-        plot_target = "target" in data_plots_set
-        plot_histograms = "histograms" in data_plots_set
-        plot_animations = "animations" in data_plots_set
-        plot_timeseries = "timeseries" in data_plots_set
-    else:
-        plot_maps = plot_settings.get("plot_maps", False)
-        if not isinstance(plot_maps, bool):
-            raise TypeError("plot_maps must be a boolean.")
-        plot_bias = plot_settings.get("plot_bias", True)
-        if not isinstance(plot_bias, bool):
-            raise TypeError("plot_bias must be a boolean.")
-        plot_target = plot_settings.get("plot_target", True)
-        if not isinstance(plot_target, bool):
-            raise TypeError("plot_target must be a boolean.")
-        plot_timeseries = plot_settings.get("plot_timeseries", False)
-        if not isinstance(plot_timeseries, bool):
-            raise TypeError("plot_timeseries must be a boolean.")
-        plot_histograms = plot_settings.get("plot_histograms", False)
-        if not isinstance(plot_histograms, bool) and plot_histograms not in {
-            "across-samples",
-            "per-sample",
-        }:
-            raise TypeError("plot_histograms must be true, false, 'across-samples', or 'per-sample'. ")
-        plot_animations = plot_settings.get("plot_animations", False)
-        if not isinstance(plot_animations, bool):
-            raise TypeError("plot_animations must be a boolean.")
+    plot_maps = plot_settings.get("plot_maps", False)
+    if not isinstance(plot_maps, bool):
+        raise TypeError("plot_maps must be a boolean.")
+    plot_bias = plot_settings.get("plot_bias", True)
+    if not isinstance(plot_bias, bool):
+        raise TypeError("plot_bias must be a boolean.")
+    plot_target = plot_settings.get("plot_target", True)
+    if not isinstance(plot_target, bool):
+        raise TypeError("plot_target must be a boolean.")
+    plot_timeseries = plot_settings.get("plot_timeseries", False)
+    if not isinstance(plot_timeseries, bool):
+        raise TypeError("plot_timeseries must be a boolean.")
+    plot_histograms = plot_settings.get("plot_histograms", False)
+    if not isinstance(plot_histograms, bool) and plot_histograms not in {
+        "across-samples",
+        "per-sample",
+    }:
+        raise TypeError("plot_histograms must be true, false, 'across-samples', or 'per-sample'. ")
+    plot_animations = plot_settings.get("plot_animations", False)
+    if not isinstance(plot_animations, bool):
+        raise TypeError("plot_animations must be a boolean.")
 
     model_output = output_data
     if output_data is None:
