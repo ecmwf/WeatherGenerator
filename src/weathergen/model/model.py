@@ -13,7 +13,6 @@ import logging
 import math
 import typing
 import warnings
-from typing import NamedTuple
 
 import astropy_healpix as hp
 import astropy_healpix.healpy
@@ -81,7 +80,6 @@ class ModelOutput:
 
     def get_latent_prediction(self, fstep: int):
         return self.latent[fstep]
-
 
 
 class ModelParams(torch.nn.Module):
@@ -346,8 +344,9 @@ class Model(torch.nn.Module):
         self.aux_token_idxs = list(range(cf.num_register_tokens + cf.num_class_tokens))
         self.num_aux_tokens = cf.num_register_tokens + cf.num_class_tokens
 
-        self._logged_ensemble_memory = False
         self.ens_latent_perturb = cf.get("decoder_ens_latent_perturbation")
+
+        assert self.cf.ae_local_num_queries == 1, "ae_local_num_queries > 1 is depricated."
 
     def _create_latent_pred_head(
         self, global_cfg, name, loss_cfg, use_class_token, use_patch_token
@@ -603,10 +602,10 @@ class Model(torch.nn.Module):
                 }
 
                 if not (configured_loss_fcts & ensemble_aware_loss_fcts):
+                    lf = sorted(configured_loss_fcts)
                     logger.warning(
                         f"decoder_ens_latent_perturbation.num_members={num_members} (>1) is "
-                        f"configured, but none of the enabled loss_fcts {sorted(configured_loss_fcts)} "
-                        "are ensemble-aware"
+                        f"configured, but none of the enabled loss_fcts {lf} are ensemble-aware"
                     )
 
         if self.use_latent_perturbation:
@@ -632,7 +631,6 @@ class Model(torch.nn.Module):
             sigma_init = self.ens_latent_perturb.get("sigma_init", 0.01)
             with torch.no_grad():
                 self.latent_perturbation_log_sigma.fill_(math.log(sigma_init))
-
 
     def print_num_parameters(self) -> None:
         """Print number of parameters for entire model and each module used to build the model"""
@@ -781,36 +779,35 @@ class Model(torch.nn.Module):
         model_params: ModelParams,
         tokens_stacked: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Gather tokens from 1-ring neighborhood of cells (including cell itself) for each
+        cell in tokens_stacked
+
+        Output shape is (model_params.hp_nbours x num_hp_cells) x token_dim with
+        model_params.hp_nbours = 9
+        """
+
+        n_hpc = self.num_healpix_cells
         num_stacked, num_tokens, token_dim = tokens_stacked.shape
         num_neighbors = model_params.hp_nbours.shape[-1]
-        assert num_tokens == self.num_healpix_cells * self.cf.ae_local_num_queries
+        assert num_tokens == n_hpc
 
-        tokens_flat = (
-            tokens_stacked.reshape(
-                num_stacked,
-                self.num_healpix_cells,
-                self.cf.ae_local_num_queries,
-                token_dim,
-            )
-            .flatten(0, 1)
-        )
+        tokens_flat = tokens_stacked.reshape(num_stacked, n_hpc, 1, token_dim).flatten(0, 1)
 
         cell_offsets = (
-            torch.arange(num_stacked, device=tokens_stacked.device).view(num_stacked, 1, 1)
-            * self.num_healpix_cells
+            torch.arange(num_stacked, device=tokens_stacked.device).view(num_stacked, 1, 1) * n_hpc
         )
+        # indices of neigbhors
         idxs = (model_params.hp_nbours.unsqueeze(0) + cell_offsets).flatten(0, 1)
+        # collect neighbors for each cell + cell itself
         tokens_nbors = tokens_flat[idxs.flatten()].flatten(0, 1)
 
-        tokens_nbors_lens = tokens_flat.new_zeros(
-            num_stacked * self.num_healpix_cells + 1,
-            dtype=torch.int32,
-        )
-        tokens_nbors_lens[1:] = num_neighbors * self.cf.ae_local_num_queries
+        tokens_nbors_lens = tokens_flat.new_zeros(num_stacked * n_hpc + 1, dtype=torch.int32)
+        tokens_nbors_lens[1:] = num_neighbors
 
         return tokens_nbors, tokens_nbors_lens
 
-    def _build_ensemble_latent_tokens(
+    def _build_latent_tokens(
         self,
         tokens: torch.Tensor,
         batch: ModelBatch,
@@ -820,47 +817,35 @@ class Model(torch.nn.Module):
         CRPS ensemble by perturbing the assimilated latent tokens with Gaussian
         noise (one perturbed copy per member).
 
-        Ensemble members are stacked as extra "batch" entries so the decoder
-        still only runs once. Members come first, batch items second: member m,
-        batch item b lives at index m * batch_size + b.
+        Ensemble dimension is stacked along batch dimension, i.e. member m,
+        batch item b is at index m * batch_size + b along the first dimension of tokens_tiled
         """
         # remove register and class tokens
-        tokens = tokens[:, self.num_aux_tokens:]
-
-        batch_size = len(batch)
-        token_dim = tokens.shape[-1]
-
-        assert tokens.shape == (
-            batch_size,
-            self.num_healpix_cells * self.cf.ae_local_num_queries,
-            tokens.shape[-1],
-        ), f"unexpected token shape {tokens.shape}"
-        assert self.cf.ae_local_num_queries == 1, (
-            "predict_decoders assumes ae_local_num_queries==1; "
-            "revisit tokens_nbors_lens if Q>1"
-        )
+        tokens = tokens[:, self.num_aux_tokens :]
 
         if not self.use_latent_perturbation:
             return tokens, 1
 
-        num_members = self.ens_latent_perturb.get("num_members", 1)
-        sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
-        eps = torch.randn(
-            num_members, batch_size,
-            self.num_healpix_cells * self.cf.ae_local_num_queries, token_dim,
-            device=tokens.device, dtype=tokens.dtype,
-        )
-        tokens_tiled = (tokens.unsqueeze(0) + sigma * eps).reshape(
-            num_members * batch_size,
-            self.num_healpix_cells * self.cf.ae_local_num_queries,
-            token_dim,
+        batch_size = len(batch)
+        token_dim = tokens.shape[-1]
+        assert tokens.shape == (batch_size, self.num_healpix_cells, token_dim), (
+            f"unexpected token shape {tokens.shape}"
         )
 
-        assert tokens_tiled.shape == (
-            num_members * batch_size,
+        num_members = self.ens_latent_perturb.get("num_members", 1)
+        sigma = torch.exp(self.latent_perturbation_log_sigma).to(tokens.dtype)
+        # ensemble pertubations
+        eps = torch.randn(
+            num_members,
+            batch_size,
             self.num_healpix_cells * self.cf.ae_local_num_queries,
             token_dim,
+            device=tokens.device,
+            dtype=tokens.dtype,
         )
+        # apply ensemble perturbations and flatten along ens dimension
+        out_shape = (num_members * batch_size, self.num_healpix_cells, token_dim)
+        tokens_tiled = (tokens.unsqueeze(0) + sigma * eps).reshape(out_shape)
 
         return tokens_tiled, num_members
 
@@ -891,14 +876,15 @@ class Model(torch.nn.Module):
         Returns:
             Prediction output tokens in physical representation for each target_coords.
         """
+
+        # skip if no physical predictions
         if not self.pred_heads:
             return output
 
-
-        tokens_tiled, num_members = self._build_ensemble_latent_tokens(tokens, batch)
+        # strip aux tokens and, if latent perturbation is enabled, build the ensemble
+        tokens_tiled, num_members = self._build_latent_tokens(tokens, batch)
         batch_size = len(batch)
         token_dim = tokens.shape[-1]
-
 
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.streams.keys():
@@ -932,8 +918,7 @@ class Model(torch.nn.Module):
                 tcs_lens = torch.cat([torch.zeros(1, dtype=torch.int32, device=tcls.device), tcls])
                 num_groups = tcs_lens.shape[0] - 1
                 assert batch_size * self.num_healpix_cells == num_groups, (
-                    f"expected {batch_size * self.num_healpix_cells} query groups, "
-                    f"got {num_groups}"
+                    f"expected {batch_size * self.num_healpix_cells} query groups, got {num_groups}"
                 )
 
                 if self.cf.decoder_type == "Linear":
@@ -960,7 +945,7 @@ class Model(torch.nn.Module):
                     # instead of num_members.
                     tc_tokens_outs = []
                     for m in range(num_members):
-                        member_tokens = tokens_tiled[m * batch_size: (m + 1) * batch_size]
+                        member_tokens = tokens_tiled[m * batch_size : (m + 1) * batch_size]
                         tokens_nbors, tokens_nbors_lens = self._gather_neighbor_tokens(
                             model_params,
                             member_tokens,
@@ -977,9 +962,7 @@ class Model(torch.nn.Module):
 
                     pred = self.pred_heads[stream_name](tc_tokens_out)
                     ens_head_size, total_target_points, output_channels = pred.shape
-                    assert (
-                        total_target_points == num_members * t_coords.shape[0]
-                    ), (
+                    assert total_target_points == num_members * t_coords.shape[0], (
                         f"expected {num_members * t_coords.shape[0]} pts in pred, "
                         f"got {total_target_points}"
                     )
@@ -989,8 +972,7 @@ class Model(torch.nn.Module):
                     pred = pred.reshape(split_shape).permute(1, 0, 2, 3).reshape(merged_shape)
 
                 assert pred.shape[1] == t_coords.shape[0], (
-                    f"expected {t_coords.shape[0]} points in dim=1, "
-                    f"got {pred.shape[1]}"
+                    f"expected {t_coords.shape[0]} points in dim=1, got {pred.shape[1]}"
                 )
 
             # recover batch dimension
