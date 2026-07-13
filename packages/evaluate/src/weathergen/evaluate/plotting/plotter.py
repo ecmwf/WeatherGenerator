@@ -1076,12 +1076,14 @@ class Plotter:
             ax.gridlines(draw_labels=False, linestyle="--", color="gray", linewidth=0.6, alpha=0.7)
 
         cbar = plt.colorbar(
-            artist,
+            mpl.cm.ScalarMappable(norm=opts["norm"], cmap=opts["cmap"]),
             ax=ax,
             fraction=0.03,
             pad=0.02,
             shrink=0.6,
             orientation="horizontal",
+            marker=opts["marker"], 
+            **opts["extra"]
         )
         cbar.set_label(f"Variable: {varname}", fontsize=7)
         cbar.ax.tick_params(labelsize=6)
