@@ -165,7 +165,7 @@ class Trainer(TrainerBase):
         collapse_config = cf.train_logging.get("collapse_monitoring", {})
         self.collapse_monitor = CollapseMonitor(collapse_config, None)  # device set later in run()
 
-        if cf.train_logging.get("track_performance_metrics"):
+        if cf.train_logging.get("throughput_tracking"):
             self.perf_tracker = ThroughputTracker(
                 device=torch.device(self.devices[0]),
                 batch_size_per_gpu=self.batch_size_per_gpu,
