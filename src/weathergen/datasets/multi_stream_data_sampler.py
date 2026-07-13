@@ -275,6 +275,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
+            stream_info[str(self._stage) + "_geoinfo_channels"] = ds.geoinfo_channels
             stream_info["target_channel_weights"] = (
                 ds.target_channel_weights
                 if ds.target_channel_weights is not None

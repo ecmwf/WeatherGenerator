@@ -126,18 +126,25 @@ class DataReaderObs(DataReaderBase):
         """
         Allow user to specify which columns they want to access.
         Get functions only returned for these specified columns.
-        """
-        selected_colnames = [
-            c
-            for c in colnames
-            if (
-                np.array([c_sel in c for c_sel in cols_select]).any()
-                if cols_select is not None
-                else True and not np.array([c_nsel in c for c_nsel in cols_exclude]).any()
-            )
-        ]
 
-        return selected_colnames
+        When ``cols_select`` is given, the returned columns follow the order of the select
+        filters (config order) so the channel layout is identical across datasets that share
+        channels, regardless of each dataset's column order. Without a selection, columns fall
+        back to deterministic lexicographic order.
+        """
+        cols_exclude = cols_exclude or []
+
+        if cols_select is not None:
+            # Respect config order: group matching columns by the order of the select filters.
+            # Matching is substring-based (a filter may match several columns).
+            selected_colnames: list[str] = []
+            for c_sel in cols_select:
+                for c in colnames:
+                    if c_sel in c and c not in selected_colnames:
+                        selected_colnames.append(c)
+            return selected_colnames
+
+        return sorted(c for c in colnames if not any(c_nsel in c for c_nsel in cols_exclude))
 
     def first_sample_with_data(self) -> int:
         """

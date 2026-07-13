@@ -260,6 +260,68 @@ class Trainer(TrainerBase):
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
 
+    def _check_channel_order_consistency(
+        self,
+        dataset: MultiStreamDataSampler,
+        from_run_id: str,
+        mini_epoch: int | None,
+        stage: Stage,
+    ) -> None:
+        """Guard against silently scrambling the channel<->weight mapping when continuing.
+
+        Compares the source/target/geoinfo channel order resolved for the current data against
+        the order stored in the checkpoint's config and raises if they differ. Streams (or
+        channel lists) absent from the checkpoint config cannot be verified and are skipped with
+        a warning (e.g. geoinfo for checkpoints predating the resolved-geoinfo back-fill).
+        """
+        try:
+            prev_cf = config.load_run_config(from_run_id, mini_epoch, None)
+        except FileNotFoundError:
+            logger.warning(
+                f"Could not load config for run_id '{from_run_id}' to verify channel order; "
+                "skipping channel-order consistency check."
+            )
+            return
+
+        prev_streams = {s["name"]: s for s in prev_cf.get("streams", [])}
+        src_key = f"{stage}_source_channels"
+        tgt_key = f"{stage}_target_channels"
+        geo_key = f"{stage}_geoinfo_channels"
+
+        mismatches: list[str] = []
+        for name, readers in dataset.streams_datasets.items():
+            prev = prev_streams.get(name)
+            if prev is None:
+                continue
+            reader = readers[0]
+            for key, resolved in (
+                (src_key, list(reader.source_channels)),
+                (tgt_key, list(reader.target_channels)),
+                (geo_key, list(reader.geoinfo_channels)),
+            ):
+                stored = prev.get(key)
+                if stored is None:
+                    logger.warning(
+                        f"Checkpoint '{from_run_id}' has no '{key}' for stream '{name}'; "
+                        "cannot verify channel order for it."
+                    )
+                    continue
+                if list(stored) != resolved:
+                    mismatches.append(
+                        f"  [{name}] {key}:\n"
+                        f"    checkpoint: {list(stored)}\n"
+                        f"    current:    {resolved}"
+                    )
+
+        if mismatches:
+            details = "\n".join(mismatches)
+            raise ValueError(
+                f"Channel order/content differs from the checkpoint being continued "
+                f"(run_id='{from_run_id}'). Continuing would scramble the learned "
+                f"channel<->weight mapping. Align the stream configs (channel order matters):\n"
+                f"{details}"
+            )
+
     def run(self, cf, devices, run_id_contd=None, mini_epoch_contd=None):
         # general initalization
         self.init(cf, devices)
@@ -274,6 +336,11 @@ class Trainer(TrainerBase):
         # create data loaders
         self.dataset = MultiStreamDataSampler(cf, self.training_cfg, stage=TRAIN)
         self.dataset_val = MultiStreamDataSampler(cf, self.validation_cfg, stage=VAL)
+
+        if run_id_contd is not None:
+            self._check_channel_order_consistency(
+                self.dataset, run_id_contd, mini_epoch_contd, TRAIN
+            )
 
         loader_params = {
             "batch_size": None,
@@ -329,7 +396,7 @@ class Trainer(TrainerBase):
         self.target_and_aux_calculators_val = self.get_target_aux_calculators(self.validation_cfg)
 
         # Restore EMA teacher weights when continuing from a checkpoint
-        if run_id_contd is not None:
+        if run_id_contd is not None: # and self.cf.general.istep != 0: # To be tested
             self._load_ema_teacher_state(run_id_contd, mini_epoch_contd)
 
         # if with_fsdp then parameter count is unreliable
