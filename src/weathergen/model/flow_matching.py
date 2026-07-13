@@ -122,8 +122,23 @@ class GaussianPath:
         return -eps / beta
 
     def to_denoiser(self, pred, x, t, prediction_type):
-        """Posterior-mean (x0) estimate; ill-conditioned near t=0 (alpha->0)."""
-        alpha, beta, _, _ = self.coeffs(t)
+        """Posterior-mean (x0 / clean-latent) estimate.
+
+        For a velocity prediction we use the direct form (Remark 16 / Eq. 43)
+
+            D_t(x) = (beta_t * u_t - beta_dot_t * x) / (alpha_dot_t * beta_t - alpha_t * beta_dot_t)
+
+        whose denominator is the Wronskian-like term (= 1 for CondOT) and therefore involves **no
+        division by alpha**: it stays well-conditioned all the way down to t -> 0. (Going via eps
+        would divide by alpha=t and amplify float error ~1/t, even though the algebra cancels.)
+
+        For noise/score predictions the 1/alpha is intrinsic — recovering x0 from an estimate of the
+        noise genuinely requires dividing by alpha — so those remain ill-conditioned as t -> 0,
+        which is expected: at the noise end a noise estimate carries almost no information about x0.
+        """
+        alpha, beta, alpha_dot, beta_dot = self.coeffs(t)
+        if prediction_type == "velocity":
+            return (beta * pred - beta_dot * x) / (alpha_dot * beta - alpha * beta_dot)
         eps = self._to_eps(pred, x, t, prediction_type)
         return (x - beta * eps) / alpha
 
@@ -416,7 +431,16 @@ class FlowMatchingForecastEngine(torch.nn.Module):
             f"path={self.path.kind}, steps={num_steps}, t in [{self.t_eps}, {1 - self.t_eps}]"
         )
 
-        track = {"t": [], "x_std": [], "vel_norm": [], "l2_to_target": [], "x": [x.cpu()]}
+        # Per-step diagnostics. At every t we compare the *current noisy state* x_t against the
+        # *denoised estimate* x0_hat = D_t(x_t) predicted from it, both in L2-to-target and in std.
+        track = {
+            "t": [],
+            "x_t_std": [],
+            "x0_hat_std": [],
+            "l2_x_t": [],
+            "l2_x0_hat": [],
+            "vel_norm": [],
+        }
         trajectory: list[torch.Tensor] = [] if return_trajectory else None
 
         x_next = x
@@ -443,12 +467,15 @@ class FlowMatchingForecastEngine(torch.nn.Module):
                     x_next = x_cur + h * 0.5 * (u + u2)
 
             with torch.no_grad():
+                # Denoised (clean-latent) estimate predicted from x_t at this t.
+                x0_hat = self.path.to_denoiser(raw, x_cur, t_cur, self.prediction_type)
                 track["t"].append(t_cur.item())
-                track["x_std"].append(x_next.std().item())
+                track["x_t_std"].append(x_cur.std().item())
+                track["x0_hat_std"].append(x0_hat.std().item())
                 track["vel_norm"].append(u.norm().item())
-                track["x"].append(x_next.cpu())
                 if self.cur_token is not None:
-                    track["l2_to_target"].append((x_next - self.cur_token).norm().item())
+                    track["l2_x_t"].append((x_cur - self.cur_token).norm().item())
+                    track["l2_x0_hat"].append((x0_hat - self.cur_token).norm().item())
 
             if return_trajectory:
                 trajectory.append(x_next)
@@ -457,37 +484,74 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         return x_next, trajectory
 
     def _plot_sampling_diagnostics(self, track: dict, num_steps: int) -> None:
-        """Compact diagnostic plot of the sampling trajectory (mirrors diffusion's)."""
+        """Diagnostic plot of the sampling trajectory.
+
+        At every path time t we compare the current *noisy state* x_t against the *denoised
+        estimate* x0_hat = D_t(x_t) predicted from it:
+          1. L2 error to the target:  ||x_t - z||  vs  ||x0_hat - z||
+          2. Standard deviation:      std(x_t)     vs  std(x0_hat)
+        x0_hat should approach the target (and the target's std) much earlier than x_t does — x_t
+        only gets there at t=1, whereas x0_hat is the model's best guess at the clean latent at
+        every t.
+        """
         import matplotlib
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        steps = list(range(len(track["t"])))
-        has_target = len(track["l2_to_target"]) > 0
+        # Drop the first step(s) from the PLOT (the data is still tracked). At t ~ t_eps the
+        # denoiser carries a 1/alpha factor for the noise/score parameterisations, so x0_hat and
+        # the ODE drift blow up by ~1/t_eps there; left in, that single point dominates the log
+        # y-scale and flattens everything else. Set fm_diag_skip_steps=0 to keep it.
+        skip = int(self.cf.get("fm_diag_skip_steps", 1))
+        ts_all = track["t"]
+        skip = min(skip, max(len(ts_all) - 2, 0))  # never leave fewer than 2 points
+        sl = slice(skip, None)
+
+        ts = ts_all[sl]
+        steps = list(range(skip, len(ts_all)))
+        has_target = len(track["l2_x_t"]) > 0
         n = 3 if has_target else 2
-        fig, axes = plt.subplots(n, 1, figsize=(10, 3 * n), sharex=True)
+        fig, axes = plt.subplots(n, 1, figsize=(10, 3.2 * n), sharex=True)
+        i = 0
 
-        axes[0].plot(steps, track["x_std"], "o-", ms=3, label="x std")
-        if self.cur_token is not None:
-            axes[0].axhline(
-                self.cur_token.std().item(), color="grey", ls="--", lw=0.8, label="target std"
-            )
-        axes[0].set_ylabel("std")
-        axes[0].set_title(f"Flow-matching sampling  |  path={self.path.kind}, steps={num_steps}")
-        axes[0].legend(fontsize=8)
-        axes[0].grid(True, alpha=0.3)
+        skipped = f"  [first {skip} step(s) omitted]" if skip else ""
 
-        axes[1].semilogy(steps, track["vel_norm"], "s-", ms=3, color="tab:orange")
-        axes[1].set_ylabel("||velocity||")
-        axes[1].grid(True, alpha=0.3)
-
+        # 1) L2 error to target: noisy state vs denoised estimate
         if has_target:
-            axes[2].plot(steps, track["l2_to_target"], "o-", ms=3, color="tab:red")
-            axes[2].set_ylabel("L2 to target")
-            axes[2].grid(True, alpha=0.3)
+            axes[i].semilogy(steps, track["l2_x_t"][sl], "o-", ms=3, color="tab:blue",
+                             label=r"$\|x_t - z\|$  (noisy state)")
+            axes[i].semilogy(steps, track["l2_x0_hat"][sl], "s-", ms=3, color="tab:red",
+                             label=r"$\|\hat{x}_0(x_t) - z\|$  (denoised estimate)")
+            axes[i].set_ylabel("L2 error to target")
+            axes[i].set_title(
+                f"Flow-matching sampling  |  path={self.path.kind}, "
+                f"pred={self.prediction_type}, sampler={self.sampler}, steps={num_steps}{skipped}"
+            )
+            axes[i].legend(fontsize=8)
+            axes[i].grid(True, alpha=0.3, which="both")
+            i += 1
 
-        axes[-1].set_xlabel("sampling step")
+        # 2) std: noisy state vs denoised estimate
+        axes[i].plot(steps, track["x_t_std"][sl], "o-", ms=3, color="tab:blue",
+                     label=r"std($x_t$)")
+        axes[i].plot(steps, track["x0_hat_std"][sl], "s-", ms=3, color="tab:red",
+                     label=r"std($\hat{x}_0(x_t)$)")
+        if self.cur_token is not None:
+            axes[i].axhline(self.cur_token.std().item(), color="grey", ls="--", lw=0.8,
+                            label="target std")
+        axes[i].set_ylabel("std")
+        axes[i].set_yscale("log")
+        axes[i].legend(fontsize=8)
+        axes[i].grid(True, alpha=0.3, which="both")
+        i += 1
+
+        # 3) velocity magnitude
+        axes[i].semilogy(steps, track["vel_norm"][sl], "^-", ms=3, color="tab:orange")
+        axes[i].set_ylabel("||velocity||")
+        axes[i].grid(True, alpha=0.3, which="both")
+
+        axes[-1].set_xlabel(f"sampling step   (t: {ts[0]:.3f} -> {ts[-1]:.3f}){skipped}")
         fig.tight_layout()
 
         out_dir = get_path_run(self.cf) / "plots" / "validation" / "plots"
