@@ -164,8 +164,8 @@ class MemoryTracker:
     """Tracks the global (max across all ranks) peak GPU memory per window.
 
     Reads the CUDA caching allocator's high-water marks (``max_memory_allocated``
-    and ``max_memory_reserved``) at each ``step()`` call, reduces them across all
-    ranks with MAX, and resets the peak stats so every call reports the peak
+    and ``max_memory_reserved``) at each ``collect()`` call, reduces them across
+    all ranks with MAX, and resets the peak stats so every call reports the peak
     since the previous one.
 
     ``max_memory_allocated`` is the peak of memory occupied by live tensors
@@ -185,23 +185,22 @@ class MemoryTracker:
         # start with a clean window so the first step reports its own peak
         torch.cuda.reset_peak_memory_stats(device)
 
-    def step(
-        self,
-        log_fn: Callable[[dict[str, float]], None] | None = None,
-        window: str = "step",
-    ) -> None:
-        """Record peak memory since the last call and optionally log it.
+    def collect(self, window: str = "step") -> dict[str, float]:
+        """Return peak-memory metrics for the window since the last call.
 
         Collective: must be called on every rank at the same point in the
-        training loop. When the current rank is root, ``log_fn`` is called with
-        the metrics dict.
+        training loop (the cross-rank MAX reduction and the peak-stat reset run
+        on every rank). The returned dict is identical on all ranks; callers
+        merge it into whatever metrics record they log on the root rank.
 
         Args:
-            log_fn: Called with the metrics dict on the root rank. Typically
-                    ``lambda m: logger.log_metrics(stage, m, step=istep)``.
             window: Label naming what the window since the last call covers
-                    (e.g. ``"step"``, ``"save_model"``, ``"validation"``); becomes
+                    (e.g. ``"train"``, ``"save_model"``, ``"validation"``); becomes
                     part of the metric key.
+
+        Returns:
+            Dict of ``"performance.memory.<window>.max_{allocated,reserved}_gib"``
+            pairs.
         """
         max_allocated = torch.cuda.max_memory_allocated(self._device)
         max_reserved = torch.cuda.max_memory_reserved(self._device)
@@ -214,13 +213,10 @@ class MemoryTracker:
             torch.distributed.all_reduce(peaks, op=torch.distributed.ReduceOp.MAX)
             max_allocated, max_reserved = peaks.tolist()
 
-        if log_fn is not None and is_root():
-            log_fn(
-                {
-                    f"performance.memory.{window}.max_allocated_gib": max_allocated / _GIB,
-                    f"performance.memory.{window}.max_reserved_gib": max_reserved / _GIB,
-                }
-            )
+        return {
+            f"performance.memory.{window}.max_allocated_gib": max_allocated / _GIB,
+            f"performance.memory.{window}.max_reserved_gib": max_reserved / _GIB,
+        }
 
 
 class NullMemoryTracker:
@@ -230,8 +226,8 @@ class NullMemoryTracker:
     training loop need no ``if`` guards.
     """
 
-    def step(self, log_fn=None, window: str = "step") -> None:
-        pass
+    def collect(self, window: str = "step") -> dict[str, float]:
+        return {}
 
 
 class NullThroughputTracker:

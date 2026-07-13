@@ -569,16 +569,12 @@ class Trainer(TrainerBase):
 
             self._log_terminal(bidx, mini_epoch, TRAIN)
             if bidx % self.train_logging.metrics == 0:
-                self._log(TRAIN)
-                # Reduce and log the peak memory accumulated over this logging
-                # interval. Done here rather than per step so the cross-rank
-                # reduction (and its device sync) only happens once per interval.
-                self.memory_tracker.step(
-                    log_fn=lambda m: self.train_logger.log_metrics(
-                        TRAIN, m, step=self.cf.general.istep, 
-                    ),
-                    window="train"
-                )
+                # Reduce the peak memory accumulated over this logging interval
+                # and merge it into the training metrics record. The cross-rank
+                # reduction (and its device sync) runs on all ranks here, once
+                # per interval, rather than per step.
+                mem_metrics = self.memory_tracker.collect(window="train")
+                self._log(TRAIN, extra_metrics=mem_metrics)
                 # Log collapse metrics
                 if self.collapse_monitor.should_log(self.cf.general.istep):
                     self._log_collapse_metrics(TRAIN)
@@ -671,17 +667,14 @@ class Trainer(TrainerBase):
                         break
 
                 self._log_terminal(0, mini_epoch, VAL)
-                self._log(VAL)
+                # close the memory window covering validation and merge its peak
+                # into the validation metrics record, so its peak is not
+                # attributed to the subsequent checkpoint save or training step
+                mem_metrics = self.memory_tracker.collect(window="validation")
+                self._log(VAL, extra_metrics=mem_metrics)
 
         # avoid that there is a systematic bias in the validation subset
         self.dataset_val.advance()
-
-        # close the memory window covering validation so its peak is not
-        # attributed to the subsequent checkpoint save or training step
-        self.memory_tracker.step(
-            log_fn=lambda m: self.train_logger.log_metrics(VAL, m, step=self.cf.general.istep),
-            window="validation",
-        )
 
     def _get_full_model_state_dict(self):
         maybe_sharded_sd = (
@@ -758,19 +751,21 @@ class Trainer(TrainerBase):
             config.save(self.cf, mini_epoch)
 
         # capture peak memory during checkpoint saving; gathering the full
-        # state dict on rank 0 is often the run-wide peak
-        self.memory_tracker.step(
-            log_fn=lambda m: self.train_logger.log_metrics(TRAIN, m, step=self.cf.general.istep),
-            window="save_model",
-        )
+        # state dict on rank 0 is often the run-wide peak. There is no companion
+        # metrics record at this point, so log it on its own.
+        mem_metrics = self.memory_tracker.collect(window="save_model")
+        if mem_metrics and is_root():
+            self.train_logger.log_metrics(TRAIN, mem_metrics, step=self.cf.general.istep)
 
-    def _log(self, stage: Stage):
+    def _log(self, stage: Stage, extra_metrics: dict[str, float] | None = None):
         """
         Logs training or validation metrics.
 
         Args:
             stage: Stage Is it's VAL, logs are treated as validation logs.
                         If TRAIN, logs are treated as training logs
+            extra_metrics: Additional scalar metrics (e.g. peak-memory stats) to
+                        merge into the same record instead of a separate log line.
 
         Notes:
             - This method only executes logging on the main process (rank 0).
@@ -788,7 +783,9 @@ class Trainer(TrainerBase):
         if is_root():
             # plain logger
             if stage == VAL:
-                self.train_logger.add_logs(stage, samples, losses_all, stddev_all)
+                self.train_logger.add_logs(
+                    stage, samples, losses_all, stddev_all, extra_metrics=extra_metrics
+                )
 
             elif self.cf.general.istep >= 0:
                 elapsed_time = time.time() - self.t_training_start
@@ -800,6 +797,7 @@ class Trainer(TrainerBase):
                     avg_loss=avg_loss,
                     lr=self.lr_scheduler.get_lr(),
                     elapsed_training_time_seconds=elapsed_time,
+                    extra_metrics=extra_metrics,
                 )
 
         loss_calculator.loss_hist = []
