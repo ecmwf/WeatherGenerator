@@ -262,10 +262,12 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         eps = torch.randn_like(z)
         x_t = alpha * z + beta * eps
 
-        # Stash eps and t so the target encoder (runs after this forward pass) can build
-        # the exact analytic target. Same channel model.py uses for conditioning_tokens.
+        # Stash eps, t and x_t so the loss (which runs after this forward pass) can build the
+        # exact analytic target and the parameterization-invariant x0 diagnostic. Same channel
+        # model.py uses for conditioning_tokens.
         meta_info["ERA5"].params["fm_eps"] = eps.detach()
         meta_info["ERA5"].params["fm_t"] = float(t.reshape(-1)[0].item())
+        meta_info["ERA5"].params["fm_x_t"] = x_t.detach()
 
         return self._net_forward(x_t, t, c, fstep, coords)
 
