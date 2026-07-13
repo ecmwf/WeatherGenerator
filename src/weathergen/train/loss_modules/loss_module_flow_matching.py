@@ -66,28 +66,35 @@ class LossFlowMatching(LossModuleBase):
         return weights_timestep_fct(forecast_steps, timestep_weight_config[1])
 
     @staticmethod
-    def _read_eps_t(metadata, device) -> tuple[Tensor, Tensor]:
-        """Read the engine-stashed noise ``eps`` and time ``t`` from the source metadata.
+    def _read_stash(metadata, device) -> tuple[Tensor, Tensor, Tensor]:
+        """Read the engine-stashed noise ``eps``, time ``t`` and input ``x_t`` from metadata.
 
         ``metadata`` is the tuple from ``extract_batch_metadata``: element [1] is the list
-        of source-sample metadata; the flow engine stashed ``fm_eps``/``fm_t`` into
+        of source-sample metadata; the flow engine stashed ``fm_eps``/``fm_t``/``fm_x_t`` into
         sample 0 (single-sample forecast setup).
         """
-        source_meta = metadata[1][0]
-        params = source_meta.params
-        assert "fm_eps" in params and "fm_t" in params, (
-            "fm_eps/fm_t not found in batch metadata — FlowMatchingForecastEngine."
+        params = metadata[1][0].params
+        missing = [k for k in ("fm_eps", "fm_t", "fm_x_t") if k not in params]
+        assert not missing, (
+            f"{missing} not found in batch metadata — FlowMatchingForecastEngine."
             "training_forward must run before the loss (it stashes them)."
         )
         eps = params["fm_eps"].to(device)
+        x_t = params["fm_x_t"].to(device)
         t = torch.as_tensor(params["fm_t"], device=device, dtype=torch.float32)
-        return eps, t
+        return eps, t, x_t
 
     def compute_loss(self, preds: dict, targets: dict, **kwargs) -> LossValues:
         losses_all: dict[str, Tensor] = {
             f"{self.name}.{name}": torch.zeros(1, device=self.device)
             for _, _, name in self.loss_fcts
         }
+        # Parameterization-invariant diagnostic (logging only, no backprop): convert the raw
+        # prediction to a clean-latent (x0) estimate and measure MSE against z. Unlike the raw
+        # training loss, this IS comparable across velocity/noise/score runs at the same t,
+        # because each parameterization regresses a target with a different scale.
+        # NB well-conditioned at the fixed validation t's; noisy as t->0 (to_denoiser ~ 1/alpha).
+        losses_all[f"{self.name}.mse_x0"] = torch.zeros(1, device=self.device)
 
         pred_tokens_all = [
             pl["latent_state"].z_pre_norm
@@ -99,13 +106,14 @@ class LossFlowMatching(LossModuleBase):
         # Ensemble mode does not call predict_latent → no latent predictions.
         if not pred_tokens_all:
             nan = torch.tensor(torch.nan).to(self.device)
+            keys = [f"{self.name}.{n}" for _, _, n in self.loss_fcts] + [f"{self.name}.mse_x0"]
             return LossValues(
                 loss=torch.zeros(1, device=self.device),
-                losses_all={f"{self.name}.{n}": nan for _, _, n in self.loss_fcts},
+                losses_all=dict.fromkeys(keys, nan),
                 stddev_all={"latent": nan},
             )
 
-        eps, t = self._read_eps_t(kwargs["metadata"], self.device)
+        eps, t, x_t = self._read_stash(kwargs["metadata"], self.device)
         fstep_loss_weights = self._get_fstep_weights(len(target_tokens_all))
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -115,6 +123,12 @@ class LossFlowMatching(LossModuleBase):
         ):
             # Analytic conditional target for the configured parameterization.
             target = self.path.conditional_target(z_target, eps, t, self.prediction_type)
+
+            # Invariant x0 diagnostic (detached: logging only, never backpropped).
+            with torch.no_grad():
+                x0_hat = self.path.to_denoiser(pred_tokens, x_t, t, self.prediction_type)
+                mse_x0, _ = loss_fns.mse(target=z_target, pred=x0_hat)
+                losses_all[f"{self.name}.mse_x0"] += mse_x0.detach()
 
             loss_fstep = torch.tensor(0.0, device=self.device, requires_grad=True)
             ctr_loss_fcts = 0
