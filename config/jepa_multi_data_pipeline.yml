@@ -24,51 +24,32 @@ stages:
   # Stage 1: JEPA pre-training with EMA teacher + deep SSL
   - name: pretrain
     command: train
-    base-config: ./config/config_jepa_multi_data_all_years.yml
-    config: ./config/config_jepa_multi_data_all_years.yml
-    # base-config: ./config/config_jepa_self_flow_multi_data.yml
-    # config: ./config/config_jepa_self_flow_multi_data.yml
+    base-config: config/jepa/space_jepa/space_jepa_and_reconstruction_pretraining_era5_o96_obs_o256_1979_2015.yml
+    config: config/jepa/space_jepa/space_jepa_and_reconstruction_pretraining_era5_o96_obs_o256_1979_2015.yml
     options: []
     chain: 2
     nodes: 2
 
-  # Stage 1: JEPA pre-training with EMA teacher + deep SSL
+  # Stage 2: JEPA pre-training with EMA teacher + deep SSL
   - name: pretrain-ft
-    command: train
-    config: ./config/config_jepa_multi_data_all_years_ft.yml
+    command: train-continue
+    config: config/jepa/space_jepa/space_jepa_and_reconstruction_pretraining_era5_o96_obs_o256_2016_2022.yml
     options: []
-    chain: 2
+    chain: 1
     nodes: 2
-
-  # # Stage 1.1: JEPA pre-training with EMA teacher + deep SSL
-  # - name: pretrain-cooldown
-  #   command: train-continue
-  #   from: pretrain
-  #   config: ./config/config_jepa_self_flow_cooldown.yml
-  #   options: []
-  #   chain: 1
-  #   nodes: 2
 
   # Stage 3: Forecasting finetuning (freezes encoder)
   - name: finetune-forecast
     command: train-continue
     from: pretrain-ft
-    config: ./config/config_jepa_multi_data_ft_forecast_all_years.yml
-    chain: 4
+    config: config/jepa/space_jepa/space_jepa_frozen_forecast_era5_o96_obs_o256.yml
+    chain: 2
     nodes: 2
 
-  # Stage 3: Forecasting finetuning (freezes encoder)
-  - name: finetune-forecast-ft
+  # Stage 3: Forecasting finetuning (unfreezes encoder)
+  - name: finetune-forecast-unfrozen
     command: train-continue
-    from: finetune-forecast
-    config: ./config/config_jepa_multi_data_ft_forecast.yml
-    chain: 3
+    from: pretrain-ft
+    config: config/jepa/space_jepa/space_jepa_unfrozen_forecast_era5_o96_obs_o256.yml
+    chain: 2
     nodes: 2
-
-  # # Stage 3: Forecasting finetuning (unfreezes encoder)
-  # - name: finetune-forecast-2
-  #   command: train-continue
-  #   from: finetune-forecast
-  #   config: ./config/config_jepa_multi_data_ft_forecast_unfreeze_encoder.yml
-  #   chain: 2
-  #   nodes: 2

@@ -256,7 +256,6 @@ class Trainer(TrainerBase):
 
         logger.info(f"Starting inference with id={self.cf.general.run_id}.")
 
-
         # inference validation set
         self.validate(0, self.test_cfg, self.batch_size_test_per_gpu)
         logger.info(f"Finished inference run with id: {cf.general.run_id}")
@@ -374,7 +373,7 @@ class Trainer(TrainerBase):
         )
 
         # Restore optimizer momentum buffers when continuing from a checkpoint
-        if run_id_contd is not None:
+        if run_id_contd is not None and self.cf.general.istep != 0:
             self._load_optimizer_state(run_id_contd, mini_epoch_contd)
 
         if self.cf.general.istep > 0 and is_root():
