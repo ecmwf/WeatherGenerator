@@ -104,9 +104,7 @@ def check_reset_not_frozen(model, reset_blocks):
     for name, module in model.named_modules():
         name = module.name if hasattr(module, "name") else name
         if (re.fullmatch(reset_blocks, name) is not None) and (name != ""):
-            frozen += [
-                f"{name}.{pn}" for pn, p in module.named_parameters() if not p.requires_grad
-            ]
+            frozen += [f"{name}.{pn}" for pn, p in module.named_parameters() if not p.requires_grad]
     if frozen:
         frozen = sorted(set(frozen))
         raise ValueError(

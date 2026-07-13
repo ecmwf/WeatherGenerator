@@ -198,7 +198,7 @@ def init_model_and_shard(
             if with_fsdp:
                 model.reset_parameters()
 
-    # Reset specified modules when starting a new stage (e.g. pretrain -> finetune); 
+    # Reset specified modules when starting a new stage (e.g. pretrain -> finetune);
     # skip when resuming the same run.
     current_run_id = cf.general.run_id
     if loaded_from_run_id is not None and loaded_from_run_id != current_run_id:
