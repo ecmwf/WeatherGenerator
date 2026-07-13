@@ -822,7 +822,7 @@ class Masker:
                     noise_level_per_cell = torch.zeros(
                         geoinfos.shape[0], dtype=geoinfos.dtype, device=geoinfos.device
                     )
-                    rd.geoinfos = torch.cat([geoinfos,noise_level_per_cell.unsqueeze(1)], dim=-1)
+                    rd.geoinfos = torch.cat([geoinfos, noise_level_per_cell.unsqueeze(1)], dim=-1)
                     input_data_geoinfo.append(rd)
                 input_data = input_data_geoinfo
             return input_data
@@ -872,7 +872,7 @@ class Masker:
                     noise_level_per_cell = torch.where(
                         point_noise_mask, noise_level_per_cell, noise_level_t
                     )
-                rd.geoinfos = torch.cat([rd.geoinfos,noise_level_per_cell.unsqueeze(1)], dim=-1)
+                rd.geoinfos = torch.cat([rd.geoinfos, noise_level_per_cell.unsqueeze(1)], dim=-1)
 
             noised.append(rd)
         return noised

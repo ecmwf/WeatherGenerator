@@ -29,7 +29,14 @@ from weathergen.model.attention import (
 )
 from weathergen.model.layers import MLP
 from weathergen.model.model import Model, ModelParams
-from weathergen.model.utils import apply_fct_to_blocks, freeze_weights
+from weathergen.model.utils import (
+    apply_fct_to_blocks,
+    broadcast_matching_params,
+    check_reset_not_frozen,
+    freeze_weights,
+    log_trainable_summary,
+    reset_weights,
+)
 from weathergen.utils.distributed import is_root
 from weathergen.utils.utils import get_dtype
 
@@ -38,6 +45,20 @@ logger = logging.getLogger(__name__)
 
 # same as in config: student_teacher, forecasting, masking
 type TrainingMode = str
+
+
+def _has_trainable_params(module: torch.nn.Module) -> bool:
+    """True if the module has at least one parameter with requires_grad=True.
+
+    FSDP2 raises "RuntimeError: _chunk_cat expects non-empty tensor" in the
+    backward reduce-scatter (foreach_reduce) when a fully_shard group contains
+    only frozen parameters, since there are no gradients to reduce. This happens
+    during fine-tuning (e.g. forecast fine-tuning freezes the encoder and
+    latent_heads). Skipping fully_shard for fully-frozen modules leaves their
+    parameters in the root FSDP group, which still has trainable parameters, so
+    they remain sharded without triggering the empty-gradient reduce.
+    """
+    return any(p.requires_grad for p in module.parameters())
 
 
 def init_model_and_shard(
@@ -96,36 +117,36 @@ def init_model_and_shard(
         )
 
         for module in model.encoder.ae_local_engine.ae_local_blocks.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
         for module in model.encoder.ae_local_global_engine.ae_adapter.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
         for module in model.encoder.ae_global_engine.ae_global_blocks.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
         for module in model.forecast_engine.fe_blocks.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 # reshard_after_forward=False keeps FE parameters unsharded
                 # during the multi-step rollout loop.
                 # Needed for pushforward trick.
                 fully_shard(module, reshard_after_forward=False, **fsdp_kwargs)
 
         for module in model.latent_heads.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **fsdp_kwargs)
 
         if model.deep_ssl_fusion is not None:
             for module in model.deep_ssl_fusion.modules():
-                if isinstance(module, modules_to_shard):
+                if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                     fully_shard(module, **fsdp_kwargs)
 
         if model.deep_ssl_level_projections is not None:
             for module in model.deep_ssl_level_projections.modules():
-                if isinstance(module, modules_to_shard):
+                if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                     fully_shard(module, **fsdp_kwargs)
 
         full_precision_fsdp_kwargs = {
@@ -140,7 +161,7 @@ def init_model_and_shard(
         }
 
         for module in model.target_token_engines.modules():
-            if isinstance(module, modules_to_shard):
+            if isinstance(module, modules_to_shard) and _has_trainable_params(module):
                 fully_shard(module, **full_precision_fsdp_kwargs)
 
     if with_ddp and with_fsdp:
@@ -158,21 +179,42 @@ def init_model_and_shard(
             torch.distributed.fsdp.register_fsdp_forward_method(embed, "forward_columns")
 
     # complete initalization and load model if inference/continuing a run
+    loaded_from_run_id = None
     if run_id_contd is not None:
         if is_root():
             logger.info(f"Continuing run with id={run_id_contd} at mini_epoch {mini_epoch_contd}.")
         model = load_model(cf, model, device, run_id_contd, mini_epoch_contd)
+        loaded_from_run_id = run_id_contd
     elif cf.get("load_chkpt", {}).get("run_id", None):
         run_id = cf.load_chkpt.run_id
         mini_epoch = cf.load_chkpt.get("mini_epoch", -1)
         if is_root():
             logger.info(f"Loading checkpoint from id={run_id} at mini_epoch {mini_epoch}.")
         model = load_model(cf, model, device, run_id, mini_epoch)
+        loaded_from_run_id = run_id
     else:
         if with_ddp and with_fsdp:
             model.to_empty(device="cuda")
             if with_fsdp:
                 model.reset_parameters()
+
+    # Reset specified modules when starting a new stage (e.g. pretrain -> finetune);
+    # skip when resuming the same run.
+    current_run_id = cf.general.run_id
+    if loaded_from_run_id is not None and loaded_from_run_id != current_run_id:
+        reset_modules = cf.get("reset_modules", "")
+        if reset_modules:
+            assert not with_fsdp, "reset_modules with FSDP-sharded parameters is not supported"
+            # a parameter that is both reset and frozen would stay random forever
+            check_reset_not_frozen(model, reset_modules)
+            if is_root():
+                logger.info(f"Resetting weights for modules matching: {reset_modules}")
+            apply_fct_to_blocks(model, reset_modules, reset_weights)
+            # each rank resets with its own RNG; sync to rank 0 like DDP does at wrap time
+            broadcast_matching_params(model, reset_modules, src=0)
+
+    if is_root():
+        log_trainable_summary(model)
 
     # model params
     model_params = ModelParams(cf).create(cf)

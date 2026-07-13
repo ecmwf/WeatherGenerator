@@ -40,7 +40,7 @@ from weathergen.model.engines import (
 from weathergen.model.layers import MLP, NamedLinear
 from weathergen.model.utils import get_num_parameters
 from weathergen.utils.distributed import is_root
-from weathergen.utils.utils import get_dtype, is_stream_forcing
+from weathergen.utils.utils import get_dtype, is_stream_reconstructed
 
 logger = logging.getLogger(__name__)
 
@@ -390,7 +390,8 @@ class Model(torch.nn.Module):
         )
 
         mode_cfg = cf.training_config
-        if cf.fe_num_blocks > 0:
+        fe_num_blocks = cf.get("fe_num_blocks", 0)
+        if fe_num_blocks > 0:
             self.forecast_engine = ForecastingEngine(cf, mode_cfg, self.num_healpix_cells)
         else:
             self.forecast_engine = IdentityEngine()
@@ -419,8 +420,9 @@ class Model(torch.nn.Module):
             for i_stream, si in enumerate(cf.streams):
                 stream_name = self.stream_names[i_stream]
 
-                # skip decoder if channels are empty
-                if is_stream_forcing(si):
+                # skip decoder for streams that are not physically reconstructed
+                # (forcing/input-only, or explicit reconstruct: false -> JEPA-only target)
+                if not is_stream_reconstructed(si):
                     continue
 
                 # skip for the moment to ensure target embedding and tte exist (ordering of
@@ -515,8 +517,9 @@ class Model(torch.nn.Module):
             for i_stream, si in enumerate(cf.streams):
                 stream_name = self.stream_names[i_stream]
 
-                # skip decoder if channels are empty
-                if is_stream_forcing(si):
+                # skip decoder for streams that are not physically reconstructed
+                # (forcing/input-only, or explicit reconstruct: false -> JEPA-only target)
+                if not is_stream_reconstructed(si):
                     continue
 
                 pred_spatial_shared = si.get("pred_spatial_shared")
@@ -779,10 +782,14 @@ class Model(torch.nn.Module):
 
             if self.forecast_engine:
                 tokens = self.forecast_engine(tokens, step, model_params.rope_coords)
-            # decoder predictions
-            output = self.predict_decoders(model_params, step, tokens, batch, output)
-            # latent predictions (raw and with SSL heads)
-            output = self.predict_latent(model_params, step, tokens, batch, output, intermediates)
+            if "masking" in self.cf.training_config.training_mode:
+                # decoder predictions
+                output = self.predict_decoders(model_params, step, tokens, batch, output)
+            if "student_teacher" in self.cf.training_config.training_mode:
+                # latent predictions (raw and with SSL heads)
+                output = self.predict_latent(
+                    model_params, step, tokens, batch, output, intermediates
+                )
 
         return output
 
@@ -890,6 +897,12 @@ class Model(torch.nn.Module):
 
         # pair with tokens from assimilation engine to obtain target tokens
         for stream_name in self.stream_names:
+            # streams without a physical decoder (forcing, or reconstruct: false JEPA-only
+            # targets) have no embed_target_coords/target_token_engine. Skip them here even
+            # though they may still carry (unused) target coords on the student view.
+            if stream_name not in self.embed_target_coords:
+                continue
+
             # extract target coords for current stream and fstep and convert to one tensor
             t_coords = [
                 batch.samples[i_b].streams_data[stream_name].target_coords[step]
