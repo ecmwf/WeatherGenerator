@@ -102,8 +102,6 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # initialise healpix
         self.healpix_level = cf.healpix_level
         self.num_healpix_cells = 12 * 4**self.healpix_level
-        self.masker = Masker(cf.healpix_level, stage, self.streams, self.mode_cfg)
-        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
 
         forecast_cfg = FORECAST_DEFAULTS | OmegaConf.to_object(mode_cfg.get("forecast", {}))
         self.output_offset = forecast_cfg["offset"]
@@ -151,6 +149,18 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
         self.check_samples(self._get_fsm())
+        if stage == "train":
+            self.total_train_steps = int((self.len * mode_cfg.num_mini_epochs) / self.batch_size)
+        else:
+            self.total_train_steps = None
+        self.masker = Masker(
+            cf.healpix_level,
+            stage,
+            self.streams,
+            self.mode_cfg,
+            total_train_steps=self.total_train_steps,
+        )
+        self.tokenizer = TokenizerMasking(cf.healpix_level, self.masker)
         self.streams_datasets = self._init_stream_datasets(cf)
 
         # RNG seed setup
@@ -159,6 +169,7 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         self.data_loader_rng_seed = rs if rs > nw else rs * 97
 
         self.rng = None
+        self.train_step = 0
 
     def check_samples(self, fsm: int):
         """Check if samples_per_mini_epoch is suitable
@@ -614,7 +625,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return (input_data, output_data)
 
-    def _get_source_target_masks(self, training_mode):
+    def _get_source_target_masks(self, training_mode, train_step: int):
         """
         Generate source and target masks for all streams.
         """
@@ -625,6 +636,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 training_mode,
                 self.num_healpix_cells,
                 stream_info,
+                train_step,
             )
             # identical for all streams
             num_target_samples = len(masks[stream_info["name"]][0])
@@ -651,7 +663,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return batch
 
-    def _get_batch(self, idx: int, num_forecast_steps: int):
+    def _get_batch(self, idx: int, num_forecast_steps: int, train_step: int):
         """
         Assemble a batch using the sample corresponding to idx
         """
@@ -661,7 +673,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_cfgs = self.mode_cfg.get("target_input", {})
 
         # get/coordinate masks
-        masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(mode)
+        masks_streams, num_source_samples, num_target_samples = self._get_source_target_masks(
+            mode, train_step
+        )
 
         source_select, target_select = [], []
         if "masking" in mode:
@@ -820,7 +834,11 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # idx_raw is used to index into the dataset; the decoupling is needed
         # since there are empty batches
         idx_raw = iter_start
+        worker_info = torch.utils.data.get_worker_info()
+        train_step_offset = worker_info.id if worker_info is not None else 0
+        train_step_stride = worker_info.num_workers if worker_info is not None else 1
         for i, _bidx in enumerate(range(iter_start, iter_end, self.batch_size)):
+            train_step = self.train_step + i * train_step_stride + train_step_offset
             # num_forecast_steps needs to be constant per batch
             # (amortized through data parallel training)
             num_forecast_steps = perms_num_forecast_steps[i]
@@ -831,7 +849,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 idx: TIndex = perms[idx_raw % perms.shape[0]]
                 idx_raw += 1
 
-                batch = self._get_batch(idx, num_forecast_steps)
+                batch = self._get_batch(idx, num_forecast_steps, train_step)
 
                 # ensure the batch is valid, i.e. not completely empty and no NaN values
                 # student teacher has no classical targets

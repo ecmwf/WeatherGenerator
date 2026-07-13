@@ -84,11 +84,14 @@ class TokenizerMasking(Tokenizer):
         training_mode: str,
         num_cells: int,
         stream_info: dict,
+        train_step: int = 0,
     ) -> tuple[np.typing.NDArray, list[np.typing.NDArray], list[SampleMetaData]]:
         """
         Create masks for samples
         """
-        return self.masker.build_samples_for_stream(training_mode, num_cells, stream_info)
+        return self.masker.build_samples_for_stream(
+            training_mode, num_cells, stream_info, train_step
+        )
 
     def cell_to_token_mask(self, idxs_cells, idxs_cells_lens, mask):
         """ """

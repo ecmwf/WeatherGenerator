@@ -17,6 +17,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import polars as pl
 import yaml
 
 import weathergen.common.config as config
@@ -112,11 +113,11 @@ def _check_run_id_dict(run_id_dict: dict) -> bool:
         return False
 
     for k, v in run_id_dict.items():
-        if not isinstance(k, str) or not isinstance(v, list) or len(v) != 2:
+        if not isinstance(k, str) or not isinstance(v, list) or len(v) not in (2, 3):
             raise argparse.ArgumentTypeError(
                 (
-                    "Each key must be a string and",
-                    f" each value must be a list of [job_id, experiment_name], but got: {k}: {v}",
+                    "Each key must be a string and each value must be a list of",
+                    f" [job_id, experiment_name(, x_offset)], but got: {k}: {v}",
                 )
             )
 
@@ -181,7 +182,10 @@ def _read_yaml_config(yaml_file_path):
     for k, v in config_dict_temp.items():
         assert isinstance(v["slurm_id"], int), "slurm_id has to be int."
         assert isinstance(v["description"], str), "description has to be str."
-        config_dict[k] = [v["slurm_id"], v["description"]]
+        # optional x-offset (in samples), e.g. to align a continued run with its first segment
+        x_offset = v.get("x_offset", 0)
+        assert isinstance(x_offset, int), "x_offset has to be int."
+        config_dict[k] = [v["slurm_id"], v["description"], x_offset]
 
     # Validate the structure: {run_id: [job_id, experiment_name]}
     _check_run_id_dict(config_dict)
@@ -848,6 +852,19 @@ def plot_train(args=None):
         TrainLogger.read(run_id, model_path=model_base_dir, cols_patterns=streams)
         for run_id in runs_ids
     ]
+
+    # apply per-run x-offsets so continued runs align with their first segment
+    for run_data in runs_data:
+        run_cfg = runs_ids[run_data.run_id]
+        x_offset = run_cfg[2] if len(run_cfg) > 2 else 0
+        if x_offset:
+            for mode in ("train", "val", "system"):
+                df = getattr(run_data, mode)
+                if df is None or df.is_empty():
+                    continue
+                cols = [c for c in df.columns if "samples" in c]
+                if cols:
+                    setattr(run_data, mode, df.with_columns([pl.col(c) + x_offset for c in cols]))
 
     # determine which runs are still alive (as a process, though they might hang internally)
     ret = subprocess.run(["squeue"], capture_output=True)
