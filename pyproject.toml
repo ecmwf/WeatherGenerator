@@ -89,7 +89,6 @@ cpu = [
 gpu = [
   "torch==2.13; sys_platform == 'linux'",
   # flash-attn also has a torch dependency.
-  "flash-attn",
   "flash-attn-3",
 ]
 
@@ -176,7 +175,7 @@ link-mode = "symlink"
 # by future releases of dependencies or sub-dependencies.
 # See https://docs.astral.sh/uv/reference/settings/#exclude-newer
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
-exclude-newer = "2026-04-27T00:00:00Z"
+exclude-newer = "2026-07-11T00:00:00Z"
 
 # torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
 override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]
@@ -244,15 +243,6 @@ weathergen-evaluate = { workspace = true }
 weathergen-metrics = { workspace = true }
 weathergen-readers-extra = { workspace = true }
 
-
-flash-attn = [
-  { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-  { url = "https://github.com/cathalobrien/get-flash-attn/releases/download/v0.1-alpha/flash_attn-2.8.3+cu12torch2.9cxx11abiFALSE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'  and platform_machine == 'x86_64'" },
-  # There is no official support for flash-attn on macos
-]
-
-flash-attn-3 = { git = "https://github.com/Dao-AILab/flash-attention", subdirectory = "hopper" }
-
 torch = [
 # Explicit pin for GPU
   { url = "https://download-r2.pytorch.org/whl/cu126/torch-2.13.0%2Bcu126-cp312-cp312-manylinux_2_28_aarch64.whl", marker = 'sys_platform == "linux" and platform_machine == "aarch64"', extra="gpu" },
@@ -267,6 +257,9 @@ torch = [
   # TODO: explore pytorch + metal backend
   { index = "pytorch-cpu", marker = "sys_platform == 'darwin'", extra="gpu"},
 ]
+
+flash-attn-3 = { git = "https://github.com/Dao-AILab/flash-attention", subdirectory = "hopper" }
+
 # TODO: switch back to this branch, but this is a larger update and the tag name is incorrect
 # anemoi-datasets = { git = "https://github.com/ecmwf/anemoi-datasets", tag = "v0.0.2-special-zarr3"}
 anemoi-datasets = { git = "https://github.com/tjhunter/anemoi-datasets", tag = "0.0.1"}
