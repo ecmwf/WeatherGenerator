@@ -601,15 +601,21 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
             rdata = collect_datasources(stream_ds, step_forecast_dt, "target", self.rng)
 
             if rdata.is_empty():
-                # work around for https://github.com/pytorch/pytorch/issues/158719
-                # create non-empty mean data instead of empty tensor
-                time_win = self.time_window_handler.window(step_forecast_dt)
-                rdata = spoof(
-                    self.healpix_level,
-                    time_win.start,
-                    stream_ds[0].get_geoinfo_size(),
-                    len(stream_ds[0].mean[stream_ds[0].target_idx]),
-                )
+                # The forecast timestep is outside the dataset range. Fall back to the
+                # source timestep's target data so that the model can still predict on the
+                # full spatial grid (respecting max_num_targets subsampling). Target values
+                # are from base_idx rather than the actual forecast time, so mark as spoof.
+                rdata = collect_datasources(stream_ds, base_idx, "target", self.rng)
+                if rdata.is_empty():
+                    # Last resort: fully synthetic spoof (work around for
+                    # https://github.com/pytorch/pytorch/issues/158719).
+                    time_win = self.time_window_handler.window(step_forecast_dt)
+                    rdata = spoof(
+                        self.healpix_level,
+                        time_win.start,
+                        stream_ds[0].get_geoinfo_size(),
+                        len(stream_ds[0].mean[stream_ds[0].target_idx]),
+                    )
                 rdata.is_spoof = True
 
             output_data += [rdata]
@@ -652,7 +658,7 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         # In inference_only mode targets are not loaded, so skip tokens_lens for targets
         if not self.inference_only:
             batch.target_samples.tokens_lens = get_tokens_lens(
-                self.streams, batch.target_samples, target_input_steps
+                stream_names, batch.target_samples, target_input_steps
             )
 
         return batch
