@@ -55,6 +55,7 @@ default_streams:
       plot_maps: true
       plot_histograms: false
       plot_animations: true
+      plot_timeseries: false
   CERRA:
     regions: ["europe"]
     channels: ["z_500", "t_850", "u_850"] #, "blah"]
@@ -69,4 +70,5 @@ default_streams:
       plot_target: false
       plot_histograms: true
       plot_animations: true
+      plot_timeseries: false
       
