@@ -171,22 +171,14 @@ training_config:
       beta2 : 0.9875  # == 0.90 on 2 nodes x 4 gpus
       eps : 2e-08
     muon:
-      # optional peak lr override for muon; if set, muon's lr schedule uses this as lr_max
-      # instead of learning_rate_scheduling.lr_max, scaling lr_start/lr_final/lr_final_decay
-      # proportionally (warmup/decay/cooldown timing stays identical to adamw's schedule).
-      # NOTE: lr_max=0.02 (muon_lr_scale=400, "original" adjust_lr_fn), validated on the
-      # geom_cosine_muon branch's architecture, was observed to diverge (loss oscillating
-      # between ~0.3 and >3, never converging) on this forecasting model/architecture instead.
-      # left null so muon reuses adamw's tuned lr schedule directly, relying on
-      # adjust_lr_fn=match_rms_adamw's per-matrix scaling below instead of a fixed multiplier.
+      # peak lr override for muon; null shares adamw's lr schedule (relies on
+      # adjust_lr_fn=match_rms_adamw's per-matrix scaling instead of a fixed multiplier)
       lr_max: null
       momentum: 0.95
       nesterov: True
       ns_steps: 5
       eps: 1e-7
-      # "original" | "match_rms_adamw"; match_rms_adamw scales lr per-matrix by
-      # 0.2*sqrt(max(A,B)) (~12-25x adamw's rate for this model's matrix sizes), letting muon
-      # reuse an adamw-tuned lr/weight_decay directly instead of a hand-picked lr_max above.
+      # "original" | "match_rms_adamw"
       adjust_lr_fn: match_rms_adamw
 
   losses : {
