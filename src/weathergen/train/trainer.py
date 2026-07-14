@@ -33,6 +33,7 @@ from weathergen.model.utils import apply_fct_to_blocks, set_to_eval
 from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
+from weathergen.train.optimizer import build_optimizer
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
@@ -118,36 +119,6 @@ class Trainer(TrainerBase):
         if "muon" in lrs and self._muon_effective_lr_factor is not None:
             lrs["muon"] = lrs["muon"] * self._muon_effective_lr_factor
         return lrs
-
-    @staticmethod
-    def _muon_adjust_lr_factor(shape, adjust_lr_fn: str) -> float:
-        """
-        Mirrors torch.optim.Muon's internal per-parameter lr-adjustment factor
-        (torch/optim/_muon.py::_adjust_lr), so a representative effective lr can be logged.
-        """
-        a, b = shape[0], shape[1]
-        if adjust_lr_fn == "match_rms_adamw":
-            return 0.2 * max(a, b) ** 0.5
-        return max(1.0, a / b) ** 0.5
-
-    @staticmethod
-    def _scale_lr_cfg(lr_cfg, lr_max_override: float | None):
-        """
-        Rescale a learning_rate_scheduling config to a different peak lr, keeping the
-        warmup/decay/cooldown timing and relative shape identical.
-        """
-        if lr_max_override is None:
-            return lr_cfg
-        scale = lr_max_override / lr_cfg.lr_max
-        return OmegaConf.merge(
-            lr_cfg,
-            {
-                "lr_start": lr_cfg.lr_start * scale,
-                "lr_max": lr_max_override,
-                "lr_final_decay": lr_cfg.lr_final_decay * scale,
-                "lr_final": lr_cfg.lr_final * scale,
-            },
-        )
 
     def init(self, cf: Config, devices):
         # pylint: disable=attribute-defined-outside-init
@@ -372,82 +343,14 @@ class Trainer(TrainerBase):
             if not cf.with_ddp:
                 self.model.print_num_parameters()
 
-        # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
-        # https://arxiv.org/pdf/2111.06377
         kappa = self.get_batch_size_total(self.batch_size_per_gpu)
-        # aiming for beta1 = 0.9 at one node, ie kappa=B=4
-        beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
-        # aiming for beta2 = 0.95 at one node, ie B=4
-        beta2 = max(0.9, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2))
-        eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
-
         shared_lr_cfg = self.training_cfg.learning_rate_scheduling
-        weight_decay = self.training_cfg.optimizer.weight_decay
-        adamw_betas_eps = {"betas": (beta1, beta2), "eps": eps}
 
-        # per-optimizer lr scheduler config, paired 1:1 with self.optimizers
-        lr_cfgs = []
-
-        optimizer_name = self.training_cfg.optimizer.get("name", "adamw").lower()
-        if optimizer_name == "adamw":
-            self.optimizers = [
-                torch.optim.AdamW(
-                    self.model.parameters(),
-                    lr=shared_lr_cfg.lr_start,
-                    weight_decay=weight_decay,
-                    fused=True,
-                    **adamw_betas_eps,
-                )
-            ]
-            lr_cfgs = [shared_lr_cfg]
-            self.optimizer_names = ["adamw"]
-        elif optimizer_name == "muon":
-            # muon orthogonalizes 2D weight matrices of hidden layers; all other parameters
-            # (biases, norms, higher-dim tensors, ...) are left to adamw, as recommended by
-            # https://kellerjordan.github.io/posts/muon/ (torch.optim.Muon also hard-requires
-            # exactly 2D tensors and raises ValueError otherwise, e.g. for a [1, 1, 2048] param)
-            muon_cfg = self.training_cfg.optimizer.muon
-            muon_params = [p for p in self.model.parameters() if p.requires_grad and p.ndim == 2]
-            adamw_params = [p for p in self.model.parameters() if p.requires_grad and p.ndim != 2]
-            muon_lr_cfg = self._scale_lr_cfg(shared_lr_cfg, muon_cfg.get("lr_max", None))
-            adjust_lr_fn = muon_cfg.get("adjust_lr_fn", None) or "original"
-            self._muon_effective_lr_factor = float(
-                np.median(
-                    [self._muon_adjust_lr_factor(p.shape, adjust_lr_fn) for p in muon_params]
-                )
-            )
-            if is_root():
-                logger.info(
-                    f"Using muon optimizer: {len(muon_params)} params (ndim == 2) via muon, "
-                    f"{len(adamw_params)} params (ndim != 2) via adamw, "
-                    f"muon lr_max={muon_lr_cfg.lr_max:.3g} "
-                    f"(adamw lr_max={shared_lr_cfg.lr_max:.3g}), "
-                    f"median {adjust_lr_fn} factor={self._muon_effective_lr_factor:.3g}"
-                )
-            self.optimizers = [
-                torch.optim.Muon(
-                    muon_params,
-                    lr=muon_lr_cfg.lr_start,
-                    weight_decay=weight_decay,
-                    momentum=muon_cfg.get("momentum", 0.95),
-                    nesterov=muon_cfg.get("nesterov", True),
-                    ns_steps=muon_cfg.get("ns_steps", 5),
-                    eps=muon_cfg.get("eps", 1e-7),
-                    adjust_lr_fn=muon_cfg.get("adjust_lr_fn", None),
-                ),
-                torch.optim.AdamW(
-                    adamw_params,
-                    lr=shared_lr_cfg.lr_start,
-                    weight_decay=weight_decay,
-                    fused=True,
-                    **adamw_betas_eps,
-                ),
-            ]
-            lr_cfgs = [muon_lr_cfg, shared_lr_cfg]
-            self.optimizer_names = ["muon", "adamw"]
-        else:
-            assert False, f"Unsupported optimizer '{optimizer_name}', expected 'adamw' or 'muon'"
+        built = build_optimizer(self.model, self.training_cfg.optimizer, shared_lr_cfg, kappa)
+        self.optimizers = built.optimizers
+        self.optimizer_names = built.optimizer_names
+        self._muon_effective_lr_factor = built.muon_effective_lr_factor
+        lr_cfgs = built.lr_cfgs
 
         if cf.get("training_config").get("optimizer").get("grad_scaling", True):
             self.grad_scaler = torch.amp.GradScaler("cuda")
