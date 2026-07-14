@@ -9,6 +9,7 @@ dependencies = [
     "cartopy>=0.24.1",
     "xskillscore",
     "xhistogram",
+    "scores",
     "panel",
     "omegaconf",
     "plotly>=6.2.0",

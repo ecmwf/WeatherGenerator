@@ -617,7 +617,7 @@ evaluation:
 | Name | Description |
 |------|-------------|
 | `ssr` | Spread–Skill Ratio |
-| `crps` | Continuous Ranked Probability Score (via xskillscore) |
+| `crps` | Continuous Ranked Probability Score (via the [scores](https://scores.readthedocs.io/) package). Supports standard, fair, and threshold-weighted variants — see parameters below. |
 | `rank_histogram` | Rank Histogram (Talagrand diagram). Produces a bar chart, not a score line plot — see [special output metrics](#special-output-metrics-psd-qq_analysis-rank_histogram). |
 | `spread` | Ensemble Spread |
 
@@ -671,6 +671,33 @@ evaluation:
         thresh: 280       # custom threshold (e.g. for 2t in Kelvin)
     - ets:
         thresh: 0.001     # custom threshold (e.g. for precipitation)
+```
+
+#### `crps` parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `method` | `"ecdf"` | CRPS variant. `"ecdf"` — standard CRPS from the empirical CDF. `"fair"` — debiased fair CRPS. `"tw_tail"` — threshold-weighted tail CRPS. `"tw_interval"` — threshold-weighted interval CRPS. |
+| `fair` | `false` | If `true`, overrides `method` with `"fair"` (debiased CRPS). Shorthand for `method: "fair"`. |
+| `threshold` | — | *(tw_tail only)* Threshold value. |
+| `tail` | `"upper"` | *(tw_tail only)* Which tail to weight: `"upper"` or `"lower"`. |
+| `lower_threshold` | — | *(tw_interval only)* Lower bound of the interval. |
+| `upper_threshold` | — | *(tw_interval only)* Upper bound of the interval. |
+
+```yaml
+evaluation:
+  metrics:
+    - crps                           # standard CRPS (ecdf method)
+    - crps:
+        fair: true                   # fair/debiased CRPS
+    - crps:
+        method: "tw_tail"
+        threshold: 0.1
+        tail: "upper"                # weight upper tail (e.g. heavy precip)
+    - crps:
+        method: "tw_interval"
+        lower_threshold: 0.0
+        upper_threshold: 10.0
 ```
 
 ---

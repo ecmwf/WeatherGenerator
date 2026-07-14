@@ -16,8 +16,8 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_list
 from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
+from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_list
 
 # from common.io import MockIO
 
@@ -28,8 +28,8 @@ try:
     from xhistogram.xarray import histogram
 except Exception:
     _logger.warning(
-        "Could not import xskillscore and xhistogram. Thus, CRPS and "
-        "rank histogram-calculations are not supported."
+        "Could not import xskillscore and xhistogram. "
+        "Thus, rank histogram calculations are not supported."
     )
 
 
@@ -1551,57 +1551,70 @@ class Scores:
         self,
         p: xr.DataArray,
         gt: xr.DataArray,
-        method: str = "ensemble",
+        method: str = "ecdf",
+        fair: bool = False,
         **kwargs,
     ) -> xr.DataArray:
         """
-        Wrapper around CRPS-methods provided by xskillscore-package.
-        See https://xskillscore.readthedocs.io/en/stable/api
+        Calculate CRPS using scores package.
 
         Parameters
         ----------
-        p: xr.DataArray
-            Forecast data array with ensemble dimension
-        gt: xr.DataArray
-            Ground truth data array
-        method: str
-            Method to calculate CRPS. Supported methods: ["ensemble", "gaussian"]
-        kwargs: dict
-            Other keyword parameters supported by respective CRPS-method from
-            the xskillscore package
+        p : xr.DataArray
+            Forecast with ensemble dimension
+        gt : xr.DataArray
+            Ground truth
+        method : str
+            "ecdf" (standard), "fair", "tw_tail", "tw_interval"
+        fair : bool
+            Use fair CRPS (overrides method if set)
+        kwargs : dict
+            For tw_tail: threshold, tail ("upper"/"lower")
+            For tw_interval: lower_threshold, upper_threshold
 
         Returns
         -------
         xr.DataArray
-            CRPS score data array averaged over the provided dimensions
+            CRPS score averaged over agg_dims
         """
-        crps_methods = ["ensemble", "gaussian"]
+        from scores.probability import (
+            crps_for_ensemble,
+            interval_tw_crps_for_ensemble,
+            tail_tw_crps_for_ensemble,
+        )
 
-        if method == "ensemble":
-            func_kwargs = {
-                "forecasts": p,
-                "member_dim": self._ens_dim,
-                "dim": self._agg_dims,
-                **kwargs,
-            }
-            crps_func = xskillscore.crps_ensemble
-        elif method == "gaussian":
-            func_kwargs = {
-                "mu": p.mean(dim=self._ens_dim),
-                "sig": p.std(dim=self._ens_dim),
-                "dim": self._agg_dims,
-                **kwargs,
-            }
-            crps_func = xskillscore.crps_gaussian
-        else:
-            raise ValueError(
-                f"Unsupported CRPS-calculation method {method} chosen."
-                + f"Supported methods: {', '.join(crps_methods)}"
+        if self._agg_dims is None:
+            raise ValueError("agg_dims required for CRPS")
+
+        # Threshold-weighted CRPS
+        if method == "tw_tail":
+            return tail_tw_crps_for_ensemble(
+                p,
+                gt,
+                self._ens_dim,
+                threshold=kwargs["threshold"],
+                tail=kwargs.get("tail", "upper"),
+                reduce_dims=self._agg_dims,
             )
 
-        crps = crps_func(gt, **func_kwargs)
+        if method == "tw_interval":
+            return interval_tw_crps_for_ensemble(
+                p,
+                gt,
+                self._ens_dim,
+                lower_threshold=kwargs["lower_threshold"],
+                upper_threshold=kwargs["upper_threshold"],
+                reduce_dims=self._agg_dims,
+            )
 
-        return crps
+        # Standard or Fair CRPS
+        return crps_for_ensemble(
+            p,
+            gt,
+            self._ens_dim,
+            method="fair" if fair else method,
+            reduce_dims=self._agg_dims,
+        )
 
     def calc_rank_histogram(
         self,
