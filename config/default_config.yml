@@ -224,7 +224,7 @@ validation_config:
     streams: null,
     # channels that will be written; default all
     channels: {
-      "ERA5": []
+      "ERA5": "all"
       }
     }
 
