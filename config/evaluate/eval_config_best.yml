@@ -1,5 +1,5 @@
 default_streams:
-  ERA5:
+  ERA5_in:
     channels:
     - 2t
     - 10u
@@ -19,7 +19,7 @@ default_streams:
       plot_histograms: false
       plot_maps: true
       sample:
-      - 0
+      - 1
 evaluation:
   add_grid: true
   bar_plots: false
@@ -39,20 +39,19 @@ evaluation:
   summary_dir: ./plots/
   summary_plots: true
 run_ids:
-  tq60natw:
-    label: Release model
-    # type: json
-    results_base_dir: ./results/tq60natw/
-  zwny809a:
-    label: Inference of k47tobdl
-    type: json
-    # results_base_dir: ./results/zwny809a/
+  # tq60natw:
+  #   label: Release model
+  #   # type: json
+  #   results_base_dir: ./results/tq60natw/
+  # zwny809a:
+  #   label: Inference of k47tobdl
+  #   type: json
+  #   # results_base_dir: ./results/zwny809a/
   # bmbywqn6:
   #   label: Inference of k47tobdl-ft32-with-noise
   #   type: json
   #   # results_base_dir: ./results/bmbywqn6/
-  ay98rzxp:
-    label: Inference of e8bd7ejo-2-nodes
-    type: json
-    # results_base_dir: ./results/ay98rzxp/
+  sukty14k:
+    label: Inference of dual enc 
+    results_base_dir: ./results/sukty14k/
 
