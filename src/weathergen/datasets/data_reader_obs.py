@@ -78,8 +78,9 @@ class DataReaderObs(DataReaderBase):
         # geoinfo channels
         sname = stream_info["name"]
         geoinfo_channels = stream_info.get("geoinfo_channels")
-        if geoinfo_channels is None:
-            raise ValueError(f"{sname}: 'geoinfo_channels' must be specified in the stream config.")
+        assert geoinfo_channels is not None, (
+            f"{sname}: 'geoinfo_channels' must be specified in the stream config."
+        )
         self.geoinfo_idx, self.geoinfo_channels = [], []
         for c in geoinfo_channels:
             if c not in self.colnames:
