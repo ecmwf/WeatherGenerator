@@ -83,11 +83,11 @@ dev = [
 [project.optional-dependencies]
 
 cpu = [
-  'torch==2.9.1',
+  'torch==2.13',
 ]
 
 gpu = [
-  "torch==2.9.1; sys_platform == 'linux'",
+  "torch==2.13; sys_platform == 'linux'",
   # flash-attn also has a torch dependency.
   "flash-attn",
   "flash-attn-3",
@@ -178,7 +178,6 @@ link-mode = "symlink"
 # TODO: pytorch does not publish valid release timestamps, so sadly it does not work.
 exclude-newer = "2026-04-27T00:00:00Z"
 
-# torch 2.9.1 pulls nvidia-nccl-cu12==2.27.5. Override
 # torch's pin UP to 2.29 (newer than 2.27.5 = ABI-safe direction). See issue #<TODO>.
 override-dependencies = ["nvidia-nccl-cu12>=2.29; sys_platform == 'linux'"]
 
