@@ -8,7 +8,7 @@ SurfaceCombined :
   stream_id : 2
   # source: []
   is_diagnostic: True
-  filenames : ['observations-ea-ofb-0001-1979-2023-combined-surface-v2.zarr']
+  filenames : ['observations-ea-ofb-0001-1979-2025-combined-surface-v1.zarr']
   loss_weight : 1.0
   masking_rate : 0.6
   masking_rate_none : 0.05
