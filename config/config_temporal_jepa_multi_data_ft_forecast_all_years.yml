@@ -133,6 +133,7 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
+    name: muon
     grad_clip: 1.0
     weight_decay: 0.1
     log_grad_norms: False
@@ -141,6 +142,16 @@ training_config:
       beta1 : 0.9875 # at B=8 beta1 =0.9
       beta2 : 0.994 # at B=8 beta1 approx 0.95
       eps : 1e-08
+    muon:
+      # peak lr override for muon; null shares adamw's lr schedule (relies on
+      # adjust_lr_fn=match_rms_adamw's per-matrix scaling instead of a fixed multiplier)
+      lr_max: null
+      momentum: 0.95
+      nesterov: True
+      ns_steps: 5
+      eps: 1e-7
+      # "original" | "match_rms_adamw"
+      adjust_lr_fn: match_rms_adamw
 
   losses : {
     "student-teacher": {

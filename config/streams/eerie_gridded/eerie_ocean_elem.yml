@@ -1,16 +1,18 @@
 EERIE_OCEAN_ELEM:
   type: mesh
   stream_id: 2137
-  loss_weight: 1.0
+  loss_weight: 0.1
   filenames: # In case of gridded data there's no separate node and element files. Not every vertial level is used for training, so the 3D gridded file is used instead of the 3D element file.
   - /work/ab0995/a270225/data_transformation/eerie_ocean_gr025_3d_gridded_daily.parq
   source: # Not every vertical level is present in gridded data.
-  - avg_uoe_2.5m # ocean u velocity at 2.5m depth
-  - avg_voe_2.5m # ocean v velocity at 2.5m depth
+  - avg_uoe_surf # ocean u velocity at 2.5m depth
+  - avg_von_surf # ocean v velocity at 2.5m depth
   target:
-  - avg_uoe_2.5m
-  - avg_voe_2.5m
+  - avg_uoe_surf
+  - avg_von_surf
   location_weight : cosine_latitude
+  sampling_mode: 'global_sparse' # loads given number of random points globally for each time step. 
+  sample_points: 32768 # list of points to sample, if sampling_mode is not null. Format: [[lat1, lon1], [lat2, lon2], ...]
   masking_rate : 0.6
   masking_rate_none : 0.05
   token_size : 32

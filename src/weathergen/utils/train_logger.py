@@ -12,7 +12,6 @@ import json
 import logging
 import math
 import time
-import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,23 +100,46 @@ class TrainLogger:
         losses_all: dict,
         stddev_all: dict,
         avg_loss: list[float] = None,
-        lr: float = None,
+        lr: float | dict[str, float] = None,
+        elapsed_training_time_seconds: float | None = None,
     ) -> None:
         """
-        Log training or validation data
+        Log training or validation data.
+
+        lr: either a single float (one optimizer), or a dict mapping optimizer name
+            to its current lr (multiple optimizers, e.g. {"adamw": ..., "muon": ...}).
+            When a dict, "adamw" (if present, else the first entry) is additionally
+            logged under the plain "learning_rate" key for backwards compatibility.
         """
         metrics: dict[str, float] = dict(num_samples=samples)
 
         if stage == "train":
-            metrics["loss_avg_mean"] = np.nanmean(avg_loss)
-            metrics["learning_rate"] = lr
+            val = np.nan if np.isnan(avg_loss).all() else np.nanmean(avg_loss)
+            metrics["loss_avg_mean"] = val
+            if isinstance(lr, dict):
+                primary_name = "adamw" if "adamw" in lr else next(iter(lr))
+                metrics["learning_rate"] = lr[primary_name]
+                for name, value in lr.items():
+                    if name != primary_name:
+                        metrics[f"learning_rate_{name}"] = value
+            else:
+                metrics["learning_rate"] = lr
             metrics["num_samples"] = int(samples)
+            if elapsed_training_time_seconds is not None:
+                metrics["elapsed_training_time_seconds"] = elapsed_training_time_seconds
+                metrics["average_samples_per_second"] = (
+                    samples / elapsed_training_time_seconds
+                    if elapsed_training_time_seconds > 0
+                    else 0
+                )
 
         for key, value in losses_all.items():
-            metrics[key] = np.nanmean(value)
+            val = np.nan if np.isnan(value).all() else np.nanmean(value)
+            metrics[key] = val
 
         for key, value in stddev_all.items():
-            metrics[key] = np.nanmean(value)
+            val = np.nan if np.isnan(value).all() else np.nanmean(value)
+            metrics[key] = val
 
         self.log_metrics(stage, metrics)
 
@@ -143,100 +165,23 @@ class TrainLogger:
         run_id = cf.general.run_id
 
         result_dir_base = config.get_path_run(cf)
-        result_dir = result_dir_base / run_id
-        fname_log_train = result_dir / f"{run_id}_train_log.txt"
-        fname_log_val = result_dir / f"{run_id}_val_log.txt"
-
-        # training
 
         # define cols for training
-        cols_train = ["dtime", "samples", "mse", "lr"]
+        # "learning_rate" is matched as a substring pattern (not just the cols1 exact name) so
+        # that any per-optimizer "learning_rate_<name>" columns (e.g. "learning_rate_muon") are
+        # also picked up, without needing to list every optimizer name here.
         cols1 = [_weathergen_timestamp, "num_samples", "loss_avg_mean", "learning_rate"]
-        cols1_patterns = ["loss_avg"] + cols_patterns
+        cols1_patterns = ["loss_avg", "learning_rate"] + cols_patterns
 
-        # read training log data
-        try:
-            with open(fname_log_train, "rb") as f:
-                log_train = np.loadtxt(f, delimiter=",")
-            log_train = log_train.reshape((log_train.shape[0] // len(cols_train), len(cols_train)))
-        except (
-            TypeError,
-            AttributeError,
-            IndexError,
-            ZeroDivisionError,
-            ValueError,
-        ) as e:
-            _logger.warning(
-                (
-                    f"Warning: no training data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — "
-                    "possible format, dimension, or logic issue.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            _logger.error(
-                (
-                    f"Error: no training data loaded for run_id={run_id}",
-                    "File system error occurred while handling the log file.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except Exception:
-            _logger.error(
-                (
-                    f"Error: no training data loaded for run_id={run_id}",
-                    f"Due to exception with trace:\n{traceback.format_exc()}",
-                )
-            )
-            log_train = np.array([])
-
-        log_train_df = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
+        metrics_train = read_metrics(cf, run_id, "train", cols1, cols1_patterns, result_dir_base)
 
         # define cols for validation
-        cols_val = ["dtime", "samples"]
         cols2 = [_weathergen_timestamp, "num_samples"]
         cols2_patterns = ["loss_avg"] + cols_patterns
 
-        # read validation log data
-        try:
-            with open(fname_log_val, "rb") as f:
-                log_val = np.loadtxt(f, delimiter=",")
-            log_val = log_val.reshape((log_val.shape[0] // len(cols_val), len(cols_val)))
-        except (
-            TypeError,
-            AttributeError,
-            IndexError,
-            ZeroDivisionError,
-            ValueError,
-        ) as e:
-            _logger.warning(
-                (
-                    f"Warning: no validation data loaded for run_id={run_id}",
-                    "Data loading or reshaping failed — "
-                    "possible format, dimension, or logic issue.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    "File system error occurred while handling the log file.",
-                    f"Due to specific error: {e}",
-                )
-            )
-        except Exception:
-            _logger.error(
-                (
-                    f"Error: no validation data loaded for run_id={run_id}",
-                    f"Due to exception with trace:\n{traceback.format_exc()}",
-                )
-            )
-            log_val = np.array([])
-        metrics_val_df = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
+        metrics_val = read_metrics(cf, run_id, "val", cols2, cols2_patterns, result_dir_base)
 
-        return Metrics(run_id, "train", log_train_df, metrics_val_df, None)
+        return Metrics(run_id, "train", metrics_train, metrics_val, None)
 
 
 def read_metrics(

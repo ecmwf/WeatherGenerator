@@ -446,6 +446,18 @@ class StreamData:
         """
         return any(self.source_is_spoof) or self.target_is_spoof[step]
 
+    def get_num_source_steps(self) -> int:
+        """
+        Get number of input/source steps
+        """
+        return len(self.source_tokens_cells)
+
+    def get_num_target_steps(self) -> int:
+        """
+        Get number of target steps
+        """
+        return len(self.target_tokens)
+
 
 def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderData:
     """
@@ -459,12 +471,12 @@ def spoof(healpix_level: int, datetime, geoinfo_size, num_channels) -> IOReaderD
     lons, lats = hp.healpix_to_lonlat(
         np.arange(0, num_healpix_cells), 2**healpix_level, dx=dx, dy=dy, order="nested"
     )
+
     coords = np.stack([lats.deg, lons.deg], axis=-1, dtype=np.float32)
     # spoof two tokens to avoid unnecessary computational load
     coords = coords[np.random.choice(coords.shape[0], size=2, replace=False)]
-    
-    geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
 
+    geoinfos = np.zeros((coords.shape[0], geoinfo_size), dtype=np.float32)
     data = np.zeros((coords.shape[0], num_channels), dtype=np.float32)
     datetimes = np.array(datetime).repeat(coords.shape[0])
 

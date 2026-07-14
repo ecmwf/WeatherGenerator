@@ -9,6 +9,8 @@
 
 """Array / DataArray utility functions: range computation, coordinate helpers."""
 
+import fnmatch
+
 import numpy as np
 import omegaconf as oc
 import xarray as xr
@@ -88,21 +90,27 @@ def common_ranges(
     """
     maps_config = global_plotting_opts_stream.copy()
     for var in plot_chs:
-        if var in maps_config:
-            if not isinstance(maps_config[var].get("vmax"), (int | float)):
-                list_max = calc_bounds(data_tars, data_preds, var, "max")
-                list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
-                maps_config[var].update({"vmax": float(max(list_max))})
-            if not isinstance(maps_config[var].get("vmin"), (int | float)):
-                list_min = calc_bounds(data_tars, data_preds, var, "min")
-                list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
-                maps_config[var].update({"vmin": float(min(list_min))})
-        else:
+        if var not in maps_config:
+            maps_config[var] = {}
+        # override empty bounds with matching glob bounds from config
+        for key, value in maps_config.items():
+            if not isinstance(value, oc.DictConfig | dict):
+                continue
+            k = str(key)
+            if any(c in k for c in "*?[]") and fnmatch.fnmatch(var, k):
+                for bound in ("vmin", "vmax"):
+                    if isinstance(value.get(bound), int | float):
+                        maps_config[var].setdefault(bound, value[bound])
+        # if vmax still missing, compute bound from data
+        if not isinstance(maps_config[var].get("vmax"), (int | float)):
             list_max = calc_bounds(data_tars, data_preds, var, "max")
             list_max = np.concatenate([arr.flatten() for arr in list_max]).tolist()
+            maps_config[var].update({"vmax": float(max(list_max))})
+        # if vmin still missing, compute bound from data
+        if not isinstance(maps_config[var].get("vmin"), (int | float)):
             list_min = calc_bounds(data_tars, data_preds, var, "min")
             list_min = np.concatenate([arr.flatten() for arr in list_min]).tolist()
-            maps_config.update({var: {"vmax": float(max(list_max)), "vmin": float(min(list_min))}})
+            maps_config[var].update({"vmin": float(min(list_min))})
     return maps_config
 
 
@@ -132,14 +140,25 @@ def bias_ranges(
     """
     bias_config = global_plotting_opts_stream.copy()
     for var in plot_chs:
-        bias_vals = [
-            (p - t).sel(channel=var).values
-            for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
-        ]
-        abs_max = float(
-            max(abs(np.concatenate(bias_vals).max()), abs(np.concatenate(bias_vals).min()))
+        # Preserve any user-provided per-channel options (e.g. marker_size) and
+        # honor explicit vmin/vmax; only fall back to a data-derived symmetric
+        # range for bounds the user did not set (mirrors ``common_ranges``).
+        var_cfg = bias_config.get(var)
+        var_cfg = dict(var_cfg) if isinstance(var_cfg, oc.DictConfig | dict) else {}
+        has_bounds = isinstance(var_cfg.get("vmin"), int | float) and isinstance(
+            var_cfg.get("vmax"), int | float
         )
-        bias_config.update({var: {"vmax": abs_max, "vmin": -abs_max}})
+        if not has_bounds:
+            bias_vals = [
+                (p - t).sel(channel=var).values
+                for t, p in zip(data_tars.values(), data_preds.values(), strict=False)
+            ]
+            abs_max = float(
+                max(abs(np.concatenate(bias_vals).max()), abs(np.concatenate(bias_vals).min()))
+            )
+            var_cfg.setdefault("vmin", -abs_max)
+            var_cfg.setdefault("vmax", abs_max)
+        bias_config[var] = var_cfg
     return bias_config
 
 

@@ -96,6 +96,48 @@ variables:
     wg_unit: m
     std_unit: m
     level_type: sfc
+   hcc:
+    var: hcc
+    long: high_cloud_cover
+    std: cloud_area_fraction_high
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  mcc:
+    var: mcc
+    long: medium_cloud_cover
+    std: cloud_area_fraction_medium
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  lcc:
+    var: lcc
+    long: low_cloud_cover
+    std: cloud_area_fraction_low
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  tcc:
+    var: tcc
+    long: total_cloud_cover
+    std: cloud_area_fraction
+    wg_unit: 1
+    std_unit: 1
+    level_type: sfc
+  strd:
+    var: strd
+    long: surface_thermal_radiation_downwards
+    std: surface_downwelling_longwave_flux_in_air
+    wg_unit: J m**-2
+    std_unit: J m-2
+    level_type: sfc
+  ssrd:
+    var: ssrd
+    long: surface_solar_radiation_downwards
+    std: surface_downwelling_shortwave_flux_in_air
+    wg_unit: J m**-2
+    std_unit: J m-2
+    level_type: sfc
   
 
 coordinates:

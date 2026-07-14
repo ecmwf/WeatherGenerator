@@ -8,6 +8,7 @@ import omegaconf
 import torch
 from numpy.typing import NDArray
 
+from weathergen.common.config import Config
 from weathergen.datasets.batch import SampleMetaData
 
 # Sample noise levels
@@ -207,13 +208,12 @@ class Masker:
 
         return stream_cfg
 
-    def build_effective_masking_cfgs(self, streams, mode_cfg):
+    def build_effective_masking_cfgs(self, streams: Config, mode_cfg):
         """Build effective masking configs for all streams."""
         cfgs = {}
-        for stream_info in streams:
-            name = stream_info["name"]
+        for stream_name, stream_info in streams.items():
             override = stream_info.get("masking_override", {})
-            cfgs[name] = self.merge_masking_config(mode_cfg, override)
+            cfgs[stream_name] = self.merge_masking_config(mode_cfg, override)
 
         return cfgs
 

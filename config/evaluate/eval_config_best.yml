@@ -38,6 +38,12 @@ evaluation:
   score_cards: false
   summary_dir: ./plots/
   summary_plots: true
+global_plotting_options:
+  ERA5_in:
+    z_500:
+      vmin: -20
+      vmax: 20
+      marker_size: 8
 run_ids:
   # tq60natw:
   #   label: Release model

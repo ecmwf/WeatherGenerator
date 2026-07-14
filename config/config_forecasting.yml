@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-embed_orientation: "channels"
 embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
@@ -66,7 +65,6 @@ forecast_att_dense_rate: 1.0
 
 healpix_level: 5
 
-<<<<<<< HEAD
 # Generalized RoPE selector.
 rope_mode: none  # one of: none, 2d, spherical
 # Optional spherical harmonic band for spherical RoPE. If null, the model picks one
@@ -74,9 +72,6 @@ rope_mode: none  # one of: none, 2d, spherical
 rope_spherical_band: null
 mlp_type: swiglu
 use_xsa: True
-=======
-rope_2D: False
->>>>>>> origin/develop
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -170,6 +165,10 @@ training_config:
     parallel_scaling_policy: "sqrt"
 
   optimizer:
+    # which optimizer to use: "adamw" or "muon"
+    # muon only optimizes 2D weight matrices of hidden layers; all other
+    # parameters (biases, norms, ...) are still optimized with adamw
+    name: muon
     grad_clip: 1.0
     weight_decay: 0.1
     log_grad_norms: False
@@ -178,6 +177,16 @@ training_config:
       beta1 : 0.98125 # == 0.85 on 2 nodes x 4 gpus
       beta2 : 0.9875  # == 0.90 on 2 nodes x 4 gpus
       eps : 2e-08
+    muon:
+      # peak lr override for muon; null shares adamw's lr schedule (relies on
+      # adjust_lr_fn=match_rms_adamw's per-matrix scaling instead of a fixed multiplier)
+      lr_max: null
+      momentum: 0.95
+      nesterov: True
+      ns_steps: 5
+      eps: 1e-7
+      # "original" | "match_rms_adamw"
+      adjust_lr_fn: match_rms_adamw
 
   losses : {
     "physical": {

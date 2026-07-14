@@ -53,12 +53,12 @@ class Sample:
 
         return self
 
-    def __init__(self, streams: dict) -> None:
+    def __init__(self, stream_names: list[str]) -> None:
         self.meta_info = {}
 
         self.streams_data = {}
-        for stream_info in streams:
-            self.streams_data[stream_info["name"]] = None
+        for stream_name in stream_names:
+            self.streams_data[stream_name] = None
 
     def to_device(self, device) -> None:
         for key in self.meta_info.keys():
@@ -134,6 +134,28 @@ class Sample:
         assert self.streams_data.get(stream_name, -1) != -1, "stream name does not exist"
         return self.streams_data[stream_name]
 
+    def get_num_source_steps(self) -> int:
+        """
+        Get number of source steps from smallest of all available streams
+        """
+        lens = [
+            stream.get_num_source_steps()
+            for _, stream in self.streams_data.items()
+            if stream is not None
+        ]
+        return min(lens) if len(lens) > 0 else 0
+
+    def get_num_target_steps(self) -> int:
+        """
+        Get number of target steps from smallest of all available streams
+        """
+        lens = [
+            stream.get_num_target_steps()
+            for _, stream in self.streams_data.items()
+            if stream is not None
+        ]
+        return min(lens) if len(lens) > 0 else 0
+
 
 class BatchSamples:
     """
@@ -146,8 +168,10 @@ class BatchSamples:
     output_idxs: list[int]
     device: str | None
 
-    def __init__(self, streams: dict, num_samples: int, output_steps, output_idxs) -> None:
-        self.samples = [Sample(streams) for _ in range(num_samples)]
+    def __init__(
+        self, stream_names: list[str], num_samples: int, output_steps, output_idxs
+    ) -> None:
+        self.samples = [Sample(stream_names) for _ in range(num_samples)]
         self.tokens_lens = None
         self.output_steps = output_steps
         self.output_idxs = output_idxs
@@ -183,16 +207,17 @@ class BatchSamples:
             bs.tokens_lens = torch.index_select(bs.tokens_lens, 1, torch_idxs)
             return bs
 
-    def get_num_steps(self) -> int:
+    def get_num_source_steps(self) -> int:
         """
         Get number of input/source steps from smallest of all available streams
         """
-        # TODO: define explicitly
-        lens = [
-            len(stream.source_tokens_cells) for _, stream in self.samples[0].streams_data.items()
-        ]
+        return self.samples[0].get_num_source_steps()
 
-        return min(lens)
+    def get_num_target_steps(self) -> int:
+        """
+        Get number of target steps from smallest of all available streams
+        """
+        return self.samples[0].get_num_target_steps()
 
     def get_output_idxs(self) -> int:
         """
@@ -275,7 +300,7 @@ class ModelBatch:
 
     def __init__(
         self,
-        streams: dict,
+        stream_names: list[str],
         num_source_samples: int,
         num_target_samples: int,
         output_offset,
@@ -289,10 +314,10 @@ class ModelBatch:
         self.output_idxs = list(range(output_offset, output_steps))
 
         self.source_samples = BatchSamples(
-            streams, num_source_samples, output_steps, self.output_idxs
+            stream_names, num_source_samples, output_steps, self.output_idxs
         )
         self.target_samples = BatchSamples(
-            streams, num_target_samples, output_steps, self.output_idxs
+            stream_names, num_target_samples, output_steps, self.output_idxs
         )
 
         self.source2target_matching_idxs = np.full(num_source_samples, -1, dtype=np.int32)
@@ -472,23 +497,10 @@ class ModelBatch:
         """
         Get number of input/source steps from smallest of all available streams
         """
-        # TODO: define explicitly
-        lens = [
-            len(stream.source_tokens_cells)
-            for _, stream in self.target_samples.samples[0].streams_data.items()
-        ]
-
-        return min(lens)
+        return self.source_samples.get_num_source_steps()
 
     def get_num_target_steps(self) -> int:
         """
-        Get number of input/source steps from smallest of all available streams
+        Get number of target steps from smallest of all available streams
         """
-        # TODO: define explicitly
-        # TODO: ensure that num_input_steps is constant across batch with different strategies
-        lens = [
-            len(stream.target_tokens)
-            for _, stream in self.target_samples.samples[0].streams_data.items()
-        ]
-
-        return min(lens)
+        return self.target_samples.get_num_target_steps()

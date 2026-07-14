@@ -53,9 +53,9 @@ class LearningRateScheduler:
             logger.debug(f"steps_decay={self.n_steps_decay} lr_steps={lr_steps}")
         # ensure that steps_decay has a reasonable value
         if self.n_steps_decay < int(0.2 * lr_steps):
-            self.n_steps_warmup = int(0.1 * lr_steps)
-            self.n_steps_cooldown = int(0.05 * lr_steps)
-            self.n_steps_decay = lr_steps - self.n_steps_warmup - self.n_steps_cooldown
+            self.n_steps_warmup = max(2, int(0.1 * lr_steps))
+            self.n_steps_cooldown = max(1, int(0.05 * lr_steps))
+            self.n_steps_decay = max(1, lr_steps - self.n_steps_warmup - self.n_steps_cooldown)
             s = (
                 "cf.lr_steps_warmup and cf.lr_steps_cooldown",
                 f" were larger than cf.lr_steps={lr_steps}",
@@ -109,6 +109,10 @@ class LearningRateScheduler:
                 pct_start=pct_start,
                 div_factor=self.lr_max_scaled / lr_cfg.lr_start,
                 final_div_factor=lr_final_decay_scaled / lr_cfg.lr_start,
+                # cycle_momentum defaults to True and otherwise silently overwrites the
+                # optimizer's tuned betas/momentum (e.g. adamw's kappa-scaled beta1, or
+                # muon's momentum) between OneCycleLR's base_momentum/max_momentum
+                cycle_momentum=False,
             )
         else:
             if self.n_steps_warmup > 0:
