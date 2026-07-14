@@ -101,6 +101,10 @@ class GaussianPath:
             return -beta * pred
         if prediction_type == "velocity":
             # From u = alpha_dot z + beta_dot eps and x = alpha z + beta eps:
+            #      z = (x - beta eps) / alpha
+            #      u = alpha_dot (x - beta eps) / alpha + beta_dot eps
+            #      u = (alpha_dot / alpha) x + (beta_dot - (alpha_dot beta / alpha)) eps
+            #      eps = (alpha u - alpha_dot x) / (alpha beta_dot - alpha_dot beta) QED
             #   eps = (alpha u - alpha_dot x) / (alpha beta_dot - alpha_dot beta)
             denom = alpha * beta_dot - alpha_dot * beta
             return (alpha * pred - alpha_dot * x) / denom
@@ -260,6 +264,7 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         z = tokens  # clean latent target
 
         c = None
+        #TODO: add date/time conditioning
         if self.conditioning == self._FORECAST:
             c = meta_info["ERA5"].params["conditioning_tokens"]
 
@@ -294,16 +299,22 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         Fallbacks are kept for reusing existing draws (see plan), but ``uniform`` is the
         primary path for flow matching.
         """
-        dist = self.cf.get("noise_distribution", "uniform")
+        dist = self.cf.get("noise_distribution", None)
+        # NB: must be `==`, not `is`. `is` compares identity; the string arrives from OmegaConf
+        # (YAML / --options) and is not the interned literal, so `dist is "uniform"` is False even
+        # when the config is correct.
+        assert dist == "uniform", (
+            f"flow-matching expects noise_distribution: uniform (t ~ U[0,1]), got {dist!r}"
+        )
         v = torch.as_tensor(noise_level_rn, device=device, dtype=dtype).reshape(1)
         if dist == "uniform":
             t = v
         # TODO: Maybe close the branches below and instead assert uniform distribution
-        elif dist == "log_normal":  # eta ~ N(0,1) -> Phi(eta) ~ Unif(0,1)
-            t = 0.5 * (1.0 + torch.erf(v / math.sqrt(2.0)))
-        elif dist == "log_uniform":  # log-sigma in [log smin, log smax] -> affine to [0,1]
-            lo, hi = math.log(self.cf.sigma_min), math.log(self.cf.sigma_max)
-            t = (v - lo) / (hi - lo)
+        # elif dist == "log_normal":  # eta ~ N(0,1) -> Phi(eta) ~ Unif(0,1)
+        #     t = 0.5 * (1.0 + torch.erf(v / math.sqrt(2.0)))
+        # elif dist == "log_uniform":  # log-sigma in [log smin, log smax] -> affine to [0,1]
+        #     lo, hi = math.log(self.cf.sigma_min), math.log(self.cf.sigma_max)
+        #     t = (v - lo) / (hi - lo)
         else:
             raise ValueError(f"Unsupported noise_distribution for flow matching: {dist!r}")
         return t.clamp(self.t_eps, 1.0 - self.t_eps)
@@ -360,6 +371,8 @@ class FlowMatchingForecastEngine(torch.nn.Module):
             raw = self.latent_proj_down(raw)
         return raw
 
+    # TODO: if implementing EDM, there should probably be a precondition_output() seam here too,
+    # to mirror the EDM c_skip/c_out/c_in.
     def _precondition_input(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Preconditioner seam (#3). Identity for flow matching; the EDM implant would
         return ``c_in(sigma) * x`` here (and pair it with c_skip/c_out on the output)."""
@@ -480,6 +493,7 @@ class FlowMatchingForecastEngine(torch.nn.Module):
             if return_trajectory:
                 trajectory.append(x_next)
 
+        #TODO: Make this optinal with log_diganostics flag
         self._plot_sampling_diagnostics(track, num_steps)
         return x_next, trajectory
 
