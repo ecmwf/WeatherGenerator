@@ -278,6 +278,7 @@ class LinePlots:
         print_summary: bool = False,
         title: str | None = None,
         colors: list[str | None] | None = None,
+        line: float | None = None,
     ) -> None:
         """
         Plot a line graph comparing multiple datasets.
@@ -296,6 +297,9 @@ class LinePlots:
             Name of the dimension to be used for the y-axis.
         print_summary:
             If True, print a summary of the values from the graph.
+        line:
+            If provided, draw a horizontal reference line at the given y-value
+            (e.g. the optimal value of a metric).
         Returns
         -------
             None
@@ -350,6 +354,7 @@ class LinePlots:
             x_dim_opts,
             y_dim,
             print_summary,
+            line=line,
             title=title,
             out_plot_dir=self.out_plot_dir_lines,
         )
