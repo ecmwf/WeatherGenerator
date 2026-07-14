@@ -4,6 +4,10 @@ def get_extra_reader(stream_type: str) -> object | None:
     # There is no sanity check on them, so they may fail at runtime during imports
 
     match stream_type:
+        case "synthetic":
+            from weathergen.datasets.data_reader_synthetic import DataReaderSynthetic
+
+            return DataReaderSynthetic
         case "iconart":
             from weathergen.readers_extra.data_reader_iconart import DataReaderIconArt
 

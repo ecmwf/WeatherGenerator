@@ -25,6 +25,10 @@ class SampleMetaData:
 
     global_params: dict | None = None
 
+    # Per-step scalar conditioning values, shape (num_output_steps, scalar_dim).
+    # Populated by MultiStreamDataSampler for streams with timestep_conditioning: scalar.
+    conditioning: np.typing.NDArray | None = None
+
 
 class Sample:
     # keys: stream name, values: SampleMetaData
@@ -43,6 +47,15 @@ class Sample:
                 if stream_data is not None and hasattr(stream_data, "pin_memory"):
                     stream_data.pin_memory()
 
+        # Pin StreamData objects in conditioning_streams_data
+        if hasattr(self, "conditioning_streams_data") and isinstance(
+            self.conditioning_streams_data, dict
+        ):
+            for _name, steps in self.conditioning_streams_data.items():
+                for sd in steps:
+                    if sd is not None and hasattr(sd, "pin_memory"):
+                        sd.pin_memory()
+
         # Pin tensors in meta_info
         if hasattr(self, "meta_info") and isinstance(self.meta_info, dict):
             for _key, meta_data in self.meta_info.items():
@@ -60,6 +73,10 @@ class Sample:
         for stream_name in stream_names:
             self.streams_data[stream_name] = None
 
+        # Field conditioning stream data, keyed by stream name then indexed by forecast step.
+        # Populated by MultiStreamDataSampler for streams with timestep_conditioning: field.
+        self.conditioning_streams_data: dict[str, list[StreamData | None]] = {}
+
     def to_device(self, device) -> None:
         for key in self.meta_info.keys():
             self.meta_info[key].mask = (
@@ -71,6 +88,11 @@ class Sample:
         for key, val in self.streams_data.items():
             if val is not None:
                 self.streams_data[key] = val.to_device(device)
+
+        for name, steps in self.conditioning_streams_data.items():
+            self.conditioning_streams_data[name] = [
+                sd.to_device(device) if sd is not None else None for sd in steps
+            ]
 
     def is_empty(self) -> bool:
         """
@@ -156,6 +178,27 @@ class Sample:
         ]
         return min(lens) if len(lens) > 0 else 0
 
+    def add_conditioning_stream_data(
+        self, stream_name: str, step: int, stream_data: StreamData | None
+    ) -> None:
+        """
+        Add StreamData for field conditioning stream @stream_name at forecast step @step
+        """
+        if stream_name not in self.conditioning_streams_data:
+            self.conditioning_streams_data[stream_name] = []
+        steps = self.conditioning_streams_data[stream_name]
+        while len(steps) <= step:
+            steps.append(None)
+        steps[step] = stream_data
+
+    def get_conditioning_stream_data(self, stream_name: str, step: int) -> StreamData | None:
+        """
+        Get StreamData for field conditioning stream @stream_name at forecast step @step
+        """
+        steps = self.conditioning_streams_data.get(stream_name)
+        if steps is None or step >= len(steps):
+            return None
+        return steps[step]
 
 class BatchSamples:
     """
@@ -390,6 +433,30 @@ class ModelBatch:
                 "invalid value for source_sample_idx"
             )
         self.target2source_matching_idxs[target_sample_idx] = source_sample_idx
+
+    def add_scalar_conditioning(self, stream_name, conditioning_values):
+        """
+        Add scalar conditioning values for all samples in the batch for a specific stream.
+        """
+        for sample in self.source_samples.samples:
+            if stream_name not in sample.meta_info:
+                sample.add_meta_info(stream_name, SampleMetaData(params={}))
+            sample.meta_info[stream_name].conditioning = conditioning_values
+
+    def get_scalar_conditioning(self, stream_name: str, step: int) -> np.typing.NDArray | None:
+        """
+        Get scalar conditioning values for all samples at a specific forecast step.
+
+        Returns np.ndarray of shape (num_samples, scalar_dim), or None if not available
+        for any sample.
+        """
+        values = []
+        for sample in self.samples:
+            meta = sample.meta_info.get(stream_name)
+            if meta is None or meta.conditioning is None or step >= len(meta.conditioning):
+                return None
+            values.append(meta.conditioning[step])
+        return np.stack(values, axis=0) if values else None
 
     def is_empty(self):
         """

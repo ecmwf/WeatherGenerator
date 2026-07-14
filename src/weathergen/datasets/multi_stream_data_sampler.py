@@ -144,7 +144,13 @@ class MultiStreamDataSampler(torch.utils.data.IterableDataset):
         # check samples per mini epoch
         self.samples_per_mini_epoch = mode_cfg.samples_per_mini_epoch
         self.check_samples(self._get_fsm())
-        self.streams_datasets = self._init_stream_datasets(cf)
+        (
+            self.streams_datasets,
+            self.scalar_conditioning_datasets,
+            self.field_conditioning_datasets,
+        ) = self._init_stream_datasets(cf)
+        self.scalar_conditioning_stream_names = list(self.scalar_conditioning_datasets.keys())
+        self.field_conditioning_stream_names = list(self.field_conditioning_datasets.keys())
 
         # RNG seed setup
         rs = cf.data_loading.rng_seed
@@ -217,7 +223,9 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
 
         return np.arange(self.max_input_steps, perms_len)
 
-    def _init_stream_datasets(self, cf) -> dict[StreamName, _Stream]:
+    def _init_stream_datasets(
+        self, cf
+    ) -> tuple[dict[StreamName, _Stream], dict[StreamName, _Stream], dict[StreamName, _Stream]]:
         """Load dataset readers for all streams from config."""
         streams_datasets: dict[StreamName, _Stream] = {}
         for stream_name, stream_info in cf.streams.items():
@@ -242,32 +250,44 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                         f"for stream name '{stream_name}'."
                         raise ValueError(msg)
 
-            for fname in stream_info.get("filenames", [pathlib.Path()]):
-                fname = pathlib.Path(fname)
-                # dont check if file exists since zarr stores might be directories
-                if fname.exists():
-                    # check if fname is a valid path to allow for simple overwriting
-                    filename = fname
-                else:
-                    filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
-
-                    filename = next((f for f in filenames if f.exists()), None)
-                    if filename is None:
-                        msg = (
-                            f"Did not find input data for {stream_info['type']} "
-                            f"stream '{stream_name}': {filenames}."
-                        )
-                        raise FileNotFoundError(msg)
-
+            filenames_cfg = stream_info.get("filenames")
+            if filenames_cfg is None:
+                # No file required (e.g. synthetic streams)
                 ds_type = stream_info["type"]
                 if is_root():
                     logger.info(
                         f"Opening dataset with type: {ds_type}"
                         + f" from stream config {stream_name}.",
                     )
-                ds = dataset(filename=filename, **kwargs)
-
+                ds = dataset(filename=None, **kwargs)
                 streams_datasets[stream_name].readers += [ds]
+            else:
+                for fname in filenames_cfg:
+                    fname = pathlib.Path(fname)
+                    # dont check if file exists since zarr stores might be directories
+                    if fname.exists():
+                        # check if fname is a valid path to allow for simple overwriting
+                        filename = fname
+                    else:
+                        filenames = [pathlib.Path(path) / fname for path in cf.data_paths]
+
+                        filename = next((f for f in filenames if f.exists()), None)
+                        if filename is None:
+                            msg = (
+                                f"Did not find input data for {stream_info['type']} "
+                                f"stream '{stream_name}': {filenames}."
+                            )
+                            raise FileNotFoundError(msg)
+
+                    ds_type = stream_info["type"]
+                    if is_root():
+                        logger.info(
+                            f"Opening dataset with type: {ds_type}"
+                            + f" from stream config {stream_name}.",
+                        )
+                    ds = dataset(filename=filename, **kwargs)
+
+                    streams_datasets[stream_name].readers += [ds]
 
             stream_info[str(self._stage) + "_source_channels"] = ds.source_channels
             stream_info[str(self._stage) + "_target_channels"] = ds.target_channels
@@ -277,7 +297,20 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
                 else [1.0 for _ in ds.target_channels]
             )
 
-        return streams_datasets
+        # Separate streams by timestep_conditioning type
+        regular: dict[StreamName, _Stream] = {}
+        scalar_conditioning: dict[StreamName, _Stream] = {}
+        field_conditioning: dict[StreamName, _Stream] = {}
+        for name, stream in streams_datasets.items():
+            tc = stream.info.get("timestep_conditioning")
+            if tc == "scalar":
+                scalar_conditioning[name] = stream
+            elif tc == "field":
+                field_conditioning[name] = stream
+            else:
+                regular[name] = stream
+
+        return regular, scalar_conditioning, field_conditioning
 
     def reset(self) -> tuple[Sequence[int], Sequence[int]]:
         """
@@ -756,6 +789,62 @@ Set repeat_data_in_mini_epoch to True if this is undesired."
         target_in_steps = 1 if len(target_in_steps) == 0 else target_in_steps.max().item()
         batch = self._preprocess_model_batch(batch, source_in_steps, target_in_steps)
 
+        if self.scalar_conditioning_stream_names:
+            batch = self._build_scalar_conditioning_data(batch, idx, num_forecast_steps)
+
+        if self.field_conditioning_stream_names:
+            batch = self._build_field_conditioning_data(batch, idx, num_forecast_steps)
+
+        return batch
+
+    def _build_scalar_conditioning_data(
+        self, batch: ModelBatch, idx: int, num_forecast_steps: int
+    ) -> ModelBatch:
+        """Collect per-step scalar conditioning values and store in sample meta_info."""
+        num_output_steps = self._get_output_length(num_forecast_steps)
+        for stream_name, stream_ds in self.scalar_conditioning_datasets.items():
+            step_values = []
+            for timestep_idx in range(self.output_offset, num_output_steps):
+                step_dt = idx + (self.time_step * timestep_idx) // self.step_timedelta
+                rdata = stream_ds.readers[0].get_source(step_dt)
+                step_values.append(rdata.data.flatten().copy())
+            conditioning_values = (
+                np.stack(step_values, axis=0) if step_values else np.zeros((0, 1), dtype=np.float32)
+            )
+            batch.add_scalar_conditioning(stream_name, conditioning_values)
+        return batch
+
+    def _build_field_conditioning_data(
+        self, batch: ModelBatch, idx: int, num_forecast_steps: int
+    ) -> ModelBatch:
+        """Collect per-step field conditioning data and store in conditioning_streams_data."""
+        num_output_steps = self._get_output_length(num_forecast_steps)
+        for stream_name, stream_ds in self.field_conditioning_datasets.items():
+            stream_info = stream_ds.info
+            for step, timestep_idx in enumerate(range(self.output_offset, num_output_steps)):
+                step_dt = idx + (self.time_step * timestep_idx) // self.step_timedelta
+                rdata = collect_datasources(stream_ds.readers, step_dt, "source", self.rng)
+                if rdata.is_empty():
+                    stream_data = None
+                else:
+                    token_data_list = self.tokenizer.get_tokens_windows(stream_info, [rdata], False)
+                    token_data = token_data_list[0]
+                    if token_data[0] is None:
+                        stream_data = None
+                    else:
+                        time_win = self.time_window_handler.window(step_dt)
+                        src_cells, src_lens = self.tokenizer.get_source(
+                            stream_info,
+                            rdata,
+                            token_data,
+                            (time_win.start, time_win.end),
+                            None,
+                        )
+                        stream_data = StreamData(step_dt, 1, 1, self.num_healpix_cells)
+                        stream_data.add_source(self._stage, 0, rdata, src_lens, src_cells, False)
+                # Field conditioning is the same for all views within a batch step
+                for sample in batch.source_samples.samples:
+                    sample.add_conditioning_stream_data(stream_name, step, stream_data)
         return batch
 
     def __iter__(self) -> ModelBatch:

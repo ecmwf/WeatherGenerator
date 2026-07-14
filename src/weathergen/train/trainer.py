@@ -11,6 +11,7 @@
 import contextlib
 import copy
 import logging
+import os
 import time
 from math import sqrt
 
@@ -341,6 +342,11 @@ class Trainer(TrainerBase):
         if cf.get("training_config").get("optimizer").get("grad_scaling", True):
             self.grad_scaler = torch.amp.GradScaler("cuda")
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"
+
+        if os.environ.get("DEBUG_DATASET"):
+            self.dataset.reset()
+            breakpoint()
+            batch = self.dataset._get_batch(0, 2)
 
         # lr is updated after each batch so account for this
         # TODO: conf should be read-only, do not modify the conf in flight
