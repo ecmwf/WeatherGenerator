@@ -44,10 +44,22 @@ def _filter_output_channels(
         return
 
     for stream_idx, stream_name in enumerate(stream_names):
-        write_vars = filter_cfg.get(stream_name, [])
-        if not write_vars:
+        write_vars = filter_cfg.get(stream_name, None)
+        # treat None or special keyword 'all' as no filtering for this stream
+        if write_vars is None:
             continue
-        write_vars = list(write_vars)
+        if isinstance(write_vars, str):
+            if write_vars.lower() == "all":
+                continue
+            # single channel specified as a string -> wrap in list
+            write_vars = [write_vars]
+        else:
+            try:
+                write_vars = list(write_vars)
+            except TypeError:
+                write_vars = [write_vars]
+        if len(write_vars) == 0:
+            continue
 
         all_channels = target_channels[stream_idx]
         write_vars_set = set(write_vars)
