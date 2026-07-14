@@ -36,6 +36,7 @@ from weathergen.train.collapse_monitor import CollapseMonitor
 from weathergen.train.loss_calculator import LossCalculator
 from weathergen.train.lr_scheduler import LearningRateScheduler
 from weathergen.train.target_and_aux_ssl_teacher import EMATeacher
+from weathergen.train.optimizer import build_optimizer
 from weathergen.train.target_and_aux_utils import get_target_aux_calculator
 from weathergen.train.trainer_base import TrainerBase
 from weathergen.train.utils import (
@@ -147,6 +148,26 @@ class Trainer(TrainerBase):
         Get total, effective batch size across all DDP ranks
         """
         return self.world_size_original * batch_size_per_gpu
+
+    def _current_lrs(self) -> dict[str, float]:
+        """
+        Current lr of each optimizer, keyed by name (e.g. {"adamw": ...} or
+        {"muon": ..., "adamw": ...}).
+
+        For muon, "muon" is the actual applied lr: the scheduled lr multiplied by a
+        representative (median, across muon params) adjust_lr_fn factor. torch.optim.Muon
+        applies this factor per-parameter, inside step(), based on each matrix's shape -- it
+        never updates param_groups[...]["lr"], so the raw scheduled lr alone (identical to
+        adamw's, since both share the same schedule) understates the actual per-parameter step
+        size by ~10-25x for this model's matrix sizes and isn't what's really applied.
+        """
+        lrs = {
+            name: scheduler.get_lr()
+            for name, scheduler in zip(self.optimizer_names, self.lr_schedulers, strict=True)
+        }
+        if "muon" in lrs and self._muon_effective_lr_factor is not None:
+            lrs["muon"] = lrs["muon"] * self._muon_effective_lr_factor
+        return lrs
 
     def init(self, cf: Config, devices):
         # pylint: disable=attribute-defined-outside-init
@@ -380,25 +401,17 @@ class Trainer(TrainerBase):
             if not cf.with_ddp:
                 self.model.print_num_parameters()
 
-        # https://www.cs.princeton.edu/~smalladi/blog/2024/01/22/SDEs-ScalingRules/
-        # aiming for beta1=0.9 and beta2=0.95 following the MAE paper
-        # https://arxiv.org/pdf/2111.06377
         kappa = self.get_batch_size_total(self.batch_size_per_gpu)
-        # aiming for beta1 = 0.9 at one node, ie kappa=B=4
-        beta1 = max(0.5, 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta1))
-        # aiming for beta2 = 0.95 at one node, ie B=4
-        beta2 = 1.0 - kappa * (1.0 - self.training_cfg.optimizer.adamw.beta2)
-        eps = self.training_cfg.optimizer.adamw.get("eps", 2e-08) / np.sqrt(kappa)
+        shared_lr_cfg = self.training_cfg.learning_rate_scheduling
 
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=self.training_cfg.learning_rate_scheduling.lr_start,
-            weight_decay=self.training_cfg.optimizer.weight_decay,
-            betas=(beta1, beta2),
-            eps=eps,
-        )
-        self.grad_scaler = torch.amp.GradScaler("cuda")
+        built = build_optimizer(self.model, self.training_cfg.optimizer, shared_lr_cfg, kappa)
+        self.optimizers = built.optimizers
+        self.optimizer_names = built.optimizer_names
+        self._muon_effective_lr_factor = built.muon_effective_lr_factor
+        lr_cfgs = built.lr_cfgs
 
+        if cf.get("training_config").get("optimizer").get("grad_scaling", True):
+            self.grad_scaler = torch.amp.GradScaler("cuda")
         assert len(self.dataset) > 0, f"No data found in {self.dataset}"
 
         # lr is updated after each batch so account for this
