@@ -36,7 +36,13 @@ All hindcast years are fetched in one shot via hdate = YYYYMMDD/YYYYMMDD/...
 IFS stream selection
 --------------------
   stream = eefo / eefh  (≥48r1, ref-date ≥ 2023-06-27)
-  stream = enfo / enfh  (<48r1)
+  stream = mofc / mofh  (<48r1)
+
+Re-forecast schedule
+--------------------
+  CY49r1+  (≥ 2024-11-12): every odd day of the month
+           (1/3/5/7/9/11/13/15/17/19/21/23/25/27/29/31, excl. 29 Feb)
+  pre-49r1: Mondays and Thursdays only
 
 Output
 ------
@@ -75,6 +81,9 @@ HOURS_PER_WEEK = 7 * 24             # 168
 
 # IFS cycle 48r1 introduced the EEFH/EEFO streams (2023-06-27)
 _CYCLE_48R1 = datetime(2023, 6, 27)
+# IFS cycle 49r1 (2024-11-12) changed the sub-seasonal re-forecast schedule
+# from Mon/Thu to every odd day of the month, giving far more initialisations.
+_CYCLE_49R1 = datetime(2024, 11, 12)
 
 _log = logging.getLogger(__name__)
 
@@ -87,32 +96,87 @@ def _ifs_stream(ref_date_str: str, hdate: bool) -> str:
     ref_dt = datetime.strptime(ref_date_str, "%Y%m%d")
     if ref_dt >= _CYCLE_48R1:
         return "eefh" if hdate else "eefo"
+    # Pre-48r1: extended-range hindcasts are in ENFH/ENFO.
+    # MOFH/MOFC is an older, now-ambiguous code in the MARS catalog.
     return "enfh" if hdate else "enfo"
 
 
 def _hdate_list(ref_date_str: str, fromyear: int, toyear: int) -> list[str]:
-    ref_dt = datetime.strptime(ref_date_str, "%Y%m%d")
-    return [f"{y:04d}{ref_dt.month:02d}{ref_dt.day:02d}"
-            for y in range(fromyear, toyear + 1)]
+    """Return one hdate per year.
 
-
-_MOFC_WEEKDAYS = {0: "Monday", 3: "Thursday"}   # IFS extended-range run days
-
-
-def _check_mofc_date(ref_date_str: str) -> None:
-    """
-    Raise ValueError if ref_date is not a Monday or Thursday.
-    The IFS extended-range forecast (mofc) only runs on these two days;
-    MARS returns 'Data not found' for any other weekday.
-    The error message shows the nearest valid date(s) for convenience.
+    CY49r1+ : same calendar day in each year (odd-day runs repeat on the
+              same day-of-month; Feb 29 is replaced by Feb 27).
+    Pre-49r1: nearest date with the same weekday (Mon or Thu) as ref_date.
     """
     from datetime import timedelta
-    ref_dt  = datetime.strptime(ref_date_str, "%Y%m%d")
+    ref_dt = datetime.strptime(ref_date_str, "%Y%m%d")
+    result = []
+
+    if ref_dt >= _CYCLE_49R1:
+        # 49r1+: same calendar day in each hindcast year (always odd)
+        for y in range(fromyear, toyear + 1):
+            try:
+                result.append(ref_dt.replace(year=y).strftime("%Y%m%d"))
+            except ValueError:      # Feb 29 in a non-leap year → Feb 27
+                result.append(ref_dt.replace(year=y, day=27).strftime("%Y%m%d"))
+    else:
+        # Pre-49r1: snap to nearest same-weekday (Mon/Thu) in each year
+        target_weekday = ref_dt.weekday()
+        for y in range(fromyear, toyear + 1):
+            try:
+                base = ref_dt.replace(year=y)
+            except ValueError:
+                base = ref_dt.replace(year=y, day=28)
+            delta = (target_weekday - base.weekday()) % 7
+            if delta > 3:
+                delta -= 7
+            result.append((base + timedelta(days=delta)).strftime("%Y%m%d"))
+    return result
+
+
+_MOFC_WEEKDAYS = {0: "Monday", 3: "Thursday"}   # IFS sub-seasonal run days (pre-49r1)
+
+
+def _check_mofc_date(ref_date_str: str) -> str:
+    """
+    Snap ref_date to the nearest valid IFS sub-seasonal run date and return it.
+
+    CY49r1+  (≥ 2024-11-12): every odd day of the month
+             (1/3/5/.../31, excluding 29 February).
+    Pre-49r1: Mondays and Thursdays only.
+
+    MARS returns 'Data not found' for any other date.
+    """
+    from datetime import timedelta
+    ref_dt = datetime.strptime(ref_date_str, "%Y%m%d")
+
+    if ref_dt >= _CYCLE_49R1:
+        # 49r1+: valid dates are odd days of the month (excl. 29 Feb)
+        day = ref_dt.day
+        if day % 2 == 1 and not (ref_dt.month == 2 and day == 29):
+            return ref_date_str
+        # Search ±2 days for the nearest odd valid date
+        best: datetime | None = None
+        for d in range(-2, 3):
+            if d == 0:
+                continue
+            cand = ref_dt + timedelta(days=d)
+            if cand.day % 2 == 1 and not (cand.month == 2 and cand.day == 29):
+                if best is None or abs(d) < abs((best - ref_dt).days):
+                    best = cand
+        assert best is not None
+        _log.info(
+            "ref-date %s (day %d) is not an odd day-of-month — 49r1 sub-seasonal "
+            "runs on odd days only. Snapping to %s.",
+            ref_date_str, day, best.strftime("%Y%m%d"),
+        )
+        return best.strftime("%Y%m%d")
+
+    # Pre-49r1: valid dates are Mondays and Thursdays
     weekday = ref_dt.weekday()   # 0=Mon ... 6=Sun
     if weekday in _MOFC_WEEKDAYS:
-        return   # valid
+        return ref_date_str
 
-    # Find nearest Monday and Thursday in both directions
     candidates: list[datetime] = []
     for wd in _MOFC_WEEKDAYS:
         back = ref_dt - timedelta(days=(weekday - wd) % 7)
@@ -127,11 +191,12 @@ def _check_mofc_date(ref_date_str: str) -> None:
         for d in candidates[:2]
     )
     day_name = ref_dt.strftime("%A")
-    raise ValueError(
-        f"ref-date {ref_date_str} is a {day_name} — IFS mofc only runs on "
-        f"Mondays and Thursdays.\n"
-        f"  Nearest valid date(s): {suggestions}"
+    _log.info(
+        "ref-date %s is a %s — IFS sub-seasonal only runs on Mondays and "
+        "Thursdays (pre-49r1).\n  Nearest valid date(s): %s. Returning %s.",
+        ref_date_str, day_name, suggestions, candidates[0].strftime("%Y%m%d"),
     )
+    return candidates[0].strftime("%Y%m%d")
 
 
 def _mars_request_text(req: dict) -> str:
@@ -208,9 +273,9 @@ def _write_nc(
         v[:] = data
 
 
-def _weekly_mean(arr: np.ndarray, n_weeks: int) -> np.ndarray:
+def _weekly_mean(arr: np.ndarray, n_weeks: int, step_freq: int = IFS_ATMFREQ) -> np.ndarray:
     """Collapse (step, lat, lon) → (n_weeks, lat, lon) via weekly means."""
-    steps_pw = HOURS_PER_WEEK // IFS_ATMFREQ   # 28
+    steps_pw = HOURS_PER_WEEK // step_freq
     arr = arr[: n_weeks * steps_pw]             # trim to requested weeks
     return arr.reshape(n_weeks, steps_pw, arr.shape[-2], arr.shape[-1]) \
                .mean(axis=1).astype(np.float32)
@@ -226,6 +291,7 @@ def _decode_and_stage(
     ref_date: str,
     n_weeks: int,
     overwrite: bool,
+    step_freq: int = IFS_ATMFREQ,
 ) -> None:
     """Decode a GRIB file and write one NC file per param × member × init-date."""
     import cfgrib
@@ -248,7 +314,7 @@ def _decode_and_stage(
         # datasets; open_datasets() handles that cleanly
         datasets = cfgrib.open_datasets(str(grib_path),
                                         filter_by_keys=fby,
-                                        backend_kwargs={"indexpath": ""})
+                                        backend_kwargs={"indexpath": "", "time_dims": ("hdate", "step")})
         if not datasets:
             _log.warning("No GRIB messages matched for %s (levtype=%s level=%s)",
                          param_id, levtype, level)
@@ -295,7 +361,7 @@ def _decode_and_stage(
                 else:
                     arr = da_m.values                      # (step, lat, lon)
 
-                weekly = _weekly_mean(arr, n_weeks)
+                weekly = _weekly_mean(arr, n_weeks, step_freq)
                 _write_nc(out, da_m.latitude.values, da_m.longitude.values,
                           weekly, param_id, n_weeks, date_str)
                 _log.info("  wrote %s", out.name)
@@ -324,15 +390,17 @@ def retrieve_and_stage(
     stage_dir.mkdir(parents=True, exist_ok=True)
 
     is_hdate = not forecast_only and hcfromyear is not None
+    ref_date = _check_mofc_date(ref_date)   # snap to Mon/Thu before building request
     stream   = _ifs_stream(ref_date, hdate=is_hdate)
     hdates   = _hdate_list(ref_date, hcfromyear, hctoyear) if is_hdate else []
-    steps    = list(range(IFS_ATMFREQ, n_weeks * HOURS_PER_WEEK + 1, IFS_ATMFREQ))
+    # ENFH/EEFH hindcasts are only archived at daily resolution;
+    # real-time ENFO/EEFO has 6-hourly data throughout.
+    step_freq = 24 if is_hdate else IFS_ATMFREQ
+    steps     = list(range(step_freq, n_weeks * HOURS_PER_WEEK + 1, step_freq))
 
     _log.info("MARS stream: %s  |  hdate mode: %s  |  steps: %d..%d  (%d total)",
               stream, is_hdate,
               steps[0], steps[-1], len(steps))
-
-    _check_mofc_date(ref_date)
 
     # -----------------------------------------------------------------------
     # Group params for efficient batching:
@@ -398,7 +466,7 @@ def retrieve_and_stage(
                 _run_mars(_mars_request_text(cf_req), req_file, dry_run)
                 if not dry_run:
                     _decode_and_stage(cf_target, stage_dir, param_ids,
-                                      "cf", [], is_hdate, ref_date, n_weeks, overwrite)
+                                      "cf", [], is_hdate, ref_date, n_weeks, overwrite, step_freq)
 
             # --- perturbed forecast (type=pf, members 1-N) ---
             if pf_members:
@@ -412,7 +480,7 @@ def retrieve_and_stage(
                 _run_mars(_mars_request_text(pf_req), req_file, dry_run)
                 if not dry_run:
                     _decode_and_stage(pf_target, stage_dir, param_ids,
-                                      "pf", pf_members, is_hdate, ref_date, n_weeks, overwrite)
+                                      "pf", pf_members, is_hdate, ref_date, n_weeks, overwrite, step_freq)
 
 
 # ---------------------------------------------------------------------------
