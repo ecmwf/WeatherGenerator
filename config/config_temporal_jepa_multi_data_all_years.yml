@@ -226,7 +226,7 @@ training_config:
       eps : 2e-08
 
   losses : {
-    "physical": { enabled: False },
+    "physical": { enabled: False, type: Disabled },
     "student-teacher": {
         enabled: True,
         type: LossLatentSSLStudentTeacher,
