@@ -16,8 +16,8 @@ import pandas as pd
 import xarray as xr
 from scipy.spatial import cKDTree
 
-from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_list
 from weathergen.evaluate.scores.psd import compute_psd_score, detect_grid_type
+from weathergen.evaluate.scores.score_utils import calc_latitude_weights, to_list
 
 # from common.io import MockIO
 
