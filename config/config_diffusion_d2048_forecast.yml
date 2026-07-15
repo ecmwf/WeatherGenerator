@@ -87,6 +87,26 @@ rho: 7
 p_mean: 3.5  # only required if noise_distribution is log_normal
 p_std: 1.2  # only required if noise_distribution is log_normal
 
+
+# --- Diffusion loss weighting across noise levels ---
+# "edm"           : lambda(sigma) = (sigma^2 + sigma_data^2)/(sigma*sigma_data)^2.
+#                   Use WITH EDM preconditioning (c_skip/c_out enabled in diffusion.denoise).
+# "min_snr_gamma" : min(SNR, gamma)/sigma_data^2 with SNR=sigma_data^2/sigma^2.
+#                   For direct x0-prediction (no EDM preconditioning); caps the weight of
+#                   trivial low-noise samples so training is not dominated by them.
+# "uniform_x0"    : 1/sigma_data^2 constant weight for direct x0-prediction.
+diffusion_loss_weighting: "edm"
+diffusion_min_snr_gamma: 5.0
+# Enable EDM preconditioning (c_skip/c_out, EDM Eq. 7) in the diffusion denoiser. When False
+# the network predicts x0 directly (c_skip=0, c_out=1). Pair True with diffusion_loss_weighting
+# "edm"; pair False with "min_snr_gamma"/"uniform_x0".
+fe_diffusion_edm_preconditioning: False
+# Quantile of the training noise distribution used to set the inference schedule's lower
+# sigma bound; smaller -> refine down to lower noise.
+sigma_min_quantile: 0.05
+# Number of ODE denoising steps at inference. If null, uses diffusion.forward's default.
+fe_diffusion_num_inference_steps: null
+
 healpix_level: 5
 
 # Use 2D RoPE instead of traditional global positional encoding
@@ -163,6 +183,10 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'yk85n9s7', 'epoch': -1}  # ERA5+obs 6h
 load_chkpt: {'run_id': 'srdrwfy6', 'epoch': -1}  # ERA5+obs SSL pretraining
 
+# Optionally overlay only the physical decoder (embed_target_coords / target_token_engines /
+# pred_heads) from a separate run, on top of the primary checkpoint. Example:
+#   load_decoder_chkpt: {'run_id': 'srdrwfy6', 'mini_epoch': -1}
+load_decoder_chkpt: {}
 
 norm_type: "LayerNorm"
 
@@ -256,14 +280,14 @@ training_config:
       eps : 2e-08
 
   losses : {
-    "physical": {
-        type: LossPhysical,
-        weight: 0.0,
-        loss_fcts: {
-          "mse": {},
-        },  
-        target_and_aux_calc: "Physical",
-    },
+    # "physical": {
+    #     type: LossPhysical,
+    #     weight: 0.0,
+    #     loss_fcts: {
+    #       "mse": {},
+    #     },  
+    #     target_and_aux_calc: "Physical",
+    # },
     "latent_diff": {
         type: LossLatentDiffusion,
         weight: 1.0,

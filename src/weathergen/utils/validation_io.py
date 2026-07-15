@@ -16,6 +16,7 @@ import weathergen.common.config as config
 import weathergen.common.io as io
 from weathergen.common.io import TimeRange, zarrio_writer
 from weathergen.datasets.data_reader_base import TimeWindowHandler
+from weathergen.utils.utils import is_stream_reconstructed
 
 _logger = logging.getLogger(__name__)
 
@@ -72,7 +73,13 @@ def write_output(
             # handle spoof data: do not write since it might corrupt validation (spoofing invisible
             # there)
 
-            if target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
+            # Streams that are not physically reconstructed (forcing, or reconstruct: false
+            # JEPA-only targets) have no physical decoder, so there are no predictions to
+            # write. They may still carry non-empty targets (used by the teacher), so emit
+            # empty per-stream slots to keep the per-stream array alignment used downstream.
+            not_reconstructed = not is_stream_reconstructed(cf.streams[sname])
+
+            if not_reconstructed or target_aux_out.physical[t_idx][sname]["is_spoof"][0]:
                 targets = target_aux_out.physical[t_idx][sname]["target"]
                 # for-loop to make sure we have a consistent number of samples
                 preds_s = [np.zeros((1, 0, t.shape[1])) for t in targets]
