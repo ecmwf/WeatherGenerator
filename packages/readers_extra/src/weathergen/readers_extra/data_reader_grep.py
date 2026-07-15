@@ -74,7 +74,7 @@ class DataReaderGREP(DataReaderTimestep):
         self.n_points: int = 0
 
         # debug
-        self.log_debug = True
+        self.log_debug = False
 
         # Set empty defaults so the object is always in a valid state
         self.init_empty()
@@ -300,6 +300,24 @@ class DataReaderGREP(DataReaderTimestep):
                 continue
             selected_names.append(var)
             selected_idxs.append(i)
+        
+        # --- ordina per profondità (e a parità di profondità per nome variabile) ---
+        def depth_key(name, no_depth_position='end'):
+            parts = name.rsplit('_', 1)
+            if len(parts) == 2:
+                var, maybe_depth = parts
+                try:
+                    depth = float(maybe_depth)
+                    return (0, depth, var)  # 0 = "ha profondità", ordina normalmente
+                except ValueError:
+                    pass
+            # nessuna profondità valida trovata
+            sentinel = float('inf') if no_depth_position == 'start' else float('-inf')
+            return (1, sentinel, name)  # 1 = "senza profondità", va in coda (o testa)
+
+        order = sorted(range(len(selected_names)), key=lambda k: depth_key(selected_names[k]))
+        selected_names = [selected_names[k] for k in order]
+        selected_idxs = [selected_idxs[k] for k in order]
 
         return selected_names, np.array(selected_idxs, dtype=np.int64)
 
