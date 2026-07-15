@@ -108,6 +108,7 @@ class LossPhysical(LossModuleBase):
 
         # Dynamic Loss state (extract it before parsing the actual loss functions)
         self.dynamic_loss_cfg = loss_fcts.get("dynamic_loss")
+        self.forecast_offset = self.mode_cfg.forecast.offset
 
         # dynamically load loss functions based on configuration and stage
         self.loss_fcts = [
@@ -291,6 +292,10 @@ class LossPhysical(LossModuleBase):
             losses_all[stream_name] = defaultdict(dict)
 
             stream_loss_weight, weights_channels = self._get_weights(stream_name, stream_info)
+            if self.dynamic_loss_ema.enabled and weights_channels is not None:
+                losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"] = {}
+                for ch_n, w in zip(target_channels, weights_channels, strict=True):
+                    losses_all[stream_name][str(self.forecast_offset)]["mse_ema_weight"][ch_n] = w.item()
 
             # TODO: make nicer
             output_step_loss_weights = self._get_output_step_weights(len(targets.output_idxs))
@@ -392,7 +397,7 @@ class LossPhysical(LossModuleBase):
                         # Update EMA for dynamic loss if enabled
                         if (
                             self.dynamic_loss_ema.enabled
-                            and timestep_idx == 0
+                            and timestep_idx == self.forecast_offset
                             and loss_fct_name == "mse"
                             and not is_spoof
                         ):

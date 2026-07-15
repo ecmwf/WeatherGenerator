@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import omegaconf as oc
 import xarray as xr
+from numpy.typing import NDArray
 
 # Local application / package
 from weathergen.common.config import (
@@ -27,7 +28,7 @@ from weathergen.common.config import (
 from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.io.data.dataarray_builders import EnsembleSelect
 from weathergen.evaluate.io.data.io_orchestration import (
-    _build_io_state,
+    build_io_state,
     get_data_dirstore,
     get_data_zipstore,
     get_num_workers,
@@ -243,10 +244,14 @@ class WeatherGenReader(Reader):
         """
         Load a single pre-computed score for a given run, stream and metric.
 
+        Also checks that the stored ``eval_settings`` (regrid, rank, ensemble, etc.)
+        match the current configuration.  Returns None (forcing recomputation) if
+        settings have changed.
+
         Returns
         -------
         score: xr.DataArray or None
-            DataArray of the score if found, else None.
+            DataArray of the score if found and settings match, else None.
         """
         if parameters is None:
             parameters = {}
@@ -258,14 +263,34 @@ class WeatherGenReader(Reader):
 
         score = None
         if score_path.exists():
-            with open(score_path) as f:
-                data_dict = json.load(f)
-                if "scores" not in data_dict:
-                    data_dict = {"scores": [data_dict]}
-                for score_version in data_dict["scores"]:
-                    if score_version["attrs"] == parameters:
-                        score = xr.DataArray.from_dict(score_version)
-                        break
+            try:
+                with open(score_path) as f:
+                    data_dict = json.load(f)
+            except (json.JSONDecodeError, OSError) as exc:
+                _logger.warning(
+                    f"Corrupted or unreadable score file {score_path.name} "
+                    f"({type(exc).__name__}). Forcing recomputation."
+                )
+                return None
+
+            if "scores" not in data_dict:
+                data_dict = {"scores": [data_dict]}
+
+            # Check eval_settings match current config
+            stored_settings = data_dict.get("eval_settings", {})
+            current_settings = self.get_eval_settings(stream)
+            if stored_settings != current_settings:
+                _logger.info(
+                    f"Eval settings changed for {score_path.name}: "
+                    f"stored={stored_settings}, current={current_settings}. "
+                    f"Forcing recomputation."
+                )
+                return None
+
+            for score_version in data_dict["scores"]:
+                if score_version["attrs"] == parameters:
+                    score = xr.DataArray.from_dict(score_version)
+                    break
         return score
 
     def get_recomputable_metrics(self, metrics: dict) -> dict:
@@ -528,15 +553,60 @@ class WeatherGenZarrReader(WeatherGenReader):
 
     def _merge_fsteps(self, all_das: dict, global_sample_coords) -> dict:
         """Merge lists of DataArrays for each forecast step across ranks.
-        Concatenates along the sample dimension and re-indexes to global samples.
+
+        For gridded data (dims include 'sample'), concatenates along 'sample'
+        and re-indexes to global sample coordinates.
+        For scatter data (no 'sample' dim), concatenates along 'ipoint'
+        and promotes the scalar 'sample' coord to a per-ipoint coordinate
+        so that downstream groupby("sample") works correctly.
         """
         merged = {}
         for fstep, das in all_das.items():
-            combined = xr.concat(das, dim="sample") if len(das) > 1 else das[0]
-            merged[fstep] = combined.assign_coords(
-                sample=global_sample_coords[: len(combined.sample)]
+            concat_dim = "sample" if "sample" in das[0].dims else "ipoint"
+
+            if concat_dim == "ipoint":
+                # Scatter: promote scalar 'sample' to per-ipoint so it
+                # survives concatenation and enables groupby("sample").
+                das = [self._promote_scalar_sample(da) for da in das]
+
+            combined = (
+                xr.concat(das, dim=concat_dim, coords="different", compat="equals")
+                if len(das) > 1
+                else das[0]
             )
+
+            combined = self._reindex_merged_coords(combined, concat_dim, global_sample_coords)
+            merged[fstep] = combined
         return merged
+
+    @staticmethod
+    def _reindex_merged_coords(
+        da: xr.DataArray, concat_dim: str, global_sample_coords: NDArray
+    ) -> xr.DataArray:
+        """Re-index coordinates after cross-rank concatenation to avoid duplicates.
+
+        Each rank file uses local indices (0, 1, 2, …) for both samples and
+        ipoints.  After concatenation these overlap, so we replace them with
+        unique global coordinates:
+        - For gridded data (concat along 'sample'): assign contiguous global
+          sample indices derived from the rank offsets.
+        - For scatter data (concat along 'ipoint'): assign a fresh 0-based
+          ipoint range covering the combined length.
+        """
+        if "sample" in da.dims:
+            da = da.assign_coords(sample=global_sample_coords[: len(da.sample)])
+        if concat_dim == "ipoint" and "ipoint" in da.dims:
+            da = da.assign_coords(ipoint=np.arange(da.sizes["ipoint"]))
+        return da
+
+    @staticmethod
+    def _promote_scalar_sample(da: xr.DataArray) -> xr.DataArray:
+        """Promote a scalar 'sample' coordinate to a per-ipoint array."""
+        if "sample" in da.coords and da.coords["sample"].ndim == 0:
+            sample_val = da.coords["sample"].item()
+            n_ip = da.sizes["ipoint"]
+            da = da.drop_vars("sample").assign_coords(sample=("ipoint", np.full(n_ip, sample_val)))
+        return da
 
     def get_data(
         self,
@@ -591,6 +661,7 @@ class WeatherGenZarrReader(WeatherGenReader):
             rank_local_to_load = [
                 local_samples[g - global_offset] for g in sorted(rank_globals & requested_globals)
             ]
+            rank_global_labels = sorted(rank_globals & requested_globals)
 
             _logger.info(
                 f"RUN {self.run_id} [rank {rank_file.stem.split('rank')[-1]}]: "
@@ -602,7 +673,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 f"global samples {sorted(rank_globals & requested_globals)}"
             )
 
-            state = _build_io_state(
+            state = build_io_state(
                 self.run_id,
                 rank_file,
                 stream,
@@ -616,6 +687,7 @@ class WeatherGenZarrReader(WeatherGenReader):
                 self._num_io_workers,
                 ens_select,
                 rank=rank_file.stem.split("rank")[-1],
+                sample_labels=rank_global_labels,
             )
             get_data_fn = get_data_zipstore if state.is_zip else get_data_dirstore
             result = get_data_fn(state)
@@ -636,6 +708,7 @@ class WeatherGenZarrReader(WeatherGenReader):
         _logger.info(
             f"RUN {self.run_id}: Multi-rank load complete. "
             f"{len(global_sample_coords)} samples × {len(merged_targets)} fsteps "
+            f"(including sub-steps) "
             f"from {ranks_loaded}/{len(self.rank_files)} ranks "
             f"({ranks_skipped} skipped)."
         )
@@ -717,6 +790,14 @@ class WeatherGenZarrReader(WeatherGenReader):
     def _compute_is_gridded(self, stream: str) -> bool:
         """is_gridded_data logic, called once per stream and cached."""
         _logger.debug(f"Checking regular spacing for stream {stream}...")
+
+        max_num_target = self.get_inference_stream_attr(stream, "max_num_targets", -1)
+        if max_num_target != -1:
+            _logger.warning(
+                f"WARNING: Stream '{stream}' has max_num_targets={max_num_target} (!= -1), "
+                "indicating variable-length observations (scatter data)."
+            )
+            return False
 
         with self._open_any_rank_for_metadata() as zio:
             dummy = zio.get_data(zio.samples[0], stream, zio.forecast_steps[0])
