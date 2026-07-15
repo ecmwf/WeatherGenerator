@@ -738,18 +738,16 @@ saved for future use.
 ### Cache invalidation
 
 The evaluation code automatically detects configuration changes and forces recomputation
-when necessary. Cached scores are **automatically invalidated** when any of the following
+when necessary. Cached scores are **automatically recomputed** when any of the following
 change:
+- `regrid`, `ensemble`, `rank`, `agg_dims`,
 
-**Configuration parameters:**
-- `regrid`, `ensemble`, `rank`, `agg_dims`, `derived_channels`, `forecast_steps`, `channels`, `sample`
+They are **recomputed only for the missing values** when the following parameters change:
+- `derived_channels`, `forecast_steps`, `channels`, `sample`
 
 **Manual cache invalidation required:**
 The cache does **not** track changes to other parameters, so you must manually delete
 the relevant JSON files, e.g. if any of these change:
-- Metric parameters
-- Region definitions
-- Channel definitions
 - Climatology files
 - Underlying Zarr data content (without forecast step changes)
 
