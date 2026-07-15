@@ -10,7 +10,6 @@ from tqdm import tqdm
 
 from weathergen.common.config import (
     get_model_results,
-    load_run_config,
 )
 from weathergen.common.io import zarrio_reader
 from weathergen.evaluate.export.parser_factory import CfParserFactory
@@ -427,7 +426,7 @@ def export_model_outputs(data_type: str, config: OmegaConf, **kwargs) -> None:
 
                     # Free any remaining refs before next batch.
                     del sample_results
-                            # Only save here if need to merge samples, otherwise saved in process_sample
+                    # Only save here if need to merge samples, otherwise saved in process_sample
         if processed_samples[0] is not None:
             parser.save(processed_samples)
 
