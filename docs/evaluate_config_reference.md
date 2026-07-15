@@ -735,11 +735,23 @@ At runtime, the code checks whether a JSON file already exists for the requested
 combination. If it does, the stored scores are loaded; otherwise they are computed and
 saved for future use.
 
-> **Known limitation:** The cache does **not** check whether configuration parameters have
-> changed since the JSON was written. If you change anything that affects score values —
-> such as `rank`, `regrid` settings, metric thresholds, or the set of ensemble members —
-> you must **manually delete the relevant JSON files** to force recomputation. Stale cached
-> scores will otherwise be silently reused.
+### Cache invalidation
+
+The evaluation code automatically detects configuration changes and forces recomputation
+when necessary. Cached scores are **automatically invalidated** when any of the following
+change:
+
+**Configuration parameters:**
+- `regrid`, `ensemble`, `rank`, `agg_dims`, `derived_channels`, `forecast_steps`, `channels`, `sample`
+
+**Manual cache invalidation required:**
+The cache does **not** track changes to other parameters, so you must manually delete
+the relevant JSON files, e.g. if any of these change:
+- Metric parameters
+- Region definitions
+- Channel definitions
+- Climatology files
+- Underlying Zarr data content (without forecast step changes)
 
 ---
 
