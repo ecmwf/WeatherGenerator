@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
 """
 make_release.py - Create a release tag for a machine learning model across
  WeatherGenerator and WeatherGenerator-private repositories.
