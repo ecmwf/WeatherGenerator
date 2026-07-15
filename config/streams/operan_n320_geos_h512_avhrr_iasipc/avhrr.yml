@@ -15,7 +15,7 @@ AVHRR :
   coords_channels: ['latitude', 'longitude']
   loss_weight : 1.0
   token_size : 256
-  reconstruct: False
+  forcing: True
   tokenize_spacetime: False
   embed : 
     net : linear
@@ -37,8 +37,8 @@ METOP_IASI_PC :
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
   loss_weight : 1.0
   token_size : 128
+  forcing: True
   tokenize_spacetime: False
-  reconstruct: False
   embed : 
     net : linear
   # unused below

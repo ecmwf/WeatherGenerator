@@ -9,6 +9,8 @@
 
 METEOSAT_SEVIRI_IR :
   type : obs
+  encoder: obs      # -> observation encoder B
+  forcing: True     # context-only: excluded from the ERA5 teacher target
   stream_id : 10
   filenames : ['observations-file-2014-2024-seviri-o256-wegen-v3.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
@@ -32,6 +34,8 @@ METEOSAT_SEVIRI_IR :
 
 GOES_ABI_IR :
   type : obs
+  encoder: obs      # -> observation encoder B
+  forcing: True     # context-only: excluded from the ERA5 teacher target
   stream_id : 11
   filenames : ['observations-file-2017-2024-abi-goes16-IR-o256-v2.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day','zenith', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
@@ -54,6 +58,8 @@ GOES_ABI_IR :
 
 HIMAWARI_AHI_IR :
   type : obs
+  encoder: obs      # -> observation encoder B
+  forcing: True     # context-only: excluded from the ERA5 teacher target
   stream_id : 12
   filenames : ['observations-file-2015-2022-himawari8-IR-o256-v1.zarr', 'observations-file-2022-2024-himawari9-IR-o256-v1.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
@@ -76,6 +82,8 @@ HIMAWARI_AHI_IR :
 
 GOES_ABI_VIS :
   type : obs
+  encoder: obs      # -> observation encoder B
+  forcing: True     # context-only: excluded from the ERA5 teacher target
   stream_id : 13
   filenames : ['observations-file-2017-2024-abi-goes16-VIS-o256-v2.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
@@ -98,6 +106,8 @@ GOES_ABI_VIS :
 
 HIMAWARI_AHI_VIS :
   type : obs
+  encoder: obs      # -> observation encoder B
+  forcing: True     # context-only: excluded from the ERA5 teacher target
   stream_id : 14
   filenames : ['observations-file-2015-2022-himawari8-VIS-o256-v1.zarr', 'observations-file-2022-2024-himawari9-VIS-o256-v3.zarr']
   geoinfo_channels : ['cos_local_time', 'sin_local_time', 'cos_julian_day', 'sin_julian_day', 'zenith', 'cos_sza', 'cos_latitude', 'sin_latitude', 'cos_longitude', 'sin_longitude']
