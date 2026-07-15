@@ -49,7 +49,7 @@ class DataReaderObs(DataReaderBase):
         base_date_str = dt_obj.strftime("%Y%m%d%H%M")
         self.hrly_index = self.z[f"idx_{base_date_str}_1"]
         self.colnames = list(self.data.attrs["colnames"])
-        
+
         data_colnames = [col for col in self.colnames if "obsvalue" in col]
         data_idx = [i for i, col in enumerate(self.colnames) if "obsvalue" in col]
 
@@ -213,7 +213,10 @@ class DataReaderObs(DataReaderBase):
                 self.indices_start = np.append(
                     self.indices_start,
                     np.ones(
-                        (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs, dtype=int
+                        # max(0, ...): a small overshoot (< step_hrs past the last valid
+                        # index) would otherwise make this count negative and crash np.ones
+                        max(0, (diff_in_hours_end - self.hrly_index.shape[0] - 1) // step_hrs),
+                        dtype=int,
                     )
                     * self.indices_start[-1],
                 )
@@ -222,7 +225,12 @@ class DataReaderObs(DataReaderBase):
                     self.indices_end,
                     np.ones(
                         # add (len_hrs + 1) since above we also have diff_in_hours_start + len_hrs
-                        (diff_in_hours_end - self.hrly_index.shape[0] + (len_hrs + 1)) // step_hrs,
+                        # max(0, ...): same small-overshoot guard as indices_start above
+                        max(
+                            0,
+                            (diff_in_hours_end - self.hrly_index.shape[0] + (len_hrs + 1))
+                            // step_hrs,
+                        ),
                         dtype=int,
                     )
                     * self.indices_end[-1],
