@@ -96,7 +96,7 @@ variables:
     wg_unit: m
     std_unit: m
     level_type: sfc
-   hcc:
+  hcc:
     var: hcc
     long: high_cloud_cover
     std: cloud_area_fraction_high
