@@ -286,7 +286,7 @@ def _get_model_config_file_read_name(run_id: str, mini_epoch: int | None):
 
 def get_model_results(
     run_id: str, mini_epoch_list: list, rank_list: list
-) -> tuple[list[Path], list]:
+) -> list[Path]:
     """
     Find all model results zarr stores from a given run_id.
     """
