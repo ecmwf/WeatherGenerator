@@ -35,3 +35,34 @@ features. However, it is currently evolving at a fast pace. It should not be exp
 This software is licensed under the terms of the Apache Licence Version 2.0 which can be obtained at [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0).
 
 In applying this licence, ECMWF does not waive the privileges and immunities granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
+
+---
+
+## Running WeatherGenerator on your machine
+
+This setup is compatible with machines that can run the project's PyTorch and Flash Attention
+dependencies. A standalone checkout uses [private_config.yaml](private_config.yaml) by default;
+set `WEATHERGEN_PRIVATE_CONF` or pass `--private-config` to use platform-specific paths instead.
+
+### Installation and setup
+
+1. Install uv, see https://docs.astral.sh/uv/getting-started/installation/.
+2. Clone the repository and change to its root directory.
+3. Install the project dependencies:
+   ```bash
+   ./scripts/actions.sh sync
+   ```
+
+### Download local ERA5 data
+
+```bash
+uv run --with "anemoi-datasets[remote]" anemoi-datasets create --overwrite \
+  datasets/download_configs/era5_o96_2020_1m.yaml \
+  datasets/era5-o96-2020-1pct-6h-v1.zarr
+```
+
+### Training
+
+```bash
+uv run train --base-config config/era5_local.yml
+```

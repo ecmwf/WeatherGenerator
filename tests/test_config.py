@@ -9,7 +9,7 @@ import weathergen.common.config as config
 TEST_RUN_ID = "test123"
 SECRET_COMPONENT = "53CR3T"
 DUMMY_PRIVATE_CONF = {
-    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"]
+    "data_paths": ["/path/to/anmoi/data", "/path/to/observation/data"],
     "secrets": {
         "my_big_secret": {
             "my_secret_id": f"{SECRET_COMPONENT}01234",
@@ -159,7 +159,7 @@ def config_fresh(private_config_file):
 def base_config():
     return OmegaConf.create(DUMMY_BASE_CONF)
 
-@pytest.fixure
+@pytest.fixture
 def base_file(base_config):
     with tempfile.NamedTemporaryFile("w+") as temp:
         temp.write(OmegaConf.to_yaml(base_config))
@@ -171,6 +171,23 @@ def test_contains_private(config_fresh):
     sanitized_private_conf = DUMMY_PRIVATE_CONF.copy()
     del sanitized_private_conf["secrets"]
     assert contains_keys(config_fresh, sanitized_private_conf)
+
+
+def test_load_private_conf_falls_back_to_repository_local_config(monkeypatch, tmp_path):
+    local_private_config = tmp_path / "private_config.yaml"
+    local_private_config.write_text("path_shared_working_dir: ./\ndata_path_anemoi: ./datasets\n")
+
+    def no_private_repository():
+        raise AssertionError("private repository is not available")
+
+    monkeypatch.delenv("WEATHERGEN_PRIVATE_CONF", raising=False)
+    monkeypatch.setattr(config, "_LOCAL_PRIVATE_CONFIG_PTH", local_private_config)
+    monkeypatch.setattr(config, "get_wg_private_path", no_private_repository)
+
+    private_conf = config._load_private_conf()
+
+    assert private_conf.path_shared_working_dir == "./"
+    assert private_conf.data_path_anemoi == "./datasets"
 
 
 def test_is_paths_set(config_fresh):

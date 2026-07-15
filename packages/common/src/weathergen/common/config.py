@@ -29,6 +29,7 @@ from weathergen.common.io import StoreType
 from weathergen.common.paths import _REPO_ROOT, get_wg_private_path
 
 _DEFAULT_CONFIG_PTH = _REPO_ROOT / "config" / "default_config.yml"
+_LOCAL_PRIVATE_CONFIG_PTH = _REPO_ROOT / "private_config.yaml"
 
 _DATETIME_TYPE_NAME = "datetime"  # Names for custom resolvers used in Omegaconf
 _TIMEDELTA_TYPE_NAME = "timedelta"
@@ -526,10 +527,9 @@ def _load_overwrite_conf(overwrite: Path | dict | DictConfig) -> DictConfig:
 
 def _load_private_conf(private_home: Path | None = None) -> DictConfig:
     """
-    Return the private configuration from file or environment variable WEATHERGEN_PRIVATE_CONF.
+    Return the private configuration from an explicit file, environment variable, supported HPC,
+    or the repository's local default.
     """
-    env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
-
     if private_home is not None and private_home.is_file():
         _logger.info(f"Loading private config from {private_home}.")
 
@@ -537,7 +537,14 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
         private_home = Path(os.environ["WEATHERGEN_PRIVATE_CONF"])
         _logger.info(f"Loading private config from WEATHERGEN_PRIVATE_CONF:{private_home}.")
 
-    elif env_script_path.is_file():
+    else:
+        try:
+            env_script_path = get_wg_private_path() / "hpc" / "platform-env.py"
+        except Exception as e:
+            _logger.info(f"Could not find private repository platform script: {e}")
+            env_script_path = None
+
+    if private_home is None and env_script_path is not None and env_script_path.is_file():
         _logger.info(f"Loading private config from platform-env.py: {env_script_path}.")
         # This code does many checks to ensure that any error message is surfaced.
         # Since it is a process call, it can be hard to diagnose the error.
@@ -564,11 +571,13 @@ def _load_private_conf(private_home: Path | None = None) -> DictConfig:
         )
         private_home = Path(result.stdout.strip())
         _logger.info(f"Loading private config from platform-env.py output: {private_home}.")
-    else:
-        _logger.info(f"Could not find platform script at {env_script_path}")
+    elif private_home is None and _LOCAL_PRIVATE_CONFIG_PTH.is_file():
+        private_home = _LOCAL_PRIVATE_CONFIG_PTH
+        _logger.info(f"Loading repository local private config from {private_home}.")
+    elif private_home is None:
         raise FileNotFoundError(
             "Could not find private config. Please set the environment variable "
-            "WEATHERGEN_PRIVATE_CONF or provide a path."
+            "WEATHERGEN_PRIVATE_CONF, provide a path, or add private_config.yaml to the repository."
         )
     private_cf = OmegaConf.load(private_home)
 
