@@ -464,7 +464,7 @@ class DiffusionForecastEngine(torch.nn.Module):
         #         f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
         #     )
         # sigma_min_eff = self.cf.get("sigma_min", 0.002)
-        # sigma_min_eff = 40
+        sigma_min_eff = 40
 
         # --- Time step discretization (EDM Eq. 5) with training-aligned bounds ---
         step_indices = torch.arange(num_steps, dtype=torch.float64, device="cuda")
