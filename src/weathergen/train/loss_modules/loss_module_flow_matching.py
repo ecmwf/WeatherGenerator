@@ -22,11 +22,13 @@ _logger = logging.getLogger(__name__)
 
 
 class LossFlowMatching(LossModuleBase):
-    """Conditional flow-matching / denoising-score-matching loss in latent space.
+    """Conditional flow-matching / denoising-score-matching (/ EDM) loss in latent space.
 
-    Regresses the engine's *raw* prediction (velocity / noise / score, per
+    Regresses the engine's *raw* prediction (velocity / noise / score / **denoiser**, per
     ``fe_flow_prediction_type``) against the analytic conditional target
-    (course Eq. 37 / Alg. 4 / Eq. 40), assembled here from:
+    (course Eq. 37 / Alg. 4 / Eq. 40; denoiser -> ``z``, matching LossLatentDiffusion). For the
+    ve/denoiser (EDM) path the per-sample loss is weighted by ``lambda(sigma)`` during training
+    (see ``_noise_weight``). The target is assembled here from:
       - ``z``  : the clean latent from :class:`FlowMatchingTargetEncoder`
                  (``targets.latent[...]["flow_target"]``),
       - ``eps``, ``t`` : the noise and time the engine drew, stashed into the (source)
@@ -52,11 +54,25 @@ class LossFlowMatching(LossModuleBase):
 
         self.path = GaussianPath(cf.get("fe_flow_path", "condot"))
         self.prediction_type = cf.get("fe_flow_prediction_type", "velocity")
+        self.sigma_data = cf.get("sigma_data", 1.0)
 
         self.loss_fcts = [
             [getattr(loss_fns, name), params.get("weight", 1.0), name]
             for name, params in loss_fcts.items()
         ]
+
+    def _noise_weight(self, s: Tensor) -> Tensor | float:
+        """EDM loss weight lambda(sigma) = (sigma^2 + sigma_data^2) / (sigma*sigma_data)^2, applied
+        for the ve/denoiser path during **training** only (val is unweighted), mirroring
+        ``LossLatentDiffusion._get_noise_weight`` + its ``stage=='val'`` gate. condot -> 1.0.
+
+        For the ve path the engine stashes the *noise level sigma itself* as ``fm_t`` (``s`` here),
+        so we do not re-derive sigma from eta — that avoids duplicating the noise_distribution
+        logic and keeps the weight identical to the sigma the network was conditioned on.
+        """
+        if self.path.kind != "ve" or self.stage == "val":
+            return 1.0
+        return (s**2 + self.sigma_data**2) / (s * self.sigma_data) ** 2
 
     def _get_fstep_weights(self, forecast_steps):
         timestep_weight_config = self.cf.get("timestep_weight")
@@ -91,9 +107,11 @@ class LossFlowMatching(LossModuleBase):
         }
         # Parameterization-invariant diagnostic (logging only, no backprop): convert the raw
         # prediction to a clean-latent (x0) estimate and measure MSE against z. Unlike the raw
-        # training loss, this IS comparable across velocity/noise/score runs at the same t,
-        # because each parameterization regresses a target with a different scale.
-        # NB well-conditioned at the fixed validation t's; noisy as t->0 (to_denoiser ~ 1/alpha).
+        # training loss, this IS comparable across velocity/noise/score/denoiser runs at the same
+        # noise level, because each parameterization regresses a target with a different scale.
+        # For the denoiser (EDM) path to_denoiser(pred)=pred, so mse_x0 equals the *unweighted*
+        # training MSE. Well-conditioned at the fixed validation levels; noisy as alpha->0 for
+        # noise/score (to_denoiser ~ 1/alpha).
         losses_all[f"{self.name}.mse_x0"] = torch.zeros(1, device=self.device)
 
         pred_tokens_all = [
@@ -114,6 +132,7 @@ class LossFlowMatching(LossModuleBase):
             )
 
         eps, t, x_t = self._read_stash(kwargs["metadata"], self.device)
+        noise_weight = self._noise_weight(t)  # lambda(sigma) for ve/train; 1.0 otherwise
         fstep_loss_weights = self._get_fstep_weights(len(target_tokens_all))
 
         loss_fsteps = torch.tensor(0.0, device=self.device, requires_grad=True)
@@ -134,6 +153,7 @@ class LossFlowMatching(LossModuleBase):
             ctr_loss_fcts = 0
             for loss_fct, loss_fct_weight, loss_fct_name in self.loss_fcts:
                 loss_lfct, _ = loss_fct(target=target, pred=pred_tokens)
+                loss_lfct = noise_weight * loss_lfct  # EDM lambda(sigma); no-op for condot/val
                 losses_all[f"{self.name}.{loss_fct_name}"] += loss_lfct
                 loss_fstep = loss_fstep + loss_fct_weight * loss_lfct
                 ctr_loss_fcts += 1 if loss_lfct > 0.0 else 0

@@ -41,31 +41,44 @@ logger = logging.getLogger(__name__)
 # Seam #1 (Path) + Seam #2 (Parameterization / conversions)
 # ---------------------------------------------------------------------------
 class GaussianPath:
-    """Gaussian probability path ``x_t = alpha_t z + beta_t eps`` and the closed-form
+    """Gaussian probability path ``x_s = alpha_s z + beta_s eps`` and the closed-form
     conversions between the velocity field, the score, the noise and the denoiser
     (course Prop. 1 / Remark 16).
 
     Schedulers return ``(alpha, beta, alpha_dot, beta_dot)`` as tensors broadcastable
-    to the data. ``condot`` is the linear (conditional optimal transport) path
-    ``alpha_t = t, beta_t = 1 - t``. Add a ``ve`` scheduler (``alpha=1, beta=sigma(t)``)
-    later to obtain the EDM/variance-exploding family through the same interface.
+    to the data, as functions of the path variable ``s``:
+
+    - ``condot``: linear (conditional optimal transport) path, ``alpha=s, beta=1-s`` with
+      the path *time* s=t in [0,1] ascending (t=0 noise, t=1 data).
+    - ``ve`` (EDM / variance-exploding): ``alpha=1, beta=s`` with the *noise level* s=sigma
+      itself as the path variable, descending sigma_max -> 0 during sampling. With a
+      denoiser prediction, ``to_velocity`` reduces to ``(x - D)/sigma`` — exactly EDM's
+      probability-flow ODE slope — so the generic sampler reproduces
+      DiffusionForecastEngine._run_ode step for step.
 
     This is the single source of truth imported by the engine, the target encoder
     and the loss module so all three agree on the math.
     """
 
-    VALID_PREDICTION_TYPES = ("velocity", "noise", "score")
+    VALID_PREDICTION_TYPES = ("velocity", "noise", "score", "denoiser")
 
     def __init__(self, kind: str = "condot"):
         self.kind = kind
 
     def coeffs(self, t: torch.Tensor):
-        """Return ``(alpha_t, beta_t, alpha_dot_t, beta_dot_t)`` for scalar/broadcast ``t``."""
+        """Return ``(alpha, beta, alpha_dot, beta_dot)`` for scalar/broadcast path var ``t``."""
         if self.kind == "condot":
             alpha = t
             beta = 1.0 - t
             alpha_dot = torch.ones_like(t)
             beta_dot = -torch.ones_like(t)
+            return alpha, beta, alpha_dot, beta_dot
+        if self.kind == "ve":
+            # EDM: x = z + sigma * eps, path variable is sigma itself.
+            alpha = torch.ones_like(t)
+            beta = t
+            alpha_dot = torch.zeros_like(t)
+            beta_dot = torch.ones_like(t)
             return alpha, beta, alpha_dot, beta_dot
         raise ValueError(f"Unknown Gaussian path kind: {self.kind!r}")
 
@@ -78,6 +91,7 @@ class GaussianPath:
         - velocity (CFM, Eq. 37): ``alpha_dot z + beta_dot eps``  (CondOT: ``z - eps``)
         - noise   (DDPM / DSM, Alg. 4):     ``eps``
         - score   (denoising score, Eq. 40): ``-eps / beta``
+        - denoiser (EDM / x0-prediction):    ``z``  (what LossLatentDiffusion regresses)
         """
         alpha, beta, alpha_dot, beta_dot = self.coeffs(t)
         if prediction_type == "velocity":
@@ -86,6 +100,8 @@ class GaussianPath:
             return eps
         if prediction_type == "score":
             return -eps / beta
+        if prediction_type == "denoiser":
+            return z
         raise ValueError(f"Unknown prediction_type: {prediction_type!r}")
 
     # -- conversions from a raw network prediction to any quantity --------------
@@ -99,6 +115,9 @@ class GaussianPath:
             return pred
         if prediction_type == "score":
             return -beta * pred
+        if prediction_type == "denoiser":
+            # pred is the clean-data estimate D; x = alpha*D + beta*eps => eps = (x - alpha*D)/beta
+            return (x - alpha * pred) / beta
         if prediction_type == "velocity":
             # From u = alpha_dot z + beta_dot eps and x = alpha z + beta eps:
             #      z = (x - beta eps) / alpha
@@ -140,6 +159,8 @@ class GaussianPath:
         noise genuinely requires dividing by alpha — so those remain ill-conditioned as t -> 0,
         which is expected: at the noise end a noise estimate carries almost no information about x0.
         """
+        if prediction_type == "denoiser":
+            return pred  # already the clean-data estimate
         alpha, beta, alpha_dot, beta_dot = self.coeffs(t)
         if prediction_type == "velocity":
             return (beta * pred - beta_dot * x) / (alpha_dot * beta - alpha * beta_dot)
@@ -210,11 +231,31 @@ class FlowMatchingForecastEngine(torch.nn.Module):
             f"fe_flow_prediction_type must be one of {GaussianPath.VALID_PREDICTION_TYPES}"
         )
 
+        # -- EDM / variance-exploding preconditioner + schedule params (seam #3/#4).
+        # Same config keys as the diffusion configs so they stay portable. Inert for condot.
+        self.sigma_data = cf.get("sigma_data", 1.0)
+        self.sigma_min = cf.get("sigma_min", 0.002)
+        self.sigma_max = cf.get("sigma_max", 80.0)
+        self.rho = cf.get("rho", 7)
+        self.p_mean = cf.get("p_mean", 1.5)
+        self.p_std = cf.get("p_std", 1.2)
+        self.sigma_min_quantile = cf.get("sigma_min_quantile", 0.05)
+        # Opt-in scale on EDM's log(sigma)/4 embedder input (default 1.0 = spec-faithful).
+        self.edm_noise_time_scale = cf.get("edm_noise_time_scale", 1.0)
+        # EDM output preconditioning (ve path): default = original Karras c_skip/c_out. Set True to
+        # force c_skip=0, c_out=1 (direct x0 prediction), reproducing diffusion.py's hardcoded case.
+        self.no_skip_connection = cf.get("fe_diffusion_model_no_skip_connection", False)
+
         # -- Sampler (seam #4) --
         self.sampler = cf.get("fe_flow_sampler", "ode")
         self.t_eps = cf.get("fm_t_eps", 1e-3)
         self.num_steps_default = cf.get("fm_num_steps", 50)
         self.sde_sigma = cf.get("fm_sde_sigma", 0.0)
+        if self.path.kind == "ve" and self.sampler == "sde" and self.sde_sigma > 0.0:
+            logger.warning(
+                "fe_flow_path=ve with the SDE sampler is mathematically valid but untested; "
+                "EDM here reproduces the ODE (probability-flow) sampler."
+            )
 
         # Validation uses a fixed t (set by the validation harness, mirroring diffusion).
         self._fixed_noise_level: float | None = None
@@ -271,8 +312,11 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         if self.training:
             noise_level_rn = meta_info["ERA5"].params["noise_level_rn"]
         else:
+            # Validation fixed level. Default when unset: condot -> t=0.5 (midpoint);
+            # ve -> 0.0 read as log-sigma by the ve mapping => sigma=exp(0)=1 (diffusion.py:232).
+            default_level = 0.0 if self.path.kind == "ve" else 0.5
             noise_level_rn = (
-                self._fixed_noise_level if self._fixed_noise_level is not None else 0.5
+                self._fixed_noise_level if self._fixed_noise_level is not None else default_level
             )
         # t is kept in float32 (a scalar) so path coefficients are precise, matching how the
         # diffusion engine keeps sigma in float32; x_t then promotes to float32.
@@ -292,32 +336,32 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         return self._net_forward(x_t, t, c, fstep, coords)
 
     def _t_from_noise_level(self, noise_level_rn, device, dtype=torch.float32) -> torch.Tensor:
-        """Map the per-sample ``noise_level_rn`` to ``t in [t_eps, 1 - t_eps]``.
+        """Map the per-sample ``noise_level_rn`` to the path variable ``s`` (a 1-element tensor):
+        ``t`` for the condot path, ``sigma`` for the ve/EDM path.
 
-        With ``noise_distribution: uniform`` (drawn at the source in masking.py),
-        ``noise_level_rn`` already *is* ``t`` and we only clamp for numerical safety.
-        Fallbacks are kept for reusing existing draws (see plan), but ``uniform`` is the
-        primary path for flow matching.
+        - **condot**: ``noise_distribution`` must be ``uniform`` — ``noise_level_rn`` already *is*
+          ``t`` (drawn at the source in masking.py); clamp to ``[t_eps, 1-t_eps]``.
+        - **ve (EDM)**: mirrors ``DiffusionForecastEngine.training_forward`` exactly —
+          training + ``log_normal`` → ``sigma = exp(v*p_std + p_mean)``;
+          training + ``log_uniform`` **or any eval/fixed level** → ``sigma = exp(v)``
+          (diffusion.py:240-241 ``or not self.training``). No clamping (diffusion does not clamp).
         """
         dist = self.cf.get("noise_distribution", None)
-        # NB: must be `==`, not `is`. `is` compares identity; the string arrives from OmegaConf
-        # (YAML / --options) and is not the interned literal, so `dist is "uniform"` is False even
-        # when the config is correct.
-        assert dist == "uniform", (
-            f"flow-matching expects noise_distribution: uniform (t ~ U[0,1]), got {dist!r}"
-        )
         v = torch.as_tensor(noise_level_rn, device=device, dtype=dtype).reshape(1)
-        if dist == "uniform":
-            t = v
-        # TODO: Maybe close the branches below and instead assert uniform distribution
-        # elif dist == "log_normal":  # eta ~ N(0,1) -> Phi(eta) ~ Unif(0,1)
-        #     t = 0.5 * (1.0 + torch.erf(v / math.sqrt(2.0)))
-        # elif dist == "log_uniform":  # log-sigma in [log smin, log smax] -> affine to [0,1]
-        #     lo, hi = math.log(self.cf.sigma_min), math.log(self.cf.sigma_max)
-        #     t = (v - lo) / (hi - lo)
-        else:
-            raise ValueError(f"Unsupported noise_distribution for flow matching: {dist!r}")
-        return t.clamp(self.t_eps, 1.0 - self.t_eps)
+
+        if self.path.kind == "ve":
+            assert dist in ("log_normal", "log_uniform"), (
+                f"ve/EDM path expects noise_distribution log_normal|log_uniform, got {dist!r}"
+            )
+            if dist == "log_uniform" or not self.training:
+                return v.exp()  # v is log-sigma (train log_uniform) or the fixed log-sigma (eval)
+            return (v * self.p_std + self.p_mean).exp()  # v is eta ~ N(0,1)
+
+        # condot: NB `==` not `is` — OmegaConf's string is not the interned literal.
+        assert dist == "uniform", (
+            f"condot path expects noise_distribution: uniform (t ~ U[0,1]), got {dist!r}"
+        )
+        return v.clamp(self.t_eps, 1.0 - self.t_eps)
 
     # -----------------------------------------------------------------------
     # Network call: preconditioning (seam #3) + conditioning handling + backbone
@@ -330,14 +374,15 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         fstep: int,
         coords: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Run the (time-conditioned) forecasting backbone on ``x`` at time ``t``.
+        """Run the (time-conditioned) forecasting backbone on ``x`` at path variable ``t``.
 
-        Mirrors DiffusionForecastEngine.denoise but with an identity preconditioner
-        (no EDM c_skip/c_out/c_in) and a time embedding instead of a sigma embedding.
-        The conditioning-type branches match the shared backbone in engines.py.
+        Mirrors DiffusionForecastEngine.denoise. The preconditioner seam (``_c_in`` /
+        ``_emb_input`` / ``_precondition_output``) is identity for condot and reproduces EDM's
+        c_in / log(sigma)/4 / (c_skip=0, c_out=1) for the ve path. The conditioning-type branches
+        match the shared backbone in engines.py.
         """
-        time_emb = self.time_embedder(t.reshape(1) * self.time_scale)
-        net_input = self._precondition_input(x, t)
+        time_emb = self.time_embedder(self._emb_input(t))
+        net_input = self._c_in(t) * x
 
         # Project encoder tokens (and forecast conditioning) up into the diffusion latent space.
         if self.latent_proj_up is not None:
@@ -369,15 +414,57 @@ class FlowMatchingForecastEngine(torch.nn.Module):
 
         if self.latent_proj_down is not None:
             raw = self.latent_proj_down(raw)
-        return raw
+        return self._precondition_output(raw, x, t)
 
-    # TODO: if implementing EDM, there should probably be a precondition_output() seam here too,
-    # to mirror the EDM c_skip/c_out/c_in.
-    def _precondition_input(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """Preconditioner seam (#3). Identity for flow matching; the EDM implant would
-        return ``c_in(sigma) * x`` here (and pair it with c_skip/c_out on the output)."""
-        c_in = self.cf.get("fm_c_in", 1.0)
-        return c_in * x
+    # -----------------------------------------------------------------------
+    # Preconditioner seam (#3). Dispatched on self.path.kind. For condot this is the
+    # identity flow-matching path; for ve it reproduces DiffusionForecastEngine.denoise
+    # (c_in = 1/sqrt(sigma^2+sigma_data^2), emb input log(sigma)/4) with the original EDM
+    # c_skip/c_out output preconditioning by default (fe_diffusion_model_no_skip_connection
+    # restores diffusion.py's hardcoded c_skip=0, c_out=1). Sampler/loss are untouched.
+    # -----------------------------------------------------------------------
+    def _c_in(self, s: torch.Tensor) -> torch.Tensor:
+        """Input scaling applied before the network sees x."""
+        if self.path.kind == "ve":
+            return 1.0 / (s**2 + self.sigma_data**2).sqrt()
+        return self.cf.get("fm_c_in", 1.0)
+
+    def _emb_input(self, s: torch.Tensor) -> torch.Tensor:
+        """Scalar fed to the (sinusoidal) noise/time embedder, as a 1-element tensor."""
+        if self.path.kind == "ve":
+            # EDM's c_noise = log(sigma)/4, times an opt-in scale (default 1.0 = spec-faithful;
+            # see edm_noise_time_scale and the diffusion-branch noise-embedding A/B).
+            return (s.reshape(1).log() / 4.0) * self.edm_noise_time_scale
+            #TODO: Check why we are taking log/deviding by 4
+        # condot: t in (0,1) scaled up into the frequency band the ladder was calibrated for.
+        return s.reshape(1) * self.time_scale
+
+    def _precondition_output(
+        self, raw: torch.Tensor, x: torch.Tensor, s: torch.Tensor
+    ) -> torch.Tensor:
+        """Output preconditioning: the returned denoiser estimate ``D = c_skip*x + c_out*raw``.
+
+        For the **ve/EDM** path this is the original Karras et al. (2022) preconditioning
+
+            c_skip(sigma) = sigma_data^2 / (sigma^2 + sigma_data^2)
+            c_out(sigma)  = sigma * sigma_data / sqrt(sigma^2 + sigma_data^2)
+
+        which, together with the ``lambda(sigma)`` loss weight, makes the network's *effective*
+        regression target unit-variance at every sigma (``lambda * c_out^2 = 1``) — the property
+        diffusion.py forgoes by hardcoding c_skip=0, c_out=1. Set
+        ``fe_diffusion_model_no_skip_connection: True`` to restore that direct-x0 prediction
+        (c_skip=0, c_out=1), reproducing diffusion.py exactly.
+
+        The returned value is the denoiser ``D`` either way, so the loss (regress ``D`` vs ``z``)
+        and the sampler (``to_velocity(D) = (x-D)/sigma``) are unchanged. condot has no EDM
+        preconditioning — it regresses the raw velocity/noise/score field directly (identity).
+        """
+        if self.path.kind == "ve" and not self.no_skip_connection:
+            c_skip = self.sigma_data**2 / (s**2 + self.sigma_data**2)
+            c_out = s * self.sigma_data / (s**2 + self.sigma_data**2).sqrt()
+            return c_skip * x + c_out * raw
+        # Identity (c_skip=0, c_out=1): condot always; ve when no_skip_connection is set.
+        return raw
 
     # -----------------------------------------------------------------------
     # Inference: integrate noise -> data (ODE default, SDE optional)
@@ -416,6 +503,43 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         )
         return trajectory
 
+    def _sampling_nodes(self, num_steps: int, device) -> torch.Tensor:
+        """The ``num_steps + 1`` path-variable nodes ``s`` the sampler integrates over.
+
+        - **condot**: ascending ``t`` linspace in ``[t_eps, 1 - t_eps]``.
+        - **ve (EDM)**: descending, rho-spaced ``sigma`` between *training-aligned* bounds plus a
+          terminal 0 — a faithful transcription of ``DiffusionForecastEngine._run_ode``
+          (diffusion.py:442-476), so the generic sampler reproduces EDM's schedule exactly.
+        """
+        if self.path.kind != "ve":
+            return torch.linspace(
+                self.t_eps, 1.0 - self.t_eps, num_steps + 1, dtype=torch.float32, device=device
+            )
+
+        # Training-aligned sigma bounds (diffusion.py:442-457).
+        sigma_max_train = math.exp(self.p_mean + 3.0 * self.p_std)
+        sigma_max_eff = min(self.sigma_max, sigma_max_train)
+        _z_scores = {0.01: -2.326, 0.025: -1.960, 0.05: -1.645, 0.10: -1.282}
+        _z = _z_scores.get(self.sigma_min_quantile, -1.645)
+        sigma_min_from_dist = math.exp(self.p_mean + _z * self.p_std)
+        sigma_min_eff = max(self.sigma_min, sigma_min_from_dist, self.sigma_data * 0.01)
+        logger.info(
+            f"EDM sigma schedule: sigma_max_eff={sigma_max_eff:.4f} "
+            f"(config={self.sigma_max}, train 3sigma={sigma_max_train:.4f}), "
+            f"sigma_min_eff={sigma_min_eff:.4f} (config={self.sigma_min}, "
+            f"dist q={self.sigma_min_quantile:.3f}/{sigma_min_from_dist:.4f}), "
+            f"sigma_data={self.sigma_data}, rho={self.rho}, num_steps={num_steps}"
+        )
+        # rho-spacing (EDM Eq. 5) in float64, terminal sigma=0; cast per-step in the loop.
+        step_indices = torch.arange(num_steps, dtype=torch.float64, device=device)
+        nodes = (
+            sigma_max_eff ** (1 / self.rho)
+            + step_indices
+            / (num_steps - 1)
+            * (sigma_min_eff ** (1 / self.rho) - sigma_max_eff ** (1 / self.rho))
+        ) ** self.rho
+        return torch.cat([nodes, torch.zeros_like(nodes[:1])])  # sigma_N = 0
+
     def _run_sampler(
         self,
         c: torch.Tensor | None,
@@ -425,23 +549,29 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         batch_size: int = 1,
         return_trajectory: bool = False,
     ):
-        """Integrate the probability path from ``t_eps`` (noise) to ``1 - t_eps`` (data).
+        """Integrate the path from noise to data over the nodes from ``_sampling_nodes``.
 
-        ODE (default): ``dX/dt = u_t(X)`` with Euler + Heun 2nd-order correction (Alg. 1).
-        SDE: Euler-Maruyama ``dX = [u + (sigma_t^2/2) score] dt + sigma_t dW`` (Thm. 17).
+        ODE (default): ``dX/ds = u_s(X)`` with Euler + Heun 2nd-order correction (Alg. 1). For the
+        ve path with a denoiser this is exactly EDM's probability-flow ODE (``u = (x-D)/sigma``).
+        SDE: Euler-Maruyama ``dX = [u + (sigma^2/2) score] ds + sigma dW`` (Thm. 17; condot only).
         """
         device = "cuda"
         dim = self.cf.ae_global_dim_embed
-        x = torch.randn(batch_size, self.num_healpix_cells, dim, device=device)  # X_0 ~ N(0, I)
+        t_steps = self._sampling_nodes(num_steps, device)
 
-        t_steps = torch.linspace(
-            self.t_eps, 1.0 - self.t_eps, num_steps + 1, dtype=torch.float32, device=device
-        )
+        # Initial noise scaled to the start-of-path marginal std. VE: X_0 ~ N(0, sigma_max^2)
+        # (diffusion.py x*t_steps[0]); condot: pinit = N(0, I), std 1 (unchanged behaviour).
+        x = torch.randn(batch_size, self.num_healpix_cells, dim, device=device)
+        if self.path.kind == "ve":
+            _, beta0, _, _ = self.path.coeffs(t_steps[0].float())
+            x = x * beta0
+
         use_sde = self.sampler == "sde" and self.sde_sigma > 0.0
         logger.info(
             f"Flow-matching inference: sampler={self.sampler} "
             f"(sde_sigma={self.sde_sigma}), prediction_type={self.prediction_type}, "
-            f"path={self.path.kind}, steps={num_steps}, t in [{self.t_eps}, {1 - self.t_eps}]"
+            f"path={self.path.kind}, steps={num_steps}, "
+            f"s: {t_steps[0].item():.4f} -> {t_steps[-2].item():.4f} -> {t_steps[-1].item():.4f}"
         )
 
         # Per-step diagnostics. At every t we compare the *current noisy state* x_t against the
@@ -458,8 +588,11 @@ class FlowMatchingForecastEngine(torch.nn.Module):
 
         x_next = x
         for i in range(num_steps):
-            t_cur = t_steps[i]
-            t_next = t_steps[i + 1]
+            # Cast per-step to float32 (nodes may be float64 for ve; diffusion.py does the same).
+            # For ve, h = sigma_next - sigma_cur is NEGATIVE (descending) — Euler/Heun are
+            # sign-agnostic and the SDE branch already uses h.abs().sqrt().
+            t_cur = t_steps[i].float()
+            t_next = t_steps[i + 1].float()
             h = t_next - t_cur
             x_cur = x_next
 
@@ -565,7 +698,8 @@ class FlowMatchingForecastEngine(torch.nn.Module):
         axes[i].set_ylabel("||velocity||")
         axes[i].grid(True, alpha=0.3, which="both")
 
-        axes[-1].set_xlabel(f"sampling step   (t: {ts[0]:.3f} -> {ts[-1]:.3f}){skipped}")
+        s_name = "sigma" if self.path.kind == "ve" else "t"
+        axes[-1].set_xlabel(f"sampling step   ({s_name}: {ts[0]:.3f} -> {ts[-1]:.3f}){skipped}")
         fig.tight_layout()
 
         out_dir = get_path_run(self.cf) / "plots" / "validation" / "plots"
