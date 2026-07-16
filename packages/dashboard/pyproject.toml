@@ -8,11 +8,11 @@ readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
     "boto3<1.36",
-    "mlflow~=3.3.2",
+    "mlflow~=3.11.1",
 #    "pdbpp>=0.11.7",
     "plotly~=6.1.2",
     "polars~=1.30.0",
-    "requests~=2.32.4",
+    "requests~=2.33.0",
     "streamlit~=1.46.0",
     "streamlit-authenticator>=0.4.2",
     "watchdog",
@@ -22,7 +22,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
- "pytest>=8.3",
+ "pytest>=9.0.3",
  "pytest-mock>=3.14.1",
  "ruff==0.9.7",
  "pyrefly==0.36.0",
