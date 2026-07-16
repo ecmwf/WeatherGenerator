@@ -153,6 +153,45 @@ class EncoderModule(torch.nn.Module):
 
         return tokens, posteriors
 
+    def assimilate_local_project_all(self, tokens, tokens_global, cell_lens, q_cells_lens):
+        """
+        Apply the local assimilation engine and then the local-to-global adapter
+        to all tokens in a single flash-attention pass.
+        """
+
+        zero_pad = torch.zeros(1, device=tokens.device, dtype=torch.int32)
+        cell_lens_cur = torch.cat([zero_pad, cell_lens])
+
+        # q_cells_lens covers a single healpix grid while cell_lens spans
+        # batch samples x input steps, so tile it to match
+        num_cells_grid = q_cells_lens.shape[0] - 1
+        assert cell_lens.shape[0] % num_cells_grid == 0
+        q_cells_lens_cur = torch.cat(
+            [zero_pad, q_cells_lens[1:].repeat(cell_lens.shape[0] // num_cells_grid)]
+        )
+
+        # local assimilation model on the full token set
+        toks = self.ae_local_engine(tokens, cell_lens_cur, use_reentrant=False)
+        toks, posteriors = self.interpolate_latents(toks)
+
+        # keep only non-empty cells for the local->global adapter
+        mask = cell_lens_cur[1:].to(torch.bool)
+        if not torch.any(mask):
+            assert False, "Not yet implemented"
+
+        toks_global_unmasked = tokens_global[mask]
+        q_cells_lens_unmasked = torch.cat([zero_pad, q_cells_lens_cur[1:][mask]])
+        cell_lens_unmasked = torch.cat([zero_pad, cell_lens_cur[1:][mask]])
+
+        toks_global_unmasked = self.ae_local_global_engine(
+            toks,
+            toks_global_unmasked,
+            q_cells_lens_unmasked,
+            cell_lens_unmasked,
+        )
+
+        return toks_global_unmasked, [posteriors]
+
     def assimilate_local_project_chunked(self, tokens, tokens_global, cell_lens, q_cells_lens):
         """
         Apply the local assimilation engine and then the
@@ -306,7 +345,7 @@ class EncoderModule(torch.nn.Module):
             tokens_global = tokens_global.repeat(rs, 1, 1)
 
         # apply local assimilation engine and project onto global latent vectors
-        tokens_global_unmasked, posteriors = self.assimilate_local_project_chunked(
+        tokens_global_unmasked, posteriors = self.assimilate_local_project_all(
             tokens, tokens_global, cell_lens, model_params.q_cells_lens
         )
 
