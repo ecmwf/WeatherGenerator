@@ -43,6 +43,7 @@ In applying this licence, ECMWF does not waive the privileges and immunities gra
 This setup is compatible with machines that can run the project's PyTorch and Flash Attention
 dependencies. A standalone checkout uses [private_config.yaml](private_config.yaml) by default;
 set `WEATHERGEN_PRIVATE_CONF` or pass `--private-config` to use platform-specific paths instead.
+The `data_paths` list controls where WeatherGenerator looks for input datasets.
 
 ### Installation and setup
 

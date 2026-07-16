@@ -1,4 +1,5 @@
 # Default paths for running WeatherGenerator from a standalone checkout.
 # Override this file with --private-config or WEATHERGEN_PRIVATE_CONF for HPC-specific paths.
 path_shared_working_dir: "."
-data_path_anemoi: "./datasets"
+data_paths:
+  - "./datasets"
