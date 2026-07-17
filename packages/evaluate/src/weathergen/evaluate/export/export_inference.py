@@ -152,18 +152,28 @@ def parse_args(args: list) -> argparse.Namespace:
 
     parser.add_argument(
         "--epoch",
-        nargs="+",
-        default=None,
         type=int,
+        default=0,
         help="Epoch number to identify the Zarr store",
     )
 
     parser.add_argument(
         "--rank",
-        nargs="+",
-        default=None,
-        type=int,
-        help="Rank number to identify the Zarr store",
+        type=str,
+        default="all",
+        help="Rank(s) to process. Use '0' for a single rank, 'all' for every rank file, "
+             "or a comma-separated list like '0,1,2'.",
+    )
+
+    parser.add_argument(
+        "--init-time-reference",
+        type=str,
+        choices=["source_start", "source_end"],
+        default="source_start",
+        help="Which end of the source (conditioning) window to use as the forecast "
+        "initialisation time written to the output metadata (e.g. GRIB 'date'/'time'). "
+        "'source_start' (default) uses the beginning of the window "
+        "(e.g. 00 UTC for a 00-05 UTC window); 'source_end' uses the end of the window.",
     )
 
     parser.add_argument(
@@ -290,6 +300,16 @@ def export_from_args(args: list) -> None:
 
     if kwargs.get("expver") == "NEW":
         kwargs["expver"] = generate_new_expver()
+
+    # Normalise rank
+    raw_rank = kwargs.get("rank", "all")
+    if raw_rank == "all":
+        kwargs["rank"] = "all"
+    elif "," in str(raw_rank):
+        kwargs["rank"] = [int(r.strip()) for r in str(raw_rank).split(",")]
+    else:
+        kwargs["rank"] = int(raw_rank)
+
     _logger.info(kwargs)
 
     # Ensure output directory exists
