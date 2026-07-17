@@ -12,44 +12,42 @@ embed_unembed_mode: "block"
 embed_dropout_rate: 0.1
 
 ae_local_dim_embed: 2048
-ae_local_num_blocks: 0
+ae_local_num_blocks: 2
 ae_local_num_heads: 16
 ae_local_dropout_rate: 0.1
-ae_local_with_qk_lnorm: True
-
+ae_local_with_qk_lnorm: true
 ae_local_num_queries: 1
-ae_local_queries_per_cell: False
+ae_local_queries_per_cell: false
+
 ae_adapter_num_heads: 16
 ae_adapter_embed: 128
-ae_adapter_with_qk_lnorm: True
-ae_adapter_with_residual: True
+ae_adapter_with_qk_lnorm: true
+ae_adapter_with_residual: true
 ae_adapter_dropout_rate: 0.1
 
 ae_global_dim_embed: 2048
 ae_global_num_blocks: 4
 ae_global_num_heads: 32
 ae_global_dropout_rate: 0.1
-ae_global_with_qk_lnorm: True
-# TODO: switching to < 1 triggers triton-related issues.
-# See https://github.com/ecmwf/WeatherGenerator/issues/1050
+ae_global_with_qk_lnorm: true
 ae_global_att_dense_rate: 1.0
 ae_global_block_factor: 64
 ae_global_mlp_hidden_factor: 2
-ae_global_trailing_layer_norm: False
+ae_global_trailing_layer_norm: false
 
 ae_aggregation_num_blocks: 0
 ae_aggregation_num_heads: 32
 ae_aggregation_dropout_rate: 0.1
-ae_aggregation_with_qk_lnorm: True
+ae_aggregation_with_qk_lnorm: true
 ae_aggregation_att_dense_rate: 1.0
 ae_aggregation_block_factor: 64
 ae_aggregation_mlp_hidden_factor: 2
 
-decoder_type: PerceiverIOCoordConditioning #  Main options PerceiverIOCoordConditioning or Linear
-pred_adapter_kv: False
-pred_self_attention: True
-pred_dyadic_dims: False
-pred_mlp_adaln: True
+decoder_type: "PerceiverIOCoordConditioning"
+pred_adapter_kv: false
+pred_self_attention: true
+pred_dyadic_dims: false
+pred_mlp_adaln: true
 num_class_tokens: 0
 num_register_tokens: 0
 
@@ -87,11 +85,11 @@ healpix_level: 5
 # Use 2D RoPE instead of traditional global positional encoding
 # When True: uses 2D RoPE based on healpix cell coordinates (lat/lon)
 # When False: uses traditional pe_global positional encoding
-rope_2D: True
-mlp_type: swiglu
-use_xsa: True
-# mlp_type: mlp
-# use_xsa: False
+rope_2D: False
+# mlp_type: swiglu
+# use_xsa: True
+mlp_type: mlp
+use_xsa: False
 
 with_mixed_precision: True
 with_flash_attention: True
@@ -153,16 +151,18 @@ freeze_modules: ".*latent_pre_norm.*|.*latent_heads.*|.*pred_heads.*|.*target_to
 # load_chkpt: {'run_id': 'ug7huxi2', 'epoch': -1}  # d2048 hl5, p_mean=1.5, forecasting
 # load_chkpt: {'run_id': 'i3y5fhda', 'epoch': -1}  # d2048 hl5, p_mean=2.5, forecasting
 # load_chkpt: {'run_id': 'wd0u4he8', 'epoch': -1}  # d2048 hl5, p_mean=3.5, forecasting
-load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z, 64 epochs
+# load_chkpt: {'run_id': 'iy534ge3', 'epoch': -1}  # d2048 hl5 pre-training with z, 64 epochs
 # load_chkpt: {'run_id': 'btnf4goa', 'epoch': -1}  # d2048 hl5 pre-training with z, 128 epochs
+load_chkpt: {'run_id': 'c7d5iw3q', 'epoch': -1}  # n320, 82 epochs
 
 
 norm_type: "LayerNorm"
 
 #####################################
 
-streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
+# streams_directory: "./config/streams/era5_1deg_forecasting_d2048/"
 # streams_directory: "./config/streams/era5_1deg_forecasting_z500/"
+streams_directory: "./config/streams/era5_n320_forecasting/"
 streams: ???
 
 # type of zarr_store
@@ -201,11 +201,6 @@ data_loading :
   num_workers: 12
   rng_seed: ???
   repeat_data_in_mini_epoch : False
-
-  # pin GPU memory for faster transfer; it is possible that enabling memory_pinning with 
-  # FSDP2 + DINOv2 can cause the job to hang and trigger a PyTorch timeout error.
-  # If this happens, you can disable the flag, but performance will drop on GH200.
-  memory_pinning: True
 
 
 # config for training
