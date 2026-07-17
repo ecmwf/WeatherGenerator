@@ -1,0 +1,52 @@
+SurfaceCombined:
+  type: obs
+  stream_id: 2
+  filenames:
+  - observations-ea-ofb-0001-1979-2025-combined-surface-v5.zarr
+  geoinfos:
+  - reportype
+  - stalt
+  - lsm
+  token_size: 512
+  tokenize_spacetime: false
+  max_num_targets: -1
+  embed:
+    net: transformer
+    num_tokens: 1
+    num_heads: 2
+    dim_embed: 256
+    num_blocks: 2
+  embed_target_coords:
+    net: linear
+    dim_embed: 256
+  target_readout:
+    num_layers: 2
+    num_heads: 4
+  pred_head:
+    ens_size: 1
+    num_layers: 1
+  train_source_channels: []
+  train_target_channels: &id001
+  - obsvalue_tsts_0
+  - obsvalue_t2m_0
+  - obsvalue_td2m_0
+  - obsvalue_u10m_0
+  - obsvalue_v10m_0
+  - obsvalue_pmsl_0
+  - obsvalue_ps_0
+  target_channel_weights:
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  val_source_channels: []
+  val_target_channels: *id001
+  source: []
+  target: *id001
+  forcing: false
+  diagnostic: true

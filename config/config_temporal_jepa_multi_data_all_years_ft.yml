@@ -1,0 +1,21 @@
+
+streams_directory: "./config/streams/pretrain_multi_data_od/"
+
+general:
+
+  # mutable parameters
+  rank: ???
+  world_size: ???
+
+training_config:
+  # Keep the same 6h future-teacher temporal JEPA objective as the all-years stage.
+  teacher_time_offset: 1
+
+  start_date: 2016-01-01T00:00
+  end_date: 2022-12-31T00:00
+
+  num_mini_epochs: 20
+  samples_per_mini_epoch: 8192
+
+  context_loss:
+    enabled: false

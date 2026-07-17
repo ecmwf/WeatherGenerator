@@ -1,0 +1,102 @@
+# Train a HIMAWARI AHI IR decoder from the n0t6ejuo JEPA checkpoint.
+# Use with train_continue; the checkpoint config supplies the encoder architecture and source streams.
+
+freeze_modules: ".*encoder.*|.*forecast_engine.*|.*latent_pre_norm.*|.*latent_heads.*|.*q_cells.*"
+streams_directory: "./config/streams/decoder_himawari_ir_n0t6ejuo/"
+
+general:
+  istep: 0
+  run_history: []
+  desc: "HIMAWARI IR decoder from frozen n0t6ejuo encoder"
+
+train_logging:
+  terminal: 1
+  metrics: 20
+  checkpoint: 500
+  log_grad_norms: False
+
+training_config:
+  training_mode: ["masking"]
+  num_mini_epochs: 32
+  samples_per_mini_epoch: 4096
+  shuffle: True
+
+  deep_ssl:
+    enabled: False
+
+  start_date: 2015-01-01T00:00
+  end_date: 2022-12-31T00:00
+
+  time_window_step: 06:00:00
+  time_window_len: 06:00:00
+
+  learning_rate_scheduling:
+    lr_start: 1e-6
+    lr_max: 5e-5
+    lr_final_decay: 2e-6
+    lr_final: 0.0
+    num_steps_warmup: 256
+    num_steps_cooldown: 512
+    policy_warmup: "cosine"
+    policy_decay: "constant"
+    policy_cooldown: "linear"
+    parallel_scaling_policy: "sqrt"
+
+  losses:
+    student-teacher:
+      enabled: False
+      type: Disabled
+    physical:
+      enabled: False
+      type: Disabled
+    physical_decoder:
+      type: LossPhysical
+      weight: 1.0
+      loss_fcts:
+        mse:
+          weight: 1.0
+          target_source_correspondence: {"0": {"0": "independent"}}
+      target_and_aux_calc: "Physical"
+
+  model_input:
+    random_easy:
+      enabled: False
+    forecasting:
+      enabled: False
+    input:
+      masking_strategy: "random"
+      masking_strategy_config:
+        rate: 1.0
+        rate_sampling: False
+
+  target_input:
+    random_easy_target:
+      enabled: False
+    target:
+      masking_strategy: "random"
+      masking_strategy_config:
+        rate: 1.0
+        rate_sampling: False
+
+  forecast:
+    time_step: 00:00:00
+    offset: 0
+    num_steps: 0
+    policy: null
+
+validation_config:
+  samples_per_mini_epoch: 256
+  shuffle: False
+  start_date: 2023-10-01T00:00
+  end_date: 2023-12-31T00:00
+  validate_with_ema:
+    enabled: False
+  output:
+    num_samples: 0
+    normalized_samples: False
+    streams: ["HIMAWARI_AHI_IR"]
+  validate_before_training: False
+
+wgtags:
+  exp: frozen_decoder
+  grid: himawari_ir
